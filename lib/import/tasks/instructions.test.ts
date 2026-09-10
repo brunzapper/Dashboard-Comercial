@@ -27,6 +27,7 @@ const ctx: TasksEditContext = {
       responsibleId: "r1",
       dueDate: null,
       dueTime: null,
+      fromSeries: false,
     },
     {
       id: "t2",
@@ -37,6 +38,7 @@ const ctx: TasksEditContext = {
       responsibleId: null,
       dueDate: null,
       dueTime: null,
+      fromSeries: false,
     },
   ],
   responsibles: [

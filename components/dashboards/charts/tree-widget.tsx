@@ -1,4 +1,10 @@
-// Versão: 1.6 | Data: 10/09/2026
+// Versão: 1.7 | Data: 10/09/2026
+// v1.7 (10/09/2026): a proposta da IA deixou de ser só "agendar". Ela cobre
+//   criar, editar, concluir e excluir (até 3 por comentário), porque o que a
+//   pessoa escreve raramente é só "abra uma tarefa" — "ele pediu para adiar a
+//   proposta e cancelar a demo" são um editar e um excluir. O cartão passou a
+//   LISTAR o que vai acontecer, com a exclusão marcada: é a única do lote que
+//   some com dado, e o clique continua sendo um só.
 // v1.6 (10/09/2026): a árvore ganha o que faltava para ser o lugar de conduzir
 //   o lead, e não só de olhar para ele.
 //   (a) CRIAR sequência, não só ajustar a que existe. O construtor é o MESMO
@@ -604,11 +610,11 @@ export function TreeWidget({
     null
   );
   // v1.6: a proposta da IA, esperando um clique. `null` = nada proposto.
+  // v1.7: são ATÉ TRÊS ações (criar/editar/concluir/excluir), então o cartão
+  // lista o que vai acontecer — um título solto não diria que algo some.
   const [proposal, setProposal] = useState<{
     json: string;
-    titulo: string;
-    data: string | null;
-    hora: string | null;
+    acoes: { resumo: string; destrutiva: boolean }[];
   } | null>(null);
   // Mensagem da análise (inclusive "não há nada a agendar", que é resposta).
   const [aiMessage, setAiMessage] = useState<string | null>(null);
@@ -753,12 +759,7 @@ export function TreeWidget({
         // Resposta legítima: o comentário não pedia próximo passo.
         return setAiMessage(res.message ?? "Nada a agendar a partir deste comentário.");
       }
-      setProposal({
-        json: res.json,
-        titulo: res.titulo ?? "",
-        data: res.data ?? null,
-        hora: res.hora ?? null,
-      });
+      setProposal({ json: res.json, acoes: res.acoes ?? [] });
     });
   };
 
@@ -866,26 +867,38 @@ export function TreeWidget({
           salvo, e agendar é um clique — mas é um clique de gente: quem
           re-valida e grava é o servidor, pelo `createTask` de sempre. */}
       {proposal ? (
-        <div className="border-primary/50 bg-primary/5 flex flex-wrap items-center gap-2 rounded-md border p-2">
-          <Sparkles className="text-primary size-4 shrink-0" />
-          <span className="min-w-0 flex-1 text-sm">
-            Agendar <strong>{proposal.titulo}</strong>
-            {proposal.data
-              ? ` para ${formatDateValue(proposal.data, DEFAULT_DATE_FORMAT)}`
-              : " sem prazo"}
-            {proposal.hora ? ` às ${proposal.hora}` : ""}?
+        <div className="border-primary/50 bg-primary/5 flex flex-col gap-2 rounded-md border p-2">
+          <span className="flex items-center gap-2 text-sm">
+            <Sparkles className="text-primary size-4 shrink-0" />A IA sugere:
           </span>
-          <Button type="button" size="sm" onClick={acceptProposal}>
-            Agendar
-          </Button>
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            onClick={() => setProposal(null)}
-          >
-            Descartar
-          </Button>
+          <ul className="flex flex-col gap-0.5 pl-6 text-sm">
+            {proposal.acoes.map((a, i) => (
+              <li
+                key={i}
+                className={cn(
+                  "list-disc",
+                  // Excluir é a única do lote que some com dado, e o clique é
+                  // um só: ela não pode parecer igual às outras.
+                  a.destrutiva && "text-destructive font-medium"
+                )}
+              >
+                {a.resumo}
+              </li>
+            ))}
+          </ul>
+          <span className="flex flex-wrap gap-2">
+            <Button type="button" size="sm" onClick={acceptProposal}>
+              Aplicar
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => setProposal(null)}
+            >
+              Descartar
+            </Button>
+          </span>
         </div>
       ) : null}
 

@@ -1,4 +1,14 @@
-// Versão: 1.0 | Data: 08/09/2026
+// Versão: 1.1 | Data: 10/09/2026
+// v1.1 (10/09/2026): `excluir` existe — mas só onde a superfície liga
+// (`validateTasksEdit(..., { allowDelete: true })`). A decisão de NÃO ter
+// exclusão continua valendo em /operacao/tarefas, que é onde ela foi tomada:
+// numa tela de lista, apagar em lote a partir de linguagem natural é
+// destrutivo demais. Na Tree o alvo é uma tarefa de UM registro, dita por um
+// comentário que a própria pessoa acabou de escrever — e "cancela a demo de
+// amanhã" sem exclusão obriga a fazer metade na mão. Precedente literal do
+// modo por superfície: `validateRecordsUpdate(..., { selection: true })`.
+// Junto: `fromSeries` no catálogo, porque excluir ocorrência de série é o
+// único alvo que o tick desfaz (ver o validador).
 // Contrato do assistente de IA de TAREFAS (padrão §4.17): lote de até 15 ações
 // declarativas (criar/editar/concluir) identificadas por TÍTULO — ids NUNCA
 // vêm do JSON (o validador resolve contra o catálogo FRESCO; 0 hits lista as
@@ -20,6 +30,17 @@ export const TASKS_EDIT_VERSION = 1;
  * precedente literal de `MAX_AI_OPERATION_ACTIONS`.
  */
 export const MAX_AI_TASK_ACTIONS = 15;
+
+/**
+ * O que a superfície deixa a IA fazer.
+ *
+ * Um flag, um validador — nunca um segundo contrato. Molde do
+ * `{ selection: true }` de `validateRecordsUpdate`.
+ */
+export interface TasksEditModes {
+  /** Habilita a ação `excluir`. Ausente = o contrato de sempre, sem exclusão. */
+  allowDelete?: boolean;
+}
 
 /** Uma fase (coluna) aceita — do quadro escolhido ou da tela de tarefas. */
 export interface TaskPhaseRef {
@@ -64,10 +85,17 @@ export interface ParsedTaskComplete {
   alvo: { id: string; titulo: string };
 }
 
+/** v1.1: só em superfície com `allowDelete`. Some com a tarefa, não a fecha. */
+export interface ParsedTaskDelete {
+  acao: "excluir";
+  alvo: { id: string; titulo: string };
+}
+
 export type ParsedTaskAction =
   | ParsedTaskCreate
   | ParsedTaskEdit
-  | ParsedTaskComplete;
+  | ParsedTaskComplete
+  | ParsedTaskDelete;
 
 /** Catálogo FRESCO carregado pelo core (na geração E no apply). */
 export interface TasksEditContext {
@@ -82,6 +110,11 @@ export interface TasksEditContext {
     dueDate: string | null;
     /** `HH:MM[:SS]` — base do par hora/hora_fim numa edição parcial. */
     dueTime: string | null;
+    /**
+     * v1.1: veio de uma SÉRIE (`tasks.series_occurrence`)? Só o `excluir`
+     * olha para isto — ver o validador.
+     */
+    fromSeries: boolean;
   }[];
   /** Responsáveis ativos, por nome de exibição. */
   responsibles: { id: string; name: string }[];

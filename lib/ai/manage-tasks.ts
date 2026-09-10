@@ -1,4 +1,10 @@
-// Versão: 1.0 | Data: 08/09/2026
+// Versão: 1.1 | Data: 10/09/2026
+// v1.1 (10/09/2026): o executor por ação saiu para `lib/ai/apply-task-action.ts`
+// — o "Salvar e analisar" da Tree passou a aplicar as mesmas ações, e uma
+// segunda cópia reencontraria uma a uma as armadilhas descritas abaixo. Esta
+// superfície NÃO liga a exclusão (`allowDelete` ausente): apagar em lote a
+// partir de linguagem natural, numa tela de lista, é destrutivo demais — a
+// decisão continua onde foi tomada.
 // NÚCLEO do assistente de IA de TAREFAS (/operacao/tarefas → "Organizar com
 // IA"). Padrão §4.17 — a IA NUNCA escreve: generateTasksCore valida o lote
 // (lib/import/tasks/validate — títulos resolvidos contra o catálogo FRESCO,
@@ -30,11 +36,11 @@ import type {
   TasksEditContext,
 } from "@/lib/import/tasks/types";
 import {
-  completeTask,
-  createTask,
-  moveTaskPhase,
-  updateTask,
-} from "@/lib/tasks/actions";
+  applyTaskAction,
+  summaryOfTaskAction,
+  tituloOfTaskAction,
+  type TaskFullRow,
+} from "@/lib/ai/apply-task-action";
 
 export interface GenerateTasksInput {
   description: string;
@@ -75,21 +81,6 @@ async function gate(): Promise<string | null> {
   return null;
 }
 
-/** Linha crua do catálogo — o apply precisa dela inteira para o merge. */
-interface TaskFullRow {
-  id: string;
-  title: string;
-  description: string | null;
-  record_id: string | null;
-  board_id: string | null;
-  phase: string;
-  due_date: string | null;
-  due_time: string | null;
-  due_time_end: string | null;
-  responsible_id: string | null;
-  completed_at: string | null;
-}
-
 interface LoadedContext {
   ctx: TasksEditContext;
   catalogJson: string;
@@ -113,7 +104,7 @@ async function loadTasksEditContext(supabase: Supabase): Promise<LoadedContext> 
       supabase
         .from("tasks")
         .select(
-          "id, title, description, record_id, board_id, phase, due_date, due_time, due_time_end, responsible_id, completed_at"
+          "id, title, description, record_id, board_id, phase, due_date, due_time, due_time_end, responsible_id, completed_at, series_occurrence"
         )
         // Subtarefas vivem no feed do pai, não são cards — fora do contrato.
         .is("parent_task_id", null)
@@ -132,7 +123,9 @@ async function loadTasksEditContext(supabase: Supabase): Promise<LoadedContext> 
         .order("name"),
     ]);
 
-  const rows = (tasksData ?? []) as TaskFullRow[];
+  const rows = (tasksData ?? []) as (TaskFullRow & {
+    series_occurrence: number | null;
+  })[];
   const rowById = new Map(rows.map((r) => [r.id, r]));
 
   // Fases da tela "Minhas tarefas": os padrões MAIS as fases já em uso por
@@ -178,6 +171,10 @@ async function loadTasksEditContext(supabase: Supabase): Promise<LoadedContext> 
       responsibleId: r.responsible_id,
       dueDate: r.due_date,
       dueTime: r.due_time,
+      // Esta superfície não exclui, então nada consulta a chave — mas o
+      // catálogo é um só, e mentir aqui esconderia o alvo do dia em que ela
+      // ligar a exclusão.
+      fromSeries: r.series_occurrence != null,
     })),
     responsibles: ((respData ?? []) as { id: string; display_name: string | null }[])
       .map((r) => ({ id: r.id, name: (r.display_name ?? "").trim() }))
@@ -212,30 +209,6 @@ async function loadTasksEditContext(supabase: Supabase): Promise<LoadedContext> 
 
   return { ctx, catalogJson, rowById };
 }
-
-function summaryOf(a: ParsedTaskAction): string {
-  if (a.acao === "concluir") return `concluir · "${a.alvo.titulo}"`;
-  const parts: string[] = [];
-  if (a.acao === "criar") {
-    parts.push(`criar · "${a.titulo}"`);
-    if (a.quadro) parts.push(`quadro: ${a.quadro.nome}`);
-  } else {
-    parts.push(`editar · "${a.alvo.titulo}"`);
-    if (a.novoTitulo) parts.push(`renomear p/ "${a.novoTitulo}"`);
-  }
-  if (a.responsavel !== undefined)
-    parts.push(a.responsavel ? `responsável: ${a.responsavel.nome}` : "sem responsável");
-  if (a.data !== undefined) parts.push(a.data ? `data: ${a.data}` : "sem prazo");
-  if (a.hora !== undefined && a.hora)
-    parts.push(a.hora_fim ? `${a.hora}–${a.hora_fim}` : `às ${a.hora}`);
-  if (a.fase) parts.push(`fase: ${a.fase.label}`);
-  if (a.descricao !== undefined)
-    parts.push(a.descricao === null ? "limpar descrição" : "com descrição");
-  return parts.join(" · ");
-}
-
-const tituloOf = (a: ParsedTaskAction): string =>
-  a.acao === "criar" ? a.titulo : a.alvo.titulo;
 
 export async function generateTasksCore(
   input: GenerateTasksInput
@@ -293,7 +266,7 @@ export async function generateTasksCore(
     ok: true,
     message: "Prévia pronta — revise as ações e confirme a aplicação.",
     actions,
-    summary: actions.map((a, i) => `${i + 1}. ${summaryOf(a)}`),
+    summary: actions.map((a, i) => `${i + 1}. ${summaryOfTaskAction(a)}`),
     warnings,
   };
 }
@@ -317,7 +290,7 @@ export async function previewTasksCore(raw: string): Promise<GenerateTasksState>
     ok: true,
     message: "Prévia pronta — revise as ações e confirme a aplicação.",
     actions: v.actions,
-    summary: v.actions.map((a, i) => `${i + 1}. ${summaryOf(a)}`),
+    summary: v.actions.map((a, i) => `${i + 1}. ${summaryOfTaskAction(a)}`),
     warnings: v.warnings,
   };
 }
@@ -333,20 +306,6 @@ export async function buildTasksPromptCore(): Promise<{
   const supabase = await createClient();
   const { catalogJson } = await loadTasksEditContext(supabase);
   return { ok: true, prompt: buildTasksPromptText({ catalogJson }) };
-}
-
-/** Converte o par hora/hora_fim já validado para os campos do form. */
-function timeFields(
-  atual: { due_time: string | null; due_time_end: string | null },
-  a: { hora?: string | null; hora_fim?: string | null }
-): { hora: string; horaFim: string } {
-  const hora = a.hora !== undefined ? (a.hora ?? "") : (atual.due_time ?? "");
-  // Sem hora inicial não pode haver final (CHECK 0111) — limpar a hora limpa
-  // as duas, como faz o form da tela.
-  if (!hora) return { hora: "", horaFim: "" };
-  const horaFim =
-    a.hora_fim !== undefined ? (a.hora_fim ?? "") : (atual.due_time_end ?? "");
-  return { hora: hora.slice(0, 5), horaFim: horaFim ? horaFim.slice(0, 5) : "" };
 }
 
 export async function applyTasksCore(raw: string): Promise<ApplyTasksState> {
@@ -369,83 +328,20 @@ export async function applyTasksCore(raw: string): Promise<ApplyTasksState> {
 
   for (let i = 0; i < actions.length; i++) {
     const a = actions[i];
-    const item: ApplyTasksResultItem = { index: i, titulo: tituloOf(a), ok: false };
+    const item: ApplyTasksResultItem = {
+      index: i,
+      titulo: tituloOfTaskAction(a),
+      ok: false,
+    };
     results.push(item);
 
-    if (a.acao === "concluir") {
-      const res = await completeTask(a.alvo.id);
-      if (!res.ok) {
-        item.message = res.message ?? "Falha ao concluir.";
-        continue;
-      }
-      item.ok = true;
-      appliedCount += 1;
-      continue;
-    }
-
-    if (a.acao === "criar") {
-      const { hora, horaFim } = timeFields(
-        { due_time: null, due_time_end: null },
-        a
-      );
-      const fd = new FormData();
-      fd.set("title", a.titulo);
-      if (a.descricao) fd.set("description", a.descricao);
-      if (a.data) fd.set("due_date", a.data);
-      if (hora) fd.set("due_time", hora);
-      if (horaFim) fd.set("due_time_end", horaFim);
-      if (a.responsavel) fd.set("responsible_id", a.responsavel.id);
-      if (a.quadro) fd.set("board_id", a.quadro.id);
-      if (a.fase) fd.set("phase", a.fase.key);
-      const res = await createTask({}, fd);
-      if (!res.ok) {
-        item.message = res.message ?? "Falha ao criar.";
-        continue;
-      }
-      item.ok = true;
-      appliedCount += 1;
-      continue;
-    }
-
-    // ---- editar. O updateTask escreve o UPDATE a partir do form INTEIRO:
-    // chave ausente vira null. Partimos da linha ATUAL para não apagar
-    // descrição, responsável e o vínculo com o REGISTRO ao mexer só na data.
-    const atual = rowById.get(a.alvo.id);
-    if (!atual) {
-      item.message = "A tarefa não existe mais.";
-      continue;
-    }
-    const { hora, horaFim } = timeFields(atual, a);
-    const fd = new FormData();
-    fd.set("id", atual.id);
-    fd.set("title", a.novoTitulo ?? atual.title);
-    const descricao =
-      a.descricao !== undefined ? a.descricao : atual.description;
-    if (descricao) fd.set("description", descricao);
-    const data = a.data !== undefined ? a.data : atual.due_date;
-    if (data) fd.set("due_date", data);
-    if (hora) fd.set("due_time", hora);
-    if (horaFim) fd.set("due_time_end", horaFim);
-    const respId =
-      a.responsavel !== undefined
-        ? (a.responsavel?.id ?? null)
-        : atual.responsible_id;
-    if (respId) fd.set("responsible_id", respId);
-    // Vínculo com registro: preservado SEMPRE (o contrato não o edita).
-    if (atual.record_id) fd.set("record_id", atual.record_id);
-
-    const res = await updateTask({}, fd);
+    // O executor é o MESMO da Tree (lib/ai/apply-task-action.ts) — é ele que
+    // guarda o merge a partir da linha atual e a fase pelo choke point.
+    // Sem `recordId`: nesta tela a tarefa criada nasce solta.
+    const res = await applyTaskAction(a, { rowById });
     if (!res.ok) {
-      item.message = res.message ?? "Falha ao salvar.";
+      item.message = res.message;
       continue;
-    }
-    // Fase é choke point PRÓPRIO (moveTaskPhase) — o updateTask não a toca.
-    if (a.fase && a.fase.key !== atual.phase) {
-      const mv = await moveTaskPhase(atual.id, a.fase.key, a.fase.completes);
-      if (!mv.ok) {
-        item.message = `Tarefa salva, mas a fase falhou: ${mv.message ?? ""}`.trim();
-        continue;
-      }
     }
     item.ok = true;
     appliedCount += 1;

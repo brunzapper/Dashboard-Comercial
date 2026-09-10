@@ -1,4 +1,9 @@
-// Versão: 1.0 | Data: 10/09/2026
+// Versão: 1.1 | Data: 10/09/2026
+// v1.1 (10/09/2026): as QUATRO ações. A v1.0 mandava usar só "criar" e proibia
+// o resto; um comentário real ("ele pediu para adiar a proposta e cancelar a
+// demo de amanhã") é um editar e um excluir, e a IA respondia propondo uma
+// terceira tarefa. O enunciado passa a dizer QUANDO cada ação cabe — e a
+// régua de prazo não mudou.
 // SPEC do "Salvar e analisar" da Tree — módulo PURO.
 //
 // O contrato é o `tarefas-edit` que já existe: mesmo formato, mesma versão,
@@ -7,14 +12,14 @@
 // Escrever um segundo contrato para isso seria a régua paralela da invariante
 // 25: o objeto de saída é o mesmo, e a diferença cabe no enunciado.
 //
-// Duas restrições que o enunciado carrega e o core RE-IMPÕE depois de validar
+// O que esta superfície tem de próprio, e o código RE-IMPÕE depois de validar
 // (o SPEC pede, o código garante):
-//  - no máximo UMA ação, e sempre "criar". "editar"/"concluir" mexeriam em
-//    tarefa que ninguém pediu para mexer, a partir de um texto que o vendedor
-//    escreveu para si mesmo.
-//  - `acoes: []` é resposta LEGÍTIMA. A pergunta é "vale agendar?", e "não"
-//    precisa ter como ser dito — sem isso o modelo inventa uma tarefa para
-//    todo comentário, e a função vira ruído.
+//  - o TETO de MAX_COMMENT_TASK_ACTIONS ações (o `narrow` do core);
+//  - o modo `allowDelete`, que é o que faz `excluir` existir aqui e não em
+//    /operacao/tarefas;
+//  - `acoes: []` é resposta LEGÍTIMA. A pergunta é "o comentário muda alguma
+//    coisa?", e "não" precisa ter como ser dito — sem isso o modelo inventa
+//    uma ação para todo comentário, e a função vira ruído.
 //
 // A régua de PRAZO é a parte que não sai de constante nenhuma, então está
 // escrita aqui uma vez só: prazo dito no comentário vence sempre; sem prazo
@@ -26,23 +31,34 @@ import { buildTasksPromptText } from "./instructions";
 const section = (title: string, body: string): string =>
   `\n\n==== ${title} ====\n\n${body.trim()}`;
 
-/** Teto do lote nesta superfície: o comentário pede UM próximo passo, ou nenhum. */
-export const MAX_COMMENT_TASK_ACTIONS = 1;
+/**
+ * Teto do lote nesta superfície.
+ *
+ * Três, não quinze: um comentário rende poucas coisas, e o cartão de
+ * confirmação é de UM clique — uma lista longa ali seria uma lista que
+ * ninguém lê antes de clicar.
+ */
+export const MAX_COMMENT_TASK_ACTIONS = 3;
 
 export const COMMENT_ANALYSIS_RULES = `Você está lendo UM comentário que a pessoa acabou de escrever no
-acompanhamento de um registro comercial. Decida uma coisa só: esse comentário
-pede um próximo passo com data?
+acompanhamento de um registro comercial. Decida o que ele muda na lista de
+tarefas DESTE registro — no máximo ${MAX_COMMENT_TASK_ACTIONS} ações.
 
-- Se PEDE, devolva EXATAMENTE UMA ação "criar", com título curto no imperativo
-  (o que fazer, não o que aconteceu) e "data" preenchida.
-- Se NÃO pede — o comentário só registra um fato, um desabafo, um dado de
-  cadastro, ou já descreve algo concluído — devolva "acoes": [] e explique em
-  uma linha em "notas". Não invente tarefa para ter o que devolver.
+Quando usar cada uma:
 
-NUNCA use "editar" nem "concluir" aqui: o comentário fala do que vem, não do
-que já está na lista de outra pessoa.
+- "criar": o comentário pede um próximo passo que ainda não existe na lista.
+- "editar": o que já estava previsto mudou — remarcou, trocou de responsável,
+  virou outra coisa. Prefira editar a criar uma tarefa quase igual.
+- "concluir": o comentário diz que aquilo foi FEITO.
+- "excluir": o que estava previsto NÃO vai mais acontecer (cancelado, desistiu,
+  perdeu o sentido). Não confunda com concluir: concluir é "aconteceu",
+  excluir é "não vai acontecer".
 
-PRAZO — nesta ordem:
+Se o comentário não muda nada — só registra um fato, um desabafo, um dado de
+cadastro — devolva "acoes": [] e explique em uma linha em "notas". Não invente
+ação para ter o que devolver: essa é a resposta mais comum.
+
+PRAZO, para "criar" e para o "data" de "editar" — nesta ordem:
 1. Se o comentário DIZ quando ("sexta", "semana que vem", "dia 20", "em 3
    dias"), use isso, resolvido contra a data de hoje informada abaixo.
 2. Se não diz, use o intervalo usual de follow-up numa venda SMB de SaaS:
@@ -67,6 +83,8 @@ export interface CommentAnalysisInput {
   record: { title: string; stage?: string | null; responsible?: string | null };
   /** O catálogo do contrato `tarefas-edit`, já serializado. */
   catalogJson: string;
+  /** v1.1: esta superfície liga a exclusão — o SPEC muda com ela. */
+  allowDelete?: boolean;
 }
 
 /**
@@ -88,7 +106,10 @@ export function buildCommentAnalysisPrompt(input: CommentAnalysisInput): string 
     .join("\n");
 
   return (
-    buildTasksPromptText({ catalogJson: input.catalogJson }) +
+    buildTasksPromptText({
+      catalogJson: input.catalogJson,
+      allowDelete: input.allowDelete,
+    }) +
     section("O QUE FAZER AQUI", COMMENT_ANALYSIS_RULES) +
     section("CONTEXTO", contexto) +
     section("O COMENTÁRIO", input.comment)

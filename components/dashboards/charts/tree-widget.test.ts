@@ -223,13 +223,24 @@ describe("o nó conclui e exclui, sem régua paralela", () => {
     expect(sheet).toContain('kind: "source"');
   });
 
-  it("a IA propõe, o usuário agenda — ela nunca escreve", () => {
+  it("a IA propõe, o usuário aplica — ela nunca escreve", () => {
     expect(widget).toContain("analyzeComment");
     expect(widget).toContain("applyCommentTask");
     const core = readFileSync("lib/ai/analyze-comment.ts", "utf8");
-    // O apply grava pelo choke point de sempre, e re-valida antes.
+    // O apply RE-VALIDA antes de escrever, e escreve pelo executor que a tela
+    // de tarefas usa — nunca por um caminho local (invariante 25).
     expect(core).toContain("validateTasksEdit");
-    expect(core).toContain("createTask(");
+    expect(core).toContain("applyTaskAction");
+    const exec = readFileSync("lib/ai/apply-task-action.ts", "utf8");
+    for (const chokePoint of [
+      "createTask(",
+      "updateTask(",
+      "moveTaskPhase(",
+      "completeTask(",
+      "deleteTask(",
+    ]) {
+      expect(exec).toContain(chokePoint);
+    }
   });
 });
 

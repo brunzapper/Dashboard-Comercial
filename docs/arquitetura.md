@@ -1,4 +1,13 @@
-<!-- Versão: 1.86 | Data: 10/09/2026 -->
+<!-- Versão: 1.88 | Data: 10/09/2026 -->
+<!-- v1.88 (10/09/2026): §4.24 — o "Salvar e analisar" da Tree passou a propor
+     criar/editar/concluir/excluir (até 3). `excluir` entra como MODO do mesmo
+     validador (allowDelete), /operacao/tarefas segue sem; ocorrência de série
+     não é alvo de exclusão (o tick a recria); e o executor por ação virou
+     compartilhado em lib/ai/apply-task-action.ts. -->
+<!-- v1.87 (10/09/2026): §4.17 — o adaptador do Gemini transmite SEMPRE (o
+     `:generateContent` apanhava 503 sob carga enquanto o painel do dashboard,
+     que transmite, passava no mesmo minuto) e falha de transporte passou a
+     repetir em fetchProvider, com a linha entre 429/5xx e 4xx de contrato. -->
 <!-- v1.86 (10/09/2026): §4.24 — a Tree passa a CONDUZIR: cria e edita a
      automação da sequência pelo MESMO AutomationRuleEditor (host novo, dono é
      a Base), desenha um tronco POR SÉRIE (com uma, saída byte-idêntica),
@@ -2581,12 +2590,50 @@ EDITAR (alvo = o próprio board), com a sessão persistida em banco
   gate; anti-CSRF: cookies SameSite=Lax + checagem de `origin`). O raciocínio
   é EFÊMERO (só exibido durante a geração — `busyDetail` do `AiChatLog`; nunca
   persistido na sessão). Contrato nos adaptadores: `AiGenerateInput.onThought`
-  (best-effort) — implementado no Gemini via `:streamGenerateContent` (SSE) +
-  `thinkingConfig.includeThoughts` (resumos de pensamento; os modelos atuais
-  já pensam por padrão, então NÃO há custo extra de tokens). Regra de custo:
+  (best-effort) — implementado no Gemini via `thinkingConfig.includeThoughts`
+  (resumos de pensamento; os modelos atuais já pensam por padrão, então NÃO há
+  custo extra de tokens). Regra de custo:
   NUNCA habilitar thinking num modelo em que ele vem desligado (Claude Opus
   4.8/Haiku, gpt-4.1…) — Claude/OpenAI seguem sem raciocínio exibido. Demais
   actions (aplicar/desfazer/recomeçar/carregar) seguem server actions.
+
+  **O adaptador do Gemini TRANSMITE SEMPRE (10/09/2026).** Até aqui o
+  `onThought` escolhia o ENDPOINT: quem exibia raciocínio ia para
+  `:streamGenerateContent?alt=sse`, todo o resto para `:generateContent`. Isso
+  produziu um sintoma que parecia bug de código novo e não era: o "Salvar e
+  analisar" da Tree devolvia 503 ("This model is currently experiencing high
+  demand") enquanto o painel do dashboard funcionava — alternando as duas telas
+  no mesmo minuto, com a mesma org, a mesma chave e o mesmo modelo. Sobrecarga
+  aleatória não escolhe sempre a mesma tela. `:generateContent` obriga o
+  servidor a produzir a resposta INTEIRA antes de responder e tem admissão mais
+  apertada sob carga (a orientação do próprio Google para 503 é usar
+  streaming), então a assimetria era entre os dois caminhos, não entre as duas
+  telas — e alcançava todas as superfícies não-streaming: Tree, tarefas,
+  campos, registros, kanban, remuneração, de-para. O ramo não-streaming SAIU:
+  como o contrato do `AiTextClient` é "devolva uma string no fim", transmitir e
+  acumular dá o mesmo resultado para quem não quer o raciocínio, sem um segundo
+  caminho para divergir do primeiro. **`includeThoughts` não acompanhou** —
+  transmitir não liga raciocínio nenhum, pedir os resumos é outra decisão, e é
+  ela que a regra de custo acima governa.
+
+  **Falha de transporte agora REPETE, e só a que faz sentido repetir
+  (10/09/2026).** As três tentativas dos laços (`runJsonGenerationLoop` e o
+  próprio de `generateDashboardCore`) sempre foram para resposta que não passa
+  no VALIDADOR: qualquer erro de transporte caía no `catch` e retornava na
+  hora, então um único 503 matava o turno. A retentativa vive em
+  `fetchProvider` (`lib/ai/util.ts`), que é por onde passam os três
+  adaptadores e, por eles, todas as superfícies — repetir por adaptador seria
+  a régua paralela da invariante 25. A LINHA: 408/429/5xx e queda de rede
+  repetem (`AI_HTTP_ATTEMPTS = 3`, backoff exponencial com jitter, honrando
+  `Retry-After` com teto); 4xx de contrato (400 payload, 401/403 chave) falha
+  na PRIMEIRA com a mensagem de sempre, porque repetir não muda nada e só
+  atrasa o erro que a pessoa precisa ler; e abort/timeout nunca repete — o
+  `AbortSignal` do chamador é o teto real do turno. Repetir um POST de geração
+  é seguro: pedido recusado não gerou token nem cobrou nada. No SSE a
+  repetição acontece ANTES do primeiro evento — stream já começado nunca
+  reinicia, senão o painel veria raciocínio duplicado. O corpo de erro cru do
+  provedor deixou de ir para a tela: `overloadMessage` vira uma frase e
+  aproveita o `error.message` de dentro do JSON.
 - **Desfazer/Recomeçar**: o snapshot pré-turno do último apply
   (`EditDashboardState.snapshot`) é persistido em `undo_snapshot` —
   `undoAiEditSession` restaura via `restoreDashboardSnapshot` e limpa (sempre a
@@ -5013,6 +5060,45 @@ a data de hoje em Brasília e a régua de prazo) e duas restrições que o core
 impõe DEPOIS de validar: no máximo uma ação, e só `criar` — `editar`/`concluir`
 mexeriam numa tarefa que ninguém mandou mexer, a partir de um texto que a pessoa
 escreveu para si mesma.
+
+**As quatro ações (10/09/2026).** A primeira versão propunha só `criar`, e o
+comentário real raramente é só isso: "ele pediu para adiar a proposta para
+sexta e cancelar a demo de amanhã" é um editar e um excluir, e a IA respondia
+sugerindo uma TERCEIRA tarefa. Hoje a proposta cobre `criar`/`editar`/
+`concluir`/`excluir`, até `MAX_COMMENT_TASK_ACTIONS` (3) por comentário — três
+porque o cartão é de UM clique, e uma lista longa ali é uma lista que ninguém
+lê antes de clicar.
+
+`excluir` **não existia** no contrato, e a ausência era deliberada (precedente
+do contrato de operações). Ela entra como MODO da superfície —
+`validateTasksEdit(raw, ctx, { allowDelete: true })` —, o precedente literal do
+`{ selection: true }` de `validateRecordsUpdate`: um validador só, com um flag,
+nunca um segundo contrato. `/operacao/tarefas` segue sem exclusão, que é onde a
+decisão foi tomada: numa tela de lista, apagar em lote a partir de linguagem
+natural é destrutivo demais. Pelo mesmo motivo o SPEC é FUNÇÃO do modo
+(`tasksSpec({ allowDelete })`) — a regra "NÃO existe ação de exclusão" e a que
+ensina a usá-la não podem estar no mesmo prompt, e `TASKS_SPEC` segue
+byte-idêntico para a outra tela.
+
+**Ocorrência de série não se exclui por aqui.** Excluir uma sem desligar a
+série NÃO GRUDA: `uq_tasks_series_occurrence` só impede recriar enquanto a
+linha existe, então o tick reabre a ocorrência no minuto seguinte e a pessoa
+acha que a ação falhou. Encerrar de verdade são as duas metades
+(`endRecordSeries`), e isso é decisão humana no `TaskSeriesScopeDialog`. A
+recusa vive no VALIDADOR, junto do ramo de `excluir` — é parte do que a ação
+significa —, alimentada por `TasksEditContext.tasks[].fromSeries`. Editar
+(remarcar) e concluir persistem e seguem permitidos.
+
+**O executor por ação é compartilhado** (`lib/ai/apply-task-action.ts`,
+extraído de `applyTasksCore`): é ele que guarda as duas armadilhas que custaram
+caro — o `updateTask` monta o UPDATE do FormData INTEIRO (então o apply parte
+da LINHA ATUAL e sobrepõe o delta, senão mudar só a data apaga descrição,
+responsável e o vínculo com o registro) e a fase é choke point PRÓPRIO
+(`moveTaskPhase`). Uma segunda cópia reencontraria as duas uma a uma. O
+`recordId` do `criar` vai como ARGUMENTO, nunca do JSON — o contrato não
+carrega vínculo com registro de propósito, e a tarefa nascida de um comentário
+precisa nascer na árvore daquele. O apply devolve resultado POR ITEM: falha de
+uma não aborta as outras.
 
 A régua de prazo: **o prazo dito no comentário vence sempre**; sem prazo dito,
 o intervalo usual de follow-up numa venda SMB de SaaS (proposta enviada: 2 dias

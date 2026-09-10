@@ -1,4 +1,10 @@
-// Versão: 1.0 | Data: 30/07/2026
+// Versão: 1.1 | Data: 10/09/2026
+// v1.1 (10/09/2026): a mensagem de falha de TRANSPORTE não repete o nome do
+//   provedor. O adaptador já se apresenta ("Gemini está sobrecarregado…"), e o
+//   prefixo daqui virava "Falha ao chamar a IA (gemini): Gemini está…". As
+//   tentativas destas três continuam sendo só para resposta que não passa no
+//   validador — repetir a CHAMADA é do `fetchProvider` (lib/ai/util.ts v1.2),
+//   que é quem sabe distinguir 503 de chave errada.
 // Laço de autocorreção GENÉRICO "IA → JSON validado" compartilhado pelos cores
 // de registros/campos/mapeamento CSV (lib/ai/insert-records.ts,
 // lib/ai/create-fields.ts, lib/ai/csv-mapping.ts). Mesmo shape do laço de
@@ -21,6 +27,16 @@ export const AI_LOOP_MAX_PRIOR_TURNS = 10;
 /** Separador de seção do system prompt (mesmo formato do core de dashboards). */
 export function aiSection(title: string, body: string): string {
   return `\n\n============================================================\n# ${title}\n============================================================\n\n${body.trim()}\n`;
+}
+
+/**
+ * Como o adaptador do provedor se apresenta nas mensagens de erro ("Gemini",
+ * "Claude", "OpenAI") — a config guarda a chave em minúsculas.
+ */
+function providerLabel(provider: string): string {
+  return provider === "openai"
+    ? "OpenAI"
+    : provider.charAt(0).toUpperCase() + provider.slice(1);
 }
 
 export type JsonLoopResult<T> =
@@ -76,9 +92,14 @@ export async function runJsonGenerationLoop<T>(opts: {
         return { ok: false, message: err.message };
       }
       const msg = err instanceof Error ? err.message : String(err);
+      // A mensagem do adaptador já nomeia o provedor ("Gemini está
+      // sobrecarregado…"); prefixar de novo daria "…(gemini): Gemini está…".
+      // O prefixo fica só para o que não se apresenta sozinho.
       return {
         ok: false,
-        message: `Falha ao chamar a IA (${opts.config.provider}): ${msg}`,
+        message: msg.startsWith(providerLabel(opts.config.provider))
+          ? msg
+          : `Falha ao chamar a IA (${opts.config.provider}): ${msg}`,
       };
     }
 

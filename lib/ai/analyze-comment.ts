@@ -1,4 +1,20 @@
-// Versão: 1.0 | Data: 10/09/2026
+// Versão: 1.1 | Data: 10/09/2026
+// v1.1 (10/09/2026): a proposta cobre as QUATRO ações — criar, editar,
+//   concluir e excluir —, até MAX_COMMENT_TASK_ACTIONS por comentário.
+//
+//   O que estava errado: "liguei, ele pediu para adiar a proposta para sexta e
+//   cancelar a demo de amanhã" é um editar e um excluir, e a v1.0 só sabia
+//   propor criar. A IA lia isso e, no melhor caso, sugeria uma TERCEIRA
+//   tarefa — deixando as duas primeiras para a pessoa fazer à mão.
+//
+//   `excluir` não existia no contrato: entra com `allowDelete`, um modo do
+//   MESMO validador (molde do `{ selection: true }` de
+//   validateRecordsUpdate). /operacao/tarefas segue sem exclusão — a decisão
+//   continua valendo onde foi tomada.
+//
+//   Aplicar deixou de ser um `createTask` local: é o `applyTaskAction`
+//   compartilhado com o assistente de tarefas, que é quem guarda o merge a
+//   partir da linha atual e a fase pelo choke point próprio.
 // NÚCLEO do "Salvar e analisar" da Tree — ler um comentário e decidir se ele
 // pede um próximo passo com data.
 //
@@ -13,13 +29,15 @@
 // contrato traria um segundo validador, um segundo SPEC e um segundo teste de
 // paridade para dizer a mesma coisa — a régua paralela da invariante 25. O que
 // esta superfície tem de próprio é o ENUNCIADO (lib/import/tasks/
-// analyze-instructions.ts) e DUAS restrições que o código impõe depois de
-// validar: no máximo uma ação, e só "criar".
+// analyze-instructions.ts), o modo `allowDelete` e o TETO de ações que o
+// código impõe depois de validar.
 //
-// Por que o apply não chama `applyTasksCore`: o contrato `tarefas-edit` não
-// carrega vínculo com REGISTRO (é decisão dele — ver a regra 4 do SPEC), e a
-// tarefa que nasce de um comentário precisa nascer NA ÁRVORE daquele registro.
-// O `record_id` entra no FormData aqui, e o choke point continua sendo o mesmo.
+// Por que o apply não chama `applyTasksCore` inteiro: aquele core carrega o
+// gate, o catálogo e a mensagem da OUTRA tela. O que importa não duplicar é o
+// executor por ação, e ele é compartilhado (`lib/ai/apply-task-action.ts`).
+// O `recordId` vai como argumento — o contrato `tarefas-edit` não carrega
+// vínculo com registro de propósito, e a tarefa que nasce de um comentário
+// precisa nascer NA ÁRVORE daquele registro.
 import "server-only";
 
 import { getSessionInfo } from "@/lib/auth/session";
@@ -41,11 +59,19 @@ import {
 import {
   TASKS_EDIT_FORMAT,
   TASKS_EDIT_VERSION,
-  type ParsedTaskCreate,
+  type ParsedTaskAction,
   type TaskPhaseRef,
   type TasksEditContext,
 } from "@/lib/import/tasks/types";
-import { createTask } from "@/lib/tasks/actions";
+
+/** Esta superfície é a única que liga a exclusão — ver o cabeçalho. */
+const MODES = { allowDelete: true } as const;
+import {
+  applyTaskAction,
+  summaryOfTaskAction,
+  tituloOfTaskAction,
+  type TaskFullRow,
+} from "@/lib/ai/apply-task-action";
 
 /** O que a análise devolve para a tela. `task` ausente = nada a agendar. */
 export interface CommentAnalysisState {
@@ -54,19 +80,25 @@ export interface CommentAnalysisState {
   errors?: string[];
   /** A proposta, no formato do contrato — é ela que volta no apply. */
   json?: string;
-  /** Resumo em uma linha, para o cartão de confirmação. */
-  titulo?: string;
-  data?: string | null;
-  hora?: string | null;
+  /** Uma linha por ação, para o cartão de confirmação. */
+  acoes?: { resumo: string; destrutiva: boolean }[];
   /** Avisos do validador + a explicação do modelo quando não propôs nada. */
   notas?: string[];
+}
+
+export interface ApplyCommentTaskResultItem {
+  titulo: string;
+  ok: boolean;
+  message?: string;
 }
 
 export interface ApplyCommentTaskState {
   ok: boolean;
   message?: string;
   errors?: string[];
-  id?: string;
+  /** Resultado POR ITEM: falha de uma não aborta as outras. */
+  results?: ApplyCommentTaskResultItem[];
+  appliedCount?: number;
 }
 
 type Supabase = Awaited<ReturnType<typeof createClient>>;
@@ -81,6 +113,8 @@ const phaseRefs = (settings: KanbanSettings): TaskPhaseRef[] =>
 interface RecordContext {
   ctx: TasksEditContext;
   catalogJson: string;
+  /** A linha INTEIRA por id — o `editar` parte dela (ver apply-task-action). */
+  rowById: Map<string, TaskFullRow>;
   record: { title: string; stage: string | null; responsibleId: string | null };
   responsibleName: string | null;
 }
@@ -107,7 +141,7 @@ async function loadRecordTaskContext(
       supabase
         .from("tasks")
         .select(
-          "id, title, phase, board_id, due_date, due_time, responsible_id, completed_at"
+          "id, title, description, record_id, board_id, phase, due_date, due_time, due_time_end, responsible_id, completed_at, series_occurrence"
         )
         .eq("record_id", recordId)
         .is("parent_task_id", null)
@@ -121,16 +155,9 @@ async function loadRecordTaskContext(
     ]);
   if (!record) return null;
 
-  const rows = (tasksData ?? []) as {
-    id: string;
-    title: string;
-    phase: string;
-    board_id: string | null;
-    due_date: string | null;
-    due_time: string | null;
-    responsible_id: string | null;
-    completed_at: string | null;
-  }[];
+  const rows = (tasksData ?? []) as (TaskFullRow & {
+    series_occurrence: number | null;
+  })[];
 
   // Mesma derivação do tarefas-client: os padrões mais as fases já em uso. A
   // IA não pode oferecer uma coluna que a tela não mostra.
@@ -161,6 +188,9 @@ async function loadRecordTaskContext(
       responsibleId: r.responsible_id,
       dueDate: r.due_date,
       dueTime: r.due_time,
+      // v1.1: excluir ocorrência de série não gruda (o tick a recria) — quem
+      // recusa é o validador, e é esta chave que o alimenta.
+      fromSeries: r.series_occurrence != null,
     })),
     responsibles: resps,
     // Sem quadros: a tarefa que nasce de um comentário é do registro, e
@@ -186,6 +216,7 @@ async function loadRecordTaskContext(
   return {
     ctx,
     catalogJson,
+    rowById: new Map(rows.map((r) => [r.id, r])),
     record: {
       title: (record.title as string) ?? "",
       stage: (record.stage as string | null) ?? null,
@@ -234,34 +265,27 @@ export function readEmptyAnswer(raw: string): { notas: string[] } | null {
 }
 
 /**
- * As duas restrições desta superfície, aplicadas DEPOIS do validador.
+ * O TETO desta superfície, aplicado DEPOIS do validador.
  *
- * Elas são um estreitamento do contrato, não uma régua paralela: o que decide
- * se o JSON é válido segue sendo `validateTasksEdit`. Aqui só se recusa o que
- * é válido em geral e indesejado aqui — mexer numa tarefa que ninguém mandou
- * mexer a partir de um texto que a pessoa escreveu para si mesma.
+ * É um estreitamento do contrato, não uma régua paralela: o que decide se o
+ * JSON é válido segue sendo `validateTasksEdit` — inclusive quais ações
+ * existem (o modo `allowDelete`) e a recusa de excluir ocorrência de série.
+ * Aqui fica só o que é próprio da leitura de UM comentário: ele rende poucas
+ * coisas, e um lote grande num cartão de um clique seria uma lista que
+ * ninguém lê antes de clicar.
  */
 export function narrow(
-  actions: { acao: string }[]
-): { ok: true; create: ParsedTaskCreate | null } | { ok: false; errors: string[] } {
+  actions: ParsedTaskAction[]
+): { ok: true; actions: ParsedTaskAction[] } | { ok: false; errors: string[] } {
   if (actions.length > MAX_COMMENT_TASK_ACTIONS) {
     return {
       ok: false,
       errors: [
-        `Um comentário rende no máximo ${MAX_COMMENT_TASK_ACTIONS} tarefa. Escolha a mais importante e devolva só ela.`,
+        `Um comentário rende no máximo ${MAX_COMMENT_TASK_ACTIONS} ações. Escolha as mais importantes e explique o resto em "notas".`,
       ],
     };
   }
-  const other = actions.find((a) => a.acao !== "criar");
-  if (other) {
-    return {
-      ok: false,
-      errors: [
-        `Aqui só cabe a ação "criar" — "${other.acao}" mexe numa tarefa que o comentário não mandou mexer.`,
-      ],
-    };
-  }
-  return { ok: true, create: (actions[0] as ParsedTaskCreate) ?? null };
+  return { ok: true, actions };
 }
 
 /**
@@ -299,10 +323,11 @@ export async function analyzeCommentCore(input: {
       responsible: loaded.responsibleName,
     },
     catalogJson: loaded.catalogJson,
+    allowDelete: MODES.allowDelete,
   });
 
   const result = await runJsonGenerationLoop<{
-    create: ParsedTaskCreate | null;
+    actions: ParsedTaskAction[];
     warnings: string[];
   }>({
     config: aiConfig,
@@ -313,20 +338,20 @@ export async function analyzeCommentCore(input: {
       "Analise o comentário acima e responda com o JSON do formato combinado.",
     validate: (raw) => {
       const vazio = readEmptyAnswer(raw);
-      if (vazio) return { ok: true, value: { create: null, warnings: vazio.notas } };
-      const v = validateTasksEdit(raw, loaded.ctx);
+      if (vazio) return { ok: true, value: { actions: [], warnings: vazio.notas } };
+      const v = validateTasksEdit(raw, loaded.ctx, MODES);
       if (!v.ok) return { ok: false, errors: v.errors };
       const n = narrow(v.actions);
       if (!n.ok) return { ok: false, errors: n.errors };
-      return { ok: true, value: { create: n.create, warnings: v.warnings } };
+      return { ok: true, value: { actions: n.actions, warnings: v.warnings } };
     },
   });
   if (!result.ok) {
     return { ok: false, message: result.message, errors: result.errors };
   }
 
-  const { create, warnings } = result.value;
-  if (!create) {
+  const { actions, warnings } = result.value;
+  if (actions.length === 0) {
     // Resposta LEGÍTIMA: o comentário não pedia próximo passo. A explicação do
     // modelo, quando vier, é mais útil que a frase genérica.
     return {
@@ -338,10 +363,13 @@ export async function analyzeCommentCore(input: {
   }
   return {
     ok: true,
-    json: serializeTasksEdit([create]),
-    titulo: create.titulo,
-    data: create.data ?? null,
-    hora: create.hora ?? null,
+    json: serializeTasksEdit(actions),
+    // O resumo por ação tem dono único (apply-task-action.ts) — a mesma frase
+    // que o assistente de /operacao/tarefas mostra na prévia dele.
+    acoes: actions.map((a) => ({
+      resumo: summaryOfTaskAction(a),
+      destrutiva: a.acao === "excluir",
+    })),
     notas: warnings,
   };
 }
@@ -364,7 +392,7 @@ export async function applyCommentTaskCore(input: {
   const loaded = await loadRecordTaskContext(supabase, input.recordId);
   if (!loaded) return { ok: false, message: "Registro não encontrado." };
 
-  const v = validateTasksEdit(input.raw, loaded.ctx);
+  const v = validateTasksEdit(input.raw, loaded.ctx, MODES);
   if (!v.ok) {
     return {
       ok: false,
@@ -374,27 +402,44 @@ export async function applyCommentTaskCore(input: {
   }
   const n = narrow(v.actions);
   if (!n.ok) return { ok: false, message: n.errors[0], errors: n.errors };
-  if (!n.create) return { ok: false, message: "Não há tarefa a agendar." };
+  if (n.actions.length === 0) return { ok: false, message: "Não há o que aplicar." };
 
-  const a = n.create;
-  const fd = new FormData();
-  fd.set("title", a.titulo);
-  fd.set("record_id", input.recordId);
-  if (a.descricao) fd.set("description", a.descricao);
-  if (a.data) fd.set("due_date", a.data);
-  if (a.hora) {
-    fd.set("due_time", a.hora.slice(0, 5));
-    // Sem hora inicial não pode haver final (CHECK 0111) — e a final só entra
-    // quando a inicial entrou, que é a mesma regra do form da tela.
-    if (a.hora_fim) fd.set("due_time_end", a.hora_fim.slice(0, 5));
+  const results: ApplyCommentTaskResultItem[] = [];
+  let appliedCount = 0;
+  for (const a of n.actions) {
+    // Responsável padrão do `criar`: o do registro. Um follow-up sem dono é um
+    // follow-up que ninguém faz. Só quando a IA não nomeou ninguém.
+    const acao: ParsedTaskAction =
+      a.acao === "criar" && a.responsavel === undefined && loaded.record.responsibleId
+        ? {
+            ...a,
+            responsavel: {
+              id: loaded.record.responsibleId,
+              nome: loaded.responsibleName ?? "",
+            },
+          }
+        : a;
+
+    const res = await applyTaskAction(acao, {
+      rowById: loaded.rowById,
+      recordId: input.recordId,
+    });
+    results.push({ titulo: tituloOfTaskAction(a), ok: res.ok, message: res.message });
+    if (res.ok) appliedCount += 1;
   }
-  const responsavel = a.responsavel?.id ?? loaded.record.responsibleId;
-  if (responsavel) fd.set("responsible_id", responsavel);
-  if (a.fase) fd.set("phase", a.fase.key);
 
-  // O choke point é o mesmo do resto do app: RLS, webhook, espelho no Bitrix e
-  // coerção do responsável acontecem lá dentro, não aqui.
-  const res = await createTask({}, fd);
-  if (!res.ok) return { ok: false, message: res.message ?? "Falha ao agendar." };
-  return { ok: true, id: res.id };
+  const total = n.actions.length;
+  return {
+    ok: appliedCount === total,
+    message:
+      appliedCount === total
+        ? total === 1
+          ? "Aplicada."
+          : `${appliedCount} ações aplicadas.`
+        : appliedCount > 0
+          ? `${appliedCount} de ${total} aplicadas — veja os erros por item.`
+          : "Nenhuma ação aplicada — veja os erros por item.",
+    results,
+    appliedCount,
+  };
 }

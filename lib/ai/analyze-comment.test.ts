@@ -8,14 +8,16 @@
 //  - `readEmptyAnswer`: "não há o que agendar" é resposta, não erro. Ela roda
 //    ANTES do validador porque ele recusa `acoes: []` — e recusa com razão, na
 //    superfície onde a pessoa PEDIU alguma coisa.
-//  - `narrow`: aqui só cabe UMA ação, e ela é "criar". Um "editar" vindo de um
-//    texto que a pessoa escreveu para si mesma mexeria numa tarefa que ninguém
-//    mandou mexer.
+//  - `narrow`: o TETO de ações. Quais ações existem é decisão do validador
+//    (o modo `allowDelete`), não daqui — aqui fica só o que é próprio de ler
+//    UM comentário, que rende poucas coisas.
 import { describe, expect, it } from "vitest";
 
+import { MAX_COMMENT_TASK_ACTIONS } from "@/lib/import/tasks/analyze-instructions";
 import {
   TASKS_EDIT_FORMAT,
   TASKS_EDIT_VERSION,
+  type ParsedTaskAction,
 } from "@/lib/import/tasks/types";
 
 import { narrow, readEmptyAnswer } from "./analyze-comment";
@@ -66,29 +68,35 @@ describe("readEmptyAnswer — 'nada a agendar' é resposta", () => {
   });
 });
 
-describe("narrow — uma ação, e ela é 'criar'", () => {
-  it("nenhuma ação: nada a agendar", () => {
+describe("narrow — o teto desta superfície", () => {
+  // A régua de QUAIS ações existem é do validador (modo `allowDelete`); aqui
+  // fica só o teto, que é próprio da leitura de um comentário.
+  const criar = { acao: "criar", titulo: "x" } as ParsedTaskAction;
+  const excluir = {
+    acao: "excluir",
+    alvo: { id: "t1", titulo: "Demo" },
+  } as ParsedTaskAction;
+
+  it("nenhuma ação passa — é a resposta 'nada mudou'", () => {
     const r = narrow([]);
     expect(r.ok).toBe(true);
-    if (r.ok) expect(r.create).toBeNull();
+    if (r.ok) expect(r.actions).toEqual([]);
   });
 
-  it("uma criação passa", () => {
-    const r = narrow([{ acao: "criar" }]);
+  it("as quatro ações passam, misturadas", () => {
+    const lote = [
+      criar,
+      { acao: "editar", alvo: { id: "t2", titulo: "Proposta" } } as ParsedTaskAction,
+      excluir,
+    ];
+    const r = narrow(lote);
     expect(r.ok).toBe(true);
-    if (r.ok) expect(r.create).not.toBeNull();
+    if (r.ok) expect(r.actions).toHaveLength(3);
   });
 
-  it("duas ações são recusadas — um comentário rende um próximo passo", () => {
-    const r = narrow([{ acao: "criar" }, { acao: "criar" }]);
+  it("acima do teto é recusado, com o número no erro", () => {
+    const r = narrow([criar, criar, criar, criar]);
     expect(r.ok).toBe(false);
-  });
-
-  it("'editar' e 'concluir' são recusados, com o motivo no erro", () => {
-    for (const acao of ["editar", "concluir"]) {
-      const r = narrow([{ acao }]);
-      expect(r.ok).toBe(false);
-      if (!r.ok) expect(r.errors[0]).toContain(acao);
-    }
+    if (!r.ok) expect(r.errors[0]).toContain(String(MAX_COMMENT_TASK_ACTIONS));
   });
 });

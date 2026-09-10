@@ -680,6 +680,31 @@ This version has breaking changes — APIs, conventions, and file structure may 
   /registros (um segundo editor seria a régua paralela da invariante 25). As
   RPCs de widget seguem INTOCADAS. Ver `docs/arquitetura.md` §4.24 e
   invariantes 33/34/35.
+- **O adaptador do Gemini TRANSMITE SEMPRE, e falha de transporte REPETE
+  (10/09/2026):** o `onThought` decide se os RESUMOS de pensamento são pedidos
+  (`thinkingConfig.includeThoughts`) — NUNCA mais o endpoint. Ele escolhia
+  entre `:streamGenerateContent` e `:generateContent`, e isso fazia o "Salvar e
+  analisar" da Tree devolver 503 ("high demand") enquanto o painel do dashboard
+  passava, alternando as duas telas no mesmo minuto com a mesma org, chave e
+  modelo: `:generateContent` produz a resposta INTEIRA antes de responder e tem
+  admissão mais apertada sob carga (a orientação do Google para 503 é usar
+  streaming), então apanhavam TODAS as superfícies não-streaming — Tree,
+  tarefas, campos, registros, kanban, remuneração, de-para. O ramo saiu: o
+  contrato do `AiTextClient` é "uma string no fim", e transmitir + acumular dá
+  o mesmo resultado sem um segundo caminho para divergir. NÃO reintroduza o
+  ramo não-streaming, e NÃO amarre `includeThoughts` ao streaming (transmitir
+  não liga raciocínio; a regra de custo vale só para os resumos).
+  A retentativa de TRANSPORTE é do `fetchProvider` (`lib/ai/util.ts`), dono
+  único dos três adaptadores — nunca por adaptador nem por superfície. As três
+  tentativas dos laços (`runJsonGenerationLoop` e a de `generateDashboardCore`)
+  seguem sendo SÓ para resposta que não passa no validador; era por isso que um
+  único 503 matava o turno. A linha: 408/429/5xx e queda de rede repetem
+  (`AI_HTTP_ATTEMPTS`, backoff com jitter, `Retry-After` com teto); 4xx de
+  CONTRATO (400/401/403) falha na primeira com a mensagem de sempre — repetir
+  não muda nada e só atrasa o erro; abort/timeout nunca repete (o
+  `AbortSignal` do chamador é o teto do turno). No SSE a repetição é ANTES do
+  primeiro evento: stream começado nunca reinicia. Corpo de erro cru não vai
+  para a tela — `overloadMessage` vira frase.
 - **A Tree CONDUZ a série, e a árvore aceita mais de um tronco (10/09/2026):**
   criar/editar a automação de uma sequência pela árvore é o MESMO
   `AutomationRuleEditor` do quadro e do Workflow — `tree-series-sheet.tsx` é só
@@ -722,6 +747,26 @@ This version has breaking changes — APIs, conventions, and file structure may 
   Depois de validar, o core ESTREITA para no máximo UMA ação `criar`. A IA
   nunca escreve: o cartão de um clique é um humano apertando o botão
   (invariante 25).
+- **A IA do comentário faz as QUATRO ações, e `excluir` é MODO da superfície
+  (10/09/2026):** o "Salvar e analisar" da Tree propõe `criar`/`editar`/
+  `concluir`/`excluir`, até `MAX_COMMENT_TASK_ACTIONS` (3). `excluir` não
+  existia no contrato `tarefas-edit` — a ausência era deliberada — e entra por
+  `validateTasksEdit(raw, ctx, { allowDelete: true })`, precedente literal do
+  `{ selection: true }` de `validateRecordsUpdate`: UM validador com um flag,
+  nunca um segundo contrato. `/operacao/tarefas` segue SEM exclusão (apagar em
+  lote por linguagem natural numa tela de lista é destrutivo demais) e o SPEC é
+  função do modo (`tasksSpec({ allowDelete })`) — as duas regras opostas não
+  cabem no mesmo prompt, e `TASKS_SPEC` fica byte-idêntico para a outra tela.
+  **Ocorrência de SÉRIE nunca é alvo de `excluir`:** sem desligar a série a
+  exclusão não gruda (`uq_tasks_series_occurrence` só impede recriar enquanto a
+  linha existe, e o tick reabre no minuto seguinte) — a recusa vive no
+  VALIDADOR, alimentada por `TasksEditContext.tasks[].fromSeries`, e a saída é
+  concluir ou encerrar a sequência pelo diálogo. Editar/concluir seguem
+  permitidos. O executor por ação é ÚNICO
+  (`lib/ai/apply-task-action.ts`, compartilhado com `applyTasksCore`): é ele
+  que guarda o merge a partir da LINHA ATUAL (o `updateTask` monta o UPDATE do
+  form inteiro — chave ausente vira NULL) e a fase pelo `moveTaskPhase`;
+  `recordId` do `criar` vem do ARGUMENTO, nunca do JSON. Resultado POR ITEM.
 - **"Quando este campo mudou" é `audit_log`, NUNCA `field_modified_at` (0135,
   09/09/2026):** as duas colunas parecem a mesma coisa e não são.
   `records.field_modified_at` é o marcador de "editado LOCALMENTE depois do
