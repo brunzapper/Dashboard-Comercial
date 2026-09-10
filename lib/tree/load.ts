@@ -1,4 +1,21 @@
-// Versão: 1.4 | Data: 10/09/2026
+// Versão: 1.5 | Data: 10/09/2026
+// v1.5 (10/09/2026): VÁRIAS séries por registro. `ruleId` virou `ruleIds`, e o
+//   tronco passa a ser um bloco por regra. O motivo é estrutural: o atributo é
+//   ÚNICO por registro (`uq_record_attributes_record_key`, 0131) e o upsert do
+//   executor é `ignoreDuplicates`, então a segunda série NUNCA vira
+//   `granted_by_rule_id` — ela existia só como tarefas soltas, sem tronco e sem
+//   a ocorrência que ninguém abriu, que é o que a árvore existe para mostrar.
+//   As regras extras saem das PRÓPRIAS tarefas do registro
+//   (`automation_rule_id` distintos com `series_occurrence not null`): é o fato,
+//   não um segundo registro de participação. O id do fato ganhou o namespace da
+//   regra (`occ:<ruleId>:<n>`) — sem ele, a 3ª ocorrência de duas séries
+//   colidiria no mesmo nó.
+//   A JANELA passou a ser aplicada por série (cada tronco traz as suas N) e o
+//   recorte dos fatos usa a borda da série PRIMÁRIA, que é a de sempre.
+//   Junto, um defeito antigo: a âncora era resolvida SEM o `anchorFallback` da
+//   série (o executor o passa desde a 0132). Uma série com "contar da criação"
+//   abria tarefas que a árvore desenhava SOLTAS — sem tronco e sem a ocorrência
+//   que ninguém abriu, que é justamente o que ela existe para mostrar.
 // v1.4 (10/09/2026): DUAS correções e uma mudança de vocabulário.
 //   1. O nó de "Alteração" NUNCA existiu: a consulta pedia `audit_log.created_at`
 //      e a coluna é `changed_at` (0006). O PostgREST devolvia erro, `changes`
@@ -31,7 +48,7 @@ import { resolveCadence } from "@/lib/series/cadence";
 import { loadSeriesSettings } from "@/lib/series/load";
 import { loadFieldHistory } from "@/lib/records/field-history";
 import { occurrencesUntil, resolveAnchorDate, resolveBound } from "@/lib/series/occurrence";
-import { occurrenceLabel } from "@/lib/series/types";
+import { occurrenceLabel, type SeriesConfig } from "@/lib/series/types";
 import type { AvailableField } from "@/lib/widgets/fields";
 import type { RecordRow } from "@/lib/records/types";
 
@@ -53,20 +70,31 @@ export interface TreeWindow {
   limit: number;
 }
 
+/** Uma série que o registro segue — o cabeçalho de um tronco. */
+export interface TreeSeriesInfo {
+  key: string;
+  /** Regra que a define, para o editor de automação abrir a certa. */
+  ruleId: string;
+  /** Nome da regra (o rótulo do tronco). */
+  ruleName: string;
+  cadenceDays: number;
+  active: boolean;
+  anchorDate: string | null;
+  /** v1.4: como ESTA série chama cada ocorrência. null = o padrão. */
+  noun: string | null;
+  /** v1.5: é a que concedeu o atributo? Os fatos avulsos caem nela. */
+  primary: boolean;
+}
+
 export interface TreeFacts {
   facts: TreeFact[];
   overrides: TreeParentOverride[];
   /** Há ocorrência (ou fato) fora da janela na direção corrente. */
   hasMore: boolean;
-  /** Cadência efetiva e se a série está ligada — o cabeçalho da árvore. */
-  series: {
-    key: string;
-    cadenceDays: number;
-    active: boolean;
-    anchorDate: string | null;
-    /** v1.4: como ESTA série chama cada ocorrência. null = o padrão. */
-    noun: string | null;
-  } | null;
+  /**
+   * As séries do registro, a primária primeiro. v1.5: era uma só.
+   */
+  series: TreeSeriesInfo[];
 }
 
 const day = (v: unknown): string =>
@@ -89,7 +117,11 @@ export async function loadRecordTreeFacts(
      */
     fieldModifiedAt?: Record<string, string> | null;
     orgId: string | null;
-    ruleId?: string | null;
+    /**
+     * v1.5: as regras de série do registro. A PRIMEIRA é a primária (a que
+     * concedeu o atributo) — é a janela dela que recorta os fatos avulsos.
+     */
+    ruleIds?: string[];
     todayIso: string;
     /** Catálogo p/ refs `unified:`/`match:` na âncora; [] resolve core e custom. */
     available?: AvailableField[];
@@ -102,57 +134,88 @@ export async function loadRecordTreeFacts(
   const facts: TreeFact[] = [];
 
   // --- o tronco: as ocorrências PREVISTAS (derivadas), não as tarefas ---
-  let series: TreeFacts["series"] = null;
+  const series: TreeSeriesInfo[] = [];
   let hasMore = false;
   // Bordas de data do recorte (uma ou outra, nunca as duas — ver acima).
   let factsFrom: string | null = null;
   let factsUntil: string | null = null;
-  if (input.ruleId) {
-    const { data: ruleRow } = await db
+  const ruleIds = [...new Set((input.ruleIds ?? []).filter(Boolean))];
+  if (ruleIds.length > 0) {
+    const { data: ruleRows } = await db
       .from("automation_rules")
-      .select("id, rule")
-      .eq("id", input.ruleId)
-      .maybeSingle();
-    const parsed = ruleRow ? parseAutomationRule(ruleRow.rule) : null;
-    if (parsed?.action.type === "create_task_series") {
-      const config = parsed.action.series;
-      // v1.3 (09/09/2026): a âncora sai do HISTÓRICO de alteração, não do
-      // marcador de proteção do sync — senão a árvore desenha um tronco vazio
-      // para todo registro vindo do Bitrix. Um registro só: uma consulta.
-      const historyFields = [
-        config.anchor.kind === "field_changed" ? config.anchor.field : null,
-        config.from?.kind === "field_changed" ? config.from.field : null,
-        config.until?.kind === "field_changed" ? config.until.field : null,
-      ].filter((f): f is string => f !== null);
-      const history =
-        historyFields.length > 0
-          ? await loadFieldHistory(
-              db,
-              [{ id: recordId, fieldModifiedAt: input.fieldModifiedAt ?? null }],
-              historyFields
-            )
-          : null;
-      const anchorFacts = {
-        record: input.record,
-        changedAt: history?.get(recordId) ?? null,
-        sourceCreatedAt: (input.record.source_created_at as string) ?? null,
-        available,
-      };
-      const anchorDate = resolveAnchorDate(config.anchor, anchorFacts);
-      const settings = await loadSeriesSettings(db, input.orgId, [config.key]);
+      .select("id, name, rule")
+      .in("id", ruleIds);
+    // A ORDEM de `ruleIds` manda: a primária é a primeira, e é a janela dela
+    // que recorta os fatos avulsos. O `.in()` devolve na ordem do banco.
+    const byId = new Map((ruleRows ?? []).map((r) => [r.id as string, r]));
+    // As exceções de cadência de TODAS as séries numa consulta só.
+    const configs: { ruleId: string; name: string; config: SeriesConfig }[] = [];
+    for (const id of ruleIds) {
+      const row = byId.get(id);
+      const parsed = row ? parseAutomationRule(row.rule) : null;
+      if (parsed?.action.type !== "create_task_series") continue;
+      configs.push({
+        ruleId: id,
+        name: (row?.name as string) || "",
+        config: parsed.action.series,
+      });
+    }
+    const settings = await loadSeriesSettings(
+      db,
+      input.orgId,
+      configs.map((c) => c.config.key)
+    );
+
+    // O HISTÓRICO de campo de TODAS as séries numa consulta só: cada `field_changed`
+    // (âncora ou borda) é uma leitura de audit_log, e um registro em três séries
+    // faria três idas ao banco para o mesmo fato.
+    const historyFields = new Set<string>();
+    for (const { config } of configs) {
+      for (const src of [config.anchor, config.from, config.until]) {
+        if (src && src.kind === "field_changed") historyFields.add(src.field);
+      }
+    }
+    const history =
+      historyFields.size > 0
+        ? await loadFieldHistory(
+            db,
+            [{ id: recordId, fieldModifiedAt: input.fieldModifiedAt ?? null }],
+            [...historyFields]
+          )
+        : null;
+    const anchorFacts = {
+      record: input.record,
+      changedAt: history?.get(recordId) ?? null,
+      sourceCreatedAt: (input.record.source_created_at as string) ?? null,
+      available,
+    };
+
+    for (const [index, { ruleId, name, config }] of configs.entries()) {
+      // O `anchorFallback` PRECISA vir junto (corrigido em 10/09/2026): o
+      // executor o passa (`evaluate.ts`), a árvore não passava, e por isso uma
+      // série com "contar da criação" gerava tarefas que a Tree desenhava
+      // SOLTAS — sem tronco, e sem a ocorrência que ninguém abriu.
+      const anchorDate = resolveAnchorDate(
+        config.anchor,
+        anchorFacts,
+        config.anchorFallback
+      );
       const cadence = resolveCadence(
         config.cadence,
         input.record,
         available,
         settings.get(config.key) ?? []
       );
-      series = {
+      series.push({
         key: config.key,
+        ruleId,
+        ruleName: name,
         cadenceDays: cadence.days,
         active: cadence.active,
         anchorDate,
         noun: config.noun ?? null,
-      };
+        primary: index === 0,
+      });
       const all = occurrencesUntil({
         anchorDate,
         cadenceDays: cadence.days,
@@ -163,15 +226,20 @@ export async function loadRecordTreeFacts(
         maxOccurrences: config.maxOccurrences,
       });
       // A janela corta AQUI, na lista de ocorrências — antes de qualquer fato
-      // ser lido. É o que garante que nenhum galho perca o tronco dele.
+      // ser lido. É o que garante que nenhum galho perca o tronco dele. Cada
+      // série traz as SUAS N: cortar o conjunto fundido faria a série mais
+      // longa esconder a mais curta.
       const win = input.window;
       const shown = !win
         ? all
         : win.order === "asc"
           ? all.slice(0, win.limit)
           : all.slice(Math.max(0, all.length - win.limit));
-      hasMore = win ? all.length > shown.length : false;
-      if (shown.length > 0) {
+      if (win && all.length > shown.length) hasMore = true;
+      // A borda dos fatos avulsos sai da série PRIMÁRIA: é nela que eles
+      // penduram (ver deriveTree v1.2), e recortá-los por outra deixaria
+      // comentário órfão de tronco.
+      if (index === 0 && shown.length > 0) {
         // Fora da janela, o fato é descartado. `desc` não tem teto superior
         // (o que veio DEPOIS da última ocorrência é o mais recente, e é o que
         // se quer ver); `asc` não tem piso (o anterior à primeira pendura
@@ -181,13 +249,16 @@ export async function loadRecordTreeFacts(
       }
       for (const occ of shown) {
         facts.push({
-          id: `occ:${occ.occurrence}`,
+          // v1.5: o namespace da regra. Sem ele, a 3ª ocorrência de duas
+          // séries seria o MESMO nó, e a tarefa de uma fundiria na outra.
+          id: `occ:${ruleId}:${occ.occurrence}`,
           kind: "occurrence",
           at: occ.dueDate,
           // O substantivo vem da série; a tarefa daquela ocorrência ainda
           // pode sobrepô-lo abaixo (occurrence_noun).
           label: occurrenceLabel(occ.occurrence, config.noun),
           occurrence: occ.occurrence,
+          seriesKey: config.key,
         });
       }
     }
@@ -203,7 +274,7 @@ export async function loadRecordTreeFacts(
       db
         .from("tasks")
         .select(
-          "id, title, description, due_date, completed_at, series_key, series_occurrence, occurrence_noun, created_at"
+          "id, title, description, due_date, completed_at, automation_rule_id, series_key, series_occurrence, occurrence_noun, created_at"
         )
         .eq("record_id", recordId)
         .order("due_date", { ascending: asc, nullsFirst: false })
@@ -246,10 +317,12 @@ export async function loadRecordTreeFacts(
 
   for (const t of tasks ?? []) {
     const occurrence = t.series_occurrence as number | null;
+    const taskRuleId = (t.automation_rule_id as string | null) ?? null;
     // A tarefa de uma ocorrência não vira nó próprio: ela É a ocorrência, e o
     // tronco já a representa. Duplicá-la faria a árvore contar duas vezes.
-    if (occurrence != null) {
-      const trunk = facts.find((f) => f.id === `occ:${occurrence}`);
+    // v1.5: o par (regra, ocorrência) — a 3ª de duas séries são nós distintos.
+    if (occurrence != null && taskRuleId) {
+      const trunk = facts.find((f) => f.id === `occ:${taskRuleId}:${occurrence}`);
       if (trunk) {
         trunk.refId = t.id as string;
         trunk.status = t.completed_at ? "concluída" : "aberta";
@@ -323,7 +396,7 @@ export async function loadRecordTreeFacts(
 
   // Sem tronco (registro fora de série), a janela recorta os PRÓPRIOS fatos:
   // não há ocorrência para agrupá-los, e a linha do tempo crua é o que existe.
-  if (!series && input.window) {
+  if (series.length === 0 && input.window) {
     const dated = facts.filter((f) => f.kind !== "note");
     if (dated.length > input.window.limit) {
       const sorted = [...facts].sort((a, b) =>

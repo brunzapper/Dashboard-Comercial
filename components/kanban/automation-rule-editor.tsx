@@ -1,4 +1,12 @@
-// Versão: 1.3 | Data: 10/09/2026
+// Versão: 1.4 | Data: 10/09/2026
+// v1.4 (10/09/2026): `emptyRuleDraft()` — o rascunho em branco virou função
+//   exportada. Ele estava escrito por extenso no "Nova regra" do sheet do
+//   quadro, e a Tree passou a precisar do MESMO ponto de partida para criar uma
+//   série de dentro da árvore. Duas cópias de um literal de trinta campos
+//   divergiriam no primeiro campo novo — e a semente do "Novo esquema" do
+//   Workflow já era prova disso: ela montava um `set_field` de campo e valor
+//   VAZIOS, que `parseAutomationRule` recusa, então aquele caminho nunca criou
+//   uma regra. Quem cria agora parte daqui.
 // v1.3 (10/09/2026): "Espelhar com (dias)" — a antecedência com que a
 //   ocorrência vira atividade no Bitrix (`SeriesConfig.mirrorLeadDays`). Junto
 //   com "Quantas adiantar", são os dois números que decidem o que o vendedor vê
@@ -47,6 +55,7 @@ import {
   MAX_MIRROR_LEAD_DAYS,
   MAX_SERIES_LOOKAHEAD,
   MAX_SERIES_NOUN_LEN,
+  seriesKeyFromLabel,
 } from "@/lib/series/types";
 import type { FilterOp, WidgetFilter } from "@/lib/widgets/types";
 import {
@@ -191,6 +200,83 @@ export interface RuleDraft {
    * É rótulo de exibição (o tronco da Tree) — não entra em chave nem consulta.
    */
   seriesNoun: string;
+}
+
+/**
+ * O rascunho EM BRANCO — o ponto de partida de toda regra nova.
+ *
+ * Dono único (v1.4): o sheet do quadro, a tela do Workflow e a Tree criam a
+ * partir daqui. Os defaults são os do pedido original da série (quinzenal,
+ * concedendo o atributo `tree`), e o `actionType` é parâmetro porque quem cria
+ * de dentro da árvore já sabe que quer uma série.
+ */
+export function emptyRuleDraft(
+  actionType: RuleDraft["actionType"] = "move_to_column"
+): RuleDraft {
+  return {
+    id: null,
+    name: "",
+    enabled: true,
+    conds: [emptyCond()],
+    actionType,
+    taskTitle: "",
+    taskDueDays: "",
+    targetKey: "",
+    setField: "",
+    setValue: "",
+    schemaKey: "",
+    // Nasce em ensaio: armar é sempre um ato explícito.
+    schemaSimulate: true,
+    seriesTitle: "",
+    seriesKey: "",
+    seriesAnchorKind: "field_changed",
+    seriesAnchorField: "",
+    // Quinzenal: o padrão que o pedido descreve.
+    seriesCadenceDays: "14",
+    seriesScopes: [],
+    seriesFirstAt: "apos_um_ciclo",
+    seriesUntilKind: "nunca",
+    seriesUntilValue: "",
+    seriesGrantAttribute: "tree",
+    seriesFromKind: "sempre",
+    seriesFromValue: "",
+    seriesDescription: "",
+    seriesMaxOccurrences: "",
+    seriesLookahead: String(DEFAULT_SERIES_LOOKAHEAD),
+    seriesAnchorFallback: "nenhum",
+    seriesMirrorBitrix: "herdar",
+    seriesMirrorLeadDays: String(DEFAULT_MIRROR_LEAD_DAYS),
+    seriesNoun: DEFAULT_SERIES_NOUN,
+  };
+}
+
+/**
+ * O rascunho de uma SÉRIE nova, já convertível por `draftToRule`.
+ *
+ * v1.4: existe porque duas telas criam série sem passar pelo construtor antes
+ * — o "Novo esquema" do Workflow e a Tree. As duas precisavam de um ponto de
+ * partida VÁLIDO: a semente anterior do Workflow montava um `set_field` de
+ * campo e valor vazios, que `parseAutomationRule` recusa, então o botão
+ * "Criar" daquela tela nunca criou regra nenhuma.
+ *
+ * A condição semeada ("criado há 0 dias ou mais") casa com todo registro da
+ * Base de propósito: a regra nasce DESLIGADA, e quem a liga passa pelo
+ * construtor para dizer quais registros participam.
+ */
+export function seedSeriesDraft(name: string): RuleDraft {
+  const label = name.trim();
+  return {
+    ...emptyRuleDraft("create_task_series"),
+    name: label,
+    conds: [
+      { ...emptyCond(), kind: "time", timeBasis: "created", timeOp: "gte", timeDays: "0" },
+    ],
+    seriesTitle: label || "Acompanhamento",
+    seriesKey: seriesKeyFromLabel(label),
+    // `created` não pede campo: a âncora que exige um (`field_changed`) faria
+    // a semente nascer inválida, que é o defeito que este helper corrige.
+    seriesAnchorKind: "created",
+  };
 }
 
 /**

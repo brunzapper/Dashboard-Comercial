@@ -1,4 +1,8 @@
-// Versão: 1.0 | Data: 10/09/2026
+// Versão: 1.1 | Data: 10/09/2026
+// v1.1 (10/09/2026): o nó de SEQUÊNCIA entra na lista dos que não se
+//   selecionam. Ele é sintético (agrupa as ocorrências de uma série); marcá-lo
+//   prometeria uma ação que não existe, e o galho dele já é alcançável pela
+//   cascata a partir de qualquer ocorrência.
 // A cascata tri-estado da árvore. O caso que decide o desenho é o terceiro:
 // desmarcar UM filho de um pai marcado tem de deixar o pai PARCIAL e preservar
 // os irmãos. É por isso que a fonte da verdade são as folhas, e o estado do pai
@@ -180,5 +184,30 @@ describe("selectionSummary", () => {
     expect(selectionSummary({ taskIds: [], commentIds: [], noteIds: [] })).toBe(
       ""
     );
+  });
+});
+
+describe("o nó de SEQUÊNCIA não se seleciona (v1.1)", () => {
+  const arvore = node("series:acomp", "series", null, [
+    node("occ:r1:1", "occurrence", "t1"),
+    node("occ:r1:2", "occurrence", null),
+  ]);
+
+  it("ele mesmo não é um alvo", () => {
+    expect(selectableKind({ kind: "series", refId: null })).toBeNull();
+    // Nem com um refId qualquer: o tipo é que decide.
+    expect(selectableKind({ kind: "series", refId: "x" })).toBeNull();
+  });
+
+  it("mas o galho dele continua alcançável pela cascata", () => {
+    // A ocorrência já fundida com uma tarefa é o único alvo real aqui — a
+    // prevista que ninguém abriu segue de fora (regra da v1.0).
+    expect(selectableRefs(arvore).map((r) => r.nodeId)).toEqual(["occ:r1:1"]);
+    expect(cascadeIds(arvore)).toEqual(["occ:r1:1"]);
+  });
+
+  it("o estado do agrupador é derivado dos filhos, como o de qualquer pai", () => {
+    expect(nodeCheckState(new Set(), arvore)).toBe(false);
+    expect(nodeCheckState(new Set(["occ:r1:1"]), arvore)).toBe(true);
   });
 });

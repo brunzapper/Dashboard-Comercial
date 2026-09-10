@@ -1,4 +1,10 @@
-// Versão: 1.1 | Data: 09/09/2026
+// Versão: 1.2 | Data: 10/09/2026
+// v1.2 (10/09/2026): VÁRIOS TRONCOS. Um registro pode seguir mais de uma série,
+//   e a árvore desenhava um só. O que os testes novos protegem é a assimetria
+//   que torna a mudança segura: com UMA série a saída continua idêntica à de
+//   antes (nenhum agrupador aparece), e o agrupador só nasce quando há o que
+//   separar.
+// v1.1 | Data: 09/09/2026
 // v1.1 (09/09/2026): a JANELA não orfana nó — o recorte por ocorrência entrega
 //   um tronco que NÃO começa na 1ª, e nada pode se perder por isso.
 // A árvore é derivada dos fatos. O que estes testes protegem:
@@ -165,5 +171,87 @@ describe("janela: tronco que não começa na 1ª ocorrência", () => {
     const tree = deriveTree({ facts: janela, layout: "por_ocorrencia" });
     const quinta = tree.find((n) => n.id === "occ:5")!;
     expect(quinta.children.map((c) => c.id)).toContain("comment:x");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// v1.2 — várias séries no mesmo registro.
+// ---------------------------------------------------------------------------
+describe("vários troncos", () => {
+  const duas: TreeFact[] = [
+    { id: "occ:r1:1", kind: "occurrence", at: "2026-09-15", label: "1ª Tarefa", seriesKey: "acomp" },
+    { id: "occ:r1:2", kind: "occurrence", at: "2026-09-29", label: "2ª Tarefa", seriesKey: "acomp" },
+    { id: "occ:r2:1", kind: "occurrence", at: "2026-09-20", label: "1ª Visita", seriesKey: "visita" },
+    { id: "comment:a", kind: "comment", at: "2026-09-17", label: "Liguei" },
+  ];
+
+  const tree = deriveTree({
+    facts: duas,
+    layout: "por_ocorrencia",
+    primarySeriesKey: "acomp",
+    seriesLabels: { acomp: "Acompanhamento", visita: "Visita técnica" },
+  });
+
+  it("cada série ganha o próprio agrupador, com o nome da regra", () => {
+    expect(tree.map((n) => n.id)).toEqual(["series:acomp", "series:visita"]);
+    expect(tree[0].label).toBe("Acompanhamento");
+    expect(tree[1].label).toBe("Visita técnica");
+  });
+
+  it("as ocorrências ficam sob a série DELAS", () => {
+    expect(childIds(tree, "series:acomp")).toEqual(["occ:r1:1", "occ:r1:2"]);
+    expect(childIds(tree, "series:visita")).toEqual(["occ:r2:1"]);
+  });
+
+  it("o fato avulso cai na janela da série PRIMÁRIA, não na mais próxima", () => {
+    // O comentário do dia 17 está entre a 1ª do acompanhamento (15) e a da
+    // visita (20). Repartir por proximidade inventaria um pertencimento que
+    // ele não tem: ele aconteceu num dia, e o dia cai na janela das duas.
+    const primeira = tree[0].children.find((n) => n.id === "occ:r1:1")!;
+    expect(primeira.children.map((c) => c.id)).toEqual(["comment:a"]);
+  });
+
+  it("nenhum fato se perde", () => {
+    // +2 pelos dois agrupadores, que são nós sintéticos.
+    expect(countNodes(tree)).toBe(duas.length + 2);
+  });
+
+  it("sem `primarySeriesKey`, a primeira série dos fatos manda", () => {
+    const semPrimaria = deriveTree({ facts: duas, layout: "por_ocorrencia" });
+    const acomp = semPrimaria.find((n) => n.id === "series:acomp")!;
+    const primeira = acomp.children.find((n) => n.id === "occ:r1:1")!;
+    expect(primeira.children.map((c) => c.id)).toEqual(["comment:a"]);
+  });
+});
+
+describe("com UMA série, a árvore é a de antes", () => {
+  // A não-regressão que torna a v1.2 segura: todo registro que existe hoje tem
+  // uma série só, e para ele nada pode mudar.
+  const uma: TreeFact[] = facts.map((f) =>
+    f.kind === "occurrence" ? { ...f, seriesKey: "acomp" } : f
+  );
+
+  it("nenhum agrupador aparece", () => {
+    const tree = deriveTree({
+      facts: uma,
+      layout: "por_ocorrencia",
+      primarySeriesKey: "acomp",
+      seriesLabels: { acomp: "Acompanhamento" },
+    });
+    expect(tree.map((n) => n.id)).toEqual(["occ:1", "occ:2"]);
+    expect(tree.some((n) => n.kind === "series")).toBe(false);
+  });
+
+  it("a saída é a MESMA de quando os fatos não tinham seriesKey", () => {
+    const comChave = deriveTree({ facts: uma, layout: "por_ocorrencia" });
+    const semChave = deriveTree({ facts, layout: "por_ocorrencia" });
+    const shape = (nodes: ReturnType<typeof deriveTree>): unknown =>
+      nodes.map((n) => [n.id, shape(n.children)]);
+    expect(shape(comChave)).toEqual(shape(semChave));
+  });
+
+  it("a forma por tipo nunca agrupa por série", () => {
+    const tree = deriveTree({ facts: uma, layout: "por_tipo" });
+    expect(tree.some((n) => n.kind === "series")).toBe(false);
   });
 });

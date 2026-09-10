@@ -1,4 +1,14 @@
-// Versão: 1.0 | Data: 09/09/2026
+// Versão: 1.1 | Data: 10/09/2026
+// v1.1 (10/09/2026): o escopo `record` passa a ser SEMPRE consultado na
+//   travessia do LIGA/DESLIGA, esteja ou não declarado em `overrideScopes`.
+//   Motivo: a Tree passou a oferecer "encerrar a sequência para este registro"
+//   ao concluir/excluir uma ocorrência, e isso grava `active:false` no escopo
+//   do registro. Uma série que não declarasse `record` ignoraria a linha em
+//   silêncio — o botão diria "encerrada" e o tick reabriria a próxima no minuto
+//   seguinte. A travessia da CADÊNCIA segue como estava: lá a precedência é
+//   declarada pelo esquema de propósito. Seguro para o que já existe: a única
+//   escrita de escopo `record` até aqui era `setRecordCadence`, que grava
+//   `cadence_days` e deixa `active` no default `true`.
 // A CASCATA DA CADÊNCIA — pura.
 //
 // O pedido: "por padrão quinzenal, mas deve poder ser configurado o padrão por
@@ -60,6 +70,9 @@ function keyOf(kind: SeriesScopeKind, value: string): string {
   return `${kind} ${value}`;
 }
 
+/** O escopo que a v1.1 consulta mesmo sem declaração (só no liga/desliga). */
+export const RECORD_SCOPE: SeriesScopeSpec = { kind: "record" };
+
 export function settingsIndex(
   settings: SeriesSetting[]
 ): Map<string, SeriesSetting> {
@@ -76,7 +89,11 @@ export function settingsIndex(
  *    declarada); ninguém gravou = o padrão do esquema.
  *  - LIGADO: QUALQUER escopo alcançado que diga `active: false` desliga. Um
  *    "não" é mais forte que um "sim" — desligar para um responsável não pode
- *    ser anulado por uma exceção de cadência mais específica.
+ *    ser anulado por uma exceção de cadência mais específica. E o escopo do
+ *    REGISTRO vale sempre (v1.1): quem encerra a sequência de um registro pela
+ *    Tree não abriu o construtor e não tem como saber quais escopos a regra
+ *    declarou; um "não" que depende de declaração prévia é um "não" que falha
+ *    em silêncio.
  */
 export function resolveCadence(
   cadence: SeriesCadence,
@@ -99,6 +116,13 @@ export function resolveCadence(
       days = hit.cadenceDays;
       fromScope = scope;
     }
+  }
+
+  // O desligar por REGISTRO independe da declaração. Só o liga/desliga: uma
+  // `cadence_days` gravada num escopo não declarado segue sendo ignorada.
+  if (!disabledBy && !cadence.overrideScopes.some((s) => s.kind === "record")) {
+    const hit = index.get(keyOf("record", record.id));
+    if (hit && !hit.active) disabledBy = RECORD_SCOPE;
   }
 
   return { days, active: disabledBy == null, fromScope, disabledBy };

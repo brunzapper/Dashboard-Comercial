@@ -1,10 +1,22 @@
-// Versão: 1.2 | Data: 10/09/2026
+// Versão: 1.3 | Data: 10/09/2026
+// v1.3 (10/09/2026): duas mudanças, ambas sobre CONCLUIR.
+//   (a) A caixa de concluir virou o BOTÃO "Concluir"/"Reabrir". A v1.2 apostou
+//       que duas caixas de formas diferentes lado a lado bastariam para não
+//       confundir; não bastaram. Uma caixa e um botão não se confundem, e o
+//       botão ainda diz o que faz — a caixa dependia do `aria-label` para isso.
+//   (b) Concluir ou excluir uma ocorrência de SÉRIE passa a PERGUNTAR o que
+//       fazer com as demais da sequência (`TaskSeriesScopeDialog`). Fechar a 3ª
+//       quinzena e ver a 4ª e a 5ª ainda ali é o certo quase sempre, e o
+//       exatamente errado quando o motivo foi "este lead não recebe mais
+//       acompanhamento" — até aqui só o primeiro caso existia. Como o hook é o
+//       dono único
+//       da regra, a pergunta vale em toda tela que lista tarefa, e não só na
+//       Tree: é a mesma decisão.
 // v1.2 (10/09/2026): SELEÇÃO MÚLTIPLA opcional. `selection` ausente = a lista
 // renderiza byte-idêntica (pinado em teste) — é o que permite ligar a seleção
 // em três telas sem tocar nas outras duas que consomem este mesmo componente.
 // A caixa de SELECIONAR é o `<Checkbox>` do shadcn (o de /registros) e fica à
-// ESQUERDA; a de CONCLUIR segue sendo o input nativo. Duas caixas iguais lado
-// a lado seriam armadilha; duas de formas e rótulos distintos, não.
+// ESQUERDA.
 // Lista de TAREFAS (página Tarefas, seção do registro e visão lista do kanban
 // de tarefas): checkbox de conclusão, destaque de prazo (atrasada/em breve),
 // vínculo, responsável, editar e excluir (regras de RLS dão o feedback).
@@ -27,12 +39,18 @@ import type { TaskRow } from "@/lib/tasks/types";
 import {
   completeTask,
   deleteTask,
+  endRecordSeries,
   reopenTask,
 } from "@/lib/tasks/actions";
 import { emitDataChanged } from "@/lib/tasks/events";
 import { classifyDue, DUE_STATUS_LABELS } from "@/lib/tasks/alerts";
 import { DEFAULT_DATE_FORMAT, formatDateValue } from "@/lib/widgets/format";
+import { occurrenceLabel } from "@/lib/series/types";
 import { TaskSheet, type TaskFormContext } from "./task-sheet";
+import {
+  TaskSeriesScopeDialog,
+  type SeriesScopeChoice,
+} from "./task-series-scope-dialog";
 
 function DueBadge({ task }: { task: TaskRow }) {
   if (!task.due_date) return null;
@@ -68,7 +86,12 @@ export function useTaskRowActions(task: TaskRow, onChanged?: () => void) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  // v1.3: qual ação está esperando a resposta sobre a sequência. null = nenhuma
+  // pergunta em curso, que é o estado de toda tarefa que não é de série.
+  const [asking, setAsking] = useState<"concluir" | "excluir" | null>(null);
   const done = Boolean(task.completed_at);
+  // Só ocorrência de série tem "as demais". Tarefa avulsa segue direto.
+  const isOccurrence = task.series_occurrence != null && Boolean(task.series_key);
 
   function emit() {
     emitDataChanged({
@@ -80,10 +103,10 @@ export function useTaskRowActions(task: TaskRow, onChanged?: () => void) {
     onChanged?.();
   }
 
-  function toggle() {
+  function run(work: () => Promise<{ ok?: boolean; message?: string }>) {
     setError(null);
     startTransition(async () => {
-      const res = done ? await reopenTask(task.id) : await completeTask(task.id);
+      const res = await work();
       if (!res.ok) setError(res.message ?? "Falha ao atualizar.");
       else {
         emit();
@@ -92,22 +115,96 @@ export function useTaskRowActions(task: TaskRow, onChanged?: () => void) {
     });
   }
 
+  function toggle() {
+    // Reabrir nunca pergunta: ele não tira nada de ninguém.
+    if (!done && isOccurrence) return setAsking("concluir");
+    run(() => (done ? reopenTask(task.id) : completeTask(task.id)));
+  }
+
   function remove() {
-    setError(null);
-    startTransition(async () => {
-      const res = await deleteTask(task.id);
-      if (!res.ok) setError(res.message ?? "Falha ao excluir.");
-      else {
-        emit();
-        router.refresh();
-      }
+    if (isOccurrence) return setAsking("excluir");
+    run(() => deleteTask(task.id));
+  }
+
+  /**
+   * A resposta da pergunta. "Encerrar" faz a ação pedida E encerra a sequência
+   * — nesta ordem, porque encerrar apaga as ocorrências ABERTAS: concluir
+   * depois não teria mais o que concluir, e excluir esbarraria numa linha que
+   * já sumiu (o `endRecordSeries` a levaria junto, e o resultado seria o mesmo
+   * com uma mensagem de erro por cima).
+   */
+  function answer(choice: SeriesScopeChoice) {
+    const verb = asking;
+    setAsking(null);
+    if (!verb) return;
+    run(async () => {
+      const first =
+        verb === "concluir" ? await completeTask(task.id) : await deleteTask(task.id);
+      if (!first.ok || choice === "somente_esta") return first;
+      if (!task.series_key || !task.record_id) return first;
+      const end = await endRecordSeries(task.series_key, task.record_id, {
+        revalidate: false,
+      });
+      // A ocorrência já foi: o erro do encerramento é o único que resta contar.
+      return end.ok ? first : end;
     });
   }
 
-  return { done, pending, error, toggle, remove };
+  return {
+    done,
+    pending,
+    error,
+    toggle,
+    remove,
+    /** v1.3: o diálogo da sequência, para o consumidor renderizar onde couber. */
+    seriesPrompt: {
+      open: asking !== null,
+      verb: asking ?? "concluir",
+      label: occurrenceLabel(task.series_occurrence ?? 0, task.occurrence_noun),
+      onOpenChange: (open: boolean) => {
+        if (!open) setAsking(null);
+      },
+      onChoose: answer,
+    },
+  };
 }
 
-export function TaskCompleteCheckbox({
+/**
+ * O diálogo da sequência, montado a partir do que o hook devolve.
+ *
+ * Componente separado porque os dois consumidores têm layouts opostos (como o
+ * próprio hook), e porque um `AlertDialog` no meio de uma linha de flex
+ * atrapalharia o alinhamento se cada um o montasse do seu jeito.
+ */
+export function TaskSeriesPrompt({
+  prompt,
+  pending,
+}: {
+  prompt: ReturnType<typeof useTaskRowActions>["seriesPrompt"];
+  pending: boolean;
+}) {
+  return (
+    <TaskSeriesScopeDialog
+      open={prompt.open}
+      onOpenChange={prompt.onOpenChange}
+      verb={prompt.verb}
+      occurrenceLabel={prompt.label}
+      pending={pending}
+      onChoose={prompt.onChoose}
+    />
+  );
+}
+
+/**
+ * Concluir / reabrir a tarefa.
+ *
+ * v1.3 (10/09/2026): era `<input type="checkbox">`. Ao lado da caixa de
+ * SELEÇÃO viravam duas caixas, e a diferença de forma (nativa × shadcn) não
+ * segurou a distinção — quem queria selecionar concluía. Um botão com a
+ * PALAVRA resolve as duas coisas de uma vez: não parece caixa e diz o que faz.
+ * O nome do export mudou junto; são dois call sites.
+ */
+export function TaskCompleteButton({
   done,
   pending,
   onToggle,
@@ -117,14 +214,17 @@ export function TaskCompleteCheckbox({
   onToggle: () => void;
 }) {
   return (
-    <input
-      type="checkbox"
-      checked={done}
-      onChange={onToggle}
+    <Button
+      type="button"
+      variant={done ? "ghost" : "outline"}
+      size="sm"
+      className="h-7 shrink-0 px-2 text-xs"
+      onClick={onToggle}
       disabled={pending}
-      className="size-4 shrink-0 accent-primary"
       aria-label={done ? "Reabrir tarefa" : "Concluir tarefa"}
-    />
+    >
+      {done ? "Reabrir" : "Concluir"}
+    </Button>
   );
 }
 
@@ -171,10 +271,12 @@ export function TaskListItem({
   responsibleLabel?: string | null;
   selection?: TaskListSelection;
 }) {
-  const { done, pending, error, toggle, remove } = useTaskRowActions(task);
+  const { done, pending, error, toggle, remove, seriesPrompt } =
+    useTaskRowActions(task);
 
   return (
     <div className="flex flex-col gap-0.5 rounded-md border px-2 py-1.5">
+      <TaskSeriesPrompt prompt={seriesPrompt} pending={pending} />
       <div className="flex items-center gap-2">
         {selection ? (
           <Checkbox
@@ -183,7 +285,7 @@ export function TaskListItem({
             aria-label="Selecionar tarefa"
           />
         ) : null}
-        <TaskCompleteCheckbox done={done} pending={pending} onToggle={toggle} />
+        <TaskCompleteButton done={done} pending={pending} onToggle={toggle} />
         <span
           className={cn(
             "flex min-w-0 flex-1 items-center gap-1 truncate text-sm",

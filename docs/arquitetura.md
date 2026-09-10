@@ -1,4 +1,12 @@
-<!-- Versão: 1.85 | Data: 10/09/2026 -->
+<!-- Versão: 1.86 | Data: 10/09/2026 -->
+<!-- v1.86 (10/09/2026): §4.24 — a Tree passa a CONDUZIR: cria e edita a
+     automação da sequência pelo MESMO AutomationRuleEditor (host novo, dono é
+     a Base), desenha um tronco POR SÉRIE (com uma, saída byte-idêntica),
+     pergunta o que fazer com as demais ao concluir/excluir uma ocorrência
+     (apagar as abertas E desligar por registro), troca a caixa de concluir por
+     um botão "Concluir" e o verbo do comentário por "Comentar" — com
+     "Salvar e analisar", que reusa o contrato tarefas-edit inteiro para propor
+     (nunca gravar) o próximo passo. Invariantes 33 e 34 atualizadas. -->
 <!-- v1.85 (10/09/2026): §4.24/§4.25 — a leitura de volta estava pendurada num
      ramo INALCANÇÁVEL do runner e nunca rodou; passa a rodar no fim real do job
      e, sem a timeline, a cada minuto. A guarda de truncamento ("não vi" não é
@@ -4913,14 +4921,131 @@ editá-las. Nenhum nível atravessa o piso - sem registro com par no CRM não h�
 `OWNER_ID` onde pendurar a atividade, e a decisão devolve o MOTIVO para a tela
 explicar em vez de só desabilitar. Toda Base nasce com o espelho desligado.
 
+**A árvore passa a conduzir, não só a mostrar (10/09/2026).** Quatro lacunas
+que só apareceram com o uso, e que têm a mesma raiz: a Tree sabia exibir o
+acompanhamento e quase não sabia mexer nele.
+
+*Criar uma segunda sequência.* Dava para ajustar a cadência DESTE registro e
+pausar o atributo; criar outra série exigia sair para o Workflow. Agora o
+cabeçalho tem "Nova sequência" e o nó de cada tronco tem o lápis, os dois
+abrindo o MESMO `AutomationRuleEditor` do painel do quadro e da tela do
+Workflow — `components/dashboards/charts/tree-series-sheet.tsx` é só o HOST
+(catálogo, semente e o que fazer no salvar), o papel que
+`workflow-rule-screen.tsx` cumpre lá. O dono é a **Base** do registro
+(`AutomationOwner {kind:"source"}`), não o registro: uma série é uma regra que
+vale para todos os que casarem as condições, e é por isso que ela nasce
+DESLIGADA — ligar é dizer "isto vale para a Base inteira". O gate é o de
+`saveAutomation` (admin para dono de Base); a RLS da 0127 segue sendo a
+muralha, e a Tree esconde os botões de quem não pode em vez de deixar falhar no
+save.
+
+*Vários troncos.* Sem isso a sequência recém-criada não apareceria: o atributo
+é ÚNICO por registro (`uq_record_attributes_record_key`) e o upsert do executor
+é `ignoreDuplicates`, então a segunda série nunca chega a ser
+`granted_by_rule_id` — ela existia só como tarefas soltas, sem tronco e sem a
+ocorrência que ninguém abriu. `loadRecordTreeFacts` passou a receber `ruleIds`,
+montados de `granted_by_rule_id` ∪ os `automation_rule_id` DISTINTOS das
+próprias tarefas do registro (o fato, não um segundo registro de participação),
+e o id do fato ganhou o namespace da regra (`occ:<ruleId>:<n>` — sem ele a 3ª
+ocorrência de duas séries seria o mesmo nó). No `deriveTree`, com duas ou mais
+séries cada uma ganha um nó SINTÉTICO `series:<key>` por cima das ocorrências
+dela (o mesmo mecanismo do `kind:<k>` de `por_tipo`); **com UMA série a saída é
+byte-idêntica à anterior**, e é isso que o teste pina. Os fatos que não são de
+série (comentário, tarefa avulsa, alteração) seguem pendurando na ocorrência da
+série PRIMÁRIA: reparti-los entre troncos exigiria inventar a qual sequência um
+comentário "pertence", e ele não pertence a nenhuma — aconteceu num dia, e o dia
+cai na janela de todas. O nó de sequência não é filtrável nem selecionável (não
+é fato de ninguém).
+
+*Concluir ou excluir uma ocorrência pergunta o que fazer com as demais.* Fechar
+a 3ª quinzena e ver a 4ª e a 5ª ainda ali é o certo quase sempre, e o
+exatamente errado quando o motivo foi "este lead não recebe mais
+acompanhamento" — e aí a saída era apagar ocorrência por ocorrência enquanto o
+tick recriava as futuras. `useTaskRowActions` é o dono único de concluir /
+reabrir / excluir, então a pergunta entrou LÁ e vale em toda tela que lista
+tarefa, não só na árvore: é a mesma decisão. "Encerrar" faz as duas metades —
+apaga as ocorrências ABERTAS daquela série neste registro (mesma sequência de
+`deleteTasksBulk`: lê o `bitrix_activity_id` antes do delete, enfileira o
+`delete` do espelho depois de a RLS deixar passar) e grava `active:false` no
+escopo do registro em `series_settings`. Só uma das metades seria um botão cujo
+efeito some sozinho, ou uma tela que continua cobrando o que já foi decidido.
+Concluídas nunca são tocadas e o atributo fica (pausar ≠ excluir): encerrar tira
+o PREVISTO, não o que aconteceu. Reabrir não pergunta — ele não tira nada de
+ninguém —, e "Retomar" no nó da sequência desfaz o desligamento (as apagadas não
+voltam, e a tela diz isso).
+
+Isso trouxe uma mudança de invariante em `resolveCadence`: o escopo `record`
+passa a ser SEMPRE consultado na travessia do LIGA/DESLIGA, declarado ou não em
+`overrideScopes`. Quem clica em "encerrar" na árvore não abriu o construtor e
+não tem como saber quais escopos a regra declarou; um "não" que depende de
+declaração prévia é um "não" que falha em silêncio. A travessia da CADÊNCIA
+segue exigindo a declaração — lá a precedência é decisão do esquema.
+
+*Concluir virou uma PALAVRA.* A v1.2 do `task-list` apostou que uma caixa
+nativa (concluir) e um `<Checkbox>` do shadcn (selecionar) lado a lado se
+distinguiriam pela forma. Não se distinguiram. `TaskCompleteButton` renderiza
+"Concluir"/"Reabrir" e diz o que faz sem depender do `aria-label`; a caixa que
+sobra é só a de seleção.
+
+*Um defeito antigo, corrigido no caminho.* `lib/tree/load.ts` resolvia a
+âncora SEM o `anchorFallback` da série — o executor o passa desde a 0132
+(`evaluate.ts`), a árvore não. Uma série com "contar da criação" abria tarefas
+que a Tree desenhava SOLTAS: sem tronco, e sem a ocorrência que ninguém abriu,
+que é justamente o que ela existe para mostrar.
+
+**"Comentar" e o "Salvar e analisar" (10/09/2026).** O verbo mudou (o anterior
+não é o que esta organização fala) e mora em `TREE_COMMENT_VERB`, ao lado do
+substantivo em `TREE_NODE_KIND_LABELS` — literal de tela é como a palavra errada
+se espalhou por 37 arquivos na 0137. Junto, um defeito antigo: `NodeCard`
+passava o nó clicado e `TreeWidget` o descartava, então "Comentar aqui" na 3ª
+ocorrência fazia exatamente o mesmo que o botão do cabeçalho (o comentário nasce
+com `created_at = now()` e pendurava na ocorrência de HOJE). O rascunho passou a
+carregar o nó, e a EXCEÇÃO de parentesco é gravada logo após o `createComment`
+por `setTreeParent` — a action existia desde a 0133 e não tinha um chamador
+sequer.
+
+O botão "Salvar e analisar" grava o comentário e pede à IA que decida se ele
+pede um próximo passo com data. **O contrato é o `tarefas-edit` que já existe** —
+mesmo formato, mesma versão, MESMO `validateTasksEdit`. O que esta superfície
+tem de próprio é o ENUNCIADO (`lib/import/tasks/analyze-instructions.ts`, que
+REUSA `buildTasksPromptText` e acrescenta o comentário, o contexto do registro,
+a data de hoje em Brasília e a régua de prazo) e duas restrições que o core
+impõe DEPOIS de validar: no máximo uma ação, e só `criar` — `editar`/`concluir`
+mexeriam numa tarefa que ninguém mandou mexer, a partir de um texto que a pessoa
+escreveu para si mesma.
+
+A régua de prazo: **o prazo dito no comentário vence sempre**; sem prazo dito,
+o intervalo usual de follow-up numa venda SMB de SaaS (proposta enviada: 2 dias
+úteis; sem resposta: 3–5 dias; reunião marcada: a véspera; objeção de momento:
+a data citada ou 30 dias; nutrição: 14 dias), sempre como data ABSOLUTA.
+
+Duas decisões de desenho que valem registrar. A primeira: `acoes: []` é
+RESPOSTA, não erro — a pergunta é "vale agendar?", e "não" é o caso mais comum.
+Como `validateTasksEdit` recusa a lista vazia (e recusa com razão: em
+/operacao/tarefas a pessoa PEDIU alguma coisa), o core a reconhece ANTES do
+validador, em `readEmptyAnswer` — que não interpreta ação nenhuma, só reconhece
+o envelope. Sem esse caminho, o laço tentaria três vezes e devolveria erro para
+o comportamento certo. A segunda: o apply NÃO chama `applyTasksCore`, porque o
+contrato `tarefas-edit` não carrega vínculo com REGISTRO (é decisão dele) e a
+tarefa que nasce de um comentário precisa nascer NA ÁRVORE daquele registro — o
+`record_id` entra no FormData do lado de cá, e o choke point segue sendo
+`createTask`. A IA nunca escreve (invariante 25): o cartão "Agendar «título»
+para dd/mm?" é um clique de gente, e quem re-valida com catálogo fresco e grava
+é o servidor.
+
 Testes: `lib/attributes/registry.test.ts`, `lib/series/{occurrence,cadence}.test.ts`
 (incl. `occurrencesAhead` nunca andando para trás e o `anchorFallback`),
 `lib/records/field-history.test.ts` (a data sai do audit mesmo com
 `field_modified_at` vazio - o caso real dos 36 deals),
 `lib/kanban/automations/series.test.ts` (a trava, o 23505 no-op, as 5 futuras,
 o atributo pausado e a não-regressão das quatro ações existentes),
-`lib/tree/derive.test.ts` (as três formas sobre os mesmos fatos; o nó
-re-pendurado vencendo a derivação),
+`lib/tree/{derive,selection}.test.ts` (as três formas sobre os mesmos fatos; o
+nó re-pendurado vencendo a derivação; e, na v1.2, os vários troncos — com UMA
+série a saída byte-idêntica, com duas o agrupador por série e o fato avulso na
+primária),
+`lib/import/tasks/analyze-instructions.test.ts` + `lib/ai/analyze-comment.test.ts`
+(o enunciado reusando o SPEC em vez de copiá-lo; `readEmptyAnswer` e o
+estreitamento para uma ação `criar`),
 `components/kanban/automation-rule-editor.test.ts` (o round-trip da série, que
 apagava `from`/`description`/`maxOccurrences`) e
 `lib/{tasks/mirror-config,sync/bitrix/task-mirror}.test.ts` (a cascata dos três
@@ -5653,7 +5778,14 @@ principalmente — para mantenedores humanos.
     escopo alcançado desliga (um "não" é mais forte que um "sim"). O padrão
     vive no esquema; as exceções são DADO em `series_settings` — mudar a
     cadência de um registro ou desligar a série de um responsável NUNCA
-    reescreve a regra que vale para todos.
+    reescreve a regra que vale para todos. Uma assimetria deliberada
+    (10/09/2026): no LIGA/DESLIGA o escopo `record` é consultado SEMPRE, esteja
+    ou não declarado em `overrideScopes` — quem encerra a sequência de um
+    registro pela árvore não abriu o construtor, e um "não" que depende de
+    declaração prévia falharia em silêncio; encerrar é sempre as DUAS metades
+    (apagar as ocorrências abertas E gravar `active:false`), porque só a
+    primeira o tick desfaz no minuto seguinte e só a segunda deixa a tela
+    pedindo o que já se decidiu abandonar.
 
 34. **A Tree é DERIVADA; `tree_nodes` guarda só a exceção (0133, §4.24).** Os
     nós são fatos que já existem (ocorrências calculadas, tarefas, comentários,
@@ -5667,7 +5799,14 @@ principalmente — para mantenedores humanos.
     ocorrência pendura NELA — nada some por cair fora de janela. A JANELA
     (09/09/2026) recorta a lista de OCORRÊNCIAS, nunca linhas soltas: cortar no
     meio de uma ocorrência deixaria os galhos dela sem tronco. `deriveTree` segue
-    puro e sem saber de paginação.
+    puro e sem saber de paginação. VÁRIAS séries por registro (10/09/2026): as
+    regras saem de `granted_by_rule_id` ∪ os `automation_rule_id` das próprias
+    tarefas (o atributo é único por registro, então a segunda série nunca chega
+    a concedê-lo), o id do fato carrega a regra (`occ:<ruleId>:<n>`) e o
+    agrupador `series:<key>` só nasce com DUAS ou mais — com uma, a árvore é
+    byte-idêntica à de antes. O agrupador é sintético: não é filtrável, não é
+    selecionável, e o fato avulso segue pendurando na ocorrência da série
+    PRIMÁRIA (ele aconteceu num dia, e o dia cai na janela de todas).
 
 35. **Atributo do registro: registry em CÓDIGO e pausar ≠ excluir (0131,
     §4.24).** `lib/attributes/registry.ts` é PURO e client-safe (precedente
