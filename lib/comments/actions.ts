@@ -1,4 +1,8 @@
-// Versão: 1.1 | Data: 10/09/2026
+// Versão: 1.2 | Data: 10/09/2026
+// v1.2 (10/09/2026): `deleteCommentsBulk` — exclusão em massa de anotações
+// (a seleção múltipla da Tree). Mesmo contrato por item das outras ações em
+// massa (`lib/kanban/bulk-helpers.ts`): id que não volta do `.select()` é a
+// RLS negando AQUELE comentário, e o lote segue.
 // v1.1 (10/09/2026): a anotação de um registro com Base espelhada (0136/0137)
 // vira COMENTÁRIO na timeline do negócio. Fila, nunca chamada em linha: o
 // portal fora do ar não pode virar anotação não gravada aqui. O caminho de
@@ -16,6 +20,14 @@ import { getSessionInfo } from "@/lib/auth/session";
 import { getActiveOrgId } from "@/lib/auth/org";
 import { createClient } from "@/lib/supabase/server";
 import { emitWebhookEvent } from "@/lib/webhooks/emit";
+import {
+  BULK_MAX_ITEMS,
+  chunk,
+  fanOut,
+  resultsFromReturned,
+  type BulkActionState,
+  type BulkItemResult,
+} from "@/lib/kanban/bulk-helpers";
 import { createServiceClient } from "@/lib/supabase/service";
 import { mirrorCommentAfterWrite } from "@/lib/sync/bitrix/task-mirror";
 import { TASK_COLS_WITH_RECORD, type TaskRow } from "@/lib/tasks/types";
@@ -120,6 +132,55 @@ export async function deleteComment(id: string): Promise<CommentActionState> {
   }
   await emitWebhookEvent("comment.deleted", { commentId: id }, await getActiveOrgId());
   return { ok: true };
+}
+
+/**
+ * Exclui anotações em massa. Molde literal de `deleteTasksBulk`: o
+ * `.delete().in(...).select("id")` já devolve o resultado por item de graça —
+ * id ausente = a RLS barrou aquele comentário (não é autor nem gestor), e os
+ * demais continuam.
+ *
+ * O cliente FATIA em `BULK_MAX_ITEMS`; aqui só se recusa acima do teto.
+ */
+export async function deleteCommentsBulk(
+  commentIds: string[]
+): Promise<BulkActionState> {
+  const session = await getSessionInfo();
+  if (!session) return { ok: false, message: "Sessão expirada." };
+  const ids = [...new Set(commentIds)].filter(Boolean);
+  if (ids.length === 0) return { ok: true, results: [] };
+  if (ids.length > BULK_MAX_ITEMS) {
+    return { ok: false, message: `Máximo de ${BULK_MAX_ITEMS} por chamada.` };
+  }
+
+  const supabase = await createClient();
+  const orgId = await getActiveOrgId();
+  const deleted: string[] = [];
+  const results: BulkItemResult[] = [];
+  for (const slice of chunk(ids, BULK_MAX_ITEMS)) {
+    const { data, error } = await supabase
+      .from("comments")
+      .delete()
+      .in("id", slice)
+      .select("id");
+    if (error) {
+      results.push(...fanOut(slice, false, error.message));
+      continue;
+    }
+    const gone = (data ?? []).map((c) => c.id as string);
+    deleted.push(...gone);
+    results.push(
+      ...resultsFromReturned(
+        slice,
+        gone,
+        "Sem permissão para excluir esta anotação."
+      )
+    );
+  }
+  for (const commentId of deleted) {
+    await emitWebhookEvent("comment.deleted", { commentId }, orgId);
+  }
+  return { ok: true, results };
 }
 
 export async function setCommentPinned(

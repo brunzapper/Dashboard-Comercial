@@ -1,4 +1,8 @@
-// Versão: 1.1 | Data: 10/09/2026
+// Versão: 1.2 | Data: 10/09/2026
+// v1.2 (10/09/2026): resolução de dono EM LOTE (`loadMirrorOwners` +
+// `enqueueTaskMirrorMany`). As ações em massa concluem/excluem até 200 tarefas
+// numa chamada, e `mirrorTaskAfterWrite` resolve Base + registro POR TAREFA —
+// seriam 400 consultas. O caminho unitário fica intocado.
 // v1.1 (10/09/2026): o sentido de SAÍDA ficou completo (0137).
 //   - `delete`: excluir aqui apaga a atividade lá. A ordem é enfileirada ANTES
 //     do delete da linha (a FK vira `set null`, não cascade) — enfileirar
@@ -428,6 +432,89 @@ export async function mirrorTaskAfterWrite(
   } catch (e) {
     console.error("[task-mirror] espelho falhou:", (e as Error).message);
   }
+}
+
+/** Onde a atividade de um registro fica pendurada, já resolvido. */
+export interface MirrorOwner {
+  entity: MirrorOwnerEntity;
+  sourceId: string;
+}
+
+/**
+ * Resolve o dono da atividade para VÁRIOS registros de uma vez.
+ *
+ * Duas consultas no total (as Bases que espelham + os registros), em vez de
+ * duas por tarefa. Registro cuja Base não espelha, ou sem par no CRM, fica
+ * FORA do mapa — é o mesmo piso do `resolveMirror`, só que em lote.
+ */
+export async function loadMirrorOwners(
+  db: SupabaseClient,
+  recordIds: string[]
+): Promise<Map<string, MirrorOwner>> {
+  const out = new Map<string, MirrorOwner>();
+  const ids = [...new Set(recordIds)].filter(Boolean);
+  if (ids.length === 0) return out;
+
+  const { data: sources } = await db
+    .from("data_sources")
+    .select("record_type, bitrix_activity_owner")
+    .not("bitrix_activity_owner", "is", null);
+  const entityByType = new Map<string, MirrorOwnerEntity>();
+  for (const s of sources ?? []) {
+    entityByType.set(
+      s.record_type as string,
+      s.bitrix_activity_owner as MirrorOwnerEntity
+    );
+  }
+  // Nenhuma Base espelha (o estado padrão): nem vale ler os registros.
+  if (entityByType.size === 0) return out;
+
+  for (let i = 0; i < ids.length; i += 200) {
+    const { data: recs } = await db
+      .from("records")
+      .select("id, record_type, source_id")
+      .in("id", ids.slice(i, i + 200))
+      .not("source_id", "is", null);
+    for (const r of recs ?? []) {
+      const entity = entityByType.get(r.record_type as string);
+      if (!entity) continue;
+      out.set(r.id as string, { entity, sourceId: String(r.source_id) });
+    }
+  }
+  return out;
+}
+
+/**
+ * Enfileira VÁRIAS operações de espelho.
+ *
+ * Tenta o insert em lote e cai para linha a linha se ele falhar — o índice
+ * `uq_task_queue_pending` é parcial, e o PostgREST não sabe expressar o
+ * `on conflict … where`, então um único 23505 derrubaria o lote inteiro. O
+ * caminho por linha trata 23505 como NO-OP, que é o resultado desejado.
+ */
+export async function enqueueTaskMirrorMany(
+  db: SupabaseClient,
+  rows: EnqueueTaskMirrorInput[]
+): Promise<void> {
+  if (rows.length === 0) return;
+  const payload = rows.map((input) => ({
+    organization_id: input.orgId,
+    task_id: input.taskId ?? null,
+    comment_id: input.commentId ?? null,
+    target: input.op === "comment_add" ? "comment" : "task",
+    op: input.op,
+    owner_entity: input.ownerEntity,
+    owner_source_id: input.ownerSourceId,
+    activity_id: input.activityId ?? null,
+    created_by: input.createdBy ?? null,
+  }));
+  try {
+    const { error } = await db.from("bitrix_task_queue").insert(payload);
+    if (!error) return;
+  } catch {
+    // cai no caminho por linha
+  }
+  for (const input of rows) await enqueueTaskMirror(db, input);
 }
 
 /**

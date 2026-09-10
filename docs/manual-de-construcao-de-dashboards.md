@@ -1,4 +1,6 @@
-<!-- Versão: 1.33 | Data: 10/09/2026 -->
+<!-- Versão: 1.34 | Data: 10/09/2026 -->
+<!-- v1.34 (10/09/2026): §5.14 — seleção múltipla na Tree, com a cascata do
+     galho e o tri-estado do pai. -->
 <!-- v1.33 (10/09/2026): §5.14 — o nó da Tree CONCLUI e EXCLUI (tarefa,
      anotação e nó livre; o de "Alteração" não, por ser fato do histórico) e a
      conclusão anda nos dois sentidos com o Bitrix; §12.2.2 — o campo "Como
@@ -1228,6 +1230,13 @@ desfazer é soltá-lo de volta.
   **anotação** e para o **nó livre** do mapa mental. O nó de **Alteração** não
   tem lixeira de propósito: ele é um fato do histórico do registro, não uma
   coisa que alguém criou.
+- **Selecionar vários** — a caixinha à esquerda de cada nó. Marcar um nó-pai
+  (uma ocorrência, por exemplo) marca **o galho inteiro**; desmarcar um filho
+  deixa o pai *parcialmente* marcado e **preserva os irmãos**, e qualquer
+  filho pode ser marcado sozinho. Com algo marcado aparece a barra no rodapé,
+  dizendo o que foi selecionado ("2 tarefas · 4 anotações") — **Concluir** age
+  só nas tarefas, **Excluir** age em tudo. **Esc** limpa a seleção. Nó de
+  Alteração não tem caixinha.
 - **Pausar / Retomar** — para (e volta a produzir) as tarefas da série. **Pausar não
   exclui nada**: o registro continua no acompanhamento e o histórico inteiro
   permanece na tela.

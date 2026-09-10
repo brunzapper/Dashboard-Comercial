@@ -1,4 +1,8 @@
-// Versão: 1.4 | Data: 10/09/2026
+// Versão: 1.5 | Data: 10/09/2026
+// v1.5 (10/09/2026): SELEÇÃO MÚLTIPLA com cascata tri-estado. Marcar um nó-pai
+//   marca o galho; desmarcar UM filho deixa o pai parcial e preserva os
+//   irmãos. A regra é pura e mora em `lib/tree/selection.ts` — aqui só o
+//   estado e o JSX. Nó de "Alteração" não é selecionável (fato do audit_log).
 // v1.4 (10/09/2026): o nó CONCLUI e EXCLUI. Abrir a tarefa inteira (v1.3) não
 //   bastava: o TaskSheet é editor, e por desenho não conclui nem apaga — então
 //   a árvore era o único lugar do app onde não se podia fechar uma tarefa nem
@@ -41,7 +45,14 @@
 // cada minuto e uma árvore que pisca sozinha lê como defeito.
 "use client";
 
-import { useCallback, useEffect, useRef, useState, useTransition } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useTransition,
+} from "react";
 import {
   ChevronDown,
   ChevronRight,
@@ -54,6 +65,7 @@ import {
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { TaskSheet, type TaskFormContext } from "@/components/tarefas/task-sheet";
 import {
@@ -80,6 +92,16 @@ import {
   BUS_REFETCH_DELAY_MS,
   useRefetchOrigin,
 } from "@/lib/feedback/use-refetch-origin";
+import { useBulkSelection } from "@/lib/feedback/use-bulk-selection";
+import {
+  allSelectableRefs,
+  cascadeIds,
+  nextCascadeValue,
+  nodeCheckState,
+  partitionSelection,
+  selectableRefs,
+} from "@/lib/tree/selection";
+import { TreeBulkBar } from "./tree-bulk-bar";
 import {
   TREE_NODE_KIND_LABELS,
   TREE_WINDOW_STEP,
@@ -221,6 +243,13 @@ function NodeDeleteButton({
   );
 }
 
+/** O que o NodeCard precisa saber sobre a seleção (v1.5). */
+interface NodeSelection {
+  selected: Set<string>;
+  /** Aplica a cascata: o nó e o galho dele acompanham o clique. */
+  onToggle: (node: TreeNode) => void;
+}
+
 function NodeCard({
   node,
   onNote,
@@ -229,6 +258,7 @@ function NodeCard({
   recordId,
   recordTitle,
   onChanged,
+  selection,
 }: {
   node: TreeNode;
   onNote: (node: TreeNode) => void;
@@ -238,11 +268,16 @@ function NodeCard({
   recordId: string;
   recordTitle: string;
   onChanged: () => void;
+  selection: NodeSelection;
 }) {
   const [open, setOpen] = useState(true);
   const hasChildren = node.children.length > 0;
   // O nó de tarefa E a ocorrência já fundida com uma tarefa carregam o id.
   const task = node.refId ? (taskById.get(node.refId) ?? null) : null;
+  // DERIVADO dos descendentes: é o que faz desmarcar um filho deixar o pai
+  // parcial. Nó sem nada selecionável abaixo não mostra caixa nenhuma.
+  const checkState = nodeCheckState(selection.selected, node);
+  const selectable = selectableRefs(node).length > 0;
 
   return (
     <div className="flex flex-col">
@@ -267,6 +302,14 @@ function NodeCard({
         ) : (
           <span className="w-4 shrink-0" />
         )}
+
+        {selectable ? (
+          <Checkbox
+            checked={checkState}
+            onCheckedChange={() => selection.onToggle(node)}
+            aria-label={`Selecionar ${TREE_NODE_KIND_LABELS[node.kind]}`}
+          />
+        ) : null}
 
         <Badge variant="outline" className="shrink-0 text-xs">
           {TREE_NODE_KIND_LABELS[node.kind]}
@@ -351,6 +394,7 @@ function NodeCard({
               recordId={recordId}
               recordTitle={recordTitle}
               onChanged={onChanged}
+              selection={selection}
             />
           ))}
         </div>
@@ -427,6 +471,29 @@ export function TreeWidget({
     null
   );
   const data = payload?.scope === scopeKey ? payload.data : null;
+
+  // --- seleção múltipla (v1.5) ---
+  // O universo é o que está VISÍVEL depois do filtro por tipo e da janela: os
+  // hooks vêm antes dos early returns, então `data` ainda pode ser null aqui.
+  const universe = useMemo(
+    () =>
+      data ? allSelectableRefs(filterKinds(data.nodes, settings?.showKinds)) : [],
+    [data, settings?.showKinds]
+  );
+  const universeIds = useMemo(() => universe.map((r) => r.nodeId), [universe]);
+  const bulk = useBulkSelection(universeIds);
+  const picked = useMemo(
+    () => partitionSelection(universe, bulk.selected),
+    [universe, bulk.selected]
+  );
+  const { setMany } = bulk;
+  // A cascata: o clique no nó leva o galho junto, e um estado PARCIAL resolve
+  // para "marcar tudo" (desmarcar tudo continua a um clique de distância).
+  const toggleNode = useCallback(
+    (node: TreeNode) =>
+      setMany(cascadeIds(node), nextCascadeValue(nodeCheckState(bulk.selected, node))),
+    [setMany, bulk.selected]
+  );
 
   const refresh = useCallback(async () => {
     if (!effectiveRecordId) return;
@@ -698,8 +765,19 @@ export function TreeWidget({
               recordId={effectiveRecordId}
               recordTitle={data.recordTitle}
               onChanged={reloadSoon}
+              selection={{ selected: bulk.selected, onToggle: toggleNode }}
             />
           ))}
+          <TreeBulkBar
+            taskIds={picked.taskIds}
+            commentIds={picked.commentIds}
+            noteIds={picked.noteIds}
+            onClear={bulk.clear}
+            onDone={() => {
+              bulk.clear();
+              reloadSoon();
+            }}
+          />
         </div>
       )}
 

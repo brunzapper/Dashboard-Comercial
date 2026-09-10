@@ -1,4 +1,7 @@
-<!-- Versão: 1.83 | Data: 10/09/2026 -->
+<!-- Versão: 1.84 | Data: 10/09/2026 -->
+<!-- v1.84 (10/09/2026): §4.25 — seleção múltipla de tarefas e anotações (o
+     hook único, a cascata tri-estado da Tree) e a correção do espelho nas
+     ações em massa, que com a leitura de volta da 0137 virou regressão. -->
 <!-- v1.83 (10/09/2026): §4.25 nova — o Bitrix nos DOIS sentidos (0137): o que
      se busca fora do período é a lista de ATIVIDADES dos donos com pendência,
      nunca o negócio (reler o deal não diz nada sobre as atividades dele), e é
@@ -4997,6 +5000,46 @@ de que o título nosso não é sobrescrito), `lib/sync/bitrix/task-mirror.test.t
 `lib/series/noun.test.ts` (a cadeia do substantivo e a guarda estática) e
 `components/dashboards/charts/tree-widget.test.ts` (as ações do nó vindo do
 hook da lista, e o `changed_at`).
+
+**Seleção múltipla, e o espelho que faltava no lote (10/09/2026).** Concluir e
+excluir dez tarefas era dez cliques com um `router.refresh()` entre cada um. A
+metade do servidor já existia — `completeTasksBulk`/`deleteTasksBulk` foram
+construídas para a seleção do kanban e usadas só por ela —, mas **elas não
+espelhavam no Bitrix**. Antes da 0137 isso era assimetria; depois virou
+regressão: concluir em lote deixava as atividades ABERTAS no CRM e a leitura de
+volta reabria todas na sincronização seguinte, e excluir deixava atividades
+órfãs que o inbound reimportava como tarefas novas. As duas passaram a
+enfileirar — o excluir lendo o `bitrix_activity_id` ANTES do delete (depois a
+linha some) e enfileirando DEPOIS de a RLS deixar passar, a mesma sequência do
+unitário. A resolução de Base é **em lote** (`loadMirrorOwners` +
+`enqueueTaskMirrorMany`): `mirrorTaskAfterWrite` resolve por tarefa, e 200
+itens dariam 400 consultas.
+
+Do lado da tela, o `Set`/toggle/poda/Esc estava copiado em `records-table` e
+`kanban-board`, e as quatro superfícies novas iam somar mais quatro cópias.
+Ele virou `lib/feedback/use-bulk-selection.ts`, com duas regras que nenhum
+consumidor deve reimplementar: a seleção é **podada contra os ids vivos**
+(item que saiu da tela sai da seleção — ação em massa não mira o que ninguém
+vê, e a poda é durante o render, nunca num efeito) e o universo do "selecionar
+todas" é a **lista filtrada em tela**, jamais a consulta inteira. A pill
+sticky virou `components/ui/bulk-bar-shell.tsx`, com os nomes acessíveis
+(`role="toolbar"` / "Ações em massa") como contrato — é o que faz os testes de
+seleção que já existiam valerem nas telas novas.
+
+`TaskList` ganhou seleção por props **opcionais**: ele tem cinco consumidores e
+só três a ligaram, então ausência = lista byte-idêntica (pinado em teste). A
+caixa de selecionar é o `<Checkbox>` do shadcn, ao lado da caixa NATIVA de
+concluir — duas caixas iguais lado a lado seriam armadilha; formas e rótulos
+distintos, não.
+
+Na **Tree** a cascata é tri-estado e vive num módulo puro
+(`lib/tree/selection.ts`): marcar o pai marca o galho, e desmarcar um filho
+deixa o pai parcial preservando os irmãos. Isso só fecha porque a fonte da
+verdade são as **folhas** e o estado do pai é derivado — guardar "o pai está
+marcado" tornaria esse gesto indecidível. Nó de **Alteração** nunca entra na
+seleção (é fato do `audit_log`), e a seleção mista é repartida por tipo para a
+action dona de cada um: `deleteTasksBulk`, `deleteCommentsBulk` (novo) e
+`deleteTreeNodesBulk` (novo).
 
 ## 5. Invariantes críticas (NÃO QUEBRAR)
 

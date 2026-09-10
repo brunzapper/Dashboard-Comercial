@@ -1,4 +1,10 @@
-// Versão: 1.1 | Data: 10/09/2026
+// Versão: 1.2 | Data: 10/09/2026
+// v1.2 (10/09/2026): SELEÇÃO MÚLTIPLA opcional. `selection` ausente = a lista
+// renderiza byte-idêntica (pinado em teste) — é o que permite ligar a seleção
+// em três telas sem tocar nas outras duas que consomem este mesmo componente.
+// A caixa de SELECIONAR é o `<Checkbox>` do shadcn (o de /registros) e fica à
+// ESQUERDA; a de CONCLUIR segue sendo o input nativo. Duas caixas iguais lado
+// a lado seriam armadilha; duas de formas e rótulos distintos, não.
 // Lista de TAREFAS (página Tarefas, seção do registro e visão lista do kanban
 // de tarefas): checkbox de conclusão, destaque de prazo (atrasada/em breve),
 // vínculo, responsável, editar e excluir (regras de RLS dão o feedback).
@@ -16,6 +22,7 @@ import { Globe, Trash2 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import type { TaskRow } from "@/lib/tasks/types";
 import {
   completeTask,
@@ -142,22 +149,40 @@ export function TaskDeleteButton({
   );
 }
 
+/**
+ * Seleção múltipla da lista. Ausente = lista sem checkbox de seleção, do jeito
+ * que sempre foi — quem liga é o dono da tela, que também é dono da barra.
+ */
+export interface TaskListSelection {
+  selected: Set<string>;
+  onToggle: (taskId: string) => void;
+}
+
 export function TaskListItem({
   task,
   ctx,
   showRecord = true,
   responsibleLabel,
+  selection,
 }: {
   task: TaskRow;
   ctx: TaskFormContext;
   showRecord?: boolean;
   responsibleLabel?: string | null;
+  selection?: TaskListSelection;
 }) {
   const { done, pending, error, toggle, remove } = useTaskRowActions(task);
 
   return (
     <div className="flex flex-col gap-0.5 rounded-md border px-2 py-1.5">
       <div className="flex items-center gap-2">
+        {selection ? (
+          <Checkbox
+            checked={selection.selected.has(task.id)}
+            onCheckedChange={() => selection.onToggle(task.id)}
+            aria-label="Selecionar tarefa"
+          />
+        ) : null}
         <TaskCompleteCheckbox done={done} pending={pending} onToggle={toggle} />
         <span
           className={cn(
@@ -202,22 +227,41 @@ export function TaskList({
   ctx,
   responsibleLabels = {},
   emptyMessage = "Nenhuma tarefa.",
+  selection,
+  allState,
+  onToggleAll,
 }: {
   tasks: TaskRow[];
   ctx: TaskFormContext;
   responsibleLabels?: Record<string, string>;
   emptyMessage?: string;
+  /** v1.2: liga a seleção múltipla. Ausente = lista de sempre. */
+  selection?: TaskListSelection;
+  /** Tri-estado do "selecionar todas" — só faz sentido com `selection`. */
+  allState?: boolean | "indeterminate";
+  onToggleAll?: (checked: boolean) => void;
 }) {
   if (tasks.length === 0) {
     return <p className="text-muted-foreground text-sm">{emptyMessage}</p>;
   }
   return (
     <div className="flex flex-col gap-1.5">
+      {selection && onToggleAll ? (
+        <label className="text-muted-foreground flex items-center gap-2 px-2 text-xs">
+          <Checkbox
+            checked={allState ?? false}
+            onCheckedChange={(v) => onToggleAll(v === true)}
+            aria-label="Selecionar todas as tarefas"
+          />
+          Selecionar todas ({tasks.length})
+        </label>
+      ) : null}
       {tasks.map((t) => (
         <TaskListItem
           key={t.id}
           task={t}
           ctx={ctx}
+          selection={selection}
           responsibleLabel={
             t.responsible_id ? (responsibleLabels[t.responsible_id] ?? null) : null
           }

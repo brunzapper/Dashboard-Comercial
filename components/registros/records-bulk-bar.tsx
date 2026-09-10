@@ -1,4 +1,8 @@
-// Versão: 1.0 | Data: 07/08/2026
+// Versão: 1.1 | Data: 10/09/2026
+// v1.1 (10/09/2026): a pill sticky saiu para `components/ui/bulk-bar-shell.tsx`.
+// As classes e os nomes acessíveis estavam LITERALMENTE duplicados com o
+// bulk-action-bar do kanban, e a seleção de tarefas ia criar a 3ª e a 4ª cópia.
+// Comportamento e nomes acessíveis inalterados (os testes ancoram neles).
 // Barra flutuante de AÇÕES EM MASSA da tabela de registros (espelho do
 // bulk-action-bar do kanban): aparece com seleção > 0, pill sticky no rodapé.
 // Ações: Editar campos (edição manual — BulkEditSheet), Editar com IA
@@ -9,9 +13,10 @@
 "use client";
 
 import { useState } from "react";
-import { Pencil, Trash2, Wand2, X } from "lucide-react";
+import { Pencil, Trash2, Wand2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { BulkBarShell } from "@/components/ui/bulk-bar-shell";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -90,13 +95,7 @@ export function RecordsBulkBar({
   }
 
   return (
-    <div
-      role="toolbar"
-      aria-label="Ações em massa"
-      className="bg-card sticky bottom-2 z-10 flex flex-wrap items-center gap-2 self-center rounded-full border px-3 py-1.5 shadow-lg"
-    >
-      <span className="text-sm font-medium">{count} selecionado(s)</span>
-
+    <BulkBarShell count={count} onClear={onClear} error={error}>
       {canEditValues ? (
         <Button
           variant="outline"
@@ -164,20 +163,6 @@ export function RecordsBulkBar({
         </>
       ) : null}
 
-      {error ? <span className="text-destructive text-xs">{error}</span> : null}
-
-      <Button
-        variant="ghost"
-        size="icon"
-        className="size-7"
-        aria-label="Limpar seleção"
-        title="Limpar seleção (Esc)"
-        onClick={onClear}
-        disabled={deleting}
-      >
-        <X className="size-4" />
-      </Button>
-
       {canEditValues ? (
         <BulkEditSheet
           source={source}
@@ -198,6 +183,6 @@ export function RecordsBulkBar({
           onApplied={onDone}
         />
       ) : null}
-    </div>
+    </BulkBarShell>
   );
 }
