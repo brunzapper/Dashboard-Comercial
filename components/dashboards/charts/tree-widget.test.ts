@@ -1,4 +1,7 @@
-// Versão: 1.0 | Data: 09/09/2026
+// Versão: 1.1 | Data: 09/09/2026
+// v1.1 (09/09/2026): a Tree passou a abrir a TAREFA INTEIRA no nó, em vez de
+//   mostrar título e data. Estes testes pinam as duas decisões estruturais:
+//   o editor é o do app (não um segundo), e o nó sabe achar a tarefa dele.
 // O defeito que esta rodada corrigiu: ao clicar em outro registro, a Tree
 // seguia mostrando a árvore E O NOME do lead ANTERIOR até o payload novo
 // chegar. Não era só demora — era informação errada em tela.
@@ -6,6 +9,7 @@
 // A correção não é um `setState` dentro de efeito (a regra do projeto proíbe):
 // o payload guarda o ESCOPO a que pertence, e o render descarta o que é de
 // outro escopo. Estes testes pinam essa lógica pura, que é onde mora o risco.
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 /** O que o widget faz no render: só serve o payload do escopo corrente. */
@@ -63,5 +67,66 @@ describe("Tree: o nome vem do clique, não do payload", () => {
       title: null,
     };
     expect(focus.title ?? "Carregando…").toBe("Carregando…");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// v1.1 — o editor do nó é o do app, e o nó acha a tarefa pelo refId.
+// ---------------------------------------------------------------------------
+describe("o nó abre a tarefa inteira", () => {
+  const widget = readFileSync(
+    "components/dashboards/charts/tree-widget.tsx",
+    "utf8"
+  );
+
+  it("usa o editor de tarefa do app, não um formulário próprio", () => {
+    expect(widget).toContain('from "@/components/tarefas/task-sheet"');
+    expect(widget).toContain("<TaskSheet");
+  });
+
+  it("não escreve tarefa por fora do choke point", () => {
+    // `addTreeTask` inseria em `tasks` direto e só sabia gravar título, prazo
+    // e responsável — era ela que fazia a tarefa da Tree nascer sem hora nem
+    // descrição. Saiu junto com o Input de título.
+    expect(widget).not.toContain("addTreeTask");
+    const actions = readFileSync(
+      "app/(app)/dashboards/tree-actions.ts",
+      "utf8"
+    );
+    expect(actions).not.toContain("export async function addTreeTask");
+  });
+
+  it("a cobrança prevista abre o editor JÁ com a data dela", () => {
+    // O campo de data que faltava: antes o `dueDate` que a action aceitava
+    // nunca era enviado, e a tarefa nascia sem prazo.
+    expect(widget).toContain("dueDate: node.at");
+  });
+
+  it("a cadência do registro tem controle (a action existia sem UI)", () => {
+    expect(widget).toContain("setRecordCadence");
+  });
+});
+
+/** O que o NodeCard faz para achar a tarefa do nó. */
+describe("refId → tarefa", () => {
+  const taskById = new Map([
+    ["t1", { id: "t1", title: "Ligar", due_date: "2026-09-29" }],
+  ]);
+  const find = (refId: string | null | undefined) =>
+    refId ? (taskById.get(refId) ?? null) : null;
+
+  it("nó de tarefa acha a linha real", () => {
+    expect(find("t1")?.due_date).toBe("2026-09-29");
+  });
+
+  it("cobrança já fundida com uma tarefa também acha (o refId é o mesmo)", () => {
+    // load.ts funde a tarefa no nó da cobrança e copia o `refId` — por isso a
+    // cobrança que já virou tarefa é editável pelo mesmo caminho.
+    expect(find("t1")).not.toBeNull();
+  });
+
+  it("cobrança AINDA sem tarefa não acha nada — e é ela que oferece agendar", () => {
+    expect(find(null)).toBeNull();
+    expect(find("occ:3")).toBeNull();
   });
 });

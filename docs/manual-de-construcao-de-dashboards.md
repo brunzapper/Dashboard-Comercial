@@ -1,4 +1,8 @@
-<!-- Versão: 1.31 | Data: 09/09/2026 -->
+<!-- Versão: 1.32 | Data: 09/09/2026 -->
+<!-- v1.32 (09/09/2026): §5.14 — o nó abre a TAREFA INTEIRA (o painel de
+     /tarefas), a cobrança prevista abre já com o prazo, a data do nó ganhou a
+     leitura de atraso, e a cadência do registro tem campo; §12.2.2 — as
+     cobranças futuras e o campo "Conceder ao registro". -->
 <!-- v1.31 (09/09/2026): §5.14 — a troca de registro é imediata (nome do
      clicado + carregamento; a árvore anterior sai na hora). -->
 <!-- v1.30 (09/09/2026): §5.14 — a seção "Tree" do editor (que não existia) e
@@ -1199,14 +1203,26 @@ desfazer é soltá-lo de volta.
 **O que se faz dentro da árvore** (respeitando as permissões de sempre):
 
 - **Anotar** — vira um comentário do registro, o mesmo feed de /registros.
-- **Agendar tarefa** — tarefa manual, no nome do responsável do registro. Ela
-  nasce SEM número de cobrança de propósito: é a diferença entre "o sistema
-  cobrou" e "o vendedor decidiu fazer" que a árvore mostra.
+- **Abrir a tarefa de um nó** — o lápis no nó abre a tarefa **inteira**:
+  título, descrição, vencimento, hora, hora-fim, responsável e registro
+  vinculado. É o mesmo painel de /tarefas, do kanban e do feed — o que se muda
+  aqui vale em todos.
+- **Agendar a cobrança prevista** — numa cobrança que ainda não virou tarefa, o
+  mesmo painel abre **já com o prazo dela preenchido**. É assim que se agenda a
+  cobrança do dia certo, sem digitar a data de novo.
+- **Agendar tarefa avulsa** — pelo botão do cabeçalho. Ela nasce SEM número de
+  cobrança de propósito: é a diferença entre "o sistema cobrou" e "o vendedor
+  decidiu fazer" que a árvore mostra.
 - **Pausar / Retomar** — para (e volta a produzir) as cobranças. **Pausar não
   exclui nada**: o registro continua no acompanhamento e o histórico inteiro
   permanece na tela.
-- **Mudar a cadência deste registro** — grava uma exceção só dele; a regra que
-  vale para os outros não é tocada (§12.2.2).
+- **Mudar a cadência deste registro** — o campo "a cada … dia(s)" no cabeçalho
+  grava uma exceção só dele; a regra que vale para os outros não é tocada
+  (§12.2.2). Limpar o campo devolve o padrão do esquema.
+
+**A data no nó é o prazo, com a mesma leitura do resto do app:** vermelha
+quando atrasada, âmbar quando vence em breve, e "sem prazo" quando não há —
+nunca em branco.
 
 **Onde se configura:** seção **Tree** do editor do widget — a fonte dos nós, a
 forma, o registro fixo (ou vazio, para seguir o clique), a chave do mapa livre
@@ -2320,18 +2336,31 @@ satisfazendo a condição. É o que sustenta a árvore do widget Tree (§5.14).
 
 Onde se configura: **Workflow → Esquemas → Nova automação** (a automação não
 precisa de quadro — pode ser da Base inteira), ou o painel de Automações de um
-quadro. A ação chama-se **"Série de tarefas"** e tem cinco decisões:
+quadro. A ação chama-se **"Série de tarefas"**:
 
 | Decisão | O que significa |
 |---|---|
 | **Condições da regra** | quem ENTRA no acompanhamento (ex.: `stage = Nutrição`) |
 | **Âncora** | a data a partir da qual o relógio corre: a mudança de um campo, a criação do registro, ou um campo de data |
 | **Cadência padrão** | de quantos em quantos dias cobra (15 = quinzenal) |
-| **Janela** | "a partir de" / "até". O fim tem quatro formas: enquanto as condições valerem (sem prazo), numa data fixa, numa data do registro, ou **quando um campo mudar** |
+| **Cobranças futuras** | além da devida hoje, quantas ficam abertas à frente (padrão 5) |
+| **Sem data de início** | o que fazer com o registro que não tem a data da âncora: não cobrar (padrão) ou contar da criação |
+| **Janela** | "começar a cobrar" / "parar de cobrar". O fim tem quatro formas: enquanto as condições valerem (sem prazo), numa data fixa, numa data do registro, ou **quando um campo mudar** |
+| **Máximo de cobranças** | teto por registro; vazio = sem teto |
 | **Precedência das exceções** | em que ordem as exceções sobrescrevem a cadência (ex.: registro → responsável → etapa) |
+| **Conceder ao registro** | o atributo que a série liga no registro — escolha **Tree** para o acompanhamento ter árvore e a linha da tabela virar clicável |
+| **Espelhar no Bitrix** | se as cobranças viram atividade no CRM: como a Base define (padrão), sempre, ou nunca |
 
 A tarefa nasce no nome do **responsável do registro**, e tanto ele quanto um
 admin a gerenciam.
+
+**As próximas ficam à vista.** A série não abre só a cobrança do dia: ela mantém
+abertas também as **próximas** (5, por padrão), com os prazos já espaçados pela
+cadência. Assim dá para ver e **remarcar** o que vem pela frente, em vez de
+esperar a data chegar — num ciclo quinzenal isso era meio mês de tela vazia.
+Cobrança que já venceu e ninguém abriu **não** é criada retroativamente: ela
+segue aparecendo na árvore como galho vazio, que é onde a falta de
+acompanhamento deve aparecer.
 
 **As exceções não abrem o construtor.** "Este deal é semanal" e "João não
 participa" são ajustes do dia a dia, feitos na Tree do registro ou no painel de

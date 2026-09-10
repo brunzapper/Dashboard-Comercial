@@ -1,4 +1,9 @@
-// Versão: 1.2 | Data: 09/09/2026
+// Versão: 1.3 | Data: 09/09/2026
+// v1.3 (09/09/2026): a árvore devolve as TAREFAS do registro (TaskRow) e os
+//   responsáveis, para o nó abrir o editor de tarefa que o resto do app já usa
+//   (components/tarefas/task-sheet.tsx) em vez de um formulário só de título.
+//   Antes um nó de tarefa mostrava o título e mais nada, e não havia como
+//   editar prazo, hora, descrição ou responsável de dentro da Tree.
 // v1.2 (09/09/2026): o registro e o atributo são buscados EM PARALELO. Eram
 //   dois awaits em série sem dependência entre eles — e cada ida ao banco
 //   entra inteira no tempo que o usuário espera depois de clicar na linha.
@@ -27,6 +32,8 @@ import { deriveTree } from "@/lib/tree/derive";
 import { loadRecordTreeFacts } from "@/lib/tree/load";
 import { TREE_WINDOW_STEP, type TreeWindow } from "@/lib/tree/load";
 import type { TreeLayout, TreeNode } from "@/lib/tree/model";
+import { TASK_COLS_WITH_RECORD, type TaskRow } from "@/lib/tasks/types";
+import type { OptionItem } from "@/lib/records/types";
 
 export interface TreeActionState {
   ok?: boolean;
@@ -46,6 +53,13 @@ export interface TreeData {
   recordTitle: string;
   /** Há cobrança fora da janela na direção corrente ("carregar mais"). */
   hasMore: boolean;
+  /**
+   * As tarefas do registro, inteiras. O nó carrega só o `refId`; é por aqui
+   * que o editor recebe a linha REAL para editar (v1.3).
+   */
+  tasks: TaskRow[];
+  /** Responsáveis ativos — o `TaskFormContext` do editor (padrão da agenda). */
+  responsibles: OptionItem[];
   message?: string;
 }
 
@@ -55,6 +69,8 @@ const EMPTY: TreeData = {
   attribute: null,
   recordTitle: "",
   hasMore: false,
+  tasks: [],
+  responsibles: [],
 };
 
 /** A árvore de um registro, já derivada na forma pedida. */
@@ -68,7 +84,8 @@ export async function loadRecordTree(
   const orgId = await getActiveOrgId();
   const supabase = await createClient();
 
-  const [{ data: record }, { data: attr }] = await Promise.all([
+  const [{ data: record }, { data: attr }, { data: taskRows }, { data: resps }] =
+    await Promise.all([
     supabase
       .from("records")
       .select(
@@ -84,7 +101,24 @@ export async function loadRecordTree(
       .eq("record_id", recordId)
       .eq("attribute_key", "tree")
       .maybeSingle(),
-  ]);
+    // v1.3: as tarefas INTEIRAS do registro. O nó guarda só o id; sem a linha
+    // completa o editor não teria prazo, hora, descrição nem responsável para
+    // mostrar. Mesmo recorte de `listRecordTasks` — a RLS de tasks recorta.
+    supabase
+      .from("tasks")
+      .select(TASK_COLS_WITH_RECORD)
+      .eq("record_id", recordId)
+      .order("due_date", { ascending: true, nullsFirst: false })
+      .limit(200),
+    // Precedente da agenda (lib/agenda/actions.ts): o combobox de responsável
+    // do editor precisa da lista, e ela cabe nesta mesma rodada de consultas.
+    supabase
+      .from("responsibles")
+      .select("id, display_name")
+      .is("canonical_id", null)
+      .eq("active", true)
+      .order("display_name"),
+    ]);
   if (!record) {
     // Pode ser RLS (o registro existe e o usuário não o vê) — dizer "não
     // encontrado" é o mesmo dos dois lados, e é o certo: não revelamos a
@@ -111,6 +145,11 @@ export async function loadRecordTree(
       : null,
     recordTitle: (record.title as string) ?? "",
     hasMore: facts.hasMore,
+    tasks: (taskRows ?? []) as unknown as TaskRow[],
+    responsibles: (resps ?? []).map((r) => ({
+      id: r.id as string,
+      label: (r.display_name as string) ?? "",
+    })),
   };
 }
 
@@ -137,45 +176,11 @@ export async function addTreeNote(
   return { ok: true };
 }
 
-/**
- * Agenda uma tarefa manual dentro da árvore. Sem `series_occurrence`: ela é
- * uma ação do vendedor, não uma cobrança da automação — e é justamente a
- * diferença entre as duas que a árvore mostra.
- */
-export async function addTreeTask(
-  recordId: string,
-  input: { title: string; dueDate?: string | null },
-  opts: { revalidate?: boolean } = {}
-): Promise<TreeActionState> {
-  const session = await getSessionInfo();
-  if (!session) return { ok: false, message: "Sessão expirada." };
-  const title = input.title.trim();
-  if (title === "") return { ok: false, message: "Dê um título à tarefa." };
-  const orgId = await getActiveOrgId();
-
-  const supabase = await createClient();
-  // O responsável é o DO REGISTRO: a tarefa nasce com quem conduz o
-  // acompanhamento, não com quem clicou.
-  const { data: record } = await supabase
-    .from("records")
-    .select("responsible_id")
-    .eq("id", recordId)
-    .maybeSingle();
-
-  const row: Record<string, unknown> = {
-    title,
-    record_id: recordId,
-    due_date: input.dueDate || null,
-    responsible_id: (record?.responsible_id as string | null) ?? null,
-    created_by: session.user.id,
-  };
-  if (orgId) row.organization_id = orgId;
-
-  const { error } = await supabase.from("tasks").insert(row);
-  if (error) return { ok: false, message: `Falha ao agendar: ${error.message}` };
-  if (opts.revalidate !== false) revalidatePath("/dashboards");
-  return { ok: true };
-}
+// v1.3 (09/09/2026): `addTreeTask` SAIU. Ela inseria em `tasks` por fora do
+// choke point, e por isso só sabia gravar título, prazo e responsável — nem
+// hora, nem descrição, nem fase. A Tree passou a abrir o editor de tarefa do
+// app (TaskSheet → createTask), que é o dono único da criação; manter as duas
+// seria a régua paralela que a invariante 25 proíbe.
 
 /**
  * Re-pendura um nó (ou o solta na raiz). Grava a EXCEÇÃO, não a árvore inteira:

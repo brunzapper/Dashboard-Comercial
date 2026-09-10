@@ -1,4 +1,7 @@
-<!-- Versão: 1.37 | Data: 09/09/2026 -->
+<!-- Versão: 1.38 | Data: 09/09/2026 -->
+<!-- v1.38 (09/09/2026): §4.16 — a receita da Nutrição corrigida (o campo
+     "Conceder ao registro" não existia na tela, e a âncora lia a coluna
+     errada), cobranças futuras, e a seção nova do espelho no Bitrix. -->
 <!-- v1.37 (09/09/2026): §4.15 — como editar uma automação pela tela de
      construção do Workflow (inclusive as de Base, que não têm quadro). -->
 <!-- v1.36 (09/09/2026): §4.16 — receita do acompanhamento periódico
@@ -1099,16 +1102,29 @@ linha.
 | Campo | O que preencher no caso |
 |---|---|
 | Título da tarefa | ex.: `Acompanhar {{titulo}}` |
-| Âncora (a data que conta) | **Mudança de campo** → `stage`. Usa `records.field_modified_at`, o mesmo fato que a condição de tempo já carrega |
+| Âncora (a data que conta) | **Mudança de campo** → `stage`. Sai do HISTÓRICO (`audit_log`), então funciona para campo que só o sync mexe |
 | Cadência padrão | `15` dias |
+| Cobranças futuras | `5` — além da devida hoje, quantas ficam abertas à frente |
+| Sem data de início | **Não cobrar** (padrão) ou **Contar da criação**, para o registro que já estava na etapa antes de a série existir |
 | Precedência das exceções | `record` > `responsible` > `field:stage` |
-| Fim | uma **data absoluta** ou um campo de data do registro |
+| Começar a cobrar / Parar de cobrar | uma **data absoluta**, um campo de data, ou "quando um campo mudar" |
+| Máximo de cobranças | vazio = sem teto |
 | Responsável | do REGISTRO |
-| Concede o atributo | `tree` |
+| **Conceder ao registro** | **Tree** — é este campo que faz a árvore existir |
 
 A âncora é o **gatilho secundário** do desenho: a etapa diz QUEM entra, a
 âncora diz a partir de QUANDO o relógio corre. Trocar a âncora para "criação do
 registro" ou para um campo de data é troca de opção, não de código.
+
+> **Se você montou esta regra antes de 09/09/2026, confira dois campos.** Até
+> aquela data o construtor não tinha controle para "Conceder ao registro" —
+> uma regra montada pela tela nascia sem o atributo `tree`, e a árvore nunca
+> aparecia. E a âncora `field_changed` lia `records.field_modified_at`, que é o
+> marcador de proteção do sync e fica VAZIO para campo vindo do Bitrix: a
+> série rodava a cada minuto e não criava nada, sem erro nenhum para
+> denunciar. Hoje a âncora lê o `audit_log` e os dois campos estão na tela.
+> Abrir a regra e salvar de novo também recupera `Começar a cobrar`,
+> `Descrição` e `Máximo de cobranças`, que a tela apagava a cada save.
 
 **Passo 3 — a tabela com clique.** No dashboard, no widget de tabela dos deals:
 construtor → **Opções avançadas** → "Ao clicar na linha" → **Atributo** →
@@ -1119,9 +1135,12 @@ registro. No modo livre ele vira mapa mental e não depende de automação nenhu
 
 **Conferir que funcionou:**
 
-1. Rode o tick (ou "Executar agora" na regra). Nasce UMA tarefa, no nome do
-   responsável do deal, com a cobrança 0.
-2. Rode o tick **de novo**. Não nasce a segunda — a trava é por ocorrência, e o
+1. Rode o tick (ou "Executar agora" na regra). Nascem a cobrança devida hoje e
+   as `Cobranças futuras` seguintes (5, por padrão), todas no nome do
+   responsável do deal, com prazos espaçados pela cadência. **Nenhuma com
+   prazo anterior ao ciclo em aberto**: cobrança que venceu e ninguém fez não é
+   criada retroativamente — ela aparece na Tree como galho vazio.
+2. Rode o tick **de novo**. Nada nasce — a trava é por ocorrência, e o
    23505 é no-op silencioso (não vira `last_error`; se virar, é bug).
 3. Avance a âncora ou reduza a cadência: nasce a próxima, com o número
    seguinte. A sequência é `floor((hoje − âncora) / cadência)`, então uma
@@ -1129,8 +1148,10 @@ registro. No modo livre ele vira mapa mental e não depende de automação nenhu
 
 **Ajustes do dia a dia — sem abrir o construtor:**
 
-- **Este deal é semanal:** na Tree do registro, mude a cadência. Grava uma linha
-  em `series_settings` escopo `record`; a regra não é tocada.
+- **Este deal é semanal:** na Tree do registro, mude a cadência **no campo ao
+  lado do "a cada … dia(s)"** no cabeçalho da árvore. Grava uma linha em
+  `series_settings` escopo `record`; a regra não é tocada, e limpar o campo
+  devolve o padrão do esquema.
 - **João não participa:** exceção escopo `responsible` com `active = false`.
   Vale para ele e só para ele — e nenhuma exceção de registro o ressuscita,
   porque um "não" em qualquer escopo alcançado desliga.
@@ -1138,17 +1159,61 @@ registro. No modo livre ele vira mapa mental e não depende de automação nenhu
   histórico inteiro também; o que para é a produção de cobranças. Retomar é o
   mesmo botão.
 
+**Mexer na tarefa pela árvore.** Clicar no lápis de um nó abre a tarefa
+INTEIRA — título, descrição, vencimento, hora, hora-fim, responsável e registro
+vinculado —, o mesmo painel de /tarefas, do kanban e do feed. A cobrança
+PREVISTA que ainda não virou tarefa abre esse painel já com o prazo dela
+preenchido: é assim que se agenda a cobrança do dia certo. Concluir marca o nó.
+A barra lateral do clique na linha tem as mesmas ações.
+
 **Ler a árvore.** O tronco são as cobranças — inclusive a que **ninguém abriu**,
 porque ela é derivada do calendário e não de uma linha de `tasks`. Um galho
 vazio no meio é exatamente a informação que se quer: passou a quinzena e nada
 aconteceu. Tarefas manuais, anotações e alterações penduram na cobrança em cuja
 janela caíram; um nó pode ser re-pendurado à mão, e só essa exceção é gravada.
 
+### Espelhar as tarefas no Bitrix (0136)
+
+A tarefa daqui pode virar uma **atividade** na timeline do negócio no Bitrix —
+a mesma que o time lê no feed, junto dos comentários e das mudanças de etapa.
+Concluir aqui fecha lá.
+
+**Ligar (é em três níveis, do geral para o específico):**
+
+1. **Base** — Configurações → Bases → a base (ex.: Deals) → **"Espelhar tarefas
+   no Bitrix"** → *Como atividade do negócio*. Toda Base nasce DESLIGADA.
+2. **Automação/série** — no editor da regra, **"Espelhar no Bitrix"**:
+   `Como a Base define` (padrão), `Sempre` ou `Nunca`. Serve para desligar uma
+   série ruidosa sem mexer na Base.
+3. **Tarefa** — o mesmo seletor no formulário da tarefa, para o caso a caso.
+
+`Como a Base define` **não** é "nunca": é ausência de decisão. Por isso ligar o
+espelho na Base alcança as séries que já rodam, sem editar nenhuma.
+
+**Conferir que funcionou:** crie uma tarefa com um registro vinculado que tenha
+par no Bitrix, espere o tick (roda a cada minuto) e abra o negócio no portal —
+a atividade está na timeline. Conclua a tarefa aqui e ela fecha lá.
+
+**Armadilhas do espelho:**
+
+- **Nada aparece no Bitrix:** o registro precisa ter par no CRM
+  (`records.source_id`). Tarefa solta, ou registro criado só aqui, não tem onde
+  pendurar a atividade — a tela diz isso em vez de falhar em silêncio.
+- **Responsável errado no Bitrix:** o mapa é `responsibles.bitrix_user_id`.
+  Responsável sem usuário do portal vai sem `RESPONSIBLE_ID`.
+- **Ver o que falhou:** `bitrix_task_queue` guarda `status`, `attempts` e
+  `last_error`. Cinco tentativas e vira `error`; o erro fica visível para o
+  admin da org.
+- **Não duplica:** `tasks.bitrix_activity_id` é a trava. Se uma tarefa aparecer
+  duas vezes na timeline, a suspeita é aquela coluna ter sido limpa à mão.
+
 **Armadilhas conhecidas:**
 
 - Cobrança não nasce: confira a âncora (registro sem a data da âncora **nunca**
   gera — é de propósito, não silêncio de erro), a janela `from`/`until`, e se
-  alguma exceção alcançada está com `active = false`.
+  alguma exceção alcançada está com `active = false`. Desde 09/09/2026 a âncora
+  `field_changed` lê o `audit_log`, então campo que só o sync mexe funciona;
+  se a regra é antiga e nunca criou nada, é quase certo que era isso.
 - Nasceu duplicado: não deveria ser possível (índice único). Se acontecer, a
   suspeita é `series_occurrence` nulo — tarefa manual da Tree não tem ocorrência
   de propósito, e é isso que distingue "o que o sistema cobrou" de "o que o

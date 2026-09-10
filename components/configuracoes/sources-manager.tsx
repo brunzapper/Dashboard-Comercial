@@ -8,6 +8,8 @@
 // sem registros (FK em records.record_type restringe).
 // v1.1 (16/07/2026): flag "Permite criação manual" (manual_entry, 0061) —
 //   habilita o botão "Novo registro" (Registros/kanbans) para a fonte.
+// v1.3 (09/09/2026): espelho de tarefas no Bitrix (bitrix_activity_owner,
+//   0136) — o nível mais geral dos três da configuração do espelho.
 // v1.2 (19/07/2026): fuso horário da origem (timezone, 0079) — datetimes
 //   ingeridos da fonte são convertidos desse fuso p/ Brasília na entrada.
 // v1.3 (26/07/2026): PASTAS (0107) — campo "Pasta" no formulário, tabela
@@ -108,6 +110,9 @@ function SourceForm({
   // Fontes novas nascem aceitando criação manual; builtins (Sync) desligados.
   const [manualEntry, setManualEntry] = useState(source?.manualEntry ?? true);
   const [timezone, setTimezone] = useState(source?.timezone ?? "");
+  const [activityOwner, setActivityOwner] = useState(
+    source?.bitrixActivityOwner ?? ""
+  );
   // Pasta (0107): "" = sem pasta. O campo só aparece quando há pasta criada.
   const [folderId, setFolderId] = useState(source?.folderId ?? "");
   const folderOptions = useMemo<ComboboxOption[]>(
@@ -217,6 +222,31 @@ function SourceForm({
           Datas/horas desta fonte são convertidas deste fuso para o horário de
           Brasília na entrada (ex.: Bitrix em Europe/Moscow). Vazio = sem
           conversão.
+        </p>
+      </div>
+
+      {/* v1.3 (09/09/2026): espelho de TAREFAS no Bitrix (0136). Fica ao lado
+          do fuso porque é da mesma família — como esta Base conversa com a
+          origem. NULL/desligado é o padrão de toda Base existente. */}
+      <div className="flex flex-col gap-1.5">
+        <Label>Espelhar tarefas no Bitrix</Label>
+        <Combobox
+          options={[
+            { value: "", label: "Não espelhar" },
+            { value: "deal", label: "Como atividade do negócio (deal)" },
+            { value: "lead", label: "Como atividade do lead" },
+          ]}
+          value={activityOwner}
+          onValueChange={setActivityOwner}
+          name="bitrix_activity_owner"
+          searchable={false}
+          aria-label="Espelhar tarefas no Bitrix"
+        />
+        <p className="text-muted-foreground text-xs">
+          Toda tarefa ligada a um registro desta base vira uma atividade na
+          timeline do CRM (a mesma que aparece no feed, junto dos comentários).
+          Concluir aqui fecha lá. Só vale para registro com par no Bitrix; a
+          automação e o formulário da tarefa podem sobrepor caso a caso.
         </p>
       </div>
 

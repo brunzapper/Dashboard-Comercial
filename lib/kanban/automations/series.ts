@@ -1,4 +1,7 @@
-// Versão: 1.0 | Data: 09/09/2026
+// Versão: 1.1 | Data: 09/09/2026
+// v1.1 (09/09/2026): a cobrança criada entra na fila do espelho no Bitrix
+//   (0136) quando a Base (e a regra) mandam. Best-effort: o espelho nunca
+//   derruba a criação da tarefa.
 // Executor da ação `create_task_series` (0132): cria a cobrança devida hoje e
 // concede o atributo a quem entrou na série.
 //
@@ -16,6 +19,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { emitWebhookEvent } from "@/lib/webhooks/emit";
+import { mirrorTaskAfterWrite } from "@/lib/sync/bitrix/task-mirror";
 
 import type { PlannedSeriesTask } from "./evaluate";
 
@@ -96,6 +100,16 @@ export async function executeAutomationSeries(
         { taskId, recordId: plan.recordId, seriesKey: plan.seriesKey },
         batch.orgId
       );
+      // v1.1: o espelho no Bitrix. Aqui o `db` JÁ é service role (o tick não
+      // tem sessão), então serve para os dois papéis.
+      await mirrorTaskAfterWrite(db, db, {
+        taskId,
+        recordId: plan.recordId,
+        orgId: batch.orgId,
+        op: "create",
+        ruleChoice: plan.mirrorBitrix,
+        createdBy: batch.createdBy,
+      });
     }
 
     // O atributo entra JUNTO com a primeira cobrança — é o que faz a linha da

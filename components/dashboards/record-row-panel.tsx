@@ -1,4 +1,8 @@
-// Versão: 1.1 | Data: 09/09/2026
+// Versão: 1.2 | Data: 09/09/2026
+// v1.2 (09/09/2026): a lista de tarefas passou a ser o `TaskList` canônico —
+//   concluir, editar e o DueBadge, os mesmos de /tarefas, do kanban e do feed.
+//   Antes era uma projeção de 4 campos desenhada aqui, sem nenhuma ação: dava
+//   para ver a tarefa e não para mexer nela.
 // v1.1 (09/09/2026): a lista de tarefas ganha ORDEM e "carregar mais". Um
 //   registro sob cobrança periódica acumula dezenas delas; a lista inteira
 //   de uma vez é uma parede, e o corte mudo escondia o resto sem dizer.
@@ -35,6 +39,8 @@ import { ATTRIBUTE_STATUS_LABELS } from "@/lib/attributes/registry";
 import type { RowActionSettings } from "@/lib/widgets/types";
 
 import { TreeWidget } from "./charts/tree-widget";
+import { TaskList } from "@/components/tarefas/task-list";
+import type { TaskFormContext } from "@/components/tarefas/task-sheet";
 
 export function RecordRowPanel({
   recordId,
@@ -47,6 +53,16 @@ export function RecordRowPanel({
   onClose: () => void;
 }) {
   const [data, setData] = useState<RowPanelData | null>(null);
+  // v1.2: contexto do editor de tarefa — o mesmo shape que kanban e agenda
+  // montam (components/kanban/kanban-widget.tsx).
+  const taskCtx: TaskFormContext = {
+    responsibles: data?.responsibles ?? [],
+    canAssignOthers: true,
+    canLock: false,
+  };
+  const respLabels: Record<string, string> = Object.fromEntries(
+    (data?.responsibles ?? []).map((r) => [r.id, r.label])
+  );
   const [order, setOrder] = useState<RowTaskOrder>("desc");
   const [loadingMore, setLoadingMore] = useState(false);
 
@@ -139,35 +155,16 @@ export function RecordRowPanel({
               </div>
               </>
             )}
+            {/* v1.2 (09/09/2026): o TaskList canônico, não uma projeção
+                read-only. É o mesmo componente de /tarefas, do kanban e do
+                feed — traz concluir, editar e o DueBadge de graça. A lista
+                artesanal daqui não tinha nenhum dos três. */}
             {data.tasks.length === 0 ? null : (
-              data.tasks.map((t) => (
-                <div
-                  key={t.id}
-                  className="flex flex-wrap items-center gap-2 rounded-md border p-2"
-                >
-                  <span className="min-w-0 flex-1 truncate text-sm">
-                    {t.title}
-                  </span>
-                  {t.occurrence != null ? (
-                    <Badge variant="outline" className="text-xs">
-                      {t.occurrence}ª cobrança
-                    </Badge>
-                  ) : null}
-                  <Badge
-                    variant={t.done ? "secondary" : "outline"}
-                    className="text-xs"
-                  >
-                    {t.done ? "concluída" : "aberta"}
-                  </Badge>
-                  <span className="text-muted-foreground text-xs">
-                    {t.dueDate
-                      ? new Date(`${t.dueDate}T12:00:00`).toLocaleDateString(
-                          "pt-BR"
-                        )
-                      : "sem prazo"}
-                  </span>
-                </div>
-              ))
+              <TaskList
+                tasks={data.tasks}
+                ctx={taskCtx}
+                responsibleLabels={respLabels}
+              />
             )}
             {data.tasks.length < data.taskTotal ? (
               <Button

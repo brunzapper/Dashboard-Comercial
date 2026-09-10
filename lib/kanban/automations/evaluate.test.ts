@@ -68,11 +68,12 @@ function facts(over: Partial<CardFacts> = {}): CardFacts {
     openTasks: 0,
     overdueTasks: 0,
     relatedCounts: {},
-    fieldModifiedAt: null,
+    changedAt: null,
     sourceCreatedAt: "2026-07-10T09:00:00-03:00",
     placementUpdatedAt: null,
     openAutomationRuleIds: [],
   seriesOccurrences: [],
+  pausedAttributes: [],
     ...over,
   };
 }
@@ -294,7 +295,7 @@ describe("evaluateCondition", () => {
           op: "lte",
           days: 3,
         },
-        facts({ fieldModifiedAt: { stage: "2026-07-26T10:00:00-03:00" } }),
+        facts({ changedAt: new Map([["stage", "2026-07-26T10:00:00-03:00"]]) }),
         CTX
       )
     ).toBe(true);

@@ -1,6 +1,8 @@
-// Versão: 1.1 | Data: 09/09/2026
+// Versão: 1.2 | Data: 09/09/2026
 // v1.1 (09/09/2026): o `until` por ALTERAÇÃO de campo (a quarta forma de
 //   parar de cobrar).
+// v1.2 (09/09/2026): `occurrencesAhead` (as cobranças futuras) e o
+//   `anchorFallback` do registro sem histórico.
 // A ocorrência devida é o relógio da série. O que estes testes protegem:
 // ela é DERIVADA (a mesma entrada dá sempre a mesma sequência, mesmo com
 // rodadas perdidas), ausência de data nunca vira "hoje", e a janela realmente
@@ -9,6 +11,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   dueOccurrence,
+  occurrencesAhead,
   occurrencesUntil,
   resolveAnchorDate,
   resolveBound,
@@ -117,7 +120,7 @@ describe("resolveAnchorDate", () => {
       id: "r1",
       custom_fields: { data_x: "2026-05-05" },
     } as never,
-    fieldModifiedAt: { stage: "2026-09-01T10:00:00-03:00" },
+    changedAt: new Map([["stage", "2026-09-01T10:00:00-03:00"]]),
     sourceCreatedAt: "2026-01-10T08:00:00-03:00",
     available: [],
   };
@@ -151,7 +154,7 @@ describe("resolveBound — quando parar de cobrar", () => {
       id: "r1",
       custom_fields: { data_limite: "2026-11-30" },
     } as never,
-    fieldModifiedAt: { assinatura: "2026-10-05T14:00:00-03:00" },
+    changedAt: new Map([["assinatura", "2026-10-05T14:00:00-03:00"]]),
     sourceCreatedAt: "2026-01-10T08:00:00-03:00",
     available: [],
   };
@@ -202,5 +205,105 @@ describe("resolveBound — quando parar de cobrar", () => {
     expect(semLimite.length).toBeGreaterThan(comLimite.length);
     // Nada depois do dia em que o campo mudou.
     for (const o of comLimite) expect(o.dueDate <= "2026-10-05").toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// v1.2 — as cobranças FUTURAS.
+// ---------------------------------------------------------------------------
+describe("occurrencesAhead", () => {
+  // Quinzenal ancorado em 01/09; em 29/09 a devida é a de número 2.
+  const base = {
+    anchorDate: "2026-09-01",
+    cadenceDays: 14,
+    todayIso: "2026-09-29",
+    firstAt: "apos_um_ciclo" as const,
+  };
+
+  it("devolve a devida hoje MAIS as N seguintes", () => {
+    const plans = occurrencesAhead(base, 5);
+    expect(plans.map((p) => p.occurrence)).toEqual([2, 3, 4, 5, 6, 7]);
+    expect(plans[0].dueDate).toBe("2026-09-29");
+    expect(plans[5].dueDate).toBe("2026-12-08");
+  });
+
+  // A decisão central: a série não abre de uma vez as cobranças que ninguém
+  // fez. A PRIMEIRA da lista é a devida agora — e ela pode ter vencido há
+  // alguns dias (é o que se está devendo hoje); o que não pode é vir a 1ª, a
+  // 2ª e a 3ª de meses atrás junto. Âncora em janeiro, quinzenal: a devida em
+  // 29/09 é a de número 19, e a lista começa NELA, não na 1.
+  it("NUNCA anda para trás, mesmo com a âncora muito antiga", () => {
+    const plans = occurrencesAhead(
+      { ...base, anchorDate: "2026-01-01", todayIso: "2026-09-29" },
+      5
+    );
+    const devida = dueOccurrence({
+      ...base,
+      anchorDate: "2026-01-01",
+      todayIso: "2026-09-29",
+    })!;
+    expect(plans[0].occurrence).toBe(devida.occurrence);
+    expect(plans.map((p) => p.occurrence)).toEqual([19, 20, 21, 22, 23, 24]);
+    // Nenhuma cobrança de ciclo anterior ao que está em aberto agora.
+    for (const p of plans) {
+      expect(p.occurrence).toBeGreaterThanOrEqual(devida.occurrence);
+      expect(p.dueDate >= devida.dueDate).toBe(true);
+    }
+  });
+
+  it("count 0 devolve só a devida hoje", () => {
+    expect(occurrencesAhead(base, 0).map((p) => p.occurrence)).toEqual([2]);
+  });
+
+  it("respeita a borda final: não agenda depois do fim da série", () => {
+    const plans = occurrencesAhead({ ...base, untilDate: "2026-10-20" }, 5);
+    expect(plans.map((p) => p.dueDate)).toEqual(["2026-09-29", "2026-10-13"]);
+  });
+
+  it("respeita o teto de cobranças", () => {
+    const plans = occurrencesAhead({ ...base, maxOccurrences: 4 }, 5);
+    expect(plans.map((p) => p.occurrence)).toEqual([2, 3, 4]);
+  });
+
+  it("sem cobrança devida hoje não adianta nada", () => {
+    // Antes da primeira: adiantar aqui seria começar a cobrar cedo.
+    expect(occurrencesAhead({ ...base, todayIso: "2026-09-05" }, 5)).toEqual([]);
+    // Sem âncora, idem.
+    expect(occurrencesAhead({ ...base, anchorDate: null }, 5)).toEqual([]);
+  });
+});
+
+describe("resolveAnchorDate — fallback", () => {
+  const facts = {
+    record: { id: "r1" } as never,
+    changedAt: null,
+    sourceCreatedAt: "2026-07-21T11:11:32-03:00",
+    available: [],
+  };
+
+  it("sem histórico e sem fallback, NÃO cobra", () => {
+    expect(
+      resolveAnchorDate({ kind: "field_changed", field: "stage" }, facts)
+    ).toBeNull();
+  });
+
+  it("com fallback 'criacao', conta da criação do registro", () => {
+    expect(
+      resolveAnchorDate(
+        { kind: "field_changed", field: "stage" },
+        facts,
+        "criacao"
+      )
+    ).toBe("2026-07-21");
+  });
+
+  it("o histórico vence o fallback quando existe", () => {
+    expect(
+      resolveAnchorDate(
+        { kind: "field_changed", field: "stage" },
+        { ...facts, changedAt: new Map([["stage", "2026-09-01T09:00:00-03:00"]]) },
+        "criacao"
+      )
+    ).toBe("2026-09-01");
   });
 });

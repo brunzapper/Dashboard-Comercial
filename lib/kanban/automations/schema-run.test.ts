@@ -117,11 +117,12 @@ const card = (over: Partial<CardFacts> = {}): CardFacts => ({
   openTasks: 0,
   overdueTasks: 0,
   relatedCounts: {},
-  fieldModifiedAt: null,
+  changedAt: null,
   sourceCreatedAt: null,
   placementUpdatedAt: null,
   openAutomationRuleIds: [],
   seriesOccurrences: [],
+  pausedAttributes: [],
   ...over,
 });
 

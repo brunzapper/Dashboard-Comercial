@@ -1,4 +1,10 @@
-// Versão: 1.1 | Data: 09/09/2026
+// Versão: 1.2 | Data: 09/09/2026
+// v1.2 (09/09/2026): a lista de tarefas do painel deixou de ser uma projeção
+//   read-only artesanal e passou a ser o `TaskList` canônico (checkbox de
+//   concluir, lápis de editar, DueBadge). A nota de "somente leitura" abaixo
+//   segue valendo para o DETALHE do registro — reusar o editor de tarefa que o
+//   app inteiro usa é o oposto de uma régua paralela; era a projeção de 4
+//   campos que impedia qualquer ação.
 // v1.1 (09/09/2026): as tarefas do painel são PAGINADAS. Um registro sob
 //   cobrança periódica acumula dezenas de tarefas, e trazer 100 de uma vez
 //   (sem "carregar mais") entregava uma parede e ainda assim escondia o
@@ -27,6 +33,8 @@ import {
 import type { FieldDefinition } from "@/lib/records/types";
 import { ROW_TASKS_PAGE } from "@/lib/records/row-panel";
 import { createClient } from "@/lib/supabase/server";
+import { TASK_COLS_WITH_RECORD, type TaskRow } from "@/lib/tasks/types";
+import type { OptionItem } from "@/lib/records/types";
 import { fieldAppliesToSource } from "@/lib/sources";
 import { attributeLabel, type RecordAttribute } from "@/lib/attributes/registry";
 import { loadRecordAttributes } from "@/lib/attributes/load";
@@ -37,14 +45,12 @@ export interface RowDetailField {
   value: string;
 }
 
-export interface RowTask {
-  id: string;
-  title: string;
-  dueDate: string | null;
-  done: boolean;
-  /** Cobrança da série (N) ou null para tarefa manual. */
-  occurrence: number | null;
-}
+/**
+ * v1.2: a tarefa INTEIRA. A projeção de 4 campos que existia aqui era o que
+ * tornava a lista inerte — sem `phase`, `due_time`, `responsible_id` etc. não
+ * há como abrir o editor nem concluir.
+ */
+export type RowTask = TaskRow;
 
 export interface RowPanelData {
   title: string;
@@ -53,6 +59,8 @@ export interface RowPanelData {
   attributes: (RecordAttribute & { label: string })[];
   /** Quantas tarefas o registro tem no total (o botão "carregar mais" precisa). */
   taskTotal: number;
+  /** Responsáveis ativos — o `TaskFormContext` do editor (v1.2). */
+  responsibles: OptionItem[];
   message?: string;
 }
 
@@ -64,6 +72,7 @@ const EMPTY: RowPanelData = {
   tasks: [],
   attributes: [],
   taskTotal: 0,
+  responsibles: [],
 };
 
 /**
@@ -83,24 +92,14 @@ export async function loadRowTasks(
 
   const { data, count } = await supabase
     .from("tasks")
-    .select("id, title, due_date, completed_at, series_occurrence", {
-      count: "exact",
-    })
+    .select(TASK_COLS_WITH_RECORD, { count: "exact" })
     .eq("record_id", recordId)
     .order("due_date", { ascending: asc, nullsFirst: false })
     .range(offset, offset + ROW_TASKS_PAGE - 1);
 
-  return { tasks: (data ?? []).map(toRowTask), total: count ?? 0 };
-}
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function toRowTask(t: any): RowTask {
   return {
-    id: t.id as string,
-    title: (t.title as string) ?? "",
-    dueDate: (t.due_date as string | null) ?? null,
-    done: t.completed_at != null,
-    occurrence: (t.series_occurrence as number | null) ?? null,
+    tasks: (data ?? []) as unknown as RowTask[],
+    total: count ?? 0,
   };
 }
 
@@ -153,9 +152,19 @@ export async function loadRowPanel(recordId: string): Promise<RowPanelData> {
 
   // Primeira página: mais recentes primeiro (o que se quer ver ao abrir um
   // acompanhamento é o que acabou de acontecer, não a cobrança de 2 anos atrás).
-  const firstPage = await loadRowTasks(recordId, { offset: 0, order: "desc" });
+  // v1.2: os responsáveis vêm junto — o editor de tarefa precisa da lista.
+  const [firstPage, attrRows, { data: resps }] = await Promise.all([
+    loadRowTasks(recordId, { offset: 0, order: "desc" }),
+    loadRecordAttributes(supabase, recordId),
+    supabase
+      .from("responsibles")
+      .select("id, display_name")
+      .is("canonical_id", null)
+      .eq("active", true)
+      .order("display_name"),
+  ]);
 
-  const attributes = (await loadRecordAttributes(supabase, recordId)).map((a) => ({
+  const attributes = attrRows.map((a) => ({
     ...a,
     label: attributeLabel(a.attributeKey),
   }));
@@ -165,6 +174,10 @@ export async function loadRowPanel(recordId: string): Promise<RowPanelData> {
     fields,
     tasks: firstPage.tasks,
     taskTotal: firstPage.total,
+    responsibles: (resps ?? []).map((r) => ({
+      id: r.id as string,
+      label: (r.display_name as string) ?? "",
+    })),
     attributes,
   };
 }

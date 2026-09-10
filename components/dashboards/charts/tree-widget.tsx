@@ -1,4 +1,11 @@
-// Versão: 1.2 | Data: 09/09/2026
+// Versão: 1.3 | Data: 09/09/2026
+// v1.3 (09/09/2026): o nó ABRE A TAREFA INTEIRA. Antes um nó mostrava título e
+//   data e mais nada, e o "agendar tarefa" era um Input de título só — a tarefa
+//   nascia sem prazo (o `dueDate` que a action aceita nunca era enviado). Agora
+//   clicar num nó abre o MESMO editor que o resto do app usa (TaskSheet), com
+//   prazo, hora, descrição e responsável; e a cobrança prevista que ainda não
+//   virou tarefa abre o editor JÁ com a data dela. Nada de editor novo: um
+//   segundo seria a régua paralela da invariante 25.
 // v1.2 (09/09/2026): a árvore RESPONDE ao clique. Três defeitos juntos:
 //   (a) o título do registro clicado já viajava no contexto de foco e era
 //       jogado fora — o nome só aparecia quando o payload inteiro chegava;
@@ -29,7 +36,6 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  CalendarPlus,
   ChevronDown,
   ChevronRight,
   Loader2,
@@ -41,10 +47,15 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { TaskSheet, type TaskFormContext } from "@/components/tarefas/task-sheet";
+import { classifyDue, DUE_STATUS_LABELS } from "@/lib/tasks/alerts";
+import { DEFAULT_DATE_FORMAT, formatDateValue } from "@/lib/widgets/format";
+import type { TaskRow } from "@/lib/tasks/types";
+import { cn } from "@/lib/utils";
 import {
   addTreeNote,
-  addTreeTask,
   loadRecordTree,
+  setRecordCadence,
   type TreeData,
 } from "@/app/(app)/dashboards/tree-actions";
 import { useRecordFocus } from "../record-focus-context";
@@ -70,17 +81,69 @@ const KIND_TONE: Record<string, string> = {
   note: "border-sky-500/40",
 };
 
+/**
+ * A data do nó, com a mesma leitura de prazo do resto do app.
+ *
+ * v1.3 (09/09/2026): antes era uma data crua, e vazio virava string vazia —
+ * indistinguível de "carregando". Reusa `classifyDue`/`formatDateValue`, os
+ * mesmos do `DueBadge` da lista de tarefas: atrasada em vermelho, em breve em
+ * âmbar. Quando o nó É uma tarefa, a data mostrada é o prazo DELA.
+ */
+function NodeDate({ node, task }: { node: TreeNode; task: TaskRow | null }) {
+  if (task?.due_date) {
+    const status = classifyDue(task);
+    const text = `${formatDateValue(task.due_date, DEFAULT_DATE_FORMAT)}${
+      task.due_time ? ` ${task.due_time.slice(0, 5)}` : ""
+    }`;
+    return (
+      <span
+        className={cn(
+          "shrink-0 rounded px-1.5 py-0.5 text-[11px] whitespace-nowrap",
+          status === "atrasada" &&
+            "bg-destructive/10 text-destructive font-medium",
+          status === "em_breve" &&
+            "bg-amber-500/15 font-medium text-amber-700 dark:text-amber-400",
+          !status && "text-muted-foreground bg-muted"
+        )}
+        title={status ? DUE_STATUS_LABELS[status] : undefined}
+      >
+        {text}
+      </span>
+    );
+  }
+  if (!node.at) {
+    // "sem prazo" é informação; a string vazia de antes parecia defeito.
+    return <span className="text-muted-foreground shrink-0 text-xs">sem prazo</span>;
+  }
+  return (
+    <span className="text-muted-foreground shrink-0 text-xs">
+      {formatDateValue(node.at, DEFAULT_DATE_FORMAT)}
+    </span>
+  );
+}
+
 function NodeCard({
   node,
   onNote,
-  onTask,
+  taskById,
+  ctx,
+  recordId,
+  recordTitle,
+  onChanged,
 }: {
   node: TreeNode;
   onNote: (node: TreeNode) => void;
-  onTask: (node: TreeNode) => void;
+  /** Tarefas do registro por id — o nó guarda só o `refId`. */
+  taskById: Map<string, TaskRow>;
+  ctx: TaskFormContext;
+  recordId: string;
+  recordTitle: string;
+  onChanged: () => void;
 }) {
   const [open, setOpen] = useState(true);
   const hasChildren = node.children.length > 0;
+  // O nó de tarefa E a cobrança já fundida com uma tarefa carregam o id dela.
+  const task = node.refId ? (taskById.get(node.refId) ?? null) : null;
 
   return (
     <div className="flex flex-col">
@@ -115,12 +178,10 @@ function NodeCard({
         {node.status ? (
           <span className="text-muted-foreground text-xs">{node.status}</span>
         ) : null}
-        <span className="text-muted-foreground text-xs">
-          {node.at ? new Date(`${node.at}T12:00:00`).toLocaleDateString("pt-BR") : ""}
-        </span>
+        <NodeDate node={node} task={task} />
 
-        {node.kind === "occurrence" ? (
-          <span className="flex shrink-0 items-center gap-1">
+        <span className="flex shrink-0 items-center gap-1">
+          {node.kind === "occurrence" ? (
             <Button
               type="button"
               variant="ghost"
@@ -131,25 +192,44 @@ function NodeCard({
             >
               <MessageSquarePlus className="size-3.5" />
             </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              className="size-6"
-              title="Agendar tarefa"
-              onClick={() => onTask(node)}
-            >
-              <CalendarPlus className="size-3.5" />
-            </Button>
-          </span>
-        ) : null}
+          ) : null}
+
+          {/* v1.3: o nó com tarefa abre a tarefa INTEIRA para editar. O
+              `refId` sempre carregou o id — só não havia para onde levá-lo. */}
+          {task ? (
+            <TaskSheet task={task} ctx={ctx} editTrigger onDone={onChanged} />
+          ) : node.kind === "occurrence" ? (
+            // A cobrança PREVISTA que ninguém abriu: agendar já com o dia dela.
+            // É o campo de data que faltava — antes a tarefa nascia sem prazo.
+            <TaskSheet
+              ctx={ctx}
+              iconTrigger
+              triggerLabel="Agendar esta cobrança"
+              defaults={{
+                recordId,
+                recordTitle,
+                dueDate: node.at || null,
+              }}
+              onDone={onChanged}
+            />
+          ) : null}
+        </span>
       </div>
 
       {open && hasChildren ? (
         // A linha de conexão é a borda esquerda: o galho é visual, não SVG.
         <div className="border-muted ml-4 flex flex-col gap-1.5 border-l pt-1.5 pl-3">
           {node.children.map((c) => (
-            <NodeCard key={c.id} node={c} onNote={onNote} onTask={onTask} />
+            <NodeCard
+              key={c.id}
+              node={c}
+              onNote={onNote}
+              taskById={taskById}
+              ctx={ctx}
+              recordId={recordId}
+              recordTitle={recordTitle}
+              onChanged={onChanged}
+            />
           ))}
         </div>
       ) : null}
@@ -204,9 +284,9 @@ export function TreeWidget({
 
   const [order, setOrder] = useState<"asc" | "desc">("desc");
   const [limit, setLimit] = useState(TREE_WINDOW_STEP);
-  const [draft, setDraft] = useState<{ kind: "note" | "task"; text: string } | null>(
-    null
-  );
+  // v1.3: só ANOTAÇÃO tem rascunho inline. Tarefa passou a abrir o editor de
+  // verdade — o Input de título só era o que fazia a tarefa nascer sem prazo.
+  const [draft, setDraft] = useState<{ text: string } | null>(null);
   const { save } = useBackgroundSave();
   const lastJson = useRef<string>("");
 
@@ -296,19 +376,25 @@ export function TreeWidget({
   const submitDraft = () => {
     if (!draft || draft.text.trim() === "") return setDraft(null);
     const text = draft.text.trim();
-    const kind = draft.kind;
     setDraft(null);
     save({
-      key: `tree-${kind}`,
-      context:
-        kind === "note" ? "Não foi possível anotar" : "Não foi possível agendar",
-      action: () =>
-        kind === "note"
-          ? addTreeNote(effectiveRecordId, text, { revalidate: false })
-          : addTreeTask(effectiveRecordId, { title: text }, { revalidate: false }),
+      key: "tree-note",
+      context: "Não foi possível anotar",
+      action: () => addTreeNote(effectiveRecordId, text, { revalidate: false }),
     });
     // A árvore recarrega depois da escrita: o nó novo é um FATO, e ela o lê.
     window.setTimeout(() => void refresh(), 600);
+  };
+
+  // O editor de tarefa escreve pelos choke points de sempre; a árvore só
+  // precisa reler os fatos depois.
+  const reloadSoon = () => window.setTimeout(() => void refresh(), 400);
+
+  const taskById = new Map(data.tasks.map((t) => [t.id, t]));
+  const taskCtx: TaskFormContext = {
+    responsibles: data.responsibles,
+    canAssignOthers: true,
+    canLock: false,
   };
 
   return (
@@ -317,9 +403,42 @@ export function TreeWidget({
         <span className="truncate text-sm font-medium">{data.recordTitle}</span>
         {data.series ? (
           <>
-            <Badge variant="outline" className="text-xs">
-              a cada {data.series.cadenceDays} dia(s)
-            </Badge>
+            {/* v1.3: a cadência DESTE registro passou a ser editável aqui. A
+                action existia desde a 0132 e o manual a descrevia, mas não
+                havia controle nenhum — a exceção só dava para gravar por SQL.
+                Grava em `series_settings` (escopo registro); a regra fica
+                intocada, e limpar o campo devolve o padrão do esquema. */}
+            <span className="flex items-center gap-1">
+              <span className="text-muted-foreground text-xs">a cada</span>
+              <Input
+                type="number"
+                min={1}
+                max={365}
+                defaultValue={data.series.cadenceDays}
+                className="h-7 w-16 text-xs"
+                aria-label="Cadência deste registro, em dias"
+                title="Cadência só deste registro. Vazio volta ao padrão do esquema."
+                onBlur={(e) => {
+                  const raw = e.target.value.trim();
+                  const days = raw === "" ? null : Number(raw);
+                  if (days != null && (!Number.isFinite(days) || days < 1)) return;
+                  if (days === data.series!.cadenceDays) return;
+                  save({
+                    key: "tree-cadence",
+                    context: "Não foi possível alterar a cadência",
+                    action: () =>
+                      setRecordCadence(
+                        data.series!.key,
+                        effectiveRecordId,
+                        days,
+                        { revalidate: false }
+                      ),
+                  });
+                  reloadSoon();
+                }}
+              />
+              <span className="text-muted-foreground text-xs">dia(s)</span>
+            </span>
             {!data.series.active ? (
               <Badge variant="secondary" className="text-xs">
                 série desligada para este recorte
@@ -399,15 +518,13 @@ export function TreeWidget({
           <Input
             autoFocus
             value={draft.text}
-            onChange={(e) => setDraft({ ...draft, text: e.target.value })}
-            placeholder={
-              draft.kind === "note" ? "O que aconteceu?" : "Título da tarefa"
-            }
+            onChange={(e) => setDraft({ text: e.target.value })}
+            placeholder="O que aconteceu?"
             onKeyDown={(e) => {
               if (e.key === "Enter") submitDraft();
               if (e.key === "Escape") setDraft(null);
             }}
-            aria-label={draft.kind === "note" ? "Anotação" : "Tarefa"}
+            aria-label="Anotação"
           />
           <Button type="button" size="sm" onClick={submitDraft}>
             Salvar
@@ -428,19 +545,18 @@ export function TreeWidget({
             variant="outline"
             size="sm"
             className="gap-1"
-            onClick={() => setDraft({ kind: "note", text: "" })}
+            onClick={() => setDraft({ text: "" })}
           >
             <MessageSquarePlus className="size-3.5" /> Anotar
           </Button>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="gap-1"
-            onClick={() => setDraft({ kind: "task", text: "" })}
-          >
-            <CalendarPlus className="size-3.5" /> Agendar tarefa
-          </Button>
+          {/* v1.3: o editor de verdade, com prazo, hora, descrição e
+              responsável — não mais um Input de título. */}
+          <TaskSheet
+            ctx={taskCtx}
+            triggerLabel="Agendar tarefa"
+            defaults={{ recordId: effectiveRecordId, recordTitle: data.recordTitle }}
+            onDone={reloadSoon}
+          />
         </div>
       )}
 
@@ -454,8 +570,12 @@ export function TreeWidget({
             <NodeCard
               key={n.id}
               node={n}
-              onNote={() => setDraft({ kind: "note", text: "" })}
-              onTask={() => setDraft({ kind: "task", text: "" })}
+              onNote={() => setDraft({ text: "" })}
+              taskById={taskById}
+              ctx={taskCtx}
+              recordId={effectiveRecordId}
+              recordTitle={data.recordTitle}
+              onChanged={reloadSoon}
             />
           ))}
         </div>

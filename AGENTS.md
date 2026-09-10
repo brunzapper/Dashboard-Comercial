@@ -669,8 +669,8 @@ This version has breaking changes — APIs, conventions, and file structure may 
   árvore vem em JANELA (`TreeWindow {order, limit}`) que recorta a lista de
   OCORRÊNCIAS antes de ler fato nenhum — nunca linhas soltas, senão o galho
   perde o tronco; `deriveTree` segue puro. `SeriesBound` tem uma 4ª forma de
-  fim, `field_changed` (para quando o campo mudar; lê o mesmo
-  `field_modified_at` da âncora) — e "enquanto as condições valerem" é a
+  fim, `field_changed` (para quando o campo mudar; lê o mesmo HISTÓRICO da
+  âncora — ver o bullet abaixo) — e "enquanto as condições valerem" é a
   AUSÊNCIA de `until`.
   O **widget `tree`** (0134) recria o CHECK de `visual_type` inteiro
   (precedente 0100), renderiza em HTML/CSS (nós têm ações dentro; as linhas são
@@ -680,6 +680,50 @@ This version has breaking changes — APIs, conventions, and file structure may 
   /registros (um segundo editor seria a régua paralela da invariante 25). As
   RPCs de widget seguem INTOCADAS. Ver `docs/arquitetura.md` §4.24 e
   invariantes 33/34/35.
+- **"Quando este campo mudou" é `audit_log`, NUNCA `field_modified_at` (0135,
+  09/09/2026):** as duas colunas parecem a mesma coisa e não são.
+  `records.field_modified_at` é o marcador de "editado LOCALMENTE depois do
+  último sync — não sobrescreva" (`isProtected`, `lib/sync/shared.ts`), e só o
+  app escreve nele: para todo campo vindo do Bitrix ele fica VAZIO para sempre.
+  Foi o que fez a âncora `field_changed` da série (0132) e a condição de tempo
+  homônima do motor 0109 nunca casarem, em silêncio, para 36 de 36 deals em
+  Nutrição. **Jamais mande o sync carimbar `field_modified_at`** — marcaria todo
+  campo sincronizado como protegido e o sync pararia de atualizar qualquer
+  coisa; os dois significados não cabem na mesma coluna. O fato certo já está em
+  `audit_log`, que o sync alimenta a cada valor que muda (`audits.push` de
+  `lib/sync/bitrix/sync.ts`), e é AGNÓSTICO de quem mudou. Dono único da
+  leitura: `loadFieldHistory` (`lib/records/field-history.ts`), batelado por
+  rodada como `loadSeriesOccurrences`, audit ∪ edição local pelo MAIOR
+  timestamp; a 0135 é só o índice `(record_id, field, changed_at desc)` (o
+  `idx_audit_record` não recorta por campo). Sem histórico ⇒ não cobra
+  (`anchorFallback` "nenhum" é o padrão; "criacao" usa `source_created_at`) —
+  nenhum caminho inventa data. Junto: `occurrencesAhead` mantém abertas a
+  cobrança devida hoje MAIS as `lookahead` (padrão 5) e NUNCA anda para trás
+  (vencida que ninguém abriu segue como galho vazio da Tree, não vira tarefa
+  retroativa); e o atributo `pausado` passou a PARAR a cobrança
+  (`CardFacts.pausedAttributes`) — o status era escrito e nunca lido. Ver
+  `docs/arquitetura.md` §4.24 e invariantes 33/36.
+- **Tarefa espelhada no Bitrix é FILA + id externo (0136, 09/09/2026):** a
+  tarefa daqui vira ATIVIDADE do CRM (`crm.activity.add`, TYPE_ID 6 /
+  PROVIDER_ID CRM_TODO) na timeline do negócio — não o módulo Tasks. A chamada
+  externa NUNCA fica no caminho de quem salva a tarefa (portal fora do ar
+  viraria tarefa não criada aqui): enfileira em `bitrix_task_queue` e
+  `drainTaskMirrorQueue` (`lib/sync/bitrix/task-mirror.ts`) drena no tick que
+  já existe, DEPOIS do write-back e no mesmo orçamento. A
+  `bitrix_writeback_queue` não serve (CHECK `entity in ('deal','lead')`,
+  `record_id` NOT NULL com FK para `records`, dreno fixo em `crm.*.update`, e
+  modela atualização de CAMPO sem devolver id). `tasks.bitrix_activity_id` é o
+  que impede duplicar e o que permite fechar lá o que se conclui aqui
+  (`COMPLETED: 'Y'`); 23505 no enfileirador é NO-OP. Configuração em CASCATA
+  resolvida SÓ em `lib/tasks/mirror-config.ts`: Base
+  (`data_sources.bitrix_activity_owner`) → automação/série (`mirrorBitrix` no
+  jsonb) → tarefa (o seletor do form). `"herdar"` NÃO é `"nunca"` — é a
+  ausência de decisão, e é o que faz ligar o espelho na Base valer para as
+  séries que já rodam sem editá-las. Nenhum nível atravessa o piso: sem
+  registro com par no CRM não há `OWNER_ID` onde pendurar, e a decisão devolve o
+  MOTIVO para a tela explicar. Toda Base nasce desligada. Espelhar COMENTÁRIOS
+  e ler o feed de volta estão FORA do escopo. Ver `docs/arquitetura.md` §4.24 e
+  invariante 37.
 - **Ação `run_schema` (0130, 09/09/2026): a trava é DERIVADA dos passos.** Um
   esquema é uma sequência de alterações DENTRO e FORA do sistema (criar lead é
   só um caso) — por isso o vocabulário tem `bitrix.entity.update` (mesma chamada

@@ -1,4 +1,10 @@
-// Versão: 1.0 | Data: 09/09/2026
+// Versão: 1.1 | Data: 09/09/2026
+// v1.1 (09/09/2026): os controles da série que faltavam. `grantAttribute` tinha
+//   campo no rascunho e NENHUM controle (a receita do manual — conceder o
+//   atributo `tree` — era impossível de seguir pela tela), e
+//   `from`/`description`/`maxOccurrences` não eram lidos de volta por
+//   `draftFromRule`: qualquer save pela UI apagava os três em silêncio.
+//   Entram também `lookahead` (cobranças futuras) e `anchorFallback`.
 // O EDITOR de uma regra de automação — extraído do painel do quadro para que a
 // tela de construção do Workflow renderize exatamente ele.
 //
@@ -21,6 +27,15 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { FILTER_OPS, opHasNoValue } from "@/lib/widgets/filter-ops";
 import type { SourceKey } from "@/lib/sources";
+import { ATTRIBUTE_REGISTRY } from "@/lib/attributes/registry";
+import {
+  MIRROR_CHOICE_LABELS,
+  type MirrorChoice,
+} from "@/lib/tasks/mirror-config";
+import {
+  DEFAULT_SERIES_LOOKAHEAD,
+  MAX_SERIES_LOOKAHEAD,
+} from "@/lib/series/types";
 import type { FilterOp, WidgetFilter } from "@/lib/widgets/types";
 import {
   FilterValuePicker,
@@ -140,7 +155,41 @@ export interface RuleDraft {
   seriesUntilKind: "nunca" | "field" | "date" | "field_changed";
   seriesUntilValue: string;
   seriesGrantAttribute: string;
+  // v1.1 (09/09/2026): os quatro abaixo EXISTIAM no jsonb e não tinham
+  // controle nenhum. `grantAttribute` só tinha campo de rascunho (sem JSX), e
+  // `from`/`description`/`maxOccurrences` nem eram lidos de volta por
+  // draftFromRule — ou seja, qualquer save pela UI APAGAVA os três em
+  // silêncio. Sem o primeiro, a receita do manual (conceder o atributo `tree`)
+  // era impossível de seguir pela tela.
+  /** Início da janela: adia a cobrança sem mover a âncora. */
+  seriesFromKind: "sempre" | "field" | "date" | "field_changed";
+  seriesFromValue: string;
+  seriesDescription: string;
+  /** Teto de cobranças por registro; vazio = sem teto. */
+  seriesMaxOccurrences: string;
+  /** Quantas futuras manter abertas além da devida hoje. */
+  seriesLookahead: string;
+  /** Âncora que não resolve: não cobrar, ou contar da criação do registro. */
+  seriesAnchorFallback: "nenhum" | "criacao";
+  /** Espelho no Bitrix (0136), nível 2: herda da Base por padrão. */
+  seriesMirrorBitrix: MirrorChoice;
 }
+
+/**
+ * Atributos que a série pode conceder — do REGISTRY, nunca de uma lista
+ * paralela. v1.1 (09/09/2026): antes não havia controle nenhum, e sem conceder
+ * o atributo a Tree do registro simplesmente não existia.
+ */
+/** Nível 2 do espelho (0136). "herdar" é o padrão: segue a Base. */
+const MIRROR_CHOICES: ComboboxOption[] = (
+  ["herdar", "sempre", "nunca"] as MirrorChoice[]
+).map((v) => ({ value: v, label: MIRROR_CHOICE_LABELS[v] }));
+
+const ATTRIBUTE_OPTIONS: ComboboxOption[] = ATTRIBUTE_REGISTRY.map((a) => ({
+  value: a.key,
+  label: a.label,
+  description: a.description,
+}));
 
 export const ACTION_OPTIONS: ComboboxOption[] = [
   { value: "move_to_column", label: "Mover para a coluna" },
@@ -313,6 +362,36 @@ export function draftToRule(draft: RuleDraft): AutomationRule | null {
                       : { kind: "field" as const, field: draft.seriesUntilValue },
               }
             : {}),
+          // v1.1: os campos que a UI perdia no round-trip.
+          ...(draft.seriesFromKind !== "sempre" && draft.seriesFromValue
+            ? {
+                from:
+                  draft.seriesFromKind === "date"
+                    ? { kind: "date" as const, date: draft.seriesFromValue }
+                    : draft.seriesFromKind === "field_changed"
+                      ? {
+                          kind: "field_changed" as const,
+                          field: draft.seriesFromValue,
+                        }
+                      : { kind: "field" as const, field: draft.seriesFromValue },
+              }
+            : {}),
+          ...(draft.seriesDescription.trim()
+            ? { description: draft.seriesDescription.trim() }
+            : {}),
+          ...(Number(draft.seriesMaxOccurrences) > 0
+            ? { maxOccurrences: Math.floor(Number(draft.seriesMaxOccurrences)) }
+            : {}),
+          lookahead: Math.min(
+            Math.max(Math.floor(Number(draft.seriesLookahead) || 0), 0),
+            MAX_SERIES_LOOKAHEAD
+          ),
+          ...(draft.seriesAnchorFallback === "criacao"
+            ? { anchorFallback: "criacao" as const }
+            : {}),
+          ...(draft.seriesMirrorBitrix !== "herdar"
+            ? { mirrorBitrix: draft.seriesMirrorBitrix }
+            : {}),
           ...(draft.seriesGrantAttribute
             ? { grantAttribute: draft.seriesGrantAttribute }
             : {}),
@@ -450,6 +529,38 @@ export function ruleToDraft(row: AutomationRow, fieldOptions: ComboboxOption[]):
       action.type === "create_task_series"
         ? (action.series.grantAttribute ?? "")
         : "tree",
+    // v1.1: sem estas quatro leituras, editar e salvar a regra APAGAVA o que
+    // estava gravado no jsonb.
+    seriesFromKind:
+      action.type === "create_task_series" && action.series.from
+        ? action.series.from.kind
+        : "sempre",
+    seriesFromValue:
+      action.type === "create_task_series" && action.series.from
+        ? action.series.from.kind === "date"
+          ? action.series.from.date
+          : action.series.from.field
+        : "",
+    seriesDescription:
+      action.type === "create_task_series"
+        ? (action.series.description ?? "")
+        : "",
+    seriesMaxOccurrences:
+      action.type === "create_task_series" && action.series.maxOccurrences
+        ? String(action.series.maxOccurrences)
+        : "",
+    seriesLookahead:
+      action.type === "create_task_series"
+        ? String(action.series.lookahead ?? DEFAULT_SERIES_LOOKAHEAD)
+        : String(DEFAULT_SERIES_LOOKAHEAD),
+    seriesAnchorFallback:
+      action.type === "create_task_series"
+        ? (action.series.anchorFallback ?? "nenhum")
+        : "nenhum",
+    seriesMirrorBitrix:
+      action.type === "create_task_series"
+        ? (action.series.mirrorBitrix ?? "herdar")
+        : "herdar",
   };
 }
 
@@ -1032,6 +1143,138 @@ export function AutomationRuleEditor({
                     seleciona, a data da mudança de etapa cronometra.
                   </p>
 
+                  {/* v1.1 (09/09/2026): os controles que faltavam. Sem o de
+                      atributo, conceder o `tree` (e portanto ter a Tree do
+                      registro) era impossível pela tela; os de janela,
+                      descrição e teto existiam no jsonb e eram APAGADOS a cada
+                      save, porque draftFromRule não os lia de volta. */}
+                  <div className="flex flex-wrap items-end gap-2">
+                    <div className="flex w-40 flex-col gap-1">
+                      <Label className="text-xs">Cobranças futuras</Label>
+                      <Input
+                        type="number"
+                        min={0}
+                        max={MAX_SERIES_LOOKAHEAD}
+                        value={draft.seriesLookahead}
+                        onChange={(e) =>
+                          setDraft((d) =>
+                            d ? { ...d, seriesLookahead: e.target.value } : d
+                          )
+                        }
+                        aria-label="Cobranças futuras mantidas abertas"
+                      />
+                    </div>
+                    <div className="flex w-56 flex-col gap-1">
+                      <Label className="text-xs">Sem data de início</Label>
+                      <Combobox
+                        options={[
+                          { value: "nenhum", label: "Não cobrar" },
+                          { value: "criacao", label: "Contar da criação" },
+                        ]}
+                        value={draft.seriesAnchorFallback}
+                        onValueChange={(v) =>
+                          setDraft((d) =>
+                            d
+                              ? {
+                                  ...d,
+                                  seriesAnchorFallback:
+                                    v as RuleDraft["seriesAnchorFallback"],
+                                }
+                              : d
+                          )
+                        }
+                        searchable={false}
+                        aria-label="Quando a âncora não resolve"
+                      />
+                    </div>
+                    <div className="flex w-40 flex-col gap-1">
+                      <Label className="text-xs">Máximo de cobranças</Label>
+                      <Input
+                        type="number"
+                        min={0}
+                        value={draft.seriesMaxOccurrences}
+                        onChange={(e) =>
+                          setDraft((d) =>
+                            d
+                              ? { ...d, seriesMaxOccurrences: e.target.value }
+                              : d
+                          )
+                        }
+                        placeholder="sem teto"
+                        aria-label="Máximo de cobranças por registro"
+                      />
+                    </div>
+                  </div>
+                  <p className="text-muted-foreground text-xs">
+                    Além da cobrança devida hoje, a série mantém abertas as
+                    próximas — dá para ver e remarcar o que vem pela frente em
+                    vez de esperar o dia. Cobrança que já venceu e ninguém abriu
+                    NÃO é criada retroativamente; ela aparece na Tree como galho
+                    vazio.
+                  </p>
+
+                  <div className="flex flex-wrap items-end gap-2">
+                    <div className="flex w-44 flex-col gap-1">
+                      <Label className="text-xs">Começar a cobrar</Label>
+                      <Combobox
+                        options={[
+                          { value: "sempre", label: "Desde a âncora" },
+                          { value: "date", label: "A partir de uma data" },
+                          { value: "field", label: "A partir de um campo" },
+                          {
+                            value: "field_changed",
+                            label: "Quando um campo mudar",
+                          },
+                        ]}
+                        value={draft.seriesFromKind}
+                        onValueChange={(v) =>
+                          setDraft((d) =>
+                            d
+                              ? {
+                                  ...d,
+                                  seriesFromKind:
+                                    v as RuleDraft["seriesFromKind"],
+                                  seriesFromValue: "",
+                                }
+                              : d
+                          )
+                        }
+                        searchable={false}
+                        aria-label="Início da janela"
+                      />
+                    </div>
+                    {draft.seriesFromKind === "date" ? (
+                      <div className="flex w-44 flex-col gap-1">
+                        <Label className="text-xs">Data</Label>
+                        <Input
+                          type="date"
+                          value={draft.seriesFromValue}
+                          onChange={(e) =>
+                            setDraft((d) =>
+                              d ? { ...d, seriesFromValue: e.target.value } : d
+                            )
+                          }
+                          aria-label="Data de início da janela"
+                        />
+                      </div>
+                    ) : draft.seriesFromKind !== "sempre" ? (
+                      <div className="flex min-w-48 flex-1 flex-col gap-1">
+                        <Label className="text-xs">Campo</Label>
+                        <Combobox
+                          options={(catalog?.fields ?? []) as ComboboxOption[]}
+                          value={draft.seriesFromValue}
+                          onValueChange={(v) =>
+                            setDraft((d) =>
+                              d ? { ...d, seriesFromValue: v } : d
+                            )
+                          }
+                          placeholder="Campo"
+                          aria-label="Campo de início da janela"
+                        />
+                      </div>
+                    ) : null}
+                  </div>
+
                   <div className="flex flex-wrap items-end gap-2">
                     <div className="flex w-56 flex-col gap-1">
                       <Label className="text-xs">Primeira cobrança</Label>
@@ -1124,6 +1367,63 @@ export function AutomationRuleEditor({
                       </div>
                     ) : null}
                   </div>
+
+                  <div className="flex flex-wrap items-end gap-2 border-t pt-2">
+                    <div className="flex min-w-56 flex-1 flex-col gap-1">
+                      <Label className="text-xs">
+                        Descrição da cobrança (opcional)
+                      </Label>
+                      <Input
+                        value={draft.seriesDescription}
+                        onChange={(e) =>
+                          setDraft((d) =>
+                            d ? { ...d, seriesDescription: e.target.value } : d
+                          )
+                        }
+                        placeholder="Vai no corpo da tarefa"
+                        aria-label="Descrição da cobrança"
+                      />
+                    </div>
+                    <div className="flex w-56 flex-col gap-1">
+                      <Label className="text-xs">Espelhar no Bitrix</Label>
+                      <Combobox
+                        options={MIRROR_CHOICES}
+                        value={draft.seriesMirrorBitrix}
+                        onValueChange={(v) =>
+                          setDraft((d) =>
+                            d
+                              ? { ...d, seriesMirrorBitrix: v as MirrorChoice }
+                              : d
+                          )
+                        }
+                        searchable={false}
+                        aria-label="Espelhar as cobranças no Bitrix"
+                      />
+                    </div>
+                    <div className="flex w-56 flex-col gap-1">
+                      <Label className="text-xs">Conceder ao registro</Label>
+                      <Combobox
+                        options={[
+                          { value: "", label: "Nada" },
+                          ...ATTRIBUTE_OPTIONS,
+                        ]}
+                        value={draft.seriesGrantAttribute}
+                        onValueChange={(v) =>
+                          setDraft((d) =>
+                            d ? { ...d, seriesGrantAttribute: v } : d
+                          )
+                        }
+                        searchable={false}
+                        aria-label="Atributo concedido ao registro"
+                      />
+                    </div>
+                  </div>
+                  <p className="text-muted-foreground text-xs">
+                    O atributo liga a funcionalidade no registro que entra na
+                    série — é ele que faz a Tree do acompanhamento existir e a
+                    linha da tabela virar clicável. Pausar o atributo depois
+                    interrompe as cobranças sem apagar o histórico.
+                  </p>
 
                   <div className="flex flex-col gap-1 border-t pt-2">
                     <Label className="text-xs">

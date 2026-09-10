@@ -36,7 +36,7 @@ export const loadSources = cache(async function loadSources(
     let query = supabase
       .from("data_sources")
       .select(
-        "key, record_type, label, short_label, default_period_field, builtin, manual_entry, timezone, folder_id, sort_order"
+        "key, record_type, label, short_label, default_period_field, builtin, manual_entry, timezone, bitrix_activity_owner, folder_id, sort_order"
       )
       .order("sort_order", { ascending: true })
       .order("builtin", { ascending: false })
@@ -57,6 +57,9 @@ export const loadSources = cache(async function loadSources(
         builtin: Boolean(r.builtin),
         manualEntry: Boolean(r.manual_entry),
         timezone: (r.timezone as string | null) || null,
+        // 0136: espelho de tarefas no Bitrix. null = desligado (o padrão).
+        bitrixActivityOwner:
+          (r.bitrix_activity_owner as "deal" | "lead" | null) || null,
         folderId: (r.folder_id as string | null) ?? null,
         sortOrder: Number(r.sort_order ?? 0),
       };

@@ -56,6 +56,11 @@ export interface SourceDef {
   // (lib/date/normalize.ts, aplicado no sync). null/ausente = sem conversão.
   // Subs não têm (herdam a ingestão da pai).
   timezone?: string | null;
+  // Espelho de TAREFAS no Bitrix (0136): a tarefa ligada a um registro desta
+  // Base vira uma atividade do CRM (crm.activity) pendurada nesta entidade.
+  // null/ausente = não espelha, que é o estado de toda Base existente. É o
+  // nível mais geral dos três (Base → automação/série → tarefa manual).
+  bitrixActivityOwner?: "deal" | "lead" | null;
   // PASTA (0107): agrupamento de EXIBIÇÃO das bases raiz (source_folders).
   // null/ausente = "sem pasta" (grupo implícito). Subs não têm (herdam a da
   // pai). Nunca entra em consulta/engine — só navegação/listas/pickers
