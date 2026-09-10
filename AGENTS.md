@@ -880,6 +880,33 @@ This version has breaking changes — APIs, conventions, and file structure may 
   em massa (`lib/kanban/bulk-actions.ts`): resultado POR ITEM (revert parcial
   no cliente), teto 200/chamada, sem revalidatePath; excluir REGISTRO é
   admin-only (espelha a RLS `records_delete`) e SEMPRE emite `record.deleted`.
+  **Ação em massa de TAREFA espelha no Bitrix, como a unitária (10/09/2026):**
+  `completeTasksBulk`/`deleteTasksBulk` não espelhavam — antes da 0137 era só
+  assimetria; com a leitura de volta virou REGRESSÃO (concluir em lote deixava
+  a atividade aberta lá e o inbound reabria TUDO no minuto seguinte; excluir
+  deixava a atividade órfã, reimportada como tarefa nova). O excluir lê o
+  `bitrix_activity_id` ANTES do delete (depois a linha some) e enfileira
+  DEPOIS de a RLS deixar passar; a resolução de Base é EM LOTE
+  (`loadMirrorOwners`/`enqueueTaskMirrorMany`, `lib/sync/bitrix/task-mirror.ts`)
+  — `mirrorTaskAfterWrite` resolve por tarefa, e 200 itens dariam 400
+  consultas. Pinado por guarda estática em `task-mirror.test.ts`.
+  **A seleção múltipla tem UM dono (10/09/2026):** o `Set`/toggle/poda/Esc vive
+  em `lib/feedback/use-bulk-selection.ts` e a pill sticky em
+  `components/ui/bulk-bar-shell.tsx` — o desenho estava copiado em
+  `records-table` e `kanban-board`, e as telas de tarefa iam somar mais quatro.
+  Duas regras que o hook carrega e que consumidor novo não deve reimplementar:
+  a seleção é PODADA contra os ids vivos (item que saiu da tela sai da
+  seleção — ação em massa nunca mira o que ninguém vê) e o universo do
+  "selecionar todas" é a lista FILTRADA em tela, jamais a consulta inteira. A
+  linha selecionável é o `<Checkbox>` do shadcn ao lado da caixa NATIVA de
+  concluir: duas caixas iguais lado a lado seriam armadilha. `TaskList` ganha
+  seleção por props OPCIONAIS (ausentes = byte-idêntico — ele tem cinco
+  consumidores e só três a ligaram). Na Tree a cascata é tri-estado e PURA
+  (`lib/tree/selection.ts`): a fonte da verdade são as FOLHAS, e o estado do
+  pai é derivado — guardar "o pai está marcado" tornaria indecidível desmarcar
+  um filho. Nó de ALTERAÇÃO nunca é selecionável (fato do `audit_log`), e a
+  seleção mista é repartida por tipo para a action dona de cada um
+  (`deleteTasksBulk`/`deleteCommentsBulk`/`deleteTreeNodesBulk`).
   No board, TODO movimento passa pela fila otimista
   (`use-kanban-bulk-queue.ts`) e o resync `data`→estado local é GUARDADO com a
   fila em voo (dado mid-flight é stale e descartado) — não remova a guarda

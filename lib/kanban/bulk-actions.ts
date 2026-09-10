@@ -1,4 +1,11 @@
-// Versão: 1.1 | Data: 07/08/2026
+// Versão: 1.2 | Data: 10/09/2026
+// v1.2 (10/09/2026): concluir e excluir em massa ESPELHAM no Bitrix
+//   (0136/0137). Antes não espelhavam — era assimetria; com a leitura de
+//   volta virou regressão: concluir em lote deixava a atividade ABERTA lá e
+//   o inbound REABRIA tudo na sincronização seguinte, e excluir deixava a
+//   atividade órfã, que o inbound reimportava como tarefa nova. Resolução de
+//   Base EM LOTE (`loadMirrorOwners`): 200 tarefas dariam 400 consultas pelo
+//   caminho unitário.
 // v1.1 (07/08/2026): deleteRecordsBulk saiu daqui — excluir registros virou
 //   ENVIO À LIXEIRA (soft delete 0121, lib/records/trash-actions.ts), mesmo
 //   contrato por item; excluir TAREFAS segue hard delete abaixo.
@@ -17,6 +24,8 @@
 import { getSessionInfo } from "@/lib/auth/session";
 import { getActiveOrgId } from "@/lib/auth/org";
 import { createClient } from "@/lib/supabase/server";
+import type { SupabaseClient } from "@supabase/supabase-js";
+
 import { createServiceClient } from "@/lib/supabase/service";
 import { emitWebhookEvent } from "@/lib/webhooks/emit";
 import {
@@ -38,6 +47,10 @@ import {
 // importe-os de LÁ: num arquivo "use server" até um `export type {}` é
 // registrado pelo compilador de server actions como export de valor e quebra a
 // avaliação do módulo em runtime (só funções async podem sair daqui).
+import {
+  loadMirrorOwners,
+  enqueueTaskMirrorMany,
+} from "@/lib/sync/bitrix/task-mirror";
 import {
   BULK_MAX_ITEMS,
   chunk,
@@ -462,7 +475,70 @@ export async function createTasksBulk(input: {
 }
 
 /**
- * Conclui tarefas em massa: por REGISTRO (todas as abertas dos cards
+ * Enfileira o `complete` do espelho para as tarefas que ACABARAM de fechar.
+ *
+ * Sem isto a atividade fica ABERTA no CRM e a leitura de volta (0137) reabre a
+ * tarefa aqui na sincronização seguinte — para sempre. Só tarefa com
+ * `bitrix_activity_id` interessa: as demais nunca foram espelhadas.
+ *
+ * Best-effort, como todo espelho: uma falha aqui não pode desfazer a
+ * conclusão que já foi gravada.
+ */
+async function mirrorCompletedBulk(
+  db: SupabaseClient,
+  taskIds: string[],
+  orgId: string | null,
+  createdBy: string | null
+): Promise<void> {
+  try {
+    if (!orgId || taskIds.length === 0) return;
+    const mirrored: { id: string; record_id: string; activity_id: string }[] =
+      [];
+    for (const slice of chunk(taskIds, CHUNK)) {
+      const { data } = await db
+        .from("tasks")
+        .select("id, record_id, bitrix_activity_id")
+        .in("id", slice)
+        .not("bitrix_activity_id", "is", null)
+        .not("record_id", "is", null);
+      for (const t of data ?? []) {
+        mirrored.push({
+          id: t.id as string,
+          record_id: t.record_id as string,
+          activity_id: t.bitrix_activity_id as string,
+        });
+      }
+    }
+    if (mirrored.length === 0) return;
+
+    const owners = await loadMirrorOwners(
+      db,
+      mirrored.map((t) => t.record_id)
+    );
+    await enqueueTaskMirrorMany(
+      createServiceClient(),
+      mirrored.flatMap((t) => {
+        const owner = owners.get(t.record_id);
+        if (!owner) return [];
+        return [
+          {
+            orgId,
+            taskId: t.id,
+            op: "complete" as const,
+            ownerEntity: owner.entity,
+            ownerSourceId: owner.sourceId,
+            activityId: t.activity_id,
+            createdBy,
+          },
+        ];
+      })
+    );
+  } catch (e) {
+    console.error("[bulk] espelho de conclusão falhou:", (e as Error).message);
+  }
+}
+
+/** Conclui tarefas em massa: por REGISTRO (todas as abertas dos cards
  * selecionados — modo registros) ou por TAREFA (cards do modo tarefas).
  */
 export async function completeTasksBulk(input: {
@@ -495,6 +571,7 @@ export async function completeTasksBulk(input: {
     for (const taskId of done) {
       await emitWebhookEvent("task.completed", { taskId }, orgId);
     }
+    await mirrorCompletedBulk(supabase, done, orgId, session.user.id);
     return {
       ok: true,
       results: resultsFromReturned(
@@ -540,6 +617,7 @@ export async function completeTasksBulk(input: {
   for (const taskId of done) {
     await emitWebhookEvent("task.completed", { taskId }, orgId);
   }
+  await mirrorCompletedBulk(supabase, [...done], orgId, session.user.id);
   const results: BulkItemResult[] = recordIds.map((rid) => {
     const own = openByRecord.get(rid) ?? [];
     const missing = own.filter((t) => !done.has(t));
@@ -573,6 +651,27 @@ export async function deleteTasksBulk(
   }
   const supabase = await createClient();
   const orgId = await getActiveOrgId();
+
+  // 10/09/2026: o espelho é lido ANTES do delete. Depois é tarde — a linha
+  // some e o `bitrix_activity_id` vai com ela, deixando a atividade órfã no
+  // feed do negócio, que a leitura de volta (0137) reimportaria como tarefa
+  // nova. Mesma sequência do `deleteTask` unitário, pelo mesmo motivo.
+  const mirrorBefore = new Map<string, { recordId: string; activityId: string }>();
+  for (const slice of chunk(ids, CHUNK)) {
+    const { data } = await supabase
+      .from("tasks")
+      .select("id, record_id, bitrix_activity_id")
+      .in("id", slice)
+      .not("bitrix_activity_id", "is", null)
+      .not("record_id", "is", null);
+    for (const t of data ?? []) {
+      mirrorBefore.set(t.id as string, {
+        recordId: t.record_id as string,
+        activityId: t.bitrix_activity_id as string,
+      });
+    }
+  }
+
   const deleted: { id: string; title: string | null; record_id: string | null }[] =
     [];
   const results: BulkItemResult[] = [];
@@ -607,5 +706,57 @@ export async function deleteTasksBulk(
       orgId
     );
   }
+  // Só o que a RLS DEIXOU apagar: enfileirar a exclusão de uma tarefa que
+  // continuou existindo aqui apagaria a atividade dela lá.
+  await mirrorDeletedBulk(
+    supabase,
+    deleted.map((t) => t.id).filter((id) => mirrorBefore.has(id)),
+    mirrorBefore,
+    orgId,
+    session.user.id
+  );
   return { ok: true, results };
+}
+
+/**
+ * Enfileira o `delete` do espelho das tarefas que a RLS deixou apagar.
+ *
+ * A ordem sobrevive à tarefa porque a FK da fila é `on delete set null`
+ * (0137) e a operação carrega o `activity_id`. Best-effort: falha aqui não
+ * ressuscita a tarefa.
+ */
+async function mirrorDeletedBulk(
+  db: SupabaseClient,
+  taskIds: string[],
+  before: Map<string, { recordId: string; activityId: string }>,
+  orgId: string | null,
+  createdBy: string | null
+): Promise<void> {
+  try {
+    if (!orgId || taskIds.length === 0) return;
+    const owners = await loadMirrorOwners(
+      db,
+      taskIds.map((id) => before.get(id)!.recordId)
+    );
+    await enqueueTaskMirrorMany(
+      createServiceClient(),
+      taskIds.flatMap((id) => {
+        const info = before.get(id)!;
+        const owner = owners.get(info.recordId);
+        if (!owner) return [];
+        return [
+          {
+            orgId,
+            op: "delete" as const,
+            ownerEntity: owner.entity,
+            ownerSourceId: owner.sourceId,
+            activityId: info.activityId,
+            createdBy,
+          },
+        ];
+      })
+    );
+  } catch (e) {
+    console.error("[bulk] espelho de exclusão falhou:", (e as Error).message);
+  }
 }

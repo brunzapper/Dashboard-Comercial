@@ -1,4 +1,8 @@
-// Versão: 1.1 | Data: 10/09/2026
+// Versão: 1.2 | Data: 10/09/2026
+// v1.2 (10/09/2026): a resolução de dono EM LOTE e a guarda de que as ações em
+// massa espelham. Sem elas, concluir 20 tarefas de uma vez deixava 20
+// atividades abertas no CRM — e a leitura de volta (0137) reabria as 20 na
+// sincronização seguinte, para sempre.
 // v1.1 (10/09/2026): as duas operações de 0137 — apagar a atividade e mandar a
 // anotação como comentário. A de apagar é a que tem armadilha: a ordem existe
 // SEM tarefa (a linha já foi removida), então tudo o que ela tem é o
@@ -11,10 +15,13 @@
 // maior parte.
 import { describe, expect, it, vi } from "vitest";
 
+import { readFileSync } from "node:fs";
+
 import {
   activityDeadline,
   activityFields,
   drainTaskMirrorQueue,
+  loadMirrorOwners,
 } from "./task-mirror";
 
 const TASK = {
@@ -314,5 +321,94 @@ describe("drainTaskMirrorQueue", () => {
     const call = vi.fn();
     await drainTaskMirrorQueue(db, Date.now() - 1, { call });
     expect(call).not.toHaveBeenCalled();
+  });
+});
+
+
+/** Dublê mínimo para `loadMirrorOwners`: duas tabelas, nada encadeado além. */
+function ownersDb(seed: {
+  sources: Record<string, unknown>[];
+  records: Record<string, unknown>[];
+}) {
+  const queried: string[] = [];
+  const make = (table: string) => {
+    queried.push(table);
+    const b: Record<string, unknown> = {};
+    const self = () => b;
+    b.select = self;
+    b.in = self;
+    b.not = self;
+    b.then = (res: (v: { data: unknown[] }) => unknown) =>
+      Promise.resolve({
+        data: table === "data_sources" ? seed.sources : seed.records,
+      }).then(res);
+    return b;
+  };
+  return { queried, db: { from: make } as never };
+}
+
+describe("loadMirrorOwners", () => {
+  const SOURCES = [{ record_type: "negocio", bitrix_activity_owner: "deal" }];
+
+  it("resolve entidade e id do CRM por registro", async () => {
+    const { db } = ownersDb({
+      sources: SOURCES,
+      records: [{ id: "r1", record_type: "negocio", source_id: 123 }],
+    });
+    const owners = await loadMirrorOwners(db, ["r1"]);
+    expect(owners.get("r1")).toEqual({ entity: "deal", sourceId: "123" });
+  });
+
+  // O piso do resolveMirror, agora em lote: Base que não espelha fica fora.
+  it("registro de Base que não espelha fica FORA do mapa", async () => {
+    const { db } = ownersDb({
+      sources: SOURCES,
+      records: [{ id: "r2", record_type: "lead", source_id: 9 }],
+    });
+    expect((await loadMirrorOwners(db, ["r2"])).size).toBe(0);
+  });
+
+  // O ganho que motiva o lote: duas consultas no total, não duas por tarefa.
+  it("nenhuma Base espelha: nem lê os registros", async () => {
+    const { db, queried } = ownersDb({ sources: [], records: [] });
+    expect((await loadMirrorOwners(db, ["r1", "r2", "r3"])).size).toBe(0);
+    expect(queried).toEqual(["data_sources"]);
+  });
+
+  it("lista vazia não consulta nada", async () => {
+    const { db, queried } = ownersDb({ sources: SOURCES, records: [] });
+    expect((await loadMirrorOwners(db, [])).size).toBe(0);
+    expect(queried).toEqual([]);
+  });
+});
+
+/**
+ * A GUARDA da regressão. O risco não é a função de resolução — é alguém mexer
+ * nas ações em massa e o espelho sumir de novo, em silêncio, com o sintoma
+ * aparecendo só um minuto depois (o inbound reabrindo tudo).
+ */
+describe("as ações em massa espelham no Bitrix", () => {
+  const src = readFileSync("lib/kanban/bulk-actions.ts", "utf8");
+
+  it("concluir em lote enfileira o espelho", () => {
+    expect(src).toContain("mirrorCompletedBulk");
+    // Os dois ramos: por taskIds (modo tarefas) e por recordIds.
+    expect(src.match(/await mirrorCompletedBulk\(/g)?.length).toBe(2);
+  });
+
+  it("excluir em lote lê o id da atividade ANTES do delete", () => {
+    const readAt = src.indexOf("mirrorBefore");
+    const deleteAt = src.indexOf('.from("tasks")\n      .delete()');
+    expect(readAt).toBeGreaterThan(-1);
+    // A leitura tem de vir primeiro: depois do delete a linha já não existe.
+    if (deleteAt > -1) expect(readAt).toBeLessThan(deleteAt);
+    expect(src).toContain("mirrorDeletedBulk");
+  });
+
+  it("usa a resolução em LOTE, não a por tarefa", () => {
+    expect(src).toContain("loadMirrorOwners");
+    // `mirrorTaskAfterWrite` resolve Base+registro por tarefa: em 200 itens
+    // seriam 400 consultas.
+    expect(src).not.toContain("mirrorTaskAfterWrite");
   });
 });

@@ -1,4 +1,8 @@
-// Versão: 1.5 | Data: 10/09/2026
+// Versão: 1.6 | Data: 10/09/2026
+// v1.6 (10/09/2026): `deleteTreeNodesBulk` — a seleção múltipla da Tree apaga
+// vários nós livres de uma vez. Mesmo `.is("node_ref", null)` do unitário: a
+// EXCEÇÃO de parentesco não é um nó, e apagá-la aqui desfaria em silêncio um
+// re-pendurar que o usuário fez de propósito.
 // v1.5 (10/09/2026): (a) `deleteTreeNode` — o nó LIVRE (nota/mapa mental) não
 //   tinha como ser apagado: `tree_nodes` só ganhava linha, nunca perdia;
 //   (b) `addTreeNote` passa a chamar `createComment`, o choke point de 0066.
@@ -38,6 +42,14 @@ import { getSessionInfo } from "@/lib/auth/session";
 import { todayBrasiliaIso } from "@/lib/date/today";
 import { createClient } from "@/lib/supabase/server";
 import { createComment } from "@/lib/comments/actions";
+import {
+  BULK_MAX_ITEMS,
+  chunk,
+  fanOut,
+  resultsFromReturned,
+  type BulkActionState,
+  type BulkItemResult,
+} from "@/lib/kanban/bulk-helpers";
 import { deriveTree } from "@/lib/tree/derive";
 import { loadRecordTreeFacts } from "@/lib/tree/load";
 import { TREE_WINDOW_STEP, type TreeWindow } from "@/lib/tree/load";
@@ -222,6 +234,51 @@ export async function deleteTreeNode(
 // hora, nem descrição, nem fase. A Tree passou a abrir o editor de tarefa do
 // app (TaskSheet → createTask), que é o dono único da criação; manter as duas
 // seria a régua paralela que a invariante 25 proíbe.
+
+/**
+ * Exclui vários nós LIVRES de uma vez.
+ *
+ * Só nó livre, como no unitário: tarefa sai por `deleteTasksBulk` e anotação
+ * por `deleteCommentsBulk`. O `.is("node_ref", null)` mantém a exceção de
+ * parentesco fora do alcance — ela é um ajuste sobre um fato que continua
+ * existindo, não um nó que alguém criou.
+ */
+export async function deleteTreeNodesBulk(
+  nodeIds: string[],
+  opts: { revalidate?: boolean } = {}
+): Promise<BulkActionState> {
+  const session = await getSessionInfo();
+  if (!session) return { ok: false, message: "Sessão expirada." };
+  const ids = [...new Set(nodeIds)].filter(Boolean);
+  if (ids.length === 0) return { ok: true, results: [] };
+  if (ids.length > BULK_MAX_ITEMS) {
+    return { ok: false, message: `Máximo de ${BULK_MAX_ITEMS} por chamada.` };
+  }
+
+  const supabase = await createClient();
+  const results: BulkItemResult[] = [];
+  for (const slice of chunk(ids, BULK_MAX_ITEMS)) {
+    const { data, error } = await supabase
+      .from("tree_nodes")
+      .delete()
+      .in("id", slice)
+      .is("node_ref", null)
+      .select("id");
+    if (error) {
+      results.push(...fanOut(slice, false, error.message));
+      continue;
+    }
+    results.push(
+      ...resultsFromReturned(
+        slice,
+        (data ?? []).map((n) => n.id as string),
+        "Sem permissão para excluir este nó."
+      )
+    );
+  }
+  if (opts.revalidate !== false) revalidatePath("/dashboards");
+  return { ok: true, results };
+}
 
 /**
  * Re-pendura um nó (ou o solta na raiz). Grava a EXCEÇÃO, não a árvore inteira:

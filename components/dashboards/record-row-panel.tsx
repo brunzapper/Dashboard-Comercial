@@ -1,4 +1,8 @@
-// Versão: 1.3 | Data: 10/09/2026
+// Versão: 1.4 | Data: 10/09/2026
+// v1.4 (10/09/2026): seleção múltipla das tarefas. O `onDone` REBUSCA
+//   (`loadRowTasks`) em vez de confiar no bus: este painel não escuta
+//   `useDataChanged`, então sem o refetch a lista ficaria com o que já
+//   não existe.
 // v1.3 (10/09/2026): só vocabulário — o substantivo da ocorrência
 //   da série saiu do código e virou dado (SeriesConfig.noun, e
 //   tasks.occurrence_noun por tarefa).
@@ -21,7 +25,7 @@
 // segunda régua sobre as mesmas escritas.
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import {
   Sheet,
@@ -43,6 +47,8 @@ import type { RowActionSettings } from "@/lib/widgets/types";
 
 import { TreeWidget } from "./charts/tree-widget";
 import { TaskList } from "@/components/tarefas/task-list";
+import { TasksBulkBar } from "@/components/tarefas/tasks-bulk-bar";
+import { useBulkSelection } from "@/lib/feedback/use-bulk-selection";
 import type { TaskFormContext } from "@/components/tarefas/task-sheet";
 
 export function RecordRowPanel({
@@ -69,6 +75,16 @@ export function RecordRowPanel({
   const [order, setOrder] = useState<RowTaskOrder>("desc");
   const [loadingMore, setLoadingMore] = useState(false);
 
+  // Seleção múltipla das tarefas do registro. O universo é a JANELA carregada
+  // (o painel pagina): "selecionar todas" marca o que está na tela.
+  const rowTasks = useMemo(() => data?.tasks ?? [], [data]);
+  const taskIds = useMemo(() => rowTasks.map((t) => t.id), [rowTasks]);
+  const bulk = useBulkSelection(taskIds);
+  const selectedTasks = useMemo(
+    () => rowTasks.filter((t) => bulk.selected.has(t.id)),
+    [rowTasks, bulk.selected]
+  );
+
   // Sem setState síncrono no efeito (regra do projeto): o estado só muda depois
   // do await; enquanto isso, `data === null` já diz "carregando".
   useEffect(() => {
@@ -91,6 +107,20 @@ export function RecordRowPanel({
     void loadRowTasks(recordId, { offset: 0, order: next }).then((p) =>
       setData((d) => (d ? { ...d, tasks: p.tasks, taskTotal: p.total } : d))
     );
+  };
+
+  /**
+   * Re-busca a PRIMEIRA página depois de uma ação em massa.
+   *
+   * O painel não escuta o event bus (é efêmero, montado no clique da linha),
+   * então sem isto a lista seguiria mostrando as tarefas que acabaram de ser
+   * excluídas. Volta ao offset 0 de propósito: depois de apagar N itens, os
+   * offsets das páginas seguintes já não valem.
+   */
+  const reloadTasks = async () => {
+    if (!recordId) return;
+    const p = await loadRowTasks(recordId, { offset: 0, order });
+    setData((d) => (d ? { ...d, tasks: p.tasks, taskTotal: p.total } : d));
   };
 
   const loadMore = () => {
@@ -163,11 +193,24 @@ export function RecordRowPanel({
                 feed — traz concluir, editar e o DueBadge de graça. A lista
                 artesanal daqui não tinha nenhum dos três. */}
             {data.tasks.length === 0 ? null : (
-              <TaskList
-                tasks={data.tasks}
-                ctx={taskCtx}
-                responsibleLabels={respLabels}
-              />
+              <>
+                <TaskList
+                  tasks={data.tasks}
+                  ctx={taskCtx}
+                  responsibleLabels={respLabels}
+                  selection={{ selected: bulk.selected, onToggle: bulk.toggle }}
+                  allState={bulk.allState}
+                  onToggleAll={bulk.toggleAll}
+                />
+                <TasksBulkBar
+                  tasks={selectedTasks}
+                  onClear={bulk.clear}
+                  onDone={() => {
+                    bulk.clear();
+                    void reloadTasks();
+                  }}
+                />
+              </>
             )}
             {data.tasks.length < data.taskTotal ? (
               <Button

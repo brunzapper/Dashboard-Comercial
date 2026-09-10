@@ -1,4 +1,7 @@
-// Versão: 2.2 | Data: 07/08/2026
+// Versão: 2.3 | Data: 10/09/2026
+// v2.3 (10/09/2026): o Set/toggle/poda/Esc da seleção saiu para
+//   `useBulkSelection` — era daqui que o kanban copiou, e a seleção de
+//   tarefas ia criar mais quatro cópias da mesma regra.
 // v2.2 (07/08/2026): SELEÇÃO EM MASSA — checkboxes na 1ª coluna (só com
 //   canEditValues/canDeleteRecords), select-all da página no header, Esc
 //   limpa, prune contra os ids vivos a cada re-render RSC (precedentes do
@@ -45,6 +48,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useBulkSelection } from "@/lib/feedback/use-bulk-selection";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { ArrowDown, ArrowUp, ArrowUpDown, Pencil } from "lucide-react";
@@ -260,36 +264,14 @@ export function RecordsTable({
     );
   }, [records]);
 
-  // Seleção em massa (checkboxes da 1ª coluna) — precedentes do kanban:
-  // Set de ids, Esc limpa, prune contra os ids vivos a cada re-render RSC.
+  // Seleção em massa (checkboxes da 1ª coluna). v(10/09/2026): o Set/toggle/
+  // poda/Esc saiu para `useBulkSelection` — este bloco era a origem da cópia
+  // que o kanban levou, e a seleção de tarefas ia criar mais quatro.
   const canBulk = canEditValues || canDeleteRecords;
-  const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkSheetOpen, setBulkSheetOpen] = useState(false);
-  const toggleSelect = (id: string) =>
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  useEffect(() => {
-    // Página nova/refresh: seleção só sobrevive para linhas ainda visíveis.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setSelected((prev) => {
-      if (prev.size === 0) return prev;
-      const live = new Set(records.map((r) => r.id));
-      const next = new Set([...prev].filter((id) => live.has(id)));
-      return next.size === prev.size ? prev : next;
-    });
-  }, [records]);
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setSelected(new Set());
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, []);
-  const clearSelection = () => setSelected(new Set());
+  const liveIds = useMemo(() => records.map((r) => r.id), [records]);
+  const bulk = useBulkSelection(liveIds);
+  const { selected, toggle: toggleSelect, clear: clearSelection } = bulk;
   const bulkDone = () => {
     clearSelection();
     emitDataChanged({ kind: "record" });
@@ -353,20 +335,8 @@ export function RecordsTable({
             {canBulk ? (
               <TableHead className="w-8">
                 <Checkbox
-                  checked={
-                    selected.size === records.length
-                      ? true
-                      : selected.size > 0
-                        ? "indeterminate"
-                        : false
-                  }
-                  onCheckedChange={(v) =>
-                    setSelected(
-                      v === true
-                        ? new Set(records.map((r) => r.id))
-                        : new Set()
-                    )
-                  }
+                  checked={bulk.allState}
+                  onCheckedChange={(v) => bulk.toggleAll(v === true)}
                   aria-label="Selecionar todos da página"
                 />
               </TableHead>
@@ -510,7 +480,7 @@ export function RecordsTable({
         <RecordsBulkBar
           source={{ key: source, label: sourceLabel }}
           ai={ai}
-          selectedIds={[...selected]}
+          selectedIds={bulk.selectedIds}
           canEditValues={canEditValues}
           canDelete={canDeleteRecords}
           onClear={clearSelection}

@@ -1,4 +1,6 @@
-<!-- Versão: 1.39 | Data: 10/09/2026 -->
+<!-- Versão: 1.40 | Data: 10/09/2026 -->
+<!-- v1.40 (10/09/2026): §4.16 — concluir/excluir em LOTE nas três superfícies,
+     e o espelho do Bitrix que passou a valer nas ações em massa. -->
 <!-- v1.39 (10/09/2026): §4.16 — o espelho do Bitrix passou a valer nos DOIS
      sentidos (0137): o que se confere fora do período é a lista de ATIVIDADES
      dos donos com pendência, e é ela que também detecta exclusão. Junto: a
@@ -1170,6 +1172,27 @@ vinculado —, o mesmo painel de /tarefas, do kanban e do feed. A ocorrência
 PREVISTA que ainda não virou tarefa abre esse painel já com o prazo dela
 preenchido: é assim que se agenda a ocorrência do dia certo. Concluir marca o nó.
 A barra lateral do clique na linha tem as mesmas ações.
+
+**Concluir e excluir em LOTE (10/09/2026).** A aba **Tarefas** (visão lista), a
+**Tree** e as tarefas **do registro** (tanto o painel do clique da linha quanto
+a aba Tarefas do sheet de edição) têm caixinha de seleção por item e
+"selecionar todas". Com algo marcado, a barra no rodapé oferece **Concluir** e
+**Excluir**; **Esc** limpa.
+
+Três coisas que valem saber quando alguém reportar comportamento estranho:
+
+- **"Selecionar todas" alcança só o que está na tela**, depois dos filtros e
+  da janela carregada — nunca a consulta inteira. É deliberado: a ação em
+  massa tem teto de 200 por chamada, e seleção invisível é armadilha.
+- **Item que sai da tela sai da seleção.** Se um filtro muda ou a lista
+  recarrega, o contador cai — não é bug.
+- **"Concluir" conta só as abertas.** Selecionar tarefas já concluídas junto
+  não dá erro: a barra diz "N já concluída(s)" e o botão age no resto.
+- **Falha é POR ITEM.** Tarefa travada, ou de outra pessoa, é recusada
+  individualmente e a barra diz quantas ficaram — o lote não é abortado.
+- **O espelho no Bitrix vale no lote também.** Concluir em massa fecha as
+  atividades lá; excluir em massa as remove. Antes de 10/09/2026 não valia, e
+  o efeito era ruim: a leitura de volta reabria tudo no minuto seguinte.
 
 **Fazer as coisas pela árvore (10/09/2026).** Cada nó de tarefa tem a caixinha
 de concluir e a lixeira, as mesmas de /tarefas. A anotação e o nó livre do mapa

@@ -1,4 +1,7 @@
-// Versão: 1.0 | Data: 16/07/2026
+// Versão: 1.1 | Data: 10/09/2026
+// v1.1 (10/09/2026): SELEÇÃO MÚLTIPLA na visão lista — concluir e
+//   excluir várias de uma vez. O universo é a lista FILTRADA (`filtered`),
+//   nunca a consulta inteira. A visão kanban já tinha seleção própria.
 // Shell client da página Tarefas: filtros (status/responsável), visão lista ou
 // quadro por fase (fases default + as presentes nas tarefas), criação. A RLS
 // já escopa o vendedor às próprias tarefas — os filtros são só de exibição.
@@ -26,7 +29,9 @@ import {
   KanbanBoard,
   type KanbanDragPayload,
 } from "@/components/kanban/kanban-board";
+import { useBulkSelection } from "@/lib/feedback/use-bulk-selection";
 import { TaskList } from "./task-list";
+import { TasksBulkBar } from "./tasks-bulk-bar";
 import { TaskSheet, type TaskFormContext } from "./task-sheet";
 
 const STATUS_OPTIONS: ComboboxOption[] = [
@@ -75,6 +80,15 @@ export function TarefasClient({
       return true;
     });
   }, [tasks, status, responsavel]);
+
+  // Seleção múltipla da visão LISTA. O universo é `filtered`: marcar "todas"
+  // com um filtro ativo não pode alcançar o que o filtro escondeu.
+  const filteredIds = useMemo(() => filtered.map((t) => t.id), [filtered]);
+  const bulk = useBulkSelection(filteredIds);
+  const selectedTasks = useMemo(
+    () => filtered.filter((t) => bulk.selected.has(t.id)),
+    [filtered, bulk.selected]
+  );
 
   // Quadro por fase: fases default + extras presentes (boards personalizados).
   const boardSettings = useMemo<KanbanSettings>(() => {
@@ -161,12 +175,25 @@ export function TarefasClient({
       </div>
 
       {view === "lista" ? (
-        <TaskList
-          tasks={filtered}
-          ctx={taskCtx}
-          responsibleLabels={responsibleLabels}
-          emptyMessage="Nenhuma tarefa neste filtro."
-        />
+        <>
+          <TaskList
+            tasks={filtered}
+            ctx={taskCtx}
+            responsibleLabels={responsibleLabels}
+            emptyMessage="Nenhuma tarefa neste filtro."
+            selection={{ selected: bulk.selected, onToggle: bulk.toggle }}
+            allState={bulk.allState}
+            onToggleAll={bulk.toggleAll}
+          />
+          <TasksBulkBar
+            tasks={selectedTasks}
+            onClear={bulk.clear}
+            onDone={() => {
+              bulk.clear();
+              router.refresh();
+            }}
+          />
+        </>
       ) : (
         <KanbanBoard
           data={boardData}
