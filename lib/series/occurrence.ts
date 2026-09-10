@@ -1,8 +1,11 @@
-// Versão: 1.2 | Data: 09/09/2026
+// Versão: 1.3 | Data: 10/09/2026
 // A OCORRÊNCIA DEVIDA de uma série — o coração da recorrência, e puro.
 //
+// v1.3 (10/09/2026): só vocabulário — o substantivo da ocorrência saiu do
+// código e virou dado (`SeriesConfig.noun`, lib/series/types.ts v1.4).
+//
 // A decisão de desenho: a ocorrência é DERIVADA, nunca contada. Dado o dia da
-// âncora e a cadência, a N-ésima cobrança é `floor(dias / cadência)` — o tick
+// âncora e a cadência, a N-ésima ocorrência é `floor(dias / cadência)` — o tick
 // calcula qual está devida HOJE e tenta criá-la; repetir esbarra no índice
 // único (0132) e é no-op. Não existe "última execução" gravada.
 //
@@ -10,7 +13,7 @@
 // orçamento de tempo). Um contador incremental erraria a conta na primeira
 // rodada perdida e ninguém saberia; a derivação sempre reconstrói a mesma
 // sequência a partir dos fatos — a mesma filosofia do payload_hash da 0130.
-// É também o que faz a Tree conseguir desenhar cobranças passadas que nunca
+// É também o que faz a Tree conseguir desenhar ocorrências passadas que nunca
 // chegaram a virar tarefa.
 import { addDaysIso, daysSince } from "@/lib/date/days";
 import { recordRawValue } from "@/lib/widgets/quick-filters";
@@ -25,7 +28,7 @@ import type {
 } from "./types";
 
 export interface OccurrencePlan {
-  /** N-ésima cobrança devida hoje (0 = a do próprio dia da âncora). */
+  /** N-ésima ocorrência devida hoje (0 = a do próprio dia da âncora). */
   occurrence: number;
   /** Dia previsto dela — vira o prazo da tarefa. */
   dueDate: string;
@@ -46,11 +49,11 @@ export interface OccurrenceInput {
 }
 
 /**
- * Qual cobrança está devida hoje — ou null quando nenhuma está.
+ * Qual ocorrência está devida hoje — ou null quando nenhuma está.
  *
  * Null (nunca cria) quando: não há âncora (o campo nunca foi preenchido — e
  * data ausente jamais vira "hoje"), o dia de hoje está fora da janela, a série
- * já passou do teto de cobranças, ou a primeira cobrança ainda não venceu.
+ * já passou do teto de ocorrências, ou a primeira ainda não venceu.
  */
 export function dueOccurrence(input: OccurrenceInput): OccurrencePlan | null {
   const anchor = input.anchorDate?.slice(0, 10);
@@ -60,7 +63,7 @@ export function dueOccurrence(input: OccurrenceInput): OccurrencePlan | null {
   if (!Number.isFinite(cadence) || cadence < 1) return null;
 
   const today = input.todayIso.slice(0, 10);
-  // Janela: a borda inicial atrasa o começo da cobrança sem mover a ÂNCORA —
+  // Janela: a borda inicial atrasa o começo da série sem mover a ÂNCORA —
   // o relógio continua contado da mudança de etapa.
   if (input.fromDate && today < input.fromDate.slice(0, 10)) return null;
   if (input.untilDate && today > input.untilDate.slice(0, 10)) return null;
@@ -69,8 +72,8 @@ export function dueOccurrence(input: OccurrenceInput): OccurrencePlan | null {
   if (elapsed == null || elapsed < 0) return null;
 
   const occurrence = Math.floor(elapsed / cadence);
-  // "Um ciclo depois" é o padrão: entrou hoje, cobra na virada da quinzena.
-  // Cobrar no mesmo dia em que o registro entrou é ruído, não acompanhamento.
+  // "Um ciclo depois" é o padrão: entrou hoje, a primeira sai na virada da
+  // quinzena. Abrir no mesmo dia em que o registro entrou é ruído.
   if (input.firstAt === "apos_um_ciclo" && occurrence < 1) return null;
   if (input.maxOccurrences && occurrence > input.maxOccurrences) return null;
 
@@ -82,9 +85,9 @@ export function dueOccurrence(input: OccurrenceInput): OccurrencePlan | null {
 }
 
 /**
- * Todas as cobranças previstas até hoje — o tronco da Tree, inclusive as que
+ * Todas as ocorrências previstas até hoje — o tronco da Tree, inclusive as que
  * não viraram tarefa (rodada perdida, série ligada depois). É o que permite
- * ler "na 3ª cobrança ele não fez nada" em vez de simplesmente não ver a 3ª.
+ * ler "na 3ª ele não fez nada" em vez de simplesmente não ver a 3ª.
  */
 export function occurrencesUntil(input: OccurrenceInput): OccurrencePlan[] {
   const last = dueOccurrence({ ...input, firstAt: "imediato" });
@@ -102,17 +105,17 @@ export function occurrencesUntil(input: OccurrenceInput): OccurrencePlan[] {
 }
 
 /**
- * As cobranças a MANTER ABERTAS hoje: a devida agora e as `count` seguintes.
+ * As ocorrências a MANTER ABERTAS hoje: a devida agora e as `count` seguintes.
  *
  * v1.2 (09/09/2026): é o que faz a série deixar de ser invisível. Antes só
- * existia a cobrança do dia, então num ciclo quinzenal o vendedor passava 15
+ * existia a ocorrência do dia, então num ciclo quinzenal o vendedor passava 15
  * dias sem ver nada — e não tinha como remarcar o que ainda ia vencer.
  *
  * NUNCA emite ocorrência já vencida que não seja a devida agora: criar as
  * atrasadas de uma vez abriria dezenas de tarefas vencidas no nome de gente
  * que nunca foi avisada de que a série existia. A Tree continua desenhando as
  * passadas (occurrencesUntil), que é onde a falta de acompanhamento deve
- * aparecer — como galho vazio, não como cobrança fabricada hoje.
+ * aparecer — como galho vazio, não como tarefa fabricada hoje.
  *
  * Criar adiantado é seguro: a trava da 0132 é por (regra, registro,
  * ocorrência), então repetir esbarra no índice e é no-op.
@@ -126,7 +129,7 @@ export function occurrencesAhead(
   if (!Number.isFinite(cadence) || cadence < 1) return [];
 
   // A devida hoje ancora a janela. Sem ela (antes da primeira, ou fora da
-  // janela) não há de onde partir — e adiantar seria começar a cobrar cedo.
+  // janela) não há de onde partir — e adiantar seria começar cedo demais.
   const due = dueOccurrence(input);
   if (!due) return [];
 
@@ -134,7 +137,7 @@ export function occurrencesAhead(
   for (let n = due.occurrence; n <= due.occurrence + ahead; n += 1) {
     if (input.maxOccurrences && n > input.maxOccurrences) break;
     const dueDate = addDaysIso(due.anchorDate, n * cadence);
-    // A borda final vale para as futuras também: não se agenda cobrança
+    // A borda final vale para as futuras também: não se agenda tarefa
     // depois do fim declarado da série.
     if (input.untilDate && dueDate > input.untilDate.slice(0, 10)) break;
     out.push({ occurrence: n, dueDate, anchorDate: due.anchorDate });
@@ -152,7 +155,7 @@ export interface AnchorFacts {
    * v1.1 (09/09/2026): era `fieldModifiedAt` (records.field_modified_at) — e
    * aquilo NÃO é histórico de alteração, é o marcador de "editado localmente,
    * proteja do sync". Para campo vindo do Bitrix ficava sempre vazio, então a
-   * âncora `field_changed` nunca resolvia e a série jamais cobrava. Ver
+   * âncora `field_changed` nunca resolvia e a série jamais gerava nada. Ver
    * lib/records/field-history.ts.
    */
   changedAt: Map<string, string> | null;
@@ -163,7 +166,7 @@ export interface AnchorFacts {
 
 /**
  * O dia em que o relógio começa a contar. null = não começou (o campo nunca
- * foi preenchido) — e a série simplesmente não cobra, em vez de cobrar desde
+ * foi preenchido) — e a série simplesmente não gera nada, em vez de contar desde
  * uma data inventada.
  */
 export function resolveAnchorDate(
@@ -185,7 +188,7 @@ export function resolveAnchorDate(
   if (direct) return direct;
   // v1.2: o registro que já estava na etapa antes de a série existir não tem
   // histórico. "criacao" o traz para dentro por uma data REAL; "nenhum" (o
-  // padrão) prefere não cobrar a cobrar por uma data inventada.
+  // padrão) prefere não gerar nada a gerar por uma data inventada.
   return fallback === "criacao" ? iso(facts.sourceCreatedAt) : null;
 }
 
@@ -197,7 +200,7 @@ export function resolveBound(
   if (!bound) return null;
   if (bound.kind === "date") return bound.date;
   // v1.1 (09/09/2026): "para quando esse campo mudar". A data-limite é o DIA da
-  // alteração — a cobrança daquele dia ainda vale (o campo mudou depois de ela
+  // alteração — a ocorrência daquele dia ainda vale (o campo mudou depois de ela
   // vencer), as seguintes não. Campo nunca alterado ⇒ null ⇒ não limita, que é
   // a mesma leniência do campo de data vazio logo abaixo.
   const raw =

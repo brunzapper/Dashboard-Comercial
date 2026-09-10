@@ -1,11 +1,11 @@
 // Versão: 1.1 | Data: 09/09/2026
-// v1.1 (09/09/2026): a JANELA não orfana nó — o recorte por cobrança entrega
+// v1.1 (09/09/2026): a JANELA não orfana nó — o recorte por ocorrência entrega
 //   um tronco que NÃO começa na 1ª, e nada pode se perder por isso.
 // A árvore é derivada dos fatos. O que estes testes protegem:
 //  - as três formas sobre os MESMOS fatos dão árvores diferentes e corretas;
 //  - o nó arrastado à mão vence a derivação em qualquer forma (foi o pedido:
-//    a forma por cobrança por padrão, editável livremente depois);
-//  - nenhum fato se perde — nem o que aconteceu antes da primeira cobrança,
+//    a forma por ocorrência por padrão, editável livremente depois);
+//  - nenhum fato se perde — nem o que aconteceu antes da primeira ocorrência,
 //    nem o que aponta para um pai que sumiu.
 import { describe, expect, it } from "vitest";
 
@@ -13,8 +13,8 @@ import { countNodes, deriveTree } from "./derive";
 import type { TreeFact } from "./model";
 
 const facts: TreeFact[] = [
-  { id: "occ:1", kind: "occurrence", at: "2026-09-15", label: "1ª cobrança" },
-  { id: "occ:2", kind: "occurrence", at: "2026-09-29", label: "2ª cobrança" },
+  { id: "occ:1", kind: "occurrence", at: "2026-09-15", label: "1ª ocorrência" },
+  { id: "occ:2", kind: "occurrence", at: "2026-09-29", label: "2ª ocorrência" },
   { id: "comment:a", kind: "comment", at: "2026-09-03", label: "Liguei, sem resposta" },
   { id: "task:b", kind: "task", at: "2026-09-20", label: "Enviar proposta" },
   { id: "change:c", kind: "change", at: "2026-10-02", label: "Etapa mudou" },
@@ -23,26 +23,26 @@ const facts: TreeFact[] = [
 const childIds = (nodes: ReturnType<typeof deriveTree>, id: string) =>
   nodes.find((n) => n.id === id)?.children.map((c) => c.id) ?? [];
 
-describe("forma por cobrança", () => {
+describe("forma por ocorrência", () => {
   const tree = deriveTree({ facts, layout: "por_ocorrencia" });
 
-  it("o tronco são as cobranças", () => {
+  it("o tronco são as ocorrências", () => {
     expect(tree.map((n) => n.id)).toEqual(["occ:1", "occ:2"]);
   });
 
-  it("cada fato pendura na cobrança em cuja janela caiu", () => {
+  it("cada fato pendura na ocorrência em cuja janela caiu", () => {
     expect(childIds(tree, "occ:1")).toEqual(["comment:a", "task:b"]);
     expect(childIds(tree, "occ:2")).toEqual(["change:c"]);
   });
 
-  it("o que aconteceu ANTES da primeira cobrança pendura nela, não some", () => {
+  it("o que aconteceu ANTES da primeira ocorrência pendura nela, não some", () => {
     // O comentário do dia 03 é do primeiro ciclo — perdê-lo seria perder o
     // começo do acompanhamento.
     expect(childIds(tree, "occ:1")).toContain("comment:a");
     expect(countNodes(tree)).toBe(facts.length);
   });
 
-  it("sem nenhuma cobrança, os fatos ficam na raiz", () => {
+  it("sem nenhuma ocorrência, os fatos ficam na raiz", () => {
     const semTronco = deriveTree({
       facts: facts.filter((f) => f.kind !== "occurrence"),
       layout: "por_ocorrencia",
@@ -54,7 +54,7 @@ describe("forma por cobrança", () => {
 describe("forma por tipo", () => {
   const tree = deriveTree({ facts, layout: "por_tipo" });
 
-  it("um ramo por tipo, cobranças na raiz", () => {
+  it("um ramo por tipo, ocorrências na raiz", () => {
     expect(tree.map((n) => n.id)).toEqual([
       "occ:1",
       "occ:2",
@@ -85,7 +85,7 @@ describe("forma livre", () => {
         { nodeRef: "change:c", parentRef: "comment:a" },
       ],
     });
-    // Raízes em ordem cronológica: a tarefa do dia 20 vem antes da 2ª cobrança.
+    // Raízes em ordem cronológica: a tarefa do dia 20 vem antes da 2ª ocorrência.
     expect(tree.map((n) => n.id)).toEqual(["occ:1", "task:b", "occ:2"]);
     expect(childIds(tree, "task:b")).toEqual(["comment:a"]);
     expect(tree.find((n) => n.id === "task:b")?.children[0].children[0].id).toBe(
@@ -95,7 +95,7 @@ describe("forma livre", () => {
 });
 
 describe("o arrastado vence a derivação", () => {
-  it("re-pendurar move o nó, mesmo na forma por cobrança", () => {
+  it("re-pendurar move o nó, mesmo na forma por ocorrência", () => {
     const tree = deriveTree({
       facts,
       layout: "por_ocorrencia",
@@ -142,16 +142,16 @@ describe("profundidade", () => {
   });
 });
 
-// A janela (lib/tree/load.ts) recorta por COBRANÇA, então o conjunto de fatos
+// A janela (lib/tree/load.ts) recorta por OCORRÊNCIA, então o conjunto de fatos
 // que chega aqui pode começar na 5ª. Do ponto de vista da derivação isso é
 // apenas "um tronco que começa mais tarde" — e a regra de sempre (o que veio
-// antes da primeira cobrança pendura nela) é justamente o que impede o galho
+// antes da primeira ocorrência pendura nela) é justamente o que impede o galho
 // de virar órfão. Se alguém trocar essa regra por um descarte, este teste cai.
-describe("janela: tronco que não começa na 1ª cobrança", () => {
+describe("janela: tronco que não começa na 1ª ocorrência", () => {
   const janela: TreeFact[] = [
-    { id: "occ:5", kind: "occurrence", at: "2026-11-10", label: "5ª cobrança" },
-    { id: "occ:6", kind: "occurrence", at: "2026-11-24", label: "6ª cobrança" },
-    // Aconteceu ANTES da primeira cobrança DA JANELA (a 5ª).
+    { id: "occ:5", kind: "occurrence", at: "2026-11-10", label: "5ª ocorrência" },
+    { id: "occ:6", kind: "occurrence", at: "2026-11-24", label: "6ª ocorrência" },
+    // Aconteceu ANTES da primeira ocorrência DA JANELA (a 5ª).
     { id: "comment:x", kind: "comment", at: "2026-11-02", label: "Retomei o contato" },
     { id: "task:y", kind: "task", at: "2026-11-15", label: "Reenviar proposta" },
   ];
@@ -161,7 +161,7 @@ describe("janela: tronco que não começa na 1ª cobrança", () => {
     expect(countNodes(tree)).toBe(janela.length);
   });
 
-  it("o fato anterior pendura na primeira cobrança da janela", () => {
+  it("o fato anterior pendura na primeira ocorrência da janela", () => {
     const tree = deriveTree({ facts: janela, layout: "por_ocorrencia" });
     const quinta = tree.find((n) => n.id === "occ:5")!;
     expect(quinta.children.map((c) => c.id)).toContain("comment:x");

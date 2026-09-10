@@ -1,7 +1,10 @@
-// Versão: 1.0 | Data: 09/09/2026
+// Versão: 1.1 | Data: 10/09/2026
 // Modelo da TREE — a árvore de acompanhamento de um registro, e o mapa mental.
 //
-// A decisão central: a árvore é DERIVADA dos fatos que já existem (as cobranças
+// v1.1 (10/09/2026): vocabulário. O rótulo do tronco deixou de ter substantivo
+// fixo no código — ele é dado agora (série ou tarefa), e o padrão é "Tarefa".
+//
+// A decisão central: a árvore é DERIVADA dos fatos que já existem (as ocorrências
 // da série, as tarefas manuais, os comentários, as alterações de campo). O
 // banco (`tree_nodes`, 0133) guarda só duas coisas: os nós que não são fato de
 // ninguém (a anotação digitada no mapa mental) e as EXCEÇÕES de parentesco (o
@@ -10,7 +13,7 @@
 // Por que assim: uma tabela que copiasse cada tarefa como nó teria de ser
 // mantida em sincronia com `tasks` para sempre — e ficaria errada na primeira
 // tarefa criada por fora. Derivar mantém a árvore verdadeira de graça, e ainda
-// deixa aparecer a cobrança que NUNCA virou tarefa (a rodada perdida), que é
+// deixa aparecer a ocorrência que NUNCA virou tarefa (a rodada perdida), que é
 // justamente o que se quer ver ao analisar a conduta.
 //
 // Módulo PURO e client-safe: o widget é um componente client.
@@ -44,14 +47,14 @@ export const TREE_FILTERABLE_KINDS = [
 export type TreeFilterableKind = (typeof TREE_FILTERABLE_KINDS)[number];
 
 /**
- * Quantas cobranças a janela da árvore traz por vez (e quantas o "carregar
+ * Quantas ocorrências a janela da árvore traz por vez (e quantas o "carregar
  * mais" acrescenta). Mora aqui, não no loader: o widget é um Client Component,
  * e importá-la de lá arrastaria o loader inteiro para o bundle do navegador.
  */
 export const TREE_WINDOW_STEP = 12;
 
 export const TREE_NODE_KIND_LABELS: Record<TreeNodeKind, string> = {
-  occurrence: "Cobrança",
+  occurrence: "Tarefa",
   task: "Tarefa",
   comment: "Anotação",
   change: "Alteração",
@@ -69,9 +72,9 @@ export interface TreeFact {
   at: string;
   label: string;
   body?: string | null;
-  /** Só no tronco: qual cobrança este nó é. */
+  /** Só no tronco: qual ocorrência da série este nó é. */
   occurrence?: number | null;
-  /** Estado exibível (tarefa concluída, cobrança sem tarefa…). */
+  /** Estado exibível (tarefa concluída, ocorrência sem tarefa…). */
   status?: string | null;
   /** Id da entidade original, para as ações do nó. */
   refId?: string | null;
@@ -86,7 +89,7 @@ export interface TreeNode extends TreeFact {
 export type TreeLayout = "por_ocorrencia" | "por_tipo" | "livre";
 
 export const TREE_LAYOUT_LABELS: Record<TreeLayout, string> = {
-  por_ocorrencia: "Por cobrança (linha do tempo do acompanhamento)",
+  por_ocorrencia: "Por ocorrência (linha do tempo do acompanhamento)",
   por_tipo: "Por tipo (tarefas, anotações, alterações)",
   livre: "Livre (mapa mental)",
 };

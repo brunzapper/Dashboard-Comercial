@@ -21,7 +21,12 @@ import { addDaysIso, DEFAULT_DUE_SOON_DAYS } from "./alerts";
 import { todayBrasiliaIso } from "@/lib/date/today";
 import { TASK_COLS_WITH_RECORD, type TaskRow } from "./types";
 import { createServiceClient } from "@/lib/supabase/service";
-import { mirrorTaskAfterWrite } from "@/lib/sync/bitrix/task-mirror";
+import {
+  mirrorTaskAfterWrite,
+  mirrorTaskDeletion,
+} from "@/lib/sync/bitrix/task-mirror";
+import { parseSeriesNoun } from "@/lib/series/types";
+import type { MirrorOwnerEntity } from "@/lib/tasks/mirror-config";
 import { parseMirrorChoice } from "./mirror-config";
 
 export interface TaskActionState {
@@ -158,6 +163,10 @@ export async function createTask(
 
   const boardId = cleanStr(formData.get("board_id"), 40) || null;
   const phase = cleanStr(formData.get("phase"), 80) || "a_fazer";
+  // 10/09/2026: como ESTA ocorrência se chama na Tree. Só o formulário de uma
+  // tarefa de série traz o campo; ausente = herda o da série.
+  const occurrenceNoun =
+    parseSeriesNoun(cleanStr(formData.get("occurrence_noun"), 40)) ?? null;
   // `locked` na criação vale para qualquer papel (default do board / escolha):
   // o trigger só protege ALTERAÇÕES da flag.
   const locked = String(formData.get("locked") ?? "") === "1";
@@ -191,6 +200,7 @@ export async function createTask(
       locked,
       parent_task_id: parentTaskId,
       is_global: isGlobal,
+      ...(occurrenceNoun ? { occurrence_noun: occurrenceNoun } : {}),
     })
     .select("id")
     .single();
@@ -251,6 +261,13 @@ export async function updateTask(
     responsible_id: responsibleId,
     record_id: parsed.record_id,
   };
+  // 10/09/2026: o substantivo só é tocado quando o CONTROLE veio no envio.
+  // O `updates` daqui é o formulário INTEIRO, então uma chave ausente viraria
+  // NULL — e o campo só aparece em tarefa de série (mesma guarda do `locked`).
+  if (formData.has("occurrence_noun")) {
+    updates.occurrence_noun =
+      parseSeriesNoun(cleanStr(formData.get("occurrence_noun"), 40)) ?? null;
+  }
   // Trava de exclusão: só admin/gestor mudam (o trigger reforça no banco).
   if (isManager && formData.has("locked")) {
     updates.locked = String(formData.get("locked")) === "1";
@@ -350,6 +367,21 @@ export async function reopenTask(id: string): Promise<TaskActionState> {
     { taskId: id, reopened: true },
     await getActiveOrgId()
   );
+  // 10/09/2026: reabrir TAMBÉM reabre a atividade lá (COMPLETED volta a 'N').
+  // Sem isto a leitura de volta (0137) veria a atividade fechada e re-fecharia
+  // a tarefa na rodada seguinte — reabrir aqui nunca duraria um minuto.
+  const { data: openTask } = await supabase
+    .from("tasks")
+    .select("record_id")
+    .eq("id", id)
+    .maybeSingle();
+  await mirrorTaskAfterWrite(supabase, createServiceClient(), {
+    taskId: id,
+    recordId: (openTask?.record_id as string | null) ?? null,
+    orgId: await getActiveOrgId(),
+    op: "update",
+    createdBy: session.user.id,
+  });
   revalidateTasks();
   return { ok: true };
 }
@@ -389,6 +421,20 @@ export async function moveTaskPhase(
     },
     await getActiveOrgId()
   );
+  // 10/09/2026: a coluna que conclui (ou a saída dela) mexe no MESMO estado
+  // que `completeTask`/`reopenTask` — tem de espelhar pelo mesmo caminho.
+  const { data: movedTask } = await supabase
+    .from("tasks")
+    .select("record_id")
+    .eq("id", id)
+    .maybeSingle();
+  await mirrorTaskAfterWrite(supabase, createServiceClient(), {
+    taskId: id,
+    recordId: (movedTask?.record_id as string | null) ?? null,
+    orgId: await getActiveOrgId(),
+    op: completes ? "complete" : "update",
+    createdBy: session.user.id,
+  });
   revalidateTasks();
   return { ok: true };
 }
@@ -422,6 +468,20 @@ export async function rescheduleTask(
     { taskId: id, dueDate: dueDateIso },
     await getActiveOrgId()
   );
+  // 10/09/2026: remarcar move o DEADLINE da atividade. É para isso que o
+  // `bitrix_activity_id` existe — sem espelhar, o prazo lá fica no dia velho.
+  const { data: movedTask } = await supabase
+    .from("tasks")
+    .select("record_id")
+    .eq("id", id)
+    .maybeSingle();
+  await mirrorTaskAfterWrite(supabase, createServiceClient(), {
+    taskId: id,
+    recordId: (movedTask?.record_id as string | null) ?? null,
+    orgId: await getActiveOrgId(),
+    op: "update",
+    createdBy: session.user.id,
+  });
   revalidateTasks();
   return { ok: true };
 }
@@ -431,6 +491,39 @@ export async function deleteTask(id: string): Promise<TaskActionState> {
   const session = await getSessionInfo();
   if (!session) return { ok: false, message: "Sessão expirada." };
   const supabase = await createClient();
+
+  // 10/09/2026: a ordem de exclusão no Bitrix é enfileirada ANTES do delete.
+  // Depois seria tarde: a linha some, o `bitrix_activity_id` vai com ela e a
+  // atividade fica órfã no feed do negócio — que a leitura de volta (0137)
+  // reimportaria como tarefa nova, num ciclo sem fim. Resolver a Base aqui
+  // (e não no dreno) é o mesmo princípio da 0136: a decisão é a vigente no
+  // momento do ato.
+  const { data: doomed } = await supabase
+    .from("tasks")
+    .select("record_id, bitrix_activity_id")
+    .eq("id", id)
+    .maybeSingle();
+  const activityId = (doomed?.bitrix_activity_id as string | null) ?? null;
+  let mirrorOwner: MirrorOwnerEntity | null = null;
+  let mirrorSourceId: string | null = null;
+  if (activityId && doomed?.record_id) {
+    const { data: rec } = await supabase
+      .from("records")
+      .select("record_type, source_id")
+      .eq("id", doomed.record_id as string)
+      .maybeSingle();
+    if (rec) {
+      const { data: src } = await supabase
+        .from("data_sources")
+        .select("bitrix_activity_owner")
+        .eq("record_type", rec.record_type as string)
+        .maybeSingle();
+      mirrorOwner =
+        (src?.bitrix_activity_owner as MirrorOwnerEntity | null) ?? null;
+      mirrorSourceId = (rec.source_id as string | null) ?? null;
+    }
+  }
+
   // .select() no delete: sem linha retornada = RLS bloqueou (tarefa travada
   // ou de outro usuário) — devolve mensagem em vez de sucesso silencioso.
   const { data, error } = await supabase
@@ -455,6 +548,15 @@ export async function deleteTask(id: string): Promise<TaskActionState> {
     },
     await getActiveOrgId()
   );
+  // Só depois de o delete PASSAR pela RLS: enfileirar antes apagaria lá uma
+  // atividade cuja tarefa continuou existindo aqui.
+  await mirrorTaskDeletion(createServiceClient(), {
+    orgId: await getActiveOrgId(),
+    activityId,
+    ownerEntity: mirrorOwner,
+    ownerSourceId: mirrorSourceId,
+    createdBy: session.user.id,
+  });
   revalidateTasks();
   return { ok: true };
 }

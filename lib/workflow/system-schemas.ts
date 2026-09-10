@@ -131,7 +131,7 @@ export const SYSTEM_FLOWS: SystemFlow[] = [
           "Classificador do domínio e, na falta dele, o motor que aprende com as entradas já existentes.",
       },
       {
-        label: "Gravar e cobrar o resto",
+        label: "Gravar e pedir o resto",
         detail:
           "O que sobrou vira uma tarefa de pendência para o administrador.",
       },

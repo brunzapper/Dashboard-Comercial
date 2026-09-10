@@ -1,7 +1,13 @@
-// Versão: 1.0 | Data: 16/07/2026
+// Versão: 1.1 | Data: 10/09/2026
 // Lista de TAREFAS (página Tarefas, seção do registro e visão lista do kanban
 // de tarefas): checkbox de conclusão, destaque de prazo (atrasada/em breve),
 // vínculo, responsável, editar e excluir (regras de RLS dão o feedback).
+//
+// v1.1 (10/09/2026): concluir e excluir saíram daqui para `useTaskRowActions`
+// + os dois botões. Motivo: o nó da Tree só sabia ABRIR a tarefa (o TaskSheet
+// não conclui nem exclui, por desenho), então não havia como fechar nem apagar
+// nada por lá. Uma segunda cópia do checkbox seria a régua paralela da
+// invariante 25 — e divergiria no primeiro tratamento de erro novo.
 "use client";
 
 import { useState, useTransition } from "react";
@@ -42,17 +48,16 @@ function DueBadge({ task }: { task: TaskRow }) {
   );
 }
 
-export function TaskListItem({
-  task,
-  ctx,
-  showRecord = true,
-  responsibleLabel,
-}: {
-  task: TaskRow;
-  ctx: TaskFormContext;
-  showRecord?: boolean;
-  responsibleLabel?: string | null;
-}) {
+/**
+ * O comportamento de concluir/reabrir e excluir UMA tarefa.
+ *
+ * Hook em vez de componente porque os dois consumidores têm layouts opostos:
+ * na lista o checkbox abre a linha e a lixeira a fecha, com o conteúdo no
+ * meio; no nó da Tree os dois ficam juntos, à direita. O que não pode
+ * divergir é a REGRA (quais actions, o evento do bus, o refresh, a mensagem
+ * de RLS), e ela mora aqui.
+ */
+export function useTaskRowActions(task: TaskRow, onChanged?: () => void) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -65,6 +70,7 @@ export function TaskListItem({
       recordId: task.record_id,
       boardId: task.board_id,
     });
+    onChanged?.();
   }
 
   function toggle() {
@@ -91,17 +97,68 @@ export function TaskListItem({
     });
   }
 
+  return { done, pending, error, toggle, remove };
+}
+
+export function TaskCompleteCheckbox({
+  done,
+  pending,
+  onToggle,
+}: {
+  done: boolean;
+  pending: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <input
+      type="checkbox"
+      checked={done}
+      onChange={onToggle}
+      disabled={pending}
+      className="size-4 shrink-0 accent-primary"
+      aria-label={done ? "Reabrir tarefa" : "Concluir tarefa"}
+    />
+  );
+}
+
+export function TaskDeleteButton({
+  pending,
+  onRemove,
+}: {
+  pending: boolean;
+  onRemove: () => void;
+}) {
+  return (
+    <Button
+      variant="ghost"
+      size="icon"
+      className="size-6"
+      onClick={onRemove}
+      disabled={pending}
+      aria-label="Excluir tarefa"
+    >
+      <Trash2 className="size-3.5" />
+    </Button>
+  );
+}
+
+export function TaskListItem({
+  task,
+  ctx,
+  showRecord = true,
+  responsibleLabel,
+}: {
+  task: TaskRow;
+  ctx: TaskFormContext;
+  showRecord?: boolean;
+  responsibleLabel?: string | null;
+}) {
+  const { done, pending, error, toggle, remove } = useTaskRowActions(task);
+
   return (
     <div className="flex flex-col gap-0.5 rounded-md border px-2 py-1.5">
       <div className="flex items-center gap-2">
-        <input
-          type="checkbox"
-          checked={done}
-          onChange={toggle}
-          disabled={pending}
-          className="size-4 shrink-0 accent-primary"
-          aria-label={done ? "Reabrir tarefa" : "Concluir tarefa"}
-        />
+        <TaskCompleteCheckbox done={done} pending={pending} onToggle={toggle} />
         <span
           className={cn(
             "flex min-w-0 flex-1 items-center gap-1 truncate text-sm",
@@ -124,16 +181,7 @@ export function TaskListItem({
           </span>
         ) : null}
         <TaskSheet task={task} ctx={ctx} editTrigger />
-        <Button
-          variant="ghost"
-          size="icon"
-          className="size-6"
-          onClick={remove}
-          disabled={pending}
-          aria-label="Excluir tarefa"
-        >
-          <Trash2 className="size-3.5" />
-        </Button>
+        <TaskDeleteButton pending={pending} onRemove={remove} />
       </div>
       {showRecord && task.record?.title ? (
         <p className="text-muted-foreground pl-6 text-xs">

@@ -1,11 +1,11 @@
 // Versão: 1.0 | Data: 09/09/2026
-// A série cobra o vendedor sozinha, para sempre, e o tick roda a cada minuto.
+// A série abre tarefa sozinha, para sempre, e o tick roda a cada minuto.
 // O que estes testes protegem é o que a torna utilizável:
 //  - a trava é por OCORRÊNCIA, não por "tarefa aberta" (a 3ª quinzena vence
 //    tenha ou não a 2ª sido feita — é ver as duas que mostra a conduta);
 //  - a mesma ocorrência não vira duas tarefas, e a corrida com o banco é
 //    NO-OP, nunca erro da regra;
-//  - desligada para um recorte, não cobra — sem perder o atributo.
+//  - desligada para um recorte, não gera nada — sem perder o atributo.
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/lib/webhooks/emit", () => ({
@@ -75,7 +75,7 @@ const ctx = (over: Partial<EvalContext> = {}): EvalContext => ({
 });
 
 describe("decideActions — série", () => {
-  it("planeja a cobrança devida com prazo e responsável do registro", () => {
+  it("planeja a ocorrência devida com prazo e responsável do registro", () => {
     const { seriesTasks } = decideActions([RULE], [card()], ctx());
     expect(seriesTasks[0]).toMatchObject({
       recordId: "rec-1",
@@ -107,9 +107,9 @@ describe("decideActions — série", () => {
   });
 
   // A decisão de NÃO criar retroativo: um deal que entrou na etapa há meses não
-  // abre de uma vez todas as cobranças que ninguém fez. Elas seguem visíveis na
+  // abre de uma vez todas as que ninguém fez. Elas seguem visíveis na
   // Tree como galho vazio, que é onde a falta de acompanhamento deve aparecer.
-  it("nunca planeja cobrança VENCIDA além da devida hoje", () => {
+  it("nunca planeja ocorrência VENCIDA além da devida hoje", () => {
     const { seriesTasks } = decideActions([RULE], [card()], ctx());
     for (const t of seriesTasks) {
       expect(t.dueDate >= "2026-09-29").toBe(true);
@@ -127,9 +127,9 @@ describe("decideActions — série", () => {
     expect(seriesTasks.map((t) => t.occurrence)).toEqual([3, 4, 5, 6, 7]);
   });
 
-  // v1.2: pausar o atributo PARA a cobrança. Antes o status era escrito pelo
+  // v1.2: pausar o atributo PARA a série. Antes o status era escrito pelo
   // executor e nunca lido por ninguém — pausar não pausava nada.
-  it("atributo pausado no registro não gera cobrança", () => {
+  it("atributo pausado no registro não gera tarefa", () => {
     const { seriesTasks } = decideActions(
       [RULE],
       [card({ pausedAttributes: ["tree"] })],
@@ -138,7 +138,7 @@ describe("decideActions — série", () => {
     expect(seriesTasks).toHaveLength(0);
   });
 
-  it("a cobrança ANTERIOR em aberto não impede a próxima", () => {
+  it("a tarefa ANTERIOR em aberto não impede a próxima", () => {
     // É a diferença para o create_task: lá, uma tarefa aberta bloqueia. Aqui, a
     // 2ª quinzena vence tenha ou não a 1ª sido feita — e é ver as duas em
     // aberto que mostra que o vendedor não está acompanhando.
@@ -150,7 +150,7 @@ describe("decideActions — série", () => {
     expect(seriesTasks[0]?.occurrence).toBe(2);
   });
 
-  it("desligada para o responsável, não cobra", () => {
+  it("desligada para o responsável, não gera nada", () => {
     const { seriesTasks } = decideActions(
       [RULE],
       [card()],
@@ -197,7 +197,7 @@ describe("decideActions — série", () => {
     expect(seriesTasks[0]?.occurrence).toBe(4);
   });
 
-  it("sem âncora (campo nunca alterado) não cobra", () => {
+  it("sem âncora (campo nunca alterado) não gera nada", () => {
     const { seriesTasks } = decideActions(
       [RULE],
       [card({ changedAt: null })],
@@ -206,7 +206,7 @@ describe("decideActions — série", () => {
     expect(seriesTasks).toHaveLength(0);
   });
 
-  it("mock nunca é cobrado", () => {
+  it("mock nunca gera tarefa", () => {
     const { seriesTasks } = decideActions([RULE], [card({ isMock: true })], ctx());
     expect(seriesTasks).toHaveLength(0);
   });
@@ -225,7 +225,7 @@ describe("parseAutomationRule — série", () => {
     });
   });
 
-  it("cadência fora de faixa derruba a regra (nunca cobra todo dia)", () => {
+  it("cadência fora de faixa derruba a regra (nunca abre todo dia)", () => {
     expect(
       parseAutomationRule(
         withSeries({ ...SERIES, cadence: { defaultDays: 0, overrideScopes: [] } })

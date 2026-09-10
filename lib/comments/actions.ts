@@ -1,4 +1,9 @@
-// Versão: 1.0 | Data: 17/07/2026
+// Versão: 1.1 | Data: 10/09/2026
+// v1.1 (10/09/2026): a anotação de um registro com Base espelhada (0136/0137)
+// vira COMENTÁRIO na timeline do negócio. Fila, nunca chamada em linha: o
+// portal fora do ar não pode virar anotação não gravada aqui. O caminho de
+// volta (comentário de lá vira anotação daqui) é do sync — ver
+// lib/sync/bitrix/activity-inbound.ts.
 // Server Actions de COMENTÁRIOS (tabela comments, 0066) e do FEED dos cards.
 // Gravação com o client do usuário — a RLS decide visibilidade (transitiva ao
 // registro/tarefa pai) e edição/exclusão (autor ou admin/gestor). `.select`
@@ -11,6 +16,8 @@ import { getSessionInfo } from "@/lib/auth/session";
 import { getActiveOrgId } from "@/lib/auth/org";
 import { createClient } from "@/lib/supabase/server";
 import { emitWebhookEvent } from "@/lib/webhooks/emit";
+import { createServiceClient } from "@/lib/supabase/service";
+import { mirrorCommentAfterWrite } from "@/lib/sync/bitrix/task-mirror";
 import { TASK_COLS_WITH_RECORD, type TaskRow } from "@/lib/tasks/types";
 import {
   COMMENT_COLS,
@@ -62,6 +69,16 @@ export async function createComment(
     },
     await getActiveOrgId()
   );
+  // Anotação de registro com Base espelhada vai para a timeline do negócio.
+  // Best-effort e fora do caminho crítico, como todo espelho.
+  if ("recordId" in target) {
+    await mirrorCommentAfterWrite(supabase, createServiceClient(), {
+      commentId: data.id as string,
+      recordId: target.recordId,
+      orgId: await getActiveOrgId(),
+      createdBy: session.user.id,
+    });
+  }
   return { ok: true, id: data.id as string };
 }
 

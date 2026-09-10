@@ -1,10 +1,18 @@
-// Versão: 1.0 | Data: 09/09/2026
+// Versão: 1.1 | Data: 10/09/2026
+// v1.1 (10/09/2026): o sentido de SAÍDA ficou completo (0137).
+//   - `delete`: excluir aqui apaga a atividade lá. A ordem é enfileirada ANTES
+//     do delete da linha (a FK vira `set null`, não cascade) — enfileirar
+//     depois sumiria com a própria ordem, e a atividade ficaria órfã no feed.
+//   - `comment_add`: a anotação daqui vira comentário da timeline.
+//   - reabrir, mover de fase e remarcar passaram a enfileirar `update`. Sem
+//     isso a leitura de volta (0137) re-fecharia a tarefa reaberta na rodada
+//     seguinte, para sempre — a assimetria virava laço.
 // A TAREFA DAQUI VIRA ATIVIDADE NO BITRIX (0136).
 //
 // O objeto do outro lado é `crm.activity` com TYPE_ID 6 / PROVIDER_ID CRM_TODO,
 // amarrada ao negócio — a mesma coisa que o time já lê no feed do deal, ao lado
 // dos comentários e das mudanças de etapa. Não é o módulo Tasks do Bitrix: uma
-// cobrança de acompanhamento pertence à conversa do negócio, não a uma lista de
+// tarefa de acompanhamento pertence à conversa do negócio, não a uma lista de
 // tarefas paralela.
 //
 // Fila + dreno no tick, no molde do write-back (0032): a chamada externa não
@@ -32,15 +40,26 @@ import { WriteBackFatal } from "./writeback";
 const BATCH = 25;
 const MAX_ATTEMPTS = 5;
 
-export type TaskMirrorOp = "create" | "update" | "complete";
+export type TaskMirrorOp =
+  | "create"
+  | "update"
+  | "complete"
+  // v1.1: apagar lá o que se apagou aqui. Não carrega tarefa — ela já não
+  // existe quando o dreno roda; quem identifica a ordem é o `activityId`.
+  | "delete"
+  // v1.1: a anotação daqui vira comentário na timeline do negócio.
+  | "comment_add";
 
 export interface EnqueueTaskMirrorInput {
   orgId: string;
-  taskId: string;
+  /** Ausente em `delete` (a tarefa já não existe) e em `comment_add`. */
+  taskId?: string | null;
+  /** Só em `comment_add`: a anotação a espelhar. */
+  commentId?: string | null;
   op: TaskMirrorOp;
   ownerEntity: MirrorOwnerEntity;
   ownerSourceId: string;
-  /** Já espelhada: o id da atividade a alterar. */
+  /** Já espelhada: o id da atividade a alterar (ou a apagar). */
   activityId?: string | null;
   createdBy?: string | null;
 }
@@ -57,7 +76,9 @@ export async function enqueueTaskMirror(
   try {
     const { error } = await db.from("bitrix_task_queue").insert({
       organization_id: input.orgId,
-      task_id: input.taskId,
+      task_id: input.taskId ?? null,
+      comment_id: input.commentId ?? null,
+      target: input.op === "comment_add" ? "comment" : "task",
       op: input.op,
       owner_entity: input.ownerEntity,
       owner_source_id: input.ownerSourceId,
@@ -77,7 +98,9 @@ export async function enqueueTaskMirror(
 
 interface QueueRow {
   id: string;
-  task_id: string;
+  task_id: string | null;
+  comment_id: string | null;
+  target: "task" | "comment";
   op: TaskMirrorOp;
   owner_entity: MirrorOwnerEntity;
   owner_source_id: string;
@@ -141,6 +164,15 @@ export function activityFields(
   return fields;
 }
 
+/**
+ * O portal diz "não achei" de várias formas. Apagar o que já não existe é o
+ * resultado desejado — repetir cinco vezes só enche a fila de erro.
+ */
+function activityGone(e: unknown): boolean {
+  const msg = (e as Error)?.message ?? "";
+  return /NOT_FOUND|not found|não encontrad|does not exist/i.test(msg);
+}
+
 /** Só o que o dreno usa do cliente — para o teste injetar um dublê. */
 export interface BitrixCallable {
   call<T>(method: string, params?: Record<string, unknown>): Promise<{ result: T }>;
@@ -159,7 +191,7 @@ export async function drainTaskMirrorQueue(
   const { data } = await db
     .from("bitrix_task_queue")
     .select(
-      "id, task_id, op, owner_entity, owner_source_id, activity_id, attempts"
+      "id, task_id, comment_id, target, op, owner_entity, owner_source_id, activity_id, attempts"
     )
     .eq("status", "pending")
     .order("created_at", { ascending: true })
@@ -176,6 +208,72 @@ export async function drainTaskMirrorQueue(
     if (Date.now() >= deadline) break;
 
     try {
+      // --- ramo 1: apagar a atividade lá ---
+      // Sem tarefa, de propósito: quem chega aqui é a ordem enfileirada ANTES
+      // do delete da linha. Só o `activity_id` importa.
+      if (row.op === "delete") {
+        if (!row.activity_id) {
+          throw new WriteBackFatal("Ordem de exclusão sem id da atividade.");
+        }
+        try {
+          await api.call("crm.activity.delete", { id: row.activity_id });
+        } catch (e) {
+          // Já não existe lá: é o resultado desejado, não uma falha a repetir.
+          if (activityGone(e)) {
+            // segue para marcar 'done'
+          } else throw e;
+        }
+        await db
+          .from("bitrix_task_queue")
+          .update({ status: "done", processed_at: now(), last_error: null })
+          .eq("id", row.id);
+        done += 1;
+        continue;
+      }
+
+      // --- ramo 2: a anotação daqui vira comentário na timeline ---
+      if (row.op === "comment_add") {
+        if (!row.comment_id) {
+          throw new WriteBackFatal("Ordem de comentário sem a anotação.");
+        }
+        const { data: cmt } = await db
+          .from("comments")
+          .select("id, body, bitrix_comment_id")
+          .eq("id", row.comment_id)
+          .maybeSingle();
+        if (!cmt) throw new WriteBackFatal("Anotação não existe mais.");
+        // Já espelhada: nada a fazer. É a idempotência do lado de cá — sem
+        // ela, uma retentativa duplicaria o comentário no feed do negócio.
+        if (!cmt.bitrix_comment_id) {
+          const res = await api.call<number | string>(
+            "crm.timeline.comment.add",
+            {
+              fields: {
+                ENTITY_ID: row.owner_source_id,
+                ENTITY_TYPE: row.owner_entity,
+                COMMENT: String(cmt.body ?? ""),
+              },
+            }
+          );
+          const newId = res.result != null ? String(res.result) : "";
+          if (newId === "") {
+            throw new Error("O Bitrix não devolveu o id do comentário.");
+          }
+          await db
+            .from("comments")
+            .update({ bitrix_comment_id: newId })
+            .eq("id", cmt.id as string);
+        }
+        await db
+          .from("bitrix_task_queue")
+          .update({ status: "done", processed_at: now(), last_error: null })
+          .eq("id", row.id);
+        done += 1;
+        continue;
+      }
+
+      // --- ramo 3: criar/atualizar/concluir a atividade da tarefa ---
+      if (!row.task_id) throw new WriteBackFatal("Ordem sem tarefa.");
       const { data: taskData } = await db
         .from("tasks")
         .select(
@@ -329,5 +427,97 @@ export async function mirrorTaskAfterWrite(
     });
   } catch (e) {
     console.error("[task-mirror] espelho falhou:", (e as Error).message);
+  }
+}
+
+/**
+ * Enfileira a EXCLUSÃO da atividade — chamada ANTES de apagar a tarefa.
+ *
+ * A ordem tem de existir antes porque a linha da tarefa some: a FK da fila é
+ * `on delete set null` (0137) justamente para a ordem sobreviver. Enfileirar
+ * depois do delete não teria de onde ler o `bitrix_activity_id`, e a atividade
+ * ficaria aberta no feed do negócio para sempre.
+ *
+ * Sem `activityId` não há o que apagar lá — e isso é o caso normal (a esmagadora
+ * maioria das tarefas nunca foi espelhada), não um erro.
+ */
+export async function mirrorTaskDeletion(
+  serviceDb: SupabaseClient,
+  input: {
+    orgId: string | null;
+    activityId: string | null;
+    ownerEntity: MirrorOwnerEntity | null;
+    ownerSourceId: string | null;
+    createdBy?: string | null;
+  }
+): Promise<void> {
+  if (
+    !input.orgId ||
+    !input.activityId ||
+    !input.ownerEntity ||
+    !input.ownerSourceId
+  ) {
+    return;
+  }
+  await enqueueTaskMirror(serviceDb, {
+    orgId: input.orgId,
+    op: "delete",
+    ownerEntity: input.ownerEntity,
+    ownerSourceId: input.ownerSourceId,
+    activityId: input.activityId,
+    createdBy: input.createdBy ?? null,
+  });
+}
+
+/**
+ * A ANOTAÇÃO daqui vira comentário na timeline do negócio.
+ *
+ * Mesma cascata do espelho de tarefa (Base → registro com par no CRM), sem os
+ * níveis 2 e 3: a anotação não nasce de regra nem tem caixa própria — quem
+ * decide é a Base. Best-effort, como todo espelho.
+ */
+export async function mirrorCommentAfterWrite(
+  db: SupabaseClient,
+  serviceDb: SupabaseClient,
+  input: {
+    commentId: string;
+    recordId: string | null;
+    orgId: string | null;
+    createdBy?: string | null;
+  }
+): Promise<void> {
+  try {
+    if (!input.recordId || !input.orgId) return;
+
+    const { data: record } = await db
+      .from("records")
+      .select("record_type, source_id")
+      .eq("id", input.recordId)
+      .maybeSingle();
+    if (!record) return;
+
+    const { data: source } = await db
+      .from("data_sources")
+      .select("bitrix_activity_owner")
+      .eq("record_type", record.record_type as string)
+      .maybeSingle();
+
+    const decision = resolveMirror({
+      baseOwner:
+        (source?.bitrix_activity_owner as MirrorOwnerEntity | null) ?? null,
+      sourceId: (record.source_id as string | null) ?? null,
+    });
+    if (!decision.mirror) return;
+
+    await enqueueTaskMirror(serviceDb, {
+      orgId: input.orgId,
+      commentId: input.commentId,
+      op: "comment_add",
+      ownerEntity: decision.ownerEntity!,
+      ownerSourceId: decision.ownerSourceId!,
+      createdBy: input.createdBy ?? null,
+    });
+  } catch (e) {
+    console.error("[task-mirror] espelho de anotação falhou:", (e as Error).message);
   }
 }

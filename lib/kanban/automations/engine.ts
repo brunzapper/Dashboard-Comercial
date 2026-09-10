@@ -1,4 +1,7 @@
-// Versão: 1.5 | Data: 09/09/2026
+// Versão: 1.6 | Data: 10/09/2026
+// v1.6 (10/09/2026): só vocabulário — o substantivo da ocorrência
+//   da série saiu do código e virou dado (SeriesConfig.noun, e
+//   tasks.occurrence_noun por tarefa).
 // v1.5 (09/09/2026): ação `create_task_series`. Dois fatos novos, ambos sob
 //   gate (só quando alguma regra ativa mantém série): as ocorrências já criadas
 //   (evita a ida ao banco; a trava real é o índice único da 0132) e as exceções
@@ -473,7 +476,7 @@ export async function runBoardAutomations(
   }
 
   // v1.2 (09/09/2026): atributos PAUSADOS do registro. Só consulta quando
-  // alguma regra ativa concede atributo — pausar precisa parar a cobrança, e
+  // alguma regra ativa concede atributo — pausar precisa parar a série, e
   // até aqui o status era escrito e nunca lido (a 0131 prometia o contrário).
   const grantedAttributes = [
     ...new Set(
@@ -710,7 +713,7 @@ export async function runBoardAutomations(
     for (const [ruleId, n] of result.createdByRule) {
       summaryMovedByRule.set(ruleId, (summaryMovedByRule.get(ruleId) ?? 0) + n);
     }
-    noteFailures(result.failed, cappedSeries, "Falha ao abrir a cobrança");
+    noteFailures(result.failed, cappedSeries, "Falha ao abrir a tarefa da série");
   }
 
   if (cappedSchemaRuns.length > 0 && orgId) {

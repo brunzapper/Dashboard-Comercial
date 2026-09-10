@@ -1,7 +1,12 @@
-<!-- Versão: 1.38 | Data: 09/09/2026 -->
+<!-- Versão: 1.39 | Data: 10/09/2026 -->
+<!-- v1.39 (10/09/2026): §4.16 — o espelho do Bitrix passou a valer nos DOIS
+     sentidos (0137): o que se confere fora do período é a lista de ATIVIDADES
+     dos donos com pendência, e é ela que também detecta exclusão. Junto: a
+     Tree conclui e exclui, o nó de "Alteração" nunca existiu (coluna errada) e
+     o substantivo da ocorrência virou campo. -->
 <!-- v1.38 (09/09/2026): §4.16 — a receita da Nutrição corrigida (o campo
      "Conceder ao registro" não existia na tela, e a âncora lia a coluna
-     errada), cobranças futuras, e a seção nova do espelho no Bitrix. -->
+     errada), ocorrências futuras, e a seção nova do espelho no Bitrix. -->
 <!-- v1.37 (09/09/2026): §4.15 — como editar uma automação pela tela de
      construção do Workflow (inclusive as de Base, que não têm quadro). -->
 <!-- v1.36 (09/09/2026): §4.16 — receita do acompanhamento periódico
@@ -1104,11 +1109,11 @@ linha.
 | Título da tarefa | ex.: `Acompanhar {{titulo}}` |
 | Âncora (a data que conta) | **Mudança de campo** → `stage`. Sai do HISTÓRICO (`audit_log`), então funciona para campo que só o sync mexe |
 | Cadência padrão | `15` dias |
-| Cobranças futuras | `5` — além da devida hoje, quantas ficam abertas à frente |
-| Sem data de início | **Não cobrar** (padrão) ou **Contar da criação**, para o registro que já estava na etapa antes de a série existir |
+| Quantas adiantar | `5` — além da devida hoje, quantas ficam abertas à frente |
+| Sem data de início | **Não gerar nada** (padrão) ou **Contar da criação**, para o registro que já estava na etapa antes de a série existir |
 | Precedência das exceções | `record` > `responsible` > `field:stage` |
-| Começar a cobrar / Parar de cobrar | uma **data absoluta**, um campo de data, ou "quando um campo mudar" |
-| Máximo de cobranças | vazio = sem teto |
+| Começar em / Encerrar em | uma **data absoluta**, um campo de data, ou "quando um campo mudar" |
+| Máximo por registro | vazio = sem teto |
 | Responsável | do REGISTRO |
 | **Conceder ao registro** | **Tree** — é este campo que faz a árvore existir |
 
@@ -1123,8 +1128,8 @@ registro" ou para um campo de data é troca de opção, não de código.
 > marcador de proteção do sync e fica VAZIO para campo vindo do Bitrix: a
 > série rodava a cada minuto e não criava nada, sem erro nenhum para
 > denunciar. Hoje a âncora lê o `audit_log` e os dois campos estão na tela.
-> Abrir a regra e salvar de novo também recupera `Começar a cobrar`,
-> `Descrição` e `Máximo de cobranças`, que a tela apagava a cada save.
+> Abrir a regra e salvar de novo também recupera `Começar em`,
+> `Descrição` e `Máximo por registro`, que a tela apagava a cada save.
 
 **Passo 3 — a tabela com clique.** No dashboard, no widget de tabela dos deals:
 construtor → **Opções avançadas** → "Ao clicar na linha" → **Atributo** →
@@ -1135,16 +1140,16 @@ registro. No modo livre ele vira mapa mental e não depende de automação nenhu
 
 **Conferir que funcionou:**
 
-1. Rode o tick (ou "Executar agora" na regra). Nascem a cobrança devida hoje e
-   as `Cobranças futuras` seguintes (5, por padrão), todas no nome do
+1. Rode o tick (ou "Executar agora" na regra). Nascem a ocorrência devida hoje e
+   as `Quantas adiantar` seguintes (5, por padrão), todas no nome do
    responsável do deal, com prazos espaçados pela cadência. **Nenhuma com
-   prazo anterior ao ciclo em aberto**: cobrança que venceu e ninguém fez não é
+   prazo anterior ao ciclo em aberto**: ocorrência que venceu e ninguém fez não é
    criada retroativamente — ela aparece na Tree como galho vazio.
 2. Rode o tick **de novo**. Nada nasce — a trava é por ocorrência, e o
    23505 é no-op silencioso (não vira `last_error`; se virar, é bug).
 3. Avance a âncora ou reduza a cadência: nasce a próxima, com o número
    seguinte. A sequência é `floor((hoje − âncora) / cadência)`, então uma
-   janela em que o tick não rodou **não** desloca as cobranças seguintes.
+   janela em que o tick não rodou **não** desloca as tarefas da série seguintes.
 
 **Ajustes do dia a dia — sem abrir o construtor:**
 
@@ -1156,20 +1161,34 @@ registro. No modo livre ele vira mapa mental e não depende de automação nenhu
   Vale para ele e só para ele — e nenhuma exceção de registro o ressuscita,
   porque um "não" em qualquer escopo alcançado desliga.
 - **Pausar este lead:** botão Pausar na Tree. O atributo **continua lá** e o
-  histórico inteiro também; o que para é a produção de cobranças. Retomar é o
+  histórico inteiro também; o que para é a produção de tarefas. Retomar é o
   mesmo botão.
 
 **Mexer na tarefa pela árvore.** Clicar no lápis de um nó abre a tarefa
 INTEIRA — título, descrição, vencimento, hora, hora-fim, responsável e registro
-vinculado —, o mesmo painel de /tarefas, do kanban e do feed. A cobrança
+vinculado —, o mesmo painel de /tarefas, do kanban e do feed. A ocorrência
 PREVISTA que ainda não virou tarefa abre esse painel já com o prazo dela
-preenchido: é assim que se agenda a cobrança do dia certo. Concluir marca o nó.
+preenchido: é assim que se agenda a ocorrência do dia certo. Concluir marca o nó.
 A barra lateral do clique na linha tem as mesmas ações.
 
-**Ler a árvore.** O tronco são as cobranças — inclusive a que **ninguém abriu**,
+**Fazer as coisas pela árvore (10/09/2026).** Cada nó de tarefa tem a caixinha
+de concluir e a lixeira, as mesmas de /tarefas. A anotação e o nó livre do mapa
+mental também têm lixeira; o nó de **Alteração** não tem, de propósito — ele é
+um fato do histórico do registro, não algo que alguém criou. Excluir pede
+confirmação, e a tarefa excluída aqui some também da timeline do Bitrix quando
+o espelho está ligado.
+
+**O nome de cada ocorrência é configurável.** Na regra, o campo **"Como chamar
+cada uma"** define o substantivo do tronco ("Tarefa" é o padrão; pode ser
+"Follow-up", "Visita", o que a operação usar). Cada tarefa ainda pode trocar o
+dela no próprio formulário — o campo **"Como chamar esta"** aparece nas tarefas
+que vieram de uma série. O título da tarefa, quando existe, continua vencendo
+os dois na árvore.
+
+**Ler a árvore.** O tronco são as tarefas da série — inclusive a que **ninguém abriu**,
 porque ela é derivada do calendário e não de uma linha de `tasks`. Um galho
 vazio no meio é exatamente a informação que se quer: passou a quinzena e nada
-aconteceu. Tarefas manuais, anotações e alterações penduram na cobrança em cuja
+aconteceu. Tarefas manuais, anotações e alterações penduram na ocorrência em cuja
 janela caíram; um nó pode ser re-pendurado à mão, e só essa exceção é gravada.
 
 ### Espelhar as tarefas no Bitrix (0136)
@@ -1194,6 +1213,38 @@ espelho na Base alcança as séries que já rodam, sem editar nenhuma.
 par no Bitrix, espere o tick (roda a cada minuto) e abra o negócio no portal —
 a atividade está na timeline. Conclua a tarefa aqui e ela fecha lá.
 
+**E de lá para cá (0137, 10/09/2026).** O espelho passou a valer nos dois
+sentidos:
+
+| No Bitrix | Aqui, na sincronização seguinte |
+|---|---|
+| atividade concluída | a tarefa fecha |
+| atividade reaberta | a tarefa reabre |
+| atividade apagada | a tarefa é **excluída**, de vez |
+| TODO novo na timeline | vira tarefa do registro |
+| comentário na timeline | vira **anotação** do registro (só nos registros com o atributo **Tree** ativo) |
+
+E daqui para lá, além do que já havia: reabrir, remarcar, mover de fase e
+**excluir** também chegam ao portal.
+
+> **Por que isso não é "só mais um filtro do sync".** Concluir uma atividade
+> **não mexe no `DATE_MODIFY` do negócio**. O reconcile inteiro busca por
+> `>= DATE_MODIFY`, então o deal cuja única mudança foi "o vendedor fechou a
+> tarefa" nunca voltaria na janela. O que se lê fora do período **não é o
+> deal** — reler o deal não diz nada sobre as atividades dele —, é a **lista de
+> atividades dos donos que têm tarefa espelhada em aberto aqui**. É a mesma
+> leitura que descobre a EXCLUSÃO, porque ela não emite nada: a atividade
+> apagada simplesmente não volta na lista.
+
+**Quem manda em quê**, para não haver cabo de guerra: título, descrição, prazo
+e responsável de uma tarefa já espelhada são **daqui** (a edição é levada ao
+portal); a conclusão, a exclusão e a criação de um TODO novo são **de lá**. A
+leitura de volta nunca sobrescreve o texto de uma tarefa que já tem par no CRM.
+
+Só o TODO da timeline (`PROVIDER_ID = CRM_TODO`) vira tarefa — ligação, e-mail
+e reunião também são "atividades" no CRM e ficariam de fora da lista de tarefas
+de propósito.
+
 **Armadilhas do espelho:**
 
 - **Nada aparece no Bitrix:** o registro precisa ter par no CRM
@@ -1206,17 +1257,26 @@ a atividade está na timeline. Conclua a tarefa aqui e ela fecha lá.
   admin da org.
 - **Não duplica:** `tasks.bitrix_activity_id` é a trava. Se uma tarefa aparecer
   duas vezes na timeline, a suspeita é aquela coluna ter sido limpa à mão.
+- **Tarefa some sozinha:** é a leitura de volta funcionando — alguém apagou a
+  atividade no Bitrix. A exclusão é definitiva dos dois lados (a lixeira de 30
+  dias é de REGISTROS, não de tarefas).
+- **Comentário não vira anotação:** só os registros com o atributo **Tree**
+  ativo puxam a timeline. É uma chamada por registro, então o escopo é
+  deliberadamente estreito.
+- **Anotação repetida:** não deveria acontecer —
+  `comments.bitrix_comment_id` marca o que já foi espelhado. Se acontecer, a
+  suspeita é aquela coluna vazia.
 
 **Armadilhas conhecidas:**
 
-- Cobrança não nasce: confira a âncora (registro sem a data da âncora **nunca**
+- Tarefa da série não nasce: confira a âncora (registro sem a data da âncora **nunca**
   gera — é de propósito, não silêncio de erro), a janela `from`/`until`, e se
   alguma exceção alcançada está com `active = false`. Desde 09/09/2026 a âncora
   `field_changed` lê o `audit_log`, então campo que só o sync mexe funciona;
   se a regra é antiga e nunca criou nada, é quase certo que era isso.
 - Nasceu duplicado: não deveria ser possível (índice único). Se acontecer, a
   suspeita é `series_occurrence` nulo — tarefa manual da Tree não tem ocorrência
-  de propósito, e é isso que distingue "o que o sistema cobrou" de "o que o
+  de propósito, e é isso que distingue "o que o sistema pediu" de "o que o
   vendedor decidiu fazer".
 - Excluir a regra não apaga o atributo nem a árvore
   (`granted_by_rule_id on delete set null`): o histórico do lead sobrevive à

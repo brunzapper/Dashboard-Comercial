@@ -1,4 +1,9 @@
-// Versão: 1.1 | Data: 09/09/2026
+// Versão: 1.2 | Data: 10/09/2026
+// v1.2 (10/09/2026): o nó CONCLUI e EXCLUI. Abrir a tarefa inteira não bastava
+//   — o TaskSheet é editor e por desenho não faz nem uma coisa nem outra, e a
+//   árvore era o único lugar do app onde não dava para fechar uma tarefa nem
+//   apagar uma anotação. Os testes pinam que a regra é REUSADA (mesmo hook da
+//   lista, mesmas actions) e que o nó de alteração fica sem ação.
 // v1.1 (09/09/2026): a Tree passou a abrir a TAREFA INTEIRA no nó, em vez de
 //   mostrar título e data. Estes testes pinam as duas decisões estruturais:
 //   o editor é o do app (não um segundo), e o nó sabe achar a tarefa dele.
@@ -96,7 +101,7 @@ describe("o nó abre a tarefa inteira", () => {
     expect(actions).not.toContain("export async function addTreeTask");
   });
 
-  it("a cobrança prevista abre o editor JÁ com a data dela", () => {
+  it("a ocorrência prevista abre o editor JÁ com a data dela", () => {
     // O campo de data que faltava: antes o `dueDate` que a action aceitava
     // nunca era enviado, e a tarefa nascia sem prazo.
     expect(widget).toContain("dueDate: node.at");
@@ -119,14 +124,66 @@ describe("refId → tarefa", () => {
     expect(find("t1")?.due_date).toBe("2026-09-29");
   });
 
-  it("cobrança já fundida com uma tarefa também acha (o refId é o mesmo)", () => {
-    // load.ts funde a tarefa no nó da cobrança e copia o `refId` — por isso a
-    // cobrança que já virou tarefa é editável pelo mesmo caminho.
+  it("ocorrência já fundida com uma tarefa também acha (o refId é o mesmo)", () => {
+    // load.ts funde a tarefa no nó da ocorrência e copia o `refId` — por isso a
+    // ocorrência que já virou tarefa é editável pelo mesmo caminho.
     expect(find("t1")).not.toBeNull();
   });
 
-  it("cobrança AINDA sem tarefa não acha nada — e é ela que oferece agendar", () => {
+  it("ocorrência AINDA sem tarefa não acha nada — e é ela que oferece agendar", () => {
     expect(find(null)).toBeNull();
     expect(find("occ:3")).toBeNull();
+  });
+});
+
+
+/**
+ * As ações do nó (v1.2). Estático de propósito: o que precisa ser pinado é que
+ * a árvore NÃO tem uma segunda régua — ela chama o mesmo hook da lista de
+ * tarefas e os mesmos choke points de anotação e de nó livre.
+ */
+describe("o nó conclui e exclui, sem régua paralela", () => {
+  const widget = readFileSync(
+    "components/dashboards/charts/tree-widget.tsx",
+    "utf8"
+  );
+
+  it("concluir/reabrir e excluir vêm do hook da LISTA de tarefas", () => {
+    expect(widget).toContain("useTaskRowActions");
+    expect(widget).toContain("@/components/tarefas/task-list");
+    // Uma cópia local das actions seria a régua paralela da invariante 25.
+    expect(widget).not.toContain('from "@/lib/tasks/actions"');
+  });
+
+  it("anotação e nó livre têm exclusão, cada uma pelo dono dela", () => {
+    expect(widget).toContain("deleteComment");
+    expect(widget).toContain("deleteTreeNode");
+  });
+
+  it("excluir pede confirmação — o gesto é irreversível", () => {
+    expect(widget).toContain("confirm(");
+  });
+
+  it("nó de ALTERAÇÃO não oferece ação (é fato do audit_log)", () => {
+    expect(widget).not.toMatch(/kind === "change"[\s\S]{0,200}Delete/);
+  });
+});
+
+/**
+ * O nó de "Alteração" nunca existiu: a consulta pedia `audit_log.created_at`,
+ * e a coluna é `changed_at` (0006). O PostgREST erra, `changes` volta null, e
+ * a árvore fica sem fato de mudança nenhum — em silêncio.
+ */
+describe("os fatos de alteração saem da coluna certa", () => {
+  const load = readFileSync("lib/tree/load.ts", "utf8");
+  // Só a chamada do audit_log: o `.limit(cap)` fecha o bloco, e depois dele
+  // vem o de `tree_nodes`, que legitimamente lê `created_at`.
+  const from = load.indexOf('.from("audit_log")');
+  const auditBlock = load.slice(from, load.indexOf(".limit(cap)", from));
+
+  it("lê e ordena por changed_at", () => {
+    expect(auditBlock).toContain('select("id, field, new_value, changed_at');
+    expect(auditBlock).toContain('.order("changed_at"');
+    expect(auditBlock).not.toContain("created_at");
   });
 });

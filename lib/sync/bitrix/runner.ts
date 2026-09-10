@@ -1,4 +1,10 @@
-// Versão: 1.0 | Data: 11/07/2026
+// Versão: 1.6 | Data: 10/09/2026
+// v1.6 (10/09/2026): a LEITURA DE VOLTA das atividades (0137) entra como
+//   gancho pós-job. Ela NÃO é uma fase do plano de propósito: a exclusão só se
+//   detecta por ausência na lista do dono, e um plano paginado passo a passo
+//   não distingue "sumiu" de "está na próxima página". E roda mesmo quando o
+//   job não escreveu nada — concluir uma atividade não mexe no DATE_MODIFY, e
+//   é justamente aí que há conclusão esperando.
 // Núcleo server-side do sync incremental e retomável do Bitrix (extraído de
 // app/(app)/registros/sync-actions.ts para ser chamável tanto pela Server Action
 // guardada por admin quanto pelo tick agendado /api/sync/tick). Toda a lógica de
@@ -30,6 +36,7 @@ import { recalcFormulaFieldsForRecords } from "@/lib/records/recalc";
 import { runAllKanbanAutomations } from "@/lib/kanban/automations/engine";
 import { reconcileAllKanbanAllocationFields } from "@/lib/kanban/allocation-reconcile";
 import { BitrixClient } from "@/lib/sync/bitrix/client";
+import { syncBitrixActivitiesInbound } from "@/lib/sync/bitrix/activity-inbound";
 import { BitrixLookups, type SerializedLookups } from "@/lib/sync/bitrix/lookups";
 import { mapDeal, mapLead, type MappedRecord } from "@/lib/sync/bitrix/mapper";
 import type { CustomMapEntry } from "@/lib/sync/bitrix/catalog";
@@ -137,6 +144,33 @@ async function maybeSyncKanbanAllocationAfterJob(
   } catch (e) {
     console.warn(
       "[sync] alocação-como-campo pós-job falhou:",
+      (e as Error).message
+    );
+  }
+}
+
+// A LEITURA DE VOLTA (0137): atividade concluída/apagada/criada no Bitrix vira
+// tarefa concluída/apagada/criada aqui, e o comentário da timeline vira
+// anotação. Roda como GANCHO pós-job, não como fase do plano — e isso é
+// deliberado: a exclusão só se detecta por AUSÊNCIA na lista do dono, e um
+// runner paginado passo a passo não sabe distinguir "sumiu" de "está na página
+// seguinte". Ver lib/sync/bitrix/activity-inbound.ts.
+//
+// Roda SEMPRE que o job termina, mesmo sem nada escrito: concluir uma atividade
+// não mexe no DATE_MODIFY do negócio, então um job que não trouxe registro
+// nenhum é EXATAMENTE o caso em que há conclusão esperando para ser lida.
+// Best-effort: falha não derruba o job.
+const ACTIVITY_INBOUND_BUDGET_MS = 12_000;
+
+async function maybeSyncActivitiesAfterJob(db: SupabaseClient): Promise<void> {
+  try {
+    await syncBitrixActivitiesInbound(
+      db,
+      Date.now() + ACTIVITY_INBOUND_BUDGET_MS
+    );
+  } catch (e) {
+    console.warn(
+      "[sync] leitura de atividades pós-job falhou:",
       (e as Error).message
     );
   }
@@ -454,6 +488,7 @@ export async function stepJob(db: SupabaseClient, jobId: string): Promise<StepPr
       await maybeAutoMatchAfterJob(db, job);
       await maybeRunKanbanAutomationsAfterJob(db, job);
       await maybeSyncKanbanAllocationAfterJob(db, job);
+      await maybeSyncActivitiesAfterJob(db);
       return { ...snapshot({ ...job, status: "done" }), done: true, status: "done" };
     }
 

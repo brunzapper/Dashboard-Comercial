@@ -18,7 +18,7 @@ import type { AutomationRow } from "./types";
 
 const TASK_RULE: AutomationRow = {
   id: "rule-task",
-  name: "Cobrar retomada",
+  name: "Lembrar retomada",
   enabled: true,
   position: 0,
   rule: {

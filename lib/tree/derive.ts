@@ -1,13 +1,15 @@
-// Versão: 1.0 | Data: 09/09/2026
+// Versão: 1.1 | Data: 10/09/2026
 // A DERIVAÇÃO da árvore — pura. Dados os fatos e a forma, o parentesco.
 //
+// v1.1 (10/09/2026): só vocabulário (o agrupamento de `por_tipo`).
+//
 // Três formas, porque as três respondem perguntas diferentes:
-//  - `por_ocorrencia`: o tronco são as COBRANÇAS e cada coisa pendura naquela
-//    em cuja janela caiu. Lendo de cima a baixo: "na 3ª cobrança ele ligou e
+//  - `por_ocorrencia`: o tronco são as OCORRÊNCIAS da série e cada coisa
+//    pendura naquela em cuja janela caiu. De cima a baixo: "na 3ª ele ligou e
 //    anotou; na 4ª não fez nada". É o que responde "como o vendedor está
 //    conduzindo este lead".
 //  - `por_tipo`: um ramo por tipo. Responde "o que existe", não "o que
-//    aconteceu em cada cobrança".
+//    aconteceu em cada uma".
 //  - `livre`: só o parentesco explícito — o mapa mental.
 //
 // E as formas se misturam, como pedido: a forma dá o parentesco DERIVADO, e um
@@ -41,10 +43,10 @@ function toNode(fact: TreeFact, depth: number): TreeNode {
 }
 
 /**
- * Em qual cobrança este fato caiu.
+ * Em qual ocorrência este fato caiu.
  *
- * A janela da cobrança N vai do dia dela até a véspera da seguinte. Fato
- * ANTERIOR à primeira cobrança pendura na primeira — ele aconteceu durante o
+ * A janela da ocorrência N vai do dia dela até a véspera da seguinte. Fato
+ * ANTERIOR à primeira pendura na primeira — ele aconteceu durante o
  * primeiro ciclo, e sumir com ele seria perder justamente o começo do
  * acompanhamento.
  */
@@ -66,7 +68,7 @@ export interface DeriveInput {
 
 /**
  * Monta a árvore. Nenhum fato se perde: o que não encontra pai derivado fica na
- * raiz, e o que aponta para um pai inexistente (nó apagado, cobrança que sumiu
+ * raiz, e o que aponta para um pai inexistente (nó apagado, ocorrência que sumiu
  * quando a cadência mudou) também — árvore não é lugar de esconder dado.
  */
 export function deriveTree(input: DeriveInput): TreeNode[] {
@@ -164,7 +166,7 @@ export function deriveTree(input: DeriveInput): TreeNode[] {
 }
 
 const KIND_LABEL: Record<TreeNodeKind, string> = {
-  occurrence: "Cobranças",
+  occurrence: "Tarefas da série",
   task: "Tarefas",
   comment: "Anotações",
   change: "Alterações",

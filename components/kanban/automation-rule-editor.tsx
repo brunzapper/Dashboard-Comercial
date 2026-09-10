@@ -1,10 +1,14 @@
-// Versão: 1.1 | Data: 09/09/2026
+// Versão: 1.2 | Data: 10/09/2026
+// v1.2 (10/09/2026): o SUBSTANTIVO da ocorrência virou controle ("Como chamar
+//   cada uma"). Ele estava escrito no fonte, e a palavra não era a que este
+//   projeto usa — vocabulário de domínio é do usuário, não do código. Padrão
+//   "Tarefa" (DEFAULT_SERIES_NOUN); a tarefa individual ainda sobrepõe.
 // v1.1 (09/09/2026): os controles da série que faltavam. `grantAttribute` tinha
 //   campo no rascunho e NENHUM controle (a receita do manual — conceder o
 //   atributo `tree` — era impossível de seguir pela tela), e
 //   `from`/`description`/`maxOccurrences` não eram lidos de volta por
 //   `draftFromRule`: qualquer save pela UI apagava os três em silêncio.
-//   Entram também `lookahead` (cobranças futuras) e `anchorFallback`.
+//   Entram também `lookahead` (ocorrências futuras) e `anchorFallback`.
 // O EDITOR de uma regra de automação — extraído do painel do quadro para que a
 // tela de construção do Workflow renderize exatamente ele.
 //
@@ -34,7 +38,9 @@ import {
 } from "@/lib/tasks/mirror-config";
 import {
   DEFAULT_SERIES_LOOKAHEAD,
+  DEFAULT_SERIES_NOUN,
   MAX_SERIES_LOOKAHEAD,
+  MAX_SERIES_NOUN_LEN,
 } from "@/lib/series/types";
 import type { FilterOp, WidgetFilter } from "@/lib/widgets/types";
 import {
@@ -161,18 +167,23 @@ export interface RuleDraft {
   // draftFromRule — ou seja, qualquer save pela UI APAGAVA os três em
   // silêncio. Sem o primeiro, a receita do manual (conceder o atributo `tree`)
   // era impossível de seguir pela tela.
-  /** Início da janela: adia a cobrança sem mover a âncora. */
+  /** Início da janela: adia o começo da série sem mover a âncora. */
   seriesFromKind: "sempre" | "field" | "date" | "field_changed";
   seriesFromValue: string;
   seriesDescription: string;
-  /** Teto de cobranças por registro; vazio = sem teto. */
+  /** Teto de ocorrências por registro; vazio = sem teto. */
   seriesMaxOccurrences: string;
   /** Quantas futuras manter abertas além da devida hoje. */
   seriesLookahead: string;
-  /** Âncora que não resolve: não cobrar, ou contar da criação do registro. */
+  /** Âncora que não resolve: não gerar nada, ou contar da criação. */
   seriesAnchorFallback: "nenhum" | "criacao";
   /** Espelho no Bitrix (0136), nível 2: herda da Base por padrão. */
   seriesMirrorBitrix: MirrorChoice;
+  /**
+   * v1.2: como esta série chama cada ocorrência. Vazio = DEFAULT_SERIES_NOUN.
+   * É rótulo de exibição (o tronco da Tree) — não entra em chave nem consulta.
+   */
+  seriesNoun: string;
 }
 
 /**
@@ -395,6 +406,12 @@ export function draftToRule(draft: RuleDraft): AutomationRule | null {
           ...(draft.seriesGrantAttribute
             ? { grantAttribute: draft.seriesGrantAttribute }
             : {}),
+          // v1.2: só grava quando o usuário escolheu OUTRO nome — regra sem a
+          // chave segue com o padrão, e o jsonb não engorda com o default.
+          ...(draft.seriesNoun.trim() &&
+          draft.seriesNoun.trim() !== DEFAULT_SERIES_NOUN
+            ? { noun: draft.seriesNoun.trim().slice(0, MAX_SERIES_NOUN_LEN) }
+            : {}),
         },
       },
     };
@@ -561,6 +578,12 @@ export function ruleToDraft(row: AutomationRow, fieldOptions: ComboboxOption[]):
       action.type === "create_task_series"
         ? (action.series.mirrorBitrix ?? "herdar")
         : "herdar",
+    // v1.2: sem esta leitura, salvar a regra apagaria o substantivo escolhido
+    // — o mesmo buraco que engoliu from/description/maxOccurrences na v1.1.
+    seriesNoun:
+      action.type === "create_task_series"
+        ? (action.series.noun ?? DEFAULT_SERIES_NOUN)
+        : DEFAULT_SERIES_NOUN,
   };
 }
 
@@ -1071,7 +1094,7 @@ export function AutomationRuleEditor({
                 <div className="flex min-w-56 flex-1 flex-col gap-3">
                   <div className="flex flex-wrap items-end gap-2">
                     <div className="flex min-w-56 flex-1 flex-col gap-1">
-                      <Label className="text-xs">Título da cobrança</Label>
+                      <Label className="text-xs">Título da tarefa</Label>
                       <Input
                         value={draft.seriesTitle}
                         onChange={(e) =>
@@ -1080,7 +1103,7 @@ export function AutomationRuleEditor({
                           )
                         }
                         placeholder="Ex.: Follow-up de nutrição"
-                        aria-label="Título da cobrança"
+                        aria-label="Título da tarefa da série"
                       />
                     </div>
                     <div className="flex w-32 flex-col gap-1">
@@ -1149,8 +1172,22 @@ export function AutomationRuleEditor({
                       descrição e teto existiam no jsonb e eram APAGADOS a cada
                       save, porque draftFromRule não os lia de volta. */}
                   <div className="flex flex-wrap items-end gap-2">
+                    <div className="flex w-44 flex-col gap-1">
+                      <Label className="text-xs">Como chamar cada uma</Label>
+                      <Input
+                        value={draft.seriesNoun}
+                        maxLength={MAX_SERIES_NOUN_LEN}
+                        onChange={(e) =>
+                          setDraft((d) =>
+                            d ? { ...d, seriesNoun: e.target.value } : d
+                          )
+                        }
+                        placeholder={DEFAULT_SERIES_NOUN}
+                        aria-label="Substantivo de cada ocorrência da série"
+                      />
+                    </div>
                     <div className="flex w-40 flex-col gap-1">
-                      <Label className="text-xs">Cobranças futuras</Label>
+                      <Label className="text-xs">Quantas adiantar</Label>
                       <Input
                         type="number"
                         min={0}
@@ -1161,14 +1198,14 @@ export function AutomationRuleEditor({
                             d ? { ...d, seriesLookahead: e.target.value } : d
                           )
                         }
-                        aria-label="Cobranças futuras mantidas abertas"
+                        aria-label="Ocorrências futuras mantidas abertas"
                       />
                     </div>
                     <div className="flex w-56 flex-col gap-1">
                       <Label className="text-xs">Sem data de início</Label>
                       <Combobox
                         options={[
-                          { value: "nenhum", label: "Não cobrar" },
+                          { value: "nenhum", label: "Não gerar nada" },
                           { value: "criacao", label: "Contar da criação" },
                         ]}
                         value={draft.seriesAnchorFallback}
@@ -1188,7 +1225,7 @@ export function AutomationRuleEditor({
                       />
                     </div>
                     <div className="flex w-40 flex-col gap-1">
-                      <Label className="text-xs">Máximo de cobranças</Label>
+                      <Label className="text-xs">Máximo por registro</Label>
                       <Input
                         type="number"
                         min={0}
@@ -1201,21 +1238,20 @@ export function AutomationRuleEditor({
                           )
                         }
                         placeholder="sem teto"
-                        aria-label="Máximo de cobranças por registro"
+                        aria-label="Máximo de ocorrências por registro"
                       />
                     </div>
                   </div>
                   <p className="text-muted-foreground text-xs">
-                    Além da cobrança devida hoje, a série mantém abertas as
-                    próximas — dá para ver e remarcar o que vem pela frente em
-                    vez de esperar o dia. Cobrança que já venceu e ninguém abriu
-                    NÃO é criada retroativamente; ela aparece na Tree como galho
-                    vazio.
+                    Além da devida hoje, a série mantém abertas as próximas —
+                    dá para ver e remarcar o que vem pela frente em vez de
+                    esperar o dia. O que já venceu e ninguém abriu NÃO é criado
+                    retroativamente; aparece na Tree como galho vazio.
                   </p>
 
                   <div className="flex flex-wrap items-end gap-2">
                     <div className="flex w-44 flex-col gap-1">
-                      <Label className="text-xs">Começar a cobrar</Label>
+                      <Label className="text-xs">Começar em</Label>
                       <Combobox
                         options={[
                           { value: "sempre", label: "Desde a âncora" },
@@ -1277,7 +1313,7 @@ export function AutomationRuleEditor({
 
                   <div className="flex flex-wrap items-end gap-2">
                     <div className="flex w-56 flex-col gap-1">
-                      <Label className="text-xs">Primeira cobrança</Label>
+                      <Label className="text-xs">Primeira ocorrência</Label>
                       <Combobox
                         options={[
                           { value: "apos_um_ciclo", label: "Um ciclo depois" },
@@ -1292,16 +1328,16 @@ export function AutomationRuleEditor({
                           )
                         }
                         searchable={false}
-                        aria-label="Primeira cobrança"
+                        aria-label="Primeira ocorrência"
                       />
                     </div>
                     <div className="flex w-44 flex-col gap-1">
-                      <Label className="text-xs">Parar de cobrar</Label>
+                      <Label className="text-xs">Encerrar em</Label>
                       <Combobox
                         options={[
                           // As quatro formas de parar. "Sem prazo" não é
                           // "para sempre": a regra deixa de casar quando o
-                          // registro sai da etapa, e as cobranças param aí.
+                          // registro sai da etapa, e a série para aí.
                           {
                             value: "nunca",
                             label: "Enquanto as condições valerem",
@@ -1371,7 +1407,7 @@ export function AutomationRuleEditor({
                   <div className="flex flex-wrap items-end gap-2 border-t pt-2">
                     <div className="flex min-w-56 flex-1 flex-col gap-1">
                       <Label className="text-xs">
-                        Descrição da cobrança (opcional)
+                        Descrição da tarefa (opcional)
                       </Label>
                       <Input
                         value={draft.seriesDescription}
@@ -1381,7 +1417,7 @@ export function AutomationRuleEditor({
                           )
                         }
                         placeholder="Vai no corpo da tarefa"
-                        aria-label="Descrição da cobrança"
+                        aria-label="Descrição da tarefa da série"
                       />
                     </div>
                     <div className="flex w-56 flex-col gap-1">
@@ -1397,7 +1433,7 @@ export function AutomationRuleEditor({
                           )
                         }
                         searchable={false}
-                        aria-label="Espelhar as cobranças no Bitrix"
+                        aria-label="Espelhar as tarefas da série no Bitrix"
                       />
                     </div>
                     <div className="flex w-56 flex-col gap-1">
@@ -1422,7 +1458,7 @@ export function AutomationRuleEditor({
                     O atributo liga a funcionalidade no registro que entra na
                     série — é ele que faz a Tree do acompanhamento existir e a
                     linha da tabela virar clicável. Pausar o atributo depois
-                    interrompe as cobranças sem apagar o histórico.
+                    interrompe a série sem apagar o histórico.
                   </p>
 
                   <div className="flex flex-col gap-1 border-t pt-2">

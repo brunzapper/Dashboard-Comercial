@@ -1,11 +1,14 @@
-// Versão: 1.6 | Data: 09/09/2026
+// Versão: 1.7 | Data: 10/09/2026
+// v1.7 (10/09/2026): só vocabulário — o substantivo da ocorrência
+//   da série saiu do código e virou dado (SeriesConfig.noun, e
+//   tasks.occurrence_noun por tarefa).
 // v1.6 (09/09/2026): o corpo do editor saiu para
 //   components/kanban/automation-rule-editor.tsx. O sheet ficou com a LISTA
 //   de regras e o estado; o editor é o MESMO componente que a tela de
 //   construção do Workflow renderiza — antes ele estava preso aqui dentro, e
 //   uma automação de BASE (que não tem quadro para abrir) não tinha porta de
 //   edição nenhuma.
-// v1.5 (09/09/2026): ação "Série de tarefas" (create_task_series) — a cobrança
+// v1.5 (09/09/2026): ação "Série de tarefas" (create_task_series) — a tarefa
 //   RECORRENTE. O editor separa as duas datas que o pedido separa: a condição
 //   diz QUEM entra (etapa = Nutrição) e a ÂNCORA diz de quando contar (a
 //   mudança de etapa). A cadência aqui é o PADRÃO; as exceções por responsável,
@@ -26,7 +29,7 @@
 // Versão: 1.2 | Data: 08/09/2026
 // v1.2 (08/09/2026): ação "Abrir tarefa" (create_task). Idempotente por regra ×
 //   registro (índice único da 0129) — reexecutar não duplica; concluída a
-//   tarefa, a regra cobra de novo se a condição voltar a valer.
+//   tarefa, a regra abre outra se a condição voltar a valer.
 // Painel "Automações" do kanban (modo registros, sem bucket de data): lista de
 // regras (ordem = ordem de avaliação; primeira que casa vence), editor de
 // condições das 4 famílias — Campo do registro / Registros conectados /
@@ -63,7 +66,10 @@ import { ResizableSheetContent } from "@/components/ui/resizable-sheet-content";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { notifyOnError } from "@/lib/feedback/notify";
 import type { KanbanColumn } from "@/lib/kanban/types";
-import { DEFAULT_SERIES_LOOKAHEAD } from "@/lib/series/types";
+import {
+  DEFAULT_SERIES_LOOKAHEAD,
+  DEFAULT_SERIES_NOUN,
+} from "@/lib/series/types";
 import {
   deleteAutomation,
   getAutomationFieldOptions,
@@ -332,6 +338,7 @@ export function AutomationsSheet({
                 seriesLookahead: String(DEFAULT_SERIES_LOOKAHEAD),
                 seriesAnchorFallback: "nenhum",
                 seriesMirrorBitrix: "herdar",
+                seriesNoun: DEFAULT_SERIES_NOUN,
               })
             }
             disabled={pending || draft != null}
@@ -454,7 +461,7 @@ export function AutomationsSheet({
                     </>
                   ) : row.rule.action.type === "create_task_series" ? (
                     <>
-                      abrir a cobrança{" "}
+                      abrir{" "}
                       <span className="font-medium">
                         {String(row.rule.action.series.title)}
                       </span>{" "}
