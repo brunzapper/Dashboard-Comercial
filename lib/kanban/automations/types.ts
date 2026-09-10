@@ -1,7 +1,10 @@
-// Versão: 1.5 | Data: 09/09/2026
-// v1.5 (09/09/2026): ação `create_task_series` — a cobrança RECORRENTE. Não é
+// Versão: 1.6 | Data: 10/09/2026
+// v1.6 (10/09/2026): só vocabulário — o substantivo da ocorrência
+//   da série saiu do código e virou dado (SeriesConfig.noun, e
+//   tasks.occurrence_noun por tarefa).
+// v1.5 (09/09/2026): ação `create_task_series` — a tarefa RECORRENTE. Não é
 //   um `create_task` repetido: a trava dele é "uma tarefa ABERTA por regra ×
-//   registro" (a regra só cobra de novo depois que a anterior é concluída), e
+//   registro" (a regra só abre outra depois que a anterior é concluída), e
 //   uma série precisa do contrário — a 3ª quinzena vence tenha ou não a 2ª
 //   sido feita, e é ver as duas lado a lado que mostra a conduta. A trava é
 //   por OCORRÊNCIA (índice único da 0132), e a ocorrência é DERIVADA da âncora
@@ -296,7 +299,7 @@ export function parseAutomationRule(raw: unknown): AutomationRule | null {
       };
     } else if (actionRaw.type === "create_task_series") {
       // Fail-closed inteiro: série sem âncora ou com cadência fora de faixa
-      // cobraria o vendedor errado, ou todo dia.
+      // abriria tarefa para o vendedor errado, ou todo dia.
       const series = parseSeriesConfig(actionRaw.series);
       if (series) action = { type: "create_task_series", series };
     } else if (

@@ -1,4 +1,7 @@
-// Versão: 1.0 | Data: 09/09/2026
+// Versão: 1.1 | Data: 10/09/2026
+// v1.1 (10/09/2026): só vocabulário — o substantivo da ocorrência
+//   da série saiu do código e virou dado (SeriesConfig.noun, e
+//   tasks.occurrence_noun por tarefa).
 // REGISTRY dos atributos de registro (0131).
 //
 // Um "atributo" é uma funcionalidade de Operação pendurada num registro — o
@@ -29,7 +32,7 @@ export const ATTRIBUTE_REGISTRY: AttributeDef[] = [
     key: "tree",
     label: "Tree",
     description:
-      "Árvore de acompanhamento do registro: as cobranças da automação, as anotações e o que foi feito em cada uma.",
+      "Árvore de acompanhamento do registro: as tarefas da série, as anotações e o que foi feito em cada uma.",
     surface: "tree",
   },
 ];

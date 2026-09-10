@@ -1,9 +1,16 @@
-// Versão: 1.3 | Data: 09/09/2026
+// Versão: 1.4 | Data: 10/09/2026
+// v1.4 (10/09/2026): o nó CONCLUI e EXCLUI. Abrir a tarefa inteira (v1.3) não
+//   bastava: o TaskSheet é editor, e por desenho não conclui nem apaga — então
+//   a árvore era o único lugar do app onde não se podia fechar uma tarefa nem
+//   apagar uma anotação. Reusa `useTaskRowActions` (a MESMA regra da lista de
+//   tarefas), `deleteComment` (0066) e a `deleteTreeNode` nova para o nó livre.
+//   Nó de "Alteração" segue sem ação: é fato do audit_log, não se apaga.
+//   Junto: o substantivo do tronco virou dado (ver lib/series/types.ts v1.4).
 // v1.3 (09/09/2026): o nó ABRE A TAREFA INTEIRA. Antes um nó mostrava título e
 //   data e mais nada, e o "agendar tarefa" era um Input de título só — a tarefa
 //   nascia sem prazo (o `dueDate` que a action aceita nunca era enviado). Agora
 //   clicar num nó abre o MESMO editor que o resto do app usa (TaskSheet), com
-//   prazo, hora, descrição e responsável; e a cobrança prevista que ainda não
+//   prazo, hora, descrição e responsável; e a ocorrência prevista que não
 //   virou tarefa abre o editor JÁ com a data dela. Nada de editor novo: um
 //   segundo seria a régua paralela da invariante 25.
 // v1.2 (09/09/2026): a árvore RESPONDE ao clique. Três defeitos juntos:
@@ -22,9 +29,9 @@
 // livre, o mapa mental.
 //
 // O que ela responde, e nenhum gráfico respondia: "como o vendedor está
-// conduzindo este lead". O tronco são as COBRANÇAS (derivadas, então a que
-// ninguém fez também aparece) e cada anotação, tarefa e alteração pendura
-// naquela em cuja janela caiu.
+// conduzindo este lead". O tronco são as OCORRÊNCIAS da série (derivadas,
+// então a que ninguém fez também aparece) e cada anotação, tarefa e alteração
+// pendura naquela em cuja janela caiu.
 //
 // Render em HTML/CSS, não SVG: os nós têm texto de tamanho variável e ações
 // dentro deles (anotar, agendar, pausar), e um <foreignObject> para cada um
@@ -34,7 +41,7 @@
 // cada minuto e uma árvore que pisca sozinha lê como defeito.
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 import {
   ChevronDown,
   ChevronRight,
@@ -42,18 +49,26 @@ import {
   MessageSquarePlus,
   Pause,
   Play,
+  Trash2,
 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { TaskSheet, type TaskFormContext } from "@/components/tarefas/task-sheet";
+import {
+  TaskCompleteCheckbox,
+  TaskDeleteButton,
+  useTaskRowActions,
+} from "@/components/tarefas/task-list";
+import { deleteComment } from "@/lib/comments/actions";
 import { classifyDue, DUE_STATUS_LABELS } from "@/lib/tasks/alerts";
 import { DEFAULT_DATE_FORMAT, formatDateValue } from "@/lib/widgets/format";
 import type { TaskRow } from "@/lib/tasks/types";
 import { cn } from "@/lib/utils";
 import {
   addTreeNote,
+  deleteTreeNode,
   loadRecordTree,
   setRecordCadence,
   type TreeData,
@@ -122,6 +137,90 @@ function NodeDate({ node, task }: { node: TreeNode; task: TaskRow | null }) {
   );
 }
 
+/**
+ * Concluir/reabrir e excluir a tarefa DO NÓ.
+ *
+ * Componente próprio porque o hook não pode ser condicional e nem todo nó tem
+ * tarefa. A regra (quais actions, o evento do bus, a mensagem de RLS) é a
+ * MESMA da lista — `useTaskRowActions` é o dono único (invariante 25).
+ */
+function TaskNodeActions({
+  task,
+  onChanged,
+}: {
+  task: TaskRow;
+  onChanged: () => void;
+}) {
+  const { done, pending, error, toggle, remove } = useTaskRowActions(
+    task,
+    onChanged
+  );
+  return (
+    <>
+      <TaskCompleteCheckbox done={done} pending={pending} onToggle={toggle} />
+      <TaskDeleteButton
+        pending={pending}
+        onRemove={() => {
+          if (confirm(`Excluir a tarefa "${task.title}"?`)) remove();
+        }}
+      />
+      {error ? (
+        <span className="text-destructive text-xs" role="status">
+          {error}
+        </span>
+      ) : null}
+    </>
+  );
+}
+
+/**
+ * Excluir um nó que NÃO é tarefa — a anotação (`comments`, 0066) e a nota
+ * livre (`tree_nodes`). Cada uma pelo choke point que já é dono dela.
+ */
+function NodeDeleteButton({
+  label,
+  confirmText,
+  onDelete,
+  onChanged,
+}: {
+  label: string;
+  confirmText: string;
+  onDelete: () => Promise<{ ok?: boolean; message?: string }>;
+  onChanged: () => void;
+}) {
+  const [pending, startTransition] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+  return (
+    <>
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon"
+        className="size-6"
+        disabled={pending}
+        aria-label={label}
+        title={label}
+        onClick={() => {
+          if (!confirm(confirmText)) return;
+          setError(null);
+          startTransition(async () => {
+            const res = await onDelete();
+            if (res.ok) onChanged();
+            else setError(res.message ?? "Falha ao excluir.");
+          });
+        }}
+      >
+        <Trash2 className="size-3.5" />
+      </Button>
+      {error ? (
+        <span className="text-destructive text-xs" role="status">
+          {error}
+        </span>
+      ) : null}
+    </>
+  );
+}
+
 function NodeCard({
   node,
   onNote,
@@ -142,7 +241,7 @@ function NodeCard({
 }) {
   const [open, setOpen] = useState(true);
   const hasChildren = node.children.length > 0;
-  // O nó de tarefa E a cobrança já fundida com uma tarefa carregam o id dela.
+  // O nó de tarefa E a ocorrência já fundida com uma tarefa carregam o id.
   const task = node.refId ? (taskById.get(node.refId) ?? null) : null;
 
   return (
@@ -187,7 +286,7 @@ function NodeCard({
               variant="ghost"
               size="icon"
               className="size-6"
-              title="Anotar nesta cobrança"
+              title="Anotar aqui"
               onClick={() => onNote(node)}
             >
               <MessageSquarePlus className="size-3.5" />
@@ -195,22 +294,45 @@ function NodeCard({
           ) : null}
 
           {/* v1.3: o nó com tarefa abre a tarefa INTEIRA para editar. O
-              `refId` sempre carregou o id — só não havia para onde levá-lo. */}
+              `refId` sempre carregou o id — só não havia para onde levá-lo.
+              v1.4: e agora conclui e exclui, que o editor não faz. */}
           {task ? (
-            <TaskSheet task={task} ctx={ctx} editTrigger onDone={onChanged} />
+            <>
+              <TaskNodeActions task={task} onChanged={onChanged} />
+              <TaskSheet task={task} ctx={ctx} editTrigger onDone={onChanged} />
+            </>
           ) : node.kind === "occurrence" ? (
-            // A cobrança PREVISTA que ninguém abriu: agendar já com o dia dela.
+            // A ocorrência PREVISTA que ninguém abriu: agendar com o dia dela.
             // É o campo de data que faltava — antes a tarefa nascia sem prazo.
             <TaskSheet
               ctx={ctx}
               iconTrigger
-              triggerLabel="Agendar esta cobrança"
+              triggerLabel="Agendar esta tarefa"
               defaults={{
                 recordId,
                 recordTitle,
                 dueDate: node.at || null,
               }}
               onDone={onChanged}
+            />
+          ) : null}
+
+          {/* v1.4: anotação e nota livre passam a ter exclusão. Nó de
+              "Alteração" fica de fora de propósito: é fato do audit_log. */}
+          {node.kind === "comment" && node.refId ? (
+            <NodeDeleteButton
+              label="Excluir anotação"
+              confirmText="Excluir esta anotação?"
+              onDelete={() => deleteComment(node.refId!)}
+              onChanged={onChanged}
+            />
+          ) : null}
+          {node.kind === "note" && node.refId ? (
+            <NodeDeleteButton
+              label="Excluir nó"
+              confirmText="Excluir este nó da árvore?"
+              onDelete={() => deleteTreeNode(node.refId!)}
+              onChanged={onChanged}
             />
           ) : null}
         </span>
@@ -454,7 +576,7 @@ export function TreeWidget({
           title="Inverte a ordem; 'carregar mais' anda nessa direção"
           onClick={() => {
             // Trocar a ordem volta ao primeiro passo: a janela é das N
-            // cobranças daquela ponta, e manter o limite esticado mostraria
+            // ocorrências daquela ponta, e manter o limite esticado mostraria
             // um recorte que ninguém pediu.
             setLimit(TREE_WINDOW_STEP);
             setOrder((o) => (o === "desc" ? "asc" : "desc"));
@@ -508,7 +630,7 @@ export function TreeWidget({
 
       {data.attribute?.status === "pausado" ? (
         <p className="text-muted-foreground text-xs">
-          Acompanhamento pausado: novas cobranças não são abertas. O registro
+          Acompanhamento pausado: novas tarefas não são abertas. O registro
           continua na automação e o histórico permanece.
         </p>
       ) : null}
@@ -590,8 +712,8 @@ export function TreeWidget({
           onClick={() => setLimit((n) => n + TREE_WINDOW_STEP)}
         >
           {order === "desc"
-            ? "Carregar cobranças mais antigas"
-            : "Carregar cobranças mais recentes"}
+            ? "Carregar o que é mais antigo"
+            : "Carregar o que é mais recente"}
         </Button>
       ) : null}
     </div>

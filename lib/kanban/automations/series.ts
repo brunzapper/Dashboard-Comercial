@@ -1,12 +1,15 @@
-// Versão: 1.1 | Data: 09/09/2026
-// v1.1 (09/09/2026): a cobrança criada entra na fila do espelho no Bitrix
+// Versão: 1.2 | Data: 10/09/2026
+// v1.2 (10/09/2026): só vocabulário — o substantivo da ocorrência
+//   da série saiu do código e virou dado (SeriesConfig.noun, e
+//   tasks.occurrence_noun por tarefa).
+// v1.1 (09/09/2026): a tarefa criada entra na fila do espelho no Bitrix
 //   (0136) quando a Base (e a regra) mandam. Best-effort: o espelho nunca
 //   derruba a criação da tarefa.
-// Executor da ação `create_task_series` (0132): cria a cobrança devida hoje e
+// Executor da ação `create_task_series` (0132): cria a tarefa devida hoje e
 // concede o atributo a quem entrou na série.
 //
 // Irmão de `task.ts`, com uma diferença que é o desenho inteiro: lá a trava é
-// "uma tarefa ABERTA por regra × registro" (a regra só cobra de novo depois que
+// "uma tarefa ABERTA por regra × registro" (a regra só abre outra depois que
 // a anterior é concluída); aqui é uma tarefa por OCORRÊNCIA, e a 3ª quinzena
 // vence tenha ou não a 2ª sido feita. É ver as duas em aberto lado a lado que
 // mostra como o vendedor está conduzindo o lead.
@@ -112,7 +115,7 @@ export async function executeAutomationSeries(
       });
     }
 
-    // O atributo entra JUNTO com a primeira cobrança — é o que faz a linha da
+    // O atributo entra JUNTO com a primeira tarefa — é o que faz a linha da
     // tabela virar clicável e a Tree existir. Ensure-if-absent: conceder de
     // novo nunca reativa um atributo que alguém pausou de propósito.
     if (plan.grantAttribute && batch.orgId) {
@@ -134,7 +137,7 @@ export async function executeAutomationSeries(
 
 /**
  * Ocorrências de série JÁ criadas para estes registros, como
- * "<ruleId>:<occurrence>" — o fato que evita a ida ao banco de uma cobrança
+ * "<ruleId>:<occurrence>" — o fato que evita a ida ao banco de uma ocorrência
  * que já existe. A trava de verdade continua sendo o índice único da 0132.
  */
 export async function loadSeriesOccurrences(

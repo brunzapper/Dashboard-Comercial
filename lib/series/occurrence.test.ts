@@ -1,12 +1,12 @@
 // Versão: 1.2 | Data: 09/09/2026
 // v1.1 (09/09/2026): o `until` por ALTERAÇÃO de campo (a quarta forma de
-//   parar de cobrar).
-// v1.2 (09/09/2026): `occurrencesAhead` (as cobranças futuras) e o
+//   encerrar).
+// v1.2 (09/09/2026): `occurrencesAhead` (as ocorrências futuras) e o
 //   `anchorFallback` do registro sem histórico.
 // A ocorrência devida é o relógio da série. O que estes testes protegem:
 // ela é DERIVADA (a mesma entrada dá sempre a mesma sequência, mesmo com
 // rodadas perdidas), ausência de data nunca vira "hoje", e a janela realmente
-// para de cobrar.
+// para de gerar.
 import { describe, expect, it } from "vitest";
 
 import {
@@ -24,13 +24,13 @@ const base = {
 };
 
 describe("dueOccurrence", () => {
-  it("antes de fechar o primeiro ciclo, não cobra", () => {
-    // Entrou em Nutrição hoje: cobrar agora seria ruído, não acompanhamento.
+  it("antes de fechar o primeiro ciclo, não gera nada", () => {
+    // Entrou em Nutrição hoje: abrir agora seria ruído, não acompanhamento.
     expect(dueOccurrence({ ...base, todayIso: "2026-09-01" })).toBeNull();
     expect(dueOccurrence({ ...base, todayIso: "2026-09-14" })).toBeNull();
   });
 
-  it("na virada da quinzena, cobra a 1ª", () => {
+  it("na virada da quinzena, abre a 1ª", () => {
     const plan = dueOccurrence({ ...base, todayIso: "2026-09-15" });
     expect(plan).toMatchObject({ occurrence: 1, dueDate: "2026-09-15" });
   });
@@ -44,7 +44,7 @@ describe("dueOccurrence", () => {
     expect(dueOccurrence({ ...base, todayIso: "2026-10-20" })?.occurrence).toBe(3);
   });
 
-  it("com 'imediato', a cobrança 0 é a do próprio dia da âncora", () => {
+  it("com 'imediato', a ocorrência 0 é a do próprio dia da âncora", () => {
     const plan = dueOccurrence({
       ...base,
       firstAt: "imediato",
@@ -53,12 +53,12 @@ describe("dueOccurrence", () => {
     expect(plan).toMatchObject({ occurrence: 0, dueDate: "2026-09-01" });
   });
 
-  it("sem âncora não cobra — data ausente nunca vira hoje", () => {
+  it("sem âncora não gera nada — data ausente nunca vira hoje", () => {
     expect(dueOccurrence({ ...base, anchorDate: null, todayIso: "2026-10-01" })).toBeNull();
     expect(dueOccurrence({ ...base, anchorDate: "", todayIso: "2026-10-01" })).toBeNull();
   });
 
-  it("fora da janela, para de cobrar", () => {
+  it("fora da janela, para de gerar", () => {
     expect(
       dueOccurrence({ ...base, todayIso: "2026-10-13", untilDate: "2026-10-01" })
     ).toBeNull();
@@ -72,18 +72,18 @@ describe("dueOccurrence", () => {
     expect(comFrom?.occurrence).toBe(3);
   });
 
-  it("respeita o teto de cobranças", () => {
+  it("respeita o teto de ocorrências", () => {
     expect(
       dueOccurrence({ ...base, todayIso: "2026-10-13", maxOccurrences: 2 })
     ).toBeNull();
   });
 
-  it("cadência inválida não cobra (nunca todo dia por engano)", () => {
+  it("cadência inválida não gera nada (nunca todo dia por engano)", () => {
     expect(dueOccurrence({ ...base, cadenceDays: 0, todayIso: "2026-10-01" })).toBeNull();
     expect(dueOccurrence({ ...base, cadenceDays: -7, todayIso: "2026-10-01" })).toBeNull();
   });
 
-  it("hoje antes da âncora não cobra", () => {
+  it("hoje antes da âncora não gera nada", () => {
     expect(dueOccurrence({ ...base, todayIso: "2026-08-20" })).toBeNull();
   });
 
@@ -99,7 +99,7 @@ describe("dueOccurrence", () => {
 });
 
 describe("occurrencesUntil", () => {
-  it("lista o tronco da Tree, inclusive cobranças que ninguém fez", () => {
+  it("lista o tronco da Tree, inclusive ocorrências que ninguém fez", () => {
     const list = occurrencesUntil({ ...base, todayIso: "2026-10-13" });
     expect(list.map((o) => o.occurrence)).toEqual([1, 2, 3]);
     expect(list.map((o) => o.dueDate)).toEqual([
@@ -148,7 +148,7 @@ describe("resolveAnchorDate", () => {
   });
 });
 
-describe("resolveBound — quando parar de cobrar", () => {
+describe("resolveBound — quando encerrar", () => {
   const facts = {
     record: {
       id: "r1",
@@ -179,7 +179,7 @@ describe("resolveBound — quando parar de cobrar", () => {
   });
 
   it("campo que nunca mudou não limita — a série segue", () => {
-    // Limitar por um fato que não aconteceu pararia a cobrança em silêncio.
+    // Limitar por um fato que não aconteceu encerraria a série em silêncio.
     expect(
       resolveBound({ kind: "field_changed", field: "outro" }, facts)
     ).toBeNull();
@@ -209,7 +209,7 @@ describe("resolveBound — quando parar de cobrar", () => {
 });
 
 // ---------------------------------------------------------------------------
-// v1.2 — as cobranças FUTURAS.
+// v1.2 — as ocorrências FUTURAS.
 // ---------------------------------------------------------------------------
 describe("occurrencesAhead", () => {
   // Quinzenal ancorado em 01/09; em 29/09 a devida é a de número 2.
@@ -227,7 +227,7 @@ describe("occurrencesAhead", () => {
     expect(plans[5].dueDate).toBe("2026-12-08");
   });
 
-  // A decisão central: a série não abre de uma vez as cobranças que ninguém
+  // A decisão central: a série não abre de uma vez as ocorrências que ninguém
   // fez. A PRIMEIRA da lista é a devida agora — e ela pode ter vencido há
   // alguns dias (é o que se está devendo hoje); o que não pode é vir a 1ª, a
   // 2ª e a 3ª de meses atrás junto. Âncora em janeiro, quinzenal: a devida em
@@ -244,7 +244,7 @@ describe("occurrencesAhead", () => {
     })!;
     expect(plans[0].occurrence).toBe(devida.occurrence);
     expect(plans.map((p) => p.occurrence)).toEqual([19, 20, 21, 22, 23, 24]);
-    // Nenhuma cobrança de ciclo anterior ao que está em aberto agora.
+    // Nenhuma ocorrência de ciclo anterior ao que está em aberto agora.
     for (const p of plans) {
       expect(p.occurrence).toBeGreaterThanOrEqual(devida.occurrence);
       expect(p.dueDate >= devida.dueDate).toBe(true);
@@ -260,13 +260,13 @@ describe("occurrencesAhead", () => {
     expect(plans.map((p) => p.dueDate)).toEqual(["2026-09-29", "2026-10-13"]);
   });
 
-  it("respeita o teto de cobranças", () => {
+  it("respeita o teto de ocorrências", () => {
     const plans = occurrencesAhead({ ...base, maxOccurrences: 4 }, 5);
     expect(plans.map((p) => p.occurrence)).toEqual([2, 3, 4]);
   });
 
-  it("sem cobrança devida hoje não adianta nada", () => {
-    // Antes da primeira: adiantar aqui seria começar a cobrar cedo.
+  it("sem ocorrência devida hoje não adianta nada", () => {
+    // Antes da primeira: adiantar aqui seria começar cedo demais.
     expect(occurrencesAhead({ ...base, todayIso: "2026-09-05" }, 5)).toEqual([]);
     // Sem âncora, idem.
     expect(occurrencesAhead({ ...base, anchorDate: null }, 5)).toEqual([]);
@@ -281,7 +281,7 @@ describe("resolveAnchorDate — fallback", () => {
     available: [],
   };
 
-  it("sem histórico e sem fallback, NÃO cobra", () => {
+  it("sem histórico e sem fallback, NÃO gera nada", () => {
     expect(
       resolveAnchorDate({ kind: "field_changed", field: "stage" }, facts)
     ).toBeNull();

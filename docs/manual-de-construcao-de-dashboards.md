@@ -1,14 +1,20 @@
-<!-- Versão: 1.32 | Data: 09/09/2026 -->
+<!-- Versão: 1.33 | Data: 10/09/2026 -->
+<!-- v1.33 (10/09/2026): §5.14 — o nó da Tree CONCLUI e EXCLUI (tarefa,
+     anotação e nó livre; o de "Alteração" não, por ser fato do histórico) e a
+     conclusão anda nos dois sentidos com o Bitrix; §12.2.2 — o campo "Como
+     chamar cada uma" (o substantivo da ocorrência, também editável por
+     tarefa). O termo que o sistema usava para a ocorrência da série mudou
+     para "Tarefa" em todo o manual. -->
 <!-- v1.32 (09/09/2026): §5.14 — o nó abre a TAREFA INTEIRA (o painel de
-     /tarefas), a cobrança prevista abre já com o prazo, a data do nó ganhou a
+     /tarefas), a ocorrência prevista abre já com o prazo, a data do nó ganhou a
      leitura de atraso, e a cadência do registro tem campo; §12.2.2 — as
-     cobranças futuras e o campo "Conceder ao registro". -->
+     ocorrências futuras e o campo "Conceder ao registro". -->
 <!-- v1.31 (09/09/2026): §5.14 — a troca de registro é imediata (nome do
      clicado + carregamento; a árvore anterior sai na hora). -->
 <!-- v1.30 (09/09/2026): §5.14 — a seção "Tree" do editor (que não existia) e
-     a JANELA de cobranças com ordem e "carregar mais"; §6.9 — o clique passa
+     a JANELA de ocorrências com ordem e "carregar mais"; §6.9 — o clique passa
      a FOCAR um widget Tree do painel quando há um, e a lista de tarefas
-     ganhou paginação; §12.2.2 — as quatro formas de parar de cobrar. -->
+     ganhou paginação; §12.2.2 — as quatro formas de encerrar a série. -->
 <!-- v1.29 (09/09/2026): §5.14 nova — widget Tree (árvore de
      acompanhamento de um registro e mapa mental: as três formas, as
      ações de dentro e o pausar que não exclui) e §6.9 — "Ao clicar na
@@ -1170,11 +1176,11 @@ A linha do tempo em forma de **árvore** do acompanhamento de um registro — e,
 no modo livre, um **mapa mental**.
 
 Ela responde o que nenhum gráfico responde: *como o vendedor está conduzindo
-este lead*. O **tronco** são as cobranças do acompanhamento periódico (§12.2.2) —
+este lead*. O **tronco** são as tarefas da série do acompanhamento periódico (§12.2.2) —
 inclusive **a que ninguém abriu**, porque elas são calculadas pelo calendário,
 não lidas de uma lista de tarefas: um galho vazio no meio é exatamente a
 informação que interessa. Nos galhos penduram as tarefas manuais, as anotações
-e as alterações de campo, cada uma na cobrança em cuja janela caiu.
+e as alterações de campo, cada uma na ocorrência em cuja janela caiu.
 
 **Duas fontes de nós:**
 
@@ -1191,7 +1197,7 @@ e as alterações de campo, cada uma na cobrança em cuja janela caiu.
 
 | Forma | Tronco | Quando usar |
 |---|---|---|
-| **Por cobrança** (padrão) | as cobranças da série | "o que aconteceu entre uma cobrança e a seguinte?" |
+| **Por ocorrência** (padrão) | as tarefas da série da série | "o que aconteceu entre uma ocorrência e a seguinte?" |
 | **Por tipo** | cronológico, um ramo por tipo | "quero ver todas as anotações juntas" |
 | **Livre** | o parentesco que você definir | mapa mental |
 
@@ -1207,13 +1213,22 @@ desfazer é soltá-lo de volta.
   título, descrição, vencimento, hora, hora-fim, responsável e registro
   vinculado. É o mesmo painel de /tarefas, do kanban e do feed — o que se muda
   aqui vale em todos.
-- **Agendar a cobrança prevista** — numa cobrança que ainda não virou tarefa, o
+- **Agendar a ocorrência prevista** — numa ocorrência que ainda não virou tarefa, o
   mesmo painel abre **já com o prazo dela preenchido**. É assim que se agenda a
-  cobrança do dia certo, sem digitar a data de novo.
+  ocorrência do dia certo, sem digitar a data de novo.
 - **Agendar tarefa avulsa** — pelo botão do cabeçalho. Ela nasce SEM número de
-  cobrança de propósito: é a diferença entre "o sistema cobrou" e "o vendedor
+  ocorrência de propósito: é a diferença entre "o sistema pediu" e "o vendedor
   decidiu fazer" que a árvore mostra.
-- **Pausar / Retomar** — para (e volta a produzir) as cobranças. **Pausar não
+- **Concluir / reabrir** — a caixinha no nó da tarefa, a mesma de /tarefas.
+  Riscar o nó é o gesto de "isto está feito"; com o espelho no Bitrix ligado,
+  a atividade fecha lá junto — e o contrário também: concluir a atividade no
+  Bitrix fecha a tarefa aqui na sincronização seguinte, mesmo que nada mais
+  tenha mudado no card.
+- **Excluir** — a lixeira, com confirmação. Vale para a **tarefa**, para a
+  **anotação** e para o **nó livre** do mapa mental. O nó de **Alteração** não
+  tem lixeira de propósito: ele é um fato do histórico do registro, não uma
+  coisa que alguém criou.
+- **Pausar / Retomar** — para (e volta a produzir) as tarefas da série. **Pausar não
   exclui nada**: o registro continua no acompanhamento e o histórico inteiro
   permanece na tela.
 - **Mudar a cadência deste registro** — o campo "a cada … dia(s)" no cabeçalho
@@ -1233,10 +1248,10 @@ na hora e o **nome do registro clicado** já aparece no cabeçalho, com o
 indicador de carregamento, enquanto o histórico é buscado. A árvore de um lead
 nunca fica em tela sob o nome de outro.
 
-**Quantidade.** A árvore vem em **janela**: as 12 cobranças de uma ponta, com
+**Quantidade.** A árvore vem em **janela**: as 12 ocorrências de uma ponta, com
 os galhos delas. O botão de ordem no topo escolhe a ponta (mais recentes ou
-mais antigas) e **"carregar cobranças…"** traz as 12 seguintes naquela direção.
-O corte é sempre por *cobrança* inteira — nunca no meio de uma, para nenhum
+mais antigas) e **"carregar ocorrências…"** traz as 12 seguintes naquela direção.
+O corte é sempre por *ocorrência* inteira — nunca no meio de uma, para nenhum
 galho ficar sem o tronco dele. Registro sem série nenhuma pagina pelos próprios
 fatos.
 
@@ -1607,7 +1622,7 @@ linhas, métricas intensivas × extensivas) no §7.9.
     (editar continua na aba Registros, com o formulário inteiro). Campos que o
     seu papel não pode ver não aparecem — e não viajam para o navegador.
   - **Tarefas do registro** — as tarefas ligadas a ele, com o número da
-    cobrança quando vieram de um acompanhamento periódico. Vêm 20 por vez, com
+    ocorrência quando vieram de um acompanhamento periódico. Vêm 20 por vez, com
     um botão de ordem (mais recentes / mais antigas) e **"carregar mais"** na
     direção escolhida.
   - **Atributo** — a funcionalidade de Operação pendurada no registro. Hoje:
@@ -2330,7 +2345,7 @@ Vale saber:
 
 ### 12.2.2 Acompanhamento periódico (série de tarefas)
 
-Uma automação pode, além de mover cards e preencher campos, **cobrar
+Uma automação pode, além de mover cards e preencher campos, **gerar tarefa
 periodicamente**: abrir uma tarefa a cada N dias enquanto o registro continuar
 satisfazendo a condição. É o que sustenta a árvore do widget Tree (§5.14).
 
@@ -2343,22 +2358,23 @@ quadro. A ação chama-se **"Série de tarefas"**:
 | **Condições da regra** | quem ENTRA no acompanhamento (ex.: `stage = Nutrição`) |
 | **Âncora** | a data a partir da qual o relógio corre: a mudança de um campo, a criação do registro, ou um campo de data |
 | **Cadência padrão** | de quantos em quantos dias cobra (15 = quinzenal) |
-| **Cobranças futuras** | além da devida hoje, quantas ficam abertas à frente (padrão 5) |
-| **Sem data de início** | o que fazer com o registro que não tem a data da âncora: não cobrar (padrão) ou contar da criação |
-| **Janela** | "começar a cobrar" / "parar de cobrar". O fim tem quatro formas: enquanto as condições valerem (sem prazo), numa data fixa, numa data do registro, ou **quando um campo mudar** |
-| **Máximo de cobranças** | teto por registro; vazio = sem teto |
+| **Quantas adiantar** | além da devida hoje, quantas ficam abertas à frente (padrão 5) |
+| **Sem data de início** | o que fazer com o registro que não tem a data da âncora: não gerar nada (padrão) ou contar da criação |
+| **Janela** | "começar em" / "encerrar em". O fim tem quatro formas: enquanto as condições valerem (sem prazo), numa data fixa, numa data do registro, ou **quando um campo mudar** |
+| **Máximo por registro** | teto por registro; vazio = sem teto |
 | **Precedência das exceções** | em que ordem as exceções sobrescrevem a cadência (ex.: registro → responsável → etapa) |
 | **Conceder ao registro** | o atributo que a série liga no registro — escolha **Tree** para o acompanhamento ter árvore e a linha da tabela virar clicável |
-| **Espelhar no Bitrix** | se as cobranças viram atividade no CRM: como a Base define (padrão), sempre, ou nunca |
+| **Espelhar no Bitrix** | se as tarefas da série viram atividade no CRM: como a Base define (padrão), sempre, ou nunca |
+| **Como chamar cada uma** | o substantivo que a árvore usa no tronco — "Tarefa" (padrão), "Follow-up", "Visita"… Cada tarefa pode ainda trocar o dela, no próprio formulário |
 
 A tarefa nasce no nome do **responsável do registro**, e tanto ele quanto um
 admin a gerenciam.
 
-**As próximas ficam à vista.** A série não abre só a cobrança do dia: ela mantém
+**As próximas ficam à vista.** A série não abre só a ocorrência do dia: ela mantém
 abertas também as **próximas** (5, por padrão), com os prazos já espaçados pela
 cadência. Assim dá para ver e **remarcar** o que vem pela frente, em vez de
 esperar a data chegar — num ciclo quinzenal isso era meio mês de tela vazia.
-Cobrança que já venceu e ninguém abriu **não** é criada retroativamente: ela
+Ocorrência que já venceu e ninguém abriu **não** é criada retroativamente: ela
 segue aparecendo na árvore como galho vazio, que é onde a falta de
 acompanhamento deve aparecer.
 
@@ -2372,10 +2388,10 @@ exceções:
 - para **ligar/desligar**, um "não" em qualquer nível desliga: desativou para o
   responsável, nenhuma exceção de registro o reativa.
 
-**Não duplica, e não se perde.** A cobrança é identificada pelo número dela na
+**Não duplica, e não se perde.** A ocorrência é identificada pelo número dela na
 sequência, calculado pelo calendário (`(hoje − âncora) ÷ cadência`). Rodar duas
 vezes no mesmo dia não abre duas tarefas; e um dia em que o sistema não rodou
-**não desloca** as cobranças seguintes — a que ninguém abriu simplesmente
+**não desloca** as tarefas da série seguintes — a que ninguém abriu simplesmente
 aparece como um galho vazio na árvore.
 
 ### 12.3 Agenda

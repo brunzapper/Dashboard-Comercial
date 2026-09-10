@@ -1,4 +1,13 @@
-// Versão: 1.3 | Data: 09/09/2026
+// Versão: 1.5 | Data: 10/09/2026
+// v1.5 (10/09/2026): (a) `deleteTreeNode` — o nó LIVRE (nota/mapa mental) não
+//   tinha como ser apagado: `tree_nodes` só ganhava linha, nunca perdia;
+//   (b) `addTreeNote` passa a chamar `createComment`, o choke point de 0066.
+//   Ela inseria em `comments` por fora e NÃO emitia `comment.created`, então
+//   nenhum webhook via a anotação feita pela árvore — o mesmo motivo pelo qual
+//   `addTreeTask` saiu na v1.3.
+// v1.4 (10/09/2026): só vocabulário — o substantivo da ocorrência
+//   da série saiu do código e virou dado (SeriesConfig.noun, e
+//   tasks.occurrence_noun por tarefa).
 // v1.3 (09/09/2026): a árvore devolve as TAREFAS do registro (TaskRow) e os
 //   responsáveis, para o nó abrir o editor de tarefa que o resto do app já usa
 //   (components/tarefas/task-sheet.tsx) em vez de um formulário só de título.
@@ -7,8 +16,8 @@
 // v1.2 (09/09/2026): o registro e o atributo são buscados EM PARALELO. Eram
 //   dois awaits em série sem dependência entre eles — e cada ida ao banco
 //   entra inteira no tempo que o usuário espera depois de clicar na linha.
-// v1.1 (09/09/2026): a árvore vem em JANELA (ordem + quantas cobranças), com
-//   "carregar mais". Ver lib/tree/load.ts — o corte é por cobrança.
+// v1.1 (09/09/2026): a árvore vem em JANELA (ordem + quantas ocorrências), com
+//   "carregar mais". Ver lib/tree/load.ts — o corte é por ocorrência.
 // Server Actions da Tree (0133): carregar a árvore de um registro e as ações
 // que se faz DENTRO dela.
 //
@@ -28,6 +37,7 @@ import { getActiveOrgId } from "@/lib/auth/org";
 import { getSessionInfo } from "@/lib/auth/session";
 import { todayBrasiliaIso } from "@/lib/date/today";
 import { createClient } from "@/lib/supabase/server";
+import { createComment } from "@/lib/comments/actions";
 import { deriveTree } from "@/lib/tree/derive";
 import { loadRecordTreeFacts } from "@/lib/tree/load";
 import { TREE_WINDOW_STEP, type TreeWindow } from "@/lib/tree/load";
@@ -51,7 +61,7 @@ export interface TreeData {
   /** Atributo que sustenta a árvore (para pausar/retomar sem excluir). */
   attribute: { id: string; status: "ativo" | "pausado" } | null;
   recordTitle: string;
-  /** Há cobrança fora da janela na direção corrente ("carregar mais"). */
+  /** Há ocorrência fora da janela na direção corrente ("carregar mais"). */
   hasMore: boolean;
   /**
    * As tarefas do registro, inteiras. O nó carrega só o `refId`; é por aqui
@@ -153,25 +163,56 @@ export async function loadRecordTree(
   };
 }
 
-/** Anota na árvore — grava em `comments`, o feed que já existe (0066). */
+/**
+ * Anota na árvore — pelo `createComment` de 0066, que é o dono da escrita.
+ *
+ * v1.5 (10/09/2026): antes esta action inseria em `comments` direto. Fazia a
+ * mesma coisa, menos o `emitWebhookEvent("comment.created")` — então anotação
+ * feita pela Tree não chegava a nenhum webhook, em silêncio. Dois escritores
+ * para a mesma tabela é a régua paralela da invariante 25.
+ */
 export async function addTreeNote(
   recordId: string,
   body: string,
   opts: { revalidate?: boolean } = {}
 ): Promise<TreeActionState> {
+  const res = await createComment({ recordId }, body);
+  if (!res.ok) {
+    return { ok: false, message: res.message ?? "Falha ao anotar." };
+  }
+  if (opts.revalidate !== false) revalidatePath("/dashboards");
+  return { ok: true };
+}
+
+/**
+ * Exclui um nó LIVRE da árvore (a nota do mapa mental).
+ *
+ * Só nó livre: tarefa se exclui pelo `deleteTask` e anotação pelo
+ * `deleteComment` — os dois já existem e já têm a RLS certa. Aqui a linha de
+ * `tree_nodes` É o nó, então apagá-la é a exclusão inteira.
+ *
+ * O `node_ref` (a EXCEÇÃO de parentesco) NÃO é apagado por aqui: ele não é um
+ * nó, é um ajuste sobre um fato que continua existindo.
+ */
+export async function deleteTreeNode(
+  nodeId: string,
+  opts: { revalidate?: boolean } = {}
+): Promise<TreeActionState> {
   const session = await getSessionInfo();
   if (!session) return { ok: false, message: "Sessão expirada." };
-  const text = body.trim();
-  if (text === "") return { ok: false, message: "Escreva a anotação." };
 
   const supabase = await createClient();
-  const { error } = await supabase.from("comments").insert({
-    record_id: recordId,
-    body: text,
-    created_by: session.user.id,
-    position: -Date.now(),
-  });
-  if (error) return { ok: false, message: `Falha ao anotar: ${error.message}` };
+  // `.select()` no delete: sem linha devolvida = a RLS da 0133 barrou.
+  const { data, error } = await supabase
+    .from("tree_nodes")
+    .delete()
+    .eq("id", nodeId)
+    .is("node_ref", null)
+    .select("id");
+  if (error) return { ok: false, message: `Falha ao excluir: ${error.message}` };
+  if (!data || data.length === 0) {
+    return { ok: false, message: "Sem permissão para excluir este nó." };
+  }
   if (opts.revalidate !== false) revalidatePath("/dashboards");
   return { ok: true };
 }
@@ -247,8 +288,8 @@ export async function setRecordCadence(
     { onConflict: "organization_id,series_key,scope_kind,scope_value" }
   );
   if (error) {
-    // A RLS da 0132 é admin/gestor: mudar a cadência de uma cobrança é decisão
-    // de quem conduz o acompanhamento, não de quem é cobrado.
+    // A RLS da 0132 é admin/gestor: mudar a cadência de uma série é decisão
+    // de quem conduz o acompanhamento, não de quem executa.
     return {
       ok: false,
       message: `Não foi possível alterar a cadência: ${error.message}`,

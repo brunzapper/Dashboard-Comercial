@@ -1,4 +1,7 @@
-// Versão: 1.2 | Data: 09/09/2026
+// Versão: 1.3 | Data: 10/09/2026
+// v1.3 (10/09/2026): só vocabulário — o substantivo da ocorrência
+//   da série saiu do código e virou dado (SeriesConfig.noun, e
+//   tasks.occurrence_noun por tarefa).
 // v1.2 (09/09/2026): a frase da série periódica. Ela diz a CADÊNCIA PADRÃO e
 //   avisa que há exceções — o número que vale para um registro específico só a
 //   cascata sabe, e prometer o contrário na lista seria mentira.
@@ -65,7 +68,7 @@ export function automationSummary(
             ? // A cadência dita é a PADRÃO: o número que vale para um registro
               // específico só a cascata sabe, e prometer o contrário aqui
               // seria mentira na lista de regras.
-              `abrir a cobrança "${a.series.title}" a cada ${a.series.cadence.defaultDays} dia(s)${
+              `abrir "${a.series.title}" a cada ${a.series.cadence.defaultDays} dia(s)${
                 a.series.cadence.overrideScopes.length > 0
                   ? " (com exceções por escopo)"
                   : ""

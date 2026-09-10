@@ -1,5 +1,8 @@
-// Versão: 1.4 | Data: 09/09/2026
-// v1.4 (09/09/2026): ação `create_task_series`. A decisão de "cobra hoje?" é
+// Versão: 1.5 | Data: 10/09/2026
+// v1.5 (10/09/2026): só vocabulário — o substantivo da ocorrência
+//   da série saiu do código e virou dado (SeriesConfig.noun, e
+//   tasks.occurrence_noun por tarefa).
+// v1.4 (09/09/2026): ação `create_task_series`. A decisão de "abre hoje?" é
 //   DERIVADA aqui, pura: âncora (o mesmo histórico que a condição de
 //   tempo já usa) + cadência resolvida pela cascata = a ocorrência devida. O
 //   fato `seriesOccurrences` evita a ida ao banco de uma ocorrência que já
@@ -13,7 +16,7 @@
 //   rodada (apagado, desligado, inválido ou com gatilho de formulário) deixa a
 //   regra INERTE com erro, pelo mesmo caminho de "coluna removida".
 // Versão: 1.4 | Data: 09/09/2026
-// v1.4 (09/09/2026): ação `create_task_series`. A decisão de "cobra hoje?" é
+// v1.4 (09/09/2026): ação `create_task_series`. A decisão de "abre hoje?" é
 //   DERIVADA aqui, pura: âncora (o mesmo histórico que a condição de
 //   tempo já usa) + cadência resolvida pela cascata = a ocorrência devida. O
 //   fato `seriesOccurrences` evita a ida ao banco de uma ocorrência que já
@@ -108,7 +111,7 @@ export interface CardFacts {
    * Atributos do registro com status 'pausado' (record_attributes, 0131).
    * Vazio quando nenhuma regra ativa da rodada concede atributo.
    *
-   * v1.2 (09/09/2026): pausar precisa PARAR a cobrança — antes o status era
+   * v1.2 (09/09/2026): pausar precisa PARAR a série — antes o status era
    * escrito e nunca lido.
    */
   pausedAttributes: string[];
@@ -155,16 +158,16 @@ export interface PlannedSet {
   ruleId: string;
 }
 
-/** Cobrança de uma série decidida por uma regra create_task_series. */
+/** Ocorrência de uma série decidida por uma regra create_task_series. */
 export interface PlannedSeriesTask {
   recordId: string;
   ruleId: string;
   seriesKey: string;
-  /** N-ésima cobrança — vai para tasks.series_occurrence (a trava). */
+  /** N-ésima ocorrência — vai para tasks.series_occurrence (a trava). */
   occurrence: number;
   title: string;
   description: string | null;
-  /** Dia previsto da cobrança (âncora + N × cadência). */
+  /** Dia previsto da ocorrência (âncora + N × cadência). */
   dueDate: string;
   responsibleId: string | null;
   /** Atributo a conceder ao registro que entra na série (ex.: "tree"). */
@@ -471,7 +474,7 @@ export function decideActions(
       } else {
         // Idempotência: já existe tarefa ABERTA desta regra para este
         // registro? Consome o card sem criar outra. Concluída a tarefa, a
-        // condição volta a valer e a regra cobra de novo — é cobrança
+        // condição volta a valer e a regra abre outra — é acompanhamento
         // recorrente, não marcador de "já cobrei uma vez na vida".
         if (!card.openAutomationRuleIds.includes(rule.id)) {
           tasks.push({
@@ -499,10 +502,10 @@ export function decideActions(
 }
 
 /**
- * A cobrança devida hoje para este registro — ou null.
+ * A ocorrência devida hoje para este registro — ou null.
  *
  * Null em quatro situações, todas silenciosas de propósito (não são erro da
- * regra, são a série ainda não tendo o que cobrar): sem âncora (o campo nunca
+ * regra, são a série ainda não tendo o que abrir): sem âncora (o campo nunca
  * foi preenchido), fora da janela, desligada por alguma exceção de escopo, ou
  * a ocorrência devida já existe. O último caso é o comum — a série passa a
  * maior parte dos dias sem nada a fazer.
@@ -538,7 +541,7 @@ function planSeriesTask(
     ctx.seriesSettings?.get(series.key) ?? []
   );
   // Desligado para este recorte (responsável, registro, etapa…): a série
-  // continua existindo e o atributo continua no registro — só não cobra.
+  // continua existindo e o atributo continua no registro — só não gera nada.
   if (!cadence.active) return [];
 
   // v1.2: a devida hoje MAIS as próximas `lookahead`. Criar adiantado é seguro

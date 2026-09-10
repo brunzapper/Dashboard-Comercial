@@ -1,4 +1,7 @@
-// Versão: 1.15 | Data: 06/09/2026
+// Versão: 1.16 | Data: 10/09/2026
+// v1.16 (10/09/2026): só vocabulário — o substantivo da ocorrência
+//   da série saiu do código e virou dado (SeriesConfig.noun, e
+//   tasks.occurrence_noun por tarefa).
 // v1.15 (06/09/2026): AppearanceSettings.table.formulaBar — barra "fx" + régua
 //   A/B/C da Tabela Livre (endereços das células no cálculo entre elas).
 // v1.14 (12/08/2026): RecordListSettings.showAddRecord — botão "+" de criação
@@ -436,7 +439,7 @@ export type RowSource = "records" | "responsibles" | "operations";
 export interface TreeSettings {
   /**
    * De onde saem os nós:
-   *  - `registro`: o histórico de UM registro (cobranças, tarefas, anotações,
+   *  - `registro`: o histórico de UM registro (a série, as tarefas, anotações,
    *    alterações) — o modo do acompanhamento;
    *  - `livre`: nós digitados e campos de registros — o mapa mental, sem
    *    automação nenhuma.

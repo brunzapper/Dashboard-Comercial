@@ -1,10 +1,13 @@
-// Versão: 1.2 | Data: 09/09/2026
+// Versão: 1.3 | Data: 10/09/2026
+// v1.3 (10/09/2026): só vocabulário — o substantivo da ocorrência
+//   da série saiu do código e virou dado (SeriesConfig.noun, e
+//   tasks.occurrence_noun por tarefa).
 // v1.2 (09/09/2026): a lista de tarefas passou a ser o `TaskList` canônico —
 //   concluir, editar e o DueBadge, os mesmos de /tarefas, do kanban e do feed.
 //   Antes era uma projeção de 4 campos desenhada aqui, sem nenhuma ação: dava
 //   para ver a tarefa e não para mexer nela.
 // v1.1 (09/09/2026): a lista de tarefas ganha ORDEM e "carregar mais". Um
-//   registro sob cobrança periódica acumula dezenas delas; a lista inteira
+//   registro em série periódica acumula dezenas delas; a lista inteira
 //   de uma vez é uma parede, e o corte mudo escondia o resto sem dizer.
 // O PAINEL do clique numa linha da tabela — detalhe, tarefas ou um atributo.
 //

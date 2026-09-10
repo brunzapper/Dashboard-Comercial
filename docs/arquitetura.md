@@ -1,7 +1,14 @@
-<!-- Versão: 1.82 | Data: 09/09/2026 -->
+<!-- Versão: 1.83 | Data: 10/09/2026 -->
+<!-- v1.83 (10/09/2026): §4.25 nova — o Bitrix nos DOIS sentidos (0137): o que
+     se busca fora do período é a lista de ATIVIDADES dos donos com pendência,
+     nunca o negócio (reler o deal não diz nada sobre as atividades dele), e é
+     a mesma leitura que detecta exclusão (por ausência). Invariantes 38 e 39.
+     Junto: a Tree passou a concluir e excluir, o nó de alteração nunca existiu
+     (audit_log.created_at → changed_at) e o substantivo da ocorrência virou
+     dado — a palavra que estava no fonte foi removida de todo o documento. -->
 <!-- v1.82 (09/09/2026): §4.24 — a âncora `field_changed` lê o HISTÓRICO
      (audit_log), nunca `field_modified_at` (que é o marcador de proteção do
-     sync e ficava vazio para campo do Bitrix); as cobranças futuras
+     sync e ficava vazio para campo do Bitrix); as ocorrências futuras
      (`lookahead`); pausar que realmente pausa; a tarefa editável na Tree e na
      barra lateral; e o espelho da tarefa como Atividade do CRM (0136).
      Invariantes 36 e 37 novas; 33 corrigida. -->
@@ -13,7 +20,7 @@
      6 idas ao banco para 3. -->
 <!-- v1.80 (09/09/2026): §4.24 — o foco de registro do painel (efêmero, com
      contagem de seguidores para decidir o destino do clique) e a janela da
-     Tree por cobrança; a seção de configuração do widget, que faltava.
+     Tree por ocorrência; a seção de configuração do widget, que faltava.
      Invariante 34 ganha a regra do corte por ocorrência. -->
 <!-- v1.79 (09/09/2026): §4.24 nova — atributos do registro (0131),
      série de tarefas periódicas com trava POR OCORRÊNCIA derivada
@@ -3046,7 +3053,7 @@ de não-regressão do ramo de quadro.
 #### Ação `create_task` (0129, 08/09/2026)
 
 A terceira ação: abrir uma tarefa vinculada ao registro ("lead parado há 7 dias
-→ cobrar retomada").
+→ lembrar retomada").
 
 **A idempotência é o problema inteiro.** `set_field` resolve por COMPARAÇÃO —
 valor atual igual ao alvo consome o card sem escrever. Criar tarefa não tem
@@ -3063,8 +3070,8 @@ regra abre 1.440 tarefas por dia, por registro. Duas camadas:
    `last_error` com "duplicate key" seria ruído sobre o resultado desejado).
 
 O `where completed_at is null` é deliberado: concluída a tarefa, a regra pode
-abrir outra se a condição voltar a valer. É cobrança recorrente, não marcador
-de "já cobrei uma vez na vida".
+abrir outra se a condição voltar a valer. É acompanhamento recorrente, não marcador
+de "já pedi uma vez na vida".
 
 **Escrita.** Não usa `createTask` (`lib/tasks/actions.ts`) — é action
 `(prevState, formData)` que depende de `getSessionInfo()`, e num tick não há
@@ -4628,7 +4635,7 @@ passos: todo campo perguntado é consumido, toda ref citada existe).
 ### 4.24 Atributos, série periódica e a Tree (0131-0134, 09/09/2026)
 
 Um dashboard mostrava NÚMEROS; não mostrava CONDUTA. Olhando a tabela de deals
-ninguém sabia se o vendedor está acompanhando o lead, quando cobrou pela última
+ninguém sabia se o vendedor está acompanhando o lead, quando falou pela última
 vez, o que anotou. Esta entrega fecha esse buraco com quatro peças que se
 encaixam - e nenhuma delas é do caso "deals em Nutrição": esse caso é montado
 por CONFIGURAÇÃO, no construtor que já existe (a receita passo a passo está no
@@ -4653,7 +4660,7 @@ enxerga o atributo - `exists` sob as policies de `records`, precedente
 além do próprio responsável", e pausar o próprio acompanhamento é decisão de
 quem acompanha.
 
-**Série de tarefas periódicas (0132) - a ocorrência é DERIVADA.** A cobrança
+**Série de tarefas periódicas (0132) - a ocorrência é DERIVADA.** A ocorrência
 quinzenal não podia ser um passo de `run_schema` nem um `create_task`: a trava
 da 0130 consome o registro uma vez para sempre (esquema que CRIA) ou reexecuta
 quando o payload muda; a da 0129 permite UMA tarefa aberta por regra x
@@ -4664,11 +4671,11 @@ escrever quando vira a quinzena. A trava certa é POR OCORRÊNCIA:
 occurrence = floor((hoje - âncora) / cadência)
 ```
 
-O tick calcula qual cobrança é devida hoje e tenta criá-la; repetir esbarra em
+O tick calcula qual ocorrência é devida hoje e tenta criá-la; repetir esbarra em
 `uq_tasks_series_occurrence` e é NO-OP (23505 nunca vira `last_error` - o
 precedente literal da 0129). **Nada de "última execução" gravada**: por ser
 derivada, tick que não rodou (deploy, janela de manutenção, org pausada) não
-DESSINCRONIZA a série - a sequência é uma função do calendário, e a cobrança
+DESSINCRONIZA a série - a sequência é uma função do calendário, e a ocorrência
 que ninguém abriu continua existindo como fato (é ela que vira o galho vazio na
 árvore). O índice é DELIBERADAMENTE sem `completed_at is null`, ao contrário do
 da 0129: ali a trava é "uma tarefa ABERTA por vez" (concluída, a regra cobra de
@@ -4707,14 +4714,14 @@ mesma correção. A 0135 é só o índice `(record_id, field, changed_at desc)` 
 Registro sem histórico não cobra: `anchorFallback` ("nenhum", o padrão, ou
 "criacao") diz o que fazer, e nenhuma das duas opções inventa uma data.
 
-**As cobranças FUTURAS (09/09/2026).** `dueOccurrence` é limitada a hoje por
-construção, então a série só abria a cobrança do dia - num ciclo quinzenal, o
+**As ocorrências FUTURAS (09/09/2026).** `dueOccurrence` é limitada a hoje por
+construção, então a série só abria a ocorrência do dia - num ciclo quinzenal, o
 vendedor passava 15 dias sem ver nada e sem poder remarcar o que vinha.
 `occurrencesAhead` (pura, irmã de `occurrencesUntil`) devolve a devida agora
 MAIS as `lookahead` seguintes (padrão 5); `planSeriesTask` passou a devolver
 uma LISTA. Criar adiantado é seguro porque a trava é por ocorrência: repetir é
 23505, que já é no-op, e o executor já era um laço. **Nunca anda para trás**:
-cobrança de ciclo anterior ao que está em aberto não é criada retroativamente -
+ocorrência de ciclo anterior ao que está em aberto não é criada retroativamente -
 ela segue aparecendo na Tree como galho vazio, que é onde a falta de
 acompanhamento deve aparecer, e não como uma tarefa vencida fabricada hoje.
 
@@ -4738,7 +4745,7 @@ por escopo): mudar a cadência de um deal ou desligar a série de um vendedor n�
 abre o construtor - e não reescreve a regra que vale para todo mundo.
 
 **A Tree (0133) é DERIVADA; a tabela guarda só a exceção.** Os nós são FATOS
-que já existem - as cobranças (calculadas por `occurrencesUntil`, então a que
+que já existem - as ocorrências (calculadas por `occurrencesUntil`, então a que
 ninguém fez também aparece), as tarefas, os comentários (0066) e as alterações
 do `audit_log`. `tree_nodes` guarda exclusivamente o que NÃO é derivável: o nó
 LIVRE (o mapa mental, digitado) e o `parent_ref` de um nó RE-PENDURADO à mão.
@@ -4748,8 +4755,8 @@ os MESMOS fatos, sem migrar dado, e o re-pendurar COMPÕE com qualquer uma delas
 linha.
 
 A derivação é pura (`lib/tree/derive.ts`) e o I/O fica em `lib/tree/load.ts`:
-uma tarefa da SÉRIE funde no nó da própria cobrança em vez de virar um segundo
-nó ao lado dela, e um fato anterior à primeira cobrança pendura NA primeira -
+uma tarefa da SÉRIE funde no nó da própria ocorrência em vez de virar um segundo
+nó ao lado dela, e um fato anterior à primeira ocorrência pendura NA primeira -
 nada some por cair fora de janela.
 
 **O widget Tree (0134)** é `visual_type` novo com o CHECK recriado inteiro
@@ -4791,14 +4798,14 @@ carimbo do event bus NÃO entra na chave, e é por isso que o tick do sync segue
 silencioso (§4.10). `loadRecordTree` também caiu de 6 idas ao banco para 3
 (registro ∥ atributo; `tree_nodes` no mesmo `Promise.all` dos fatos).
 
-**A árvore vem em JANELA, cortada por COBRANÇA (09/09/2026).** Um
+**A árvore vem em JANELA, cortada por OCORRÊNCIA (09/09/2026).** Um
 acompanhamento quinzenal de dois anos tem ~50 galhos. `TreeWindow`
 (`{order, limit}`) recorta a lista de ocorrências ANTES de qualquer fato ser
 lido, e as bordas de data daí resultantes filtram tarefas/anotações/alterações;
 `deriveTree` continua puro e sem saber de paginação. Cortar por linha solta em
-vez de por cobrança deixaria galhos sem tronco — e a regra que já existia (o
-fato anterior à primeira cobrança pendura NELA) é o que garante que uma janela
-que começa na 5ª cobrança não orfane nada. Registro sem série pagina pelos
+vez de por ocorrência deixaria galhos sem tronco — e a regra que já existia (o
+fato anterior à primeira ocorrência pendura NELA) é o que garante que uma janela
+que começa na 5ª ocorrência não orfane nada. Registro sem série pagina pelos
 próprios fatos.
 
 **O clique da linha da tabela** é `RecordListSettings.rowAction`, configurado em
@@ -4820,8 +4827,8 @@ kanban, agenda, feed), e reusá-lo é o oposto de uma régua paralela.
 O que existia antes era o problema: o nó da Tree mostrava título e uma data
 crua, e o "agendar tarefa" era um `Input` de título só - o `dueDate` que a
 action aceitava nunca era enviado, então toda tarefa criada pela árvore nascia
-SEM PRAZO. Hoje o nó com `refId` (a tarefa, e também a cobrança já fundida com
-uma) abre o `TaskSheet` com a linha real; a cobrança PREVISTA que ainda não
+SEM PRAZO. Hoje o nó com `refId` (a tarefa, e também a ocorrência já fundida com
+uma) abre o `TaskSheet` com a linha real; a ocorrência PREVISTA que ainda não
 virou tarefa abre o mesmo editor já com a data dela. `addTreeTask` foi REMOVIDA:
 inseria em `tasks` por fora do choke point e por isso só sabia gravar três
 campos. A barra lateral trocou a projeção de 4 campos pelo `TaskList` canônico
@@ -4833,7 +4840,7 @@ dos `Promise.all` que já existiam.
 uma ATIVIDADE do CRM (`crm.activity.add`, TYPE_ID 6 / PROVIDER_ID CRM_TODO),
 pendurada no negócio - o mesmo objeto que o time lê no feed do deal, ao lado
 dos comentários e das mudanças de etapa. Não é o módulo Tasks do Bitrix: uma
-cobrança de acompanhamento pertence à conversa do negócio, não a uma lista
+tarefa de acompanhamento pertence à conversa do negócio, não a uma lista
 paralela.
 
 É FILA com dreno no tick que já existe, no molde do write-back (0032): a
@@ -4875,6 +4882,121 @@ re-pendurado vencendo a derivação),
 apagava `from`/`description`/`maxOccurrences`) e
 `lib/{tasks/mirror-config,sync/bitrix/task-mirror}.test.ts` (a cascata dos três
 níveis e a idempotência do dreno, com o cliente Bitrix dublado).
+
+### 4.25 O Bitrix nos dois sentidos, e o vocabulário como dado (0137, 10/09/2026)
+
+A 0136 entregou metade do espelho: a tarefa daqui vira atividade lá. Faltava
+tudo o que acontece DO OUTRO LADO — concluir, apagar, criar, comentar.
+
+**O obstáculo, e por que a solução óbvia não serve.** Concluir uma atividade
+NÃO mexe no `DATE_MODIFY` do negócio. O reconcile inteiro é
+`">=DATE_MODIFY": since` (`buildReconcilePlan`), então o deal cuja única
+mudança foi "o vendedor fechou a tarefa" jamais volta na janela: a conclusão
+feita lá é invisível para o sync.
+
+A regra certa — *os registros com atividade pendente são conferidos
+independentemente de período* — vale, mas o objeto a buscar **não é o deal**:
+reler o deal não diz nada sobre as atividades dele. O que se lê fora do período
+é a **lista de atividades daqueles donos** (`crm.activity.list` com
+`@OWNER_ID`). E ela resolve duas coisas de uma vez, porque a EXCLUSÃO só se
+detecta por ausência: a atividade apagada não emite evento nenhum, ela
+simplesmente não volta na lista do dono.
+
+**Por isso o inbound é GANCHO pós-job, não uma fase do plano.** O runner é
+passo a passo e não guarda o que já viu entre páginas — não teria como
+distinguir "sumiu" de "está na página seguinte". `syncBitrixActivitiesInbound`
+(`lib/sync/bitrix/activity-inbound.ts`) lê o dono INTEIRO de uma vez, em lotes
+de 40, com orçamento próprio, no molde de `runAutoMatchIncremental` e
+`reconcileAllKanbanAllocationFields`. Roda SEMPRE que o job termina, inclusive
+quando ele não escreveu nada: um job vazio é exatamente o caso em que há
+conclusão esperando para ser lida.
+
+**Quem escreve o quê** — a linha que evita o cabo de guerra:
+
+| Fato | Dono |
+| --- | --- |
+| Título, descrição, prazo, responsável de tarefa já espelhada | **daqui** (o outbound leva) |
+| `COMPLETED` de atividade existente | **de lá** |
+| Atividade que sumiu da lista do dono | **de lá** — apaga a tarefa, de vez |
+| Atividade CRM_TODO sem tarefa aqui | **de lá** — cria a tarefa |
+
+O inbound **nunca** sobrescreve o conteúdo de uma tarefa que já tem
+`bitrix_activity_id`. É isso que dispensa inventar um `isProtected` para
+`tasks` (a invariante 36 explica por que `field_modified_at` não serviria), e é
+isso que evita o pingue-pongue: o inbound escreve DIRETO, sem enfileirar de
+volta.
+
+**Escopo declarado:** só `PROVIDER_ID = 'CRM_TODO'` (TYPE_ID 6) vira tarefa —
+o mesmo objeto que nós criamos. Ligação, e-mail e reunião também são
+atividades no CRM, e importá-las encheria a lista de tarefas de coisa que
+ninguém abriu. E só em Base com `bitrix_activity_owner` configurado.
+
+**Três buracos do lado de SAÍDA, que viravam laço com o inbound.** Eles já
+existiam como assimetria; com a leitura de volta viravam defeito permanente:
+
+- `reopenTask`, `moveTaskPhase` e `rescheduleTask` não espelhavam. Reabrir aqui
+  seria re-fechado pela leitura seguinte, **para sempre**. Os três passaram a
+  enfileirar `update`.
+- `deleteTask` não avisava o Bitrix, e apagava o `bitrix_activity_id` junto: a
+  atividade ficava órfã no feed, e o inbound a reimportaria como tarefa nova.
+  Agora a ordem `delete` é enfileirada ANTES do delete da linha — e a FK da
+  fila virou `on delete set null` (0137) justamente para a ordem sobreviver;
+  com o `cascade` da 0136, enfileirar depois sumia com a própria ordem.
+- `uq_task_queue_pending` é `(task_id, op)`, e NULL não casa com NULL num
+  índice único: as ordens sem tarefa ganharam índice parcial próprio por
+  `activity_id`.
+
+**Anotação ↔ comentário.** `createComment` (o choke point de 0066) enfileira
+`comment_add`; a fila ganhou `target` com default `'task'`, para as linhas
+gravadas pela 0136 não mudarem de significado. A leitura de volta puxa
+`crm.timeline.comment.list` **só nos registros com o atributo `tree` ativo** —
+é uma chamada por registro, e é neles que o acompanhamento é lido.
+`comments.bitrix_comment_id` é o que impede o nosso próprio comentário de
+voltar como uma segunda anotação. `comments` NÃO ganhou `organization_id`: é
+transitiva ao registro desde a 0066 e a RLS depende disso; o inbound escopa
+pelos registros da org.
+
+**Fora de escopo, dito:** ler o feed inteiro do Bitrix (mudança de etapa já
+chega pelo sync de campo, e reimportá-la duplicaria o `audit_log`) e espelhar
+EDIÇÃO de comentário.
+
+**O vocabulário virou dado.** Uma entrega anterior escreveu no código um
+substantivo de domínio que esta organização não usa, e ele se espalhou por 37
+arquivos — código, UI, testes e os quatro documentos. Rótulo errado no fonte
+não é erro de digitação: ele reaparece em toda tela nova, e a correção seguinte
+tem de varrer o repositório de novo. Duas defesas:
+
+1. o substantivo de cada ocorrência é DADO — `SeriesConfig.noun` (a automação)
+   e `tasks.occurrence_noun` (a tarefa individual), com padrão
+   `DEFAULT_SERIES_NOUN = "Tarefa"` e UM dono da frase, `occurrenceLabel`
+   (`lib/series/types.ts`). A cadeia é tarefa → série → padrão, e o título da
+   tarefa continua vencendo tudo no tronco quando existe;
+2. `lib/series/noun.test.ts` tem a guarda ESTÁTICA: nenhum `.ts`/`.tsx` fora de
+   uma allowlist de dois arquivos (ambos DADO real de negócio — um segmento de
+   mercado e o rótulo de um campo que existe no Bitrix) pode reintroduzir o
+   radical.
+
+**Junto, dois defeitos corrigidos.** A Tree não conseguia concluir nem excluir
+nada: o único gesto por nó era abrir o `TaskSheet`, que por desenho só cria e
+edita. Agora o nó reusa `useTaskRowActions` (o MESMO hook da lista de tarefas —
+uma segunda cópia seria a régua paralela da invariante 25), a anotação tem
+lixeira pelo `deleteComment` que já existia, e o nó livre ganhou
+`deleteTreeNode` (a única ação de fato nova: `tree_nodes` só ganhava linha,
+nunca perdia). Nó de "Alteração" segue sem ação — é fato do `audit_log`. E
+`lib/tree/load.ts` lia `audit_log.created_at`, coluna que não existe (é
+`changed_at`, 0006): o PostgREST errava, `changes` voltava null e **os nós de
+alteração nunca apareceram**, em silêncio, desde que a Tree existe.
+`addTreeNote` também passou a chamar `createComment` em vez de inserir direto —
+ela não emitia `comment.created`, então nenhum webhook via a anotação feita
+pela árvore.
+
+Testes: `lib/sync/bitrix/activity-inbound.test.ts` (conclusão, reabertura,
+exclusão por ausência, criação, o descarte do que não é CRM_TODO e a garantia
+de que o título nosso não é sobrescrito), `lib/sync/bitrix/task-mirror.test.ts`
+(as ordens `delete` e `comment_add`, com a de exclusão vivendo SEM tarefa),
+`lib/series/noun.test.ts` (a cadeia do substantivo e a guarda estática) e
+`components/dashboards/charts/tree-widget.test.ts` (as ações do nó vindo do
+hook da lista, e o `changed_at`).
 
 ## 5. Invariantes críticas (NÃO QUEBRAR)
 
@@ -5401,11 +5523,11 @@ principalmente — para mantenedores humanos.
 33. **Série periódica: a ocorrência é DERIVADA e a trava é POR OCORRÊNCIA
     (0132, §4.24).** `occurrence = floor((hoje − âncora) / cadência)` — nunca
     um contador, nunca "última execução" gravada: tick que não rodou não
-    dessincroniza a série, e a cobrança que ninguém abriu segue existindo como
+    dessincroniza a série, e a ocorrência que ninguém abriu segue existindo como
     fato (é ela que vira o galho vazio na árvore). A série mantém abertas a
     devida hoje MAIS as `lookahead` seguintes (`occurrencesAhead`, padrão 5) e
-    **nunca anda para trás**: cobrança de ciclo anterior ao que está em aberto
-    não vira tarefa retroativa. Atributo `pausado` PARA a cobrança
+    **nunca anda para trás**: ocorrência de ciclo anterior ao que está em aberto
+    não vira tarefa retroativa. Atributo `pausado` PARA a ocorrência
     (`CardFacts.pausedAttributes`) — o status precisa ser LIDO, não só escrito. A trava de verdade é
     `uq_tasks_series_occurrence` e 23505 é NO-OP, jamais `last_error`
     (precedente 0129). O índice é DELIBERADAMENTE sem `completed_at is null`
@@ -5419,17 +5541,17 @@ principalmente — para mantenedores humanos.
     reescreve a regra que vale para todos.
 
 34. **A Tree é DERIVADA; `tree_nodes` guarda só a exceção (0133, §4.24).** Os
-    nós são fatos que já existem (cobranças calculadas, tarefas, comentários,
+    nós são fatos que já existem (ocorrências calculadas, tarefas, comentários,
     `audit_log`); a tabela guarda exclusivamente o que não é derivável — o nó
     LIVRE e o `parent_ref` de um nó re-pendurado à mão. É isso que faz as três
     formas (`por_ocorrencia`/`por_tipo`/`livre`) funcionarem sobre os MESMOS
     fatos sem migrar dado, e o re-pendurar COMPOR com qualquer uma delas (a
     forma dá o parentesco derivado; a exceção vence). Nunca materialize a
     árvore: desfazer tem de ser apagar uma linha. Tarefa da série FUNDE no nó
-    da própria cobrança (nunca duplica ao lado dela) e fato anterior à primeira
-    cobrança pendura NELA — nada some por cair fora de janela. A JANELA
+    da própria ocorrência (nunca duplica ao lado dela) e fato anterior à primeira
+    ocorrência pendura NELA — nada some por cair fora de janela. A JANELA
     (09/09/2026) recorta a lista de OCORRÊNCIAS, nunca linhas soltas: cortar no
-    meio de uma cobrança deixaria os galhos dela sem tronco. `deriveTree` segue
+    meio de uma ocorrência deixaria os galhos dela sem tronco. `deriveTree` segue
     puro e sem saber de paginação.
 
 35. **Atributo do registro: registry em CÓDIGO e pausar ≠ excluir (0131,
@@ -5469,6 +5591,30 @@ principalmente — para mantenedores humanos.
     as séries que já rodam. Nenhum nível atravessa o piso — sem registro com
     par no CRM não há onde pendurar a atividade. 23505 no enfileirador é NO-OP,
     nunca `last_error`.
+38. **O que se busca fora do período é a ATIVIDADE, nunca o negócio — e o
+    inbound não escreve conteúdo (0137, §4.25).** Concluir uma atividade não
+    mexe no `DATE_MODIFY` do deal, então o reconcile por período nunca o traria
+    de volta; e reler o DEAL não diria nada sobre as atividades dele. Lê-se a
+    LISTA DE ATIVIDADES dos donos com pendência aqui — que é também o único
+    jeito de detectar EXCLUSÃO, porque ela não emite nada: a atividade apagada
+    simplesmente não volta na lista. Por isso o inbound é gancho pós-job e lê o
+    dono INTEIRO (um runner paginado não distingue "sumiu" de "está na próxima
+    página"), e por isso ele roda mesmo com o job sem nada escrito. Quem escreve
+    o quê: conteúdo de tarefa já espelhada é DAQUI (o outbound leva);
+    `COMPLETED`, exclusão e atividade CRM_TODO desconhecida são DE LÁ. O inbound
+    NUNCA sobrescreve conteúdo de tarefa com `bitrix_activity_id` — é o que
+    dispensa um `isProtected` para `tasks` — e escreve DIRETO, sem enfileirar de
+    volta. Do lado de saída, `reopenTask`/`moveTaskPhase`/`rescheduleTask` TÊM
+    de enfileirar `update` (senão a leitura re-fecha a tarefa reaberta, para
+    sempre) e `deleteTask` enfileira `delete` ANTES de apagar a linha (a FK da
+    fila é `on delete set null` justamente para a ordem sobreviver).
+39. **Vocabulário de domínio é DADO, nunca literal no fonte (10/09/2026,
+    §4.25).** O substantivo de cada ocorrência vive em `SeriesConfig.noun` e
+    `tasks.occurrence_noun`, com padrão `DEFAULT_SERIES_NOUN` e um dono único da
+    frase (`occurrenceLabel`). Rótulo de domínio escrito no código reaparece em
+    toda tela nova — foi assim que uma palavra que esta organização não usa
+    chegou a 37 arquivos. `lib/series/noun.test.ts` guarda isso estaticamente;
+    a allowlist só aceita DADO real de negócio.
 
 ## 6. Convenções do projeto
 

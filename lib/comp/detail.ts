@@ -140,7 +140,7 @@ export const MAX_DETAIL_ROWS_BUDGET = 5000;
 /**
  * Linhas de estrutura cobradas do orçamento por fator: cabeçalho do fator,
  * cabeçalho de colunas, subtotal, respiro, mais o rateio do cabeçalho do plano
- * e do bloco da pessoa. Cobrar a mais é barato; cobrar a menos estoura o teto
+ * e do bloco da pessoa. Pedir a mais é barato; pedir a menos estoura o teto
  * do validador e o export perde o detalhamento inteiro.
  */
 const DETAIL_ROWS_OVERHEAD = 10;

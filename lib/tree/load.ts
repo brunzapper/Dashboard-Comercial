@@ -1,16 +1,24 @@
-// Versão: 1.3 | Data: 09/09/2026
+// Versão: 1.4 | Data: 10/09/2026
+// v1.4 (10/09/2026): DUAS correções e uma mudança de vocabulário.
+//   1. O nó de "Alteração" NUNCA existiu: a consulta pedia `audit_log.created_at`
+//      e a coluna é `changed_at` (0006). O PostgREST devolvia erro, `changes`
+//      voltava null e a árvore ficava sem os fatos de mudança — em silêncio,
+//      desde que a Tree existe.
+//   2. O substantivo do tronco saiu do código. Ele é DADO agora
+//      (`tasks.occurrence_noun` → `SeriesConfig.noun` → "Tarefa"), montado só
+//      por `occurrenceLabel` (lib/series/types.ts).
 // v1.2 (09/09/2026): `tree_nodes` entra no MESMO Promise.all dos fatos. Ele
 //   não depende de tarefa, anotação nem alteração — estava em série sem
 //   razão, e cada ida ao banco pesa no tempo entre o clique e a árvore.
-// v1.1 (09/09/2026): JANELA. Um registro sob cobrança quinzenal por dois
-//   anos tem ~50 galhos, e a árvore inteira de uma vez é ilegível. O corte é
-//   por COBRANÇA, nunca por linha solta: cortar no meio de uma deixaria a
+// v1.1 (09/09/2026): JANELA. Um registro em série quinzenal por dois anos
+//   tem ~50 galhos, e a árvore inteira de uma vez é ilegível. O corte é
+//   por OCORRÊNCIA, nunca por linha solta: cortar no meio de uma deixaria a
 //   anotação e a tarefa dela órfãs de tronco. Sem série (sem tronco), a
 //   janela é dos próprios fatos, na direção da ordem.
 // Monta os FATOS da árvore de um registro — tudo lido ao vivo, nada copiado.
 //
-// A ordem importa: primeiro o TRONCO (as cobranças previstas pela série, que é
-// derivado e por isso mostra até a cobrança que nunca virou tarefa), depois o
+// A ordem importa: primeiro o TRONCO (as ocorrências previstas pela série, que
+// é derivado e por isso mostra até a que nunca virou tarefa), depois o
 // que aconteceu (tarefas, anotações, alterações), depois as exceções de
 // parentesco. Quem transforma isso em árvore é `deriveTree`, puro.
 //
@@ -23,6 +31,7 @@ import { resolveCadence } from "@/lib/series/cadence";
 import { loadSeriesSettings } from "@/lib/series/load";
 import { loadFieldHistory } from "@/lib/records/field-history";
 import { occurrencesUntil, resolveAnchorDate, resolveBound } from "@/lib/series/occurrence";
+import { occurrenceLabel } from "@/lib/series/types";
 import type { AvailableField } from "@/lib/widgets/fields";
 import type { RecordRow } from "@/lib/records/types";
 
@@ -38,16 +47,16 @@ export { TREE_WINDOW_STEP };
 const FACT_FETCH_CAP = 400;
 
 export interface TreeWindow {
-  /** `desc` = das cobranças mais recentes para trás (o padrão de quem abre). */
+  /** `desc` = das ocorrências mais recentes para trás (o padrão de quem abre). */
   order: "asc" | "desc";
-  /** Quantas cobranças exibir. Cresce a cada "carregar mais". */
+  /** Quantas ocorrências exibir. Cresce a cada "carregar mais". */
   limit: number;
 }
 
 export interface TreeFacts {
   facts: TreeFact[];
   overrides: TreeParentOverride[];
-  /** Há cobrança (ou fato) fora da janela na direção corrente. */
+  /** Há ocorrência (ou fato) fora da janela na direção corrente. */
   hasMore: boolean;
   /** Cadência efetiva e se a série está ligada — o cabeçalho da árvore. */
   series: {
@@ -55,6 +64,8 @@ export interface TreeFacts {
     cadenceDays: number;
     active: boolean;
     anchorDate: string | null;
+    /** v1.4: como ESTA série chama cada ocorrência. null = o padrão. */
+    noun: string | null;
   } | null;
 }
 
@@ -90,7 +101,7 @@ export async function loadRecordTreeFacts(
   const available = input.available ?? [];
   const facts: TreeFact[] = [];
 
-  // --- o tronco: as cobranças PREVISTAS (derivadas), não as tarefas ---
+  // --- o tronco: as ocorrências PREVISTAS (derivadas), não as tarefas ---
   let series: TreeFacts["series"] = null;
   let hasMore = false;
   // Bordas de data do recorte (uma ou outra, nunca as duas — ver acima).
@@ -140,6 +151,7 @@ export async function loadRecordTreeFacts(
         cadenceDays: cadence.days,
         active: cadence.active,
         anchorDate,
+        noun: config.noun ?? null,
       };
       const all = occurrencesUntil({
         anchorDate,
@@ -150,7 +162,7 @@ export async function loadRecordTreeFacts(
         firstAt: config.firstAt,
         maxOccurrences: config.maxOccurrences,
       });
-      // A janela corta AQUI, na lista de cobranças — antes de qualquer fato
+      // A janela corta AQUI, na lista de ocorrências — antes de qualquer fato
       // ser lido. É o que garante que nenhum galho perca o tronco dele.
       const win = input.window;
       const shown = !win
@@ -161,7 +173,7 @@ export async function loadRecordTreeFacts(
       hasMore = win ? all.length > shown.length : false;
       if (shown.length > 0) {
         // Fora da janela, o fato é descartado. `desc` não tem teto superior
-        // (o que veio DEPOIS da última cobrança é o mais recente, e é o que
+        // (o que veio DEPOIS da última ocorrência é o mais recente, e é o que
         // se quer ver); `asc` não tem piso (o anterior à primeira pendura
         // nela, regra que o deriveTree já aplica).
         if (win?.order === "asc") factsUntil = shown[shown.length - 1].dueDate;
@@ -172,7 +184,9 @@ export async function loadRecordTreeFacts(
           id: `occ:${occ.occurrence}`,
           kind: "occurrence",
           at: occ.dueDate,
-          label: `${occ.occurrence}ª cobrança`,
+          // O substantivo vem da série; a tarefa daquela ocorrência ainda
+          // pode sobrepô-lo abaixo (occurrence_noun).
+          label: occurrenceLabel(occ.occurrence, config.noun),
           occurrence: occ.occurrence,
         });
       }
@@ -189,7 +203,7 @@ export async function loadRecordTreeFacts(
       db
         .from("tasks")
         .select(
-          "id, title, description, due_date, completed_at, series_key, series_occurrence, created_at"
+          "id, title, description, due_date, completed_at, series_key, series_occurrence, occurrence_noun, created_at"
         )
         .eq("record_id", recordId)
         .order("due_date", { ascending: asc, nullsFirst: false })
@@ -200,11 +214,14 @@ export async function loadRecordTreeFacts(
         .eq("record_id", recordId)
         .order("created_at", { ascending: asc })
         .limit(cap),
+      // v1.4: `changed_at` — a coluna do audit_log (0006). Com `created_at`
+      // (que não existe lá) o PostgREST erra e `changes` volta NULL: a árvore
+      // ficava sem nó de alteração nenhum, sem dizer por quê.
       db
         .from("audit_log")
-        .select("id, field, new_value, created_at, origin")
+        .select("id, field, new_value, changed_at, origin")
         .eq("record_id", recordId)
-        .order("created_at", { ascending: asc })
+        .order("changed_at", { ascending: asc })
         .limit(cap),
       // Nós livres e exceções de parentesco: independentes dos fatos acima.
       db
@@ -229,14 +246,18 @@ export async function loadRecordTreeFacts(
 
   for (const t of tasks ?? []) {
     const occurrence = t.series_occurrence as number | null;
-    // A tarefa de uma cobrança não vira nó próprio: ela É a cobrança, e o
+    // A tarefa de uma ocorrência não vira nó próprio: ela É a ocorrência, e o
     // tronco já a representa. Duplicá-la faria a árvore contar duas vezes.
     if (occurrence != null) {
       const trunk = facts.find((f) => f.id === `occ:${occurrence}`);
       if (trunk) {
         trunk.refId = t.id as string;
         trunk.status = t.completed_at ? "concluída" : "aberta";
-        trunk.label = (t.title as string) || trunk.label;
+        // Cadeia do rótulo: título da tarefa > substantivo DELA > o da série.
+        const noun = (t.occurrence_noun as string | null) ?? null;
+        trunk.label =
+          (t.title as string) ||
+          (noun ? occurrenceLabel(occurrence, noun) : trunk.label);
         continue;
       }
     }
@@ -266,11 +287,11 @@ export async function loadRecordTreeFacts(
   }
 
   for (const a of changes ?? []) {
-    if (!inWindow(day(a.created_at))) continue;
+    if (!inWindow(day(a.changed_at))) continue;
     facts.push({
       id: `change:${a.id as string}`,
       kind: "change",
-      at: day(a.created_at),
+      at: day(a.changed_at),
       label: `${a.field as string}: ${String(a.new_value ?? "").slice(0, 60)}`,
       status: (a.origin as string) ?? null,
       refId: a.id as string,
@@ -301,7 +322,7 @@ export async function loadRecordTreeFacts(
   }
 
   // Sem tronco (registro fora de série), a janela recorta os PRÓPRIOS fatos:
-  // não há cobrança para agrupá-los, e a linha do tempo crua é o que existe.
+  // não há ocorrência para agrupá-los, e a linha do tempo crua é o que existe.
   if (!series && input.window) {
     const dated = facts.filter((f) => f.kind !== "note");
     if (dated.length > input.window.limit) {

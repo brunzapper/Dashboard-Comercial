@@ -1,4 +1,7 @@
-// Versão: 1.2 | Data: 09/09/2026
+// Versão: 1.3 | Data: 10/09/2026
+// v1.3 (10/09/2026): só vocabulário — o substantivo da ocorrência
+//   da série saiu do código e virou dado (SeriesConfig.noun, e
+//   tasks.occurrence_noun por tarefa).
 // v1.2 (09/09/2026): a lista de tarefas do painel deixou de ser uma projeção
 //   read-only artesanal e passou a ser o `TaskList` canônico (checkbox de
 //   concluir, lápis de editar, DueBadge). A nota de "somente leitura" abaixo
@@ -6,7 +9,7 @@
 //   app inteiro usa é o oposto de uma régua paralela; era a projeção de 4
 //   campos que impedia qualquer ação.
 // v1.1 (09/09/2026): as tarefas do painel são PAGINADAS. Um registro sob
-//   cobrança periódica acumula dezenas de tarefas, e trazer 100 de uma vez
+//   série periódica acumula dezenas de tarefas, e trazer 100 de uma vez
 //   (sem "carregar mais") entregava uma parede e ainda assim escondia o
 //   resto. Agora vem uma página e a contagem total; `loadRowTasks` traz as
 //   seguintes na direção da ordem escolhida.
@@ -151,7 +154,7 @@ export async function loadRowPanel(recordId: string): Promise<RowPanelData> {
     .filter((f) => f.value !== "");
 
   // Primeira página: mais recentes primeiro (o que se quer ver ao abrir um
-  // acompanhamento é o que acabou de acontecer, não a cobrança de 2 anos atrás).
+  // acompanhamento é o que acabou de acontecer, não a tarefa de 2 anos atrás).
   // v1.2: os responsáveis vêm junto — o editor de tarefa precisa da lista.
   const [firstPage, attrRows, { data: resps }] = await Promise.all([
     loadRowTasks(recordId, { offset: 0, order: "desc" }),

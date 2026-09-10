@@ -1,4 +1,8 @@
-// Versão: 1.0 | Data: 09/09/2026
+// Versão: 1.1 | Data: 10/09/2026
+// v1.1 (10/09/2026): as duas operações de 0137 — apagar a atividade e mandar a
+// anotação como comentário. A de apagar é a que tem armadilha: a ordem existe
+// SEM tarefa (a linha já foi removida), então tudo o que ela tem é o
+// `activity_id`.
 // O espelho de tarefa como ATIVIDADE do CRM (0136).
 //
 // O que está em risco aqui é duplicar: o tick roda a cada minuto, e uma
@@ -78,6 +82,7 @@ describe("activityFields", () => {
 function fakeDb(opts: {
   queue: Record<string, unknown>[];
   task: Record<string, unknown> | null;
+  comment?: Record<string, unknown> | null;
 }) {
   const updates: { table: string; patch: Record<string, unknown> }[] = [];
   const make = (table: string) => {
@@ -99,7 +104,9 @@ function fakeDb(opts: {
             ? opts.task
             : table === "responsibles"
               ? { bitrix_user_id: "89" }
-              : null,
+              : table === "comments"
+                ? (opts.comment ?? null)
+                : null,
       });
     return b;
   };
@@ -109,6 +116,8 @@ function fakeDb(opts: {
 const row = (over: Record<string, unknown> = {}) => ({
   id: "q1",
   task_id: "t1",
+  comment_id: null,
+  target: "task",
   op: "create",
   owner_entity: "deal",
   owner_source_id: "123",
@@ -205,6 +214,99 @@ describe("drainTaskMirrorQueue", () => {
       { done: 0, errors: 0 }
     );
     expect(call).not.toHaveBeenCalled();
+  });
+
+  // A ordem de exclusão sobrevive à tarefa: a FK virou `set null` na 0137
+  // justamente porque, quando o dreno roda, a linha já não existe.
+  it("excluir chama crm.activity.delete SEM tarefa", async () => {
+    const { db, updates } = fakeDb({
+      queue: [
+        row({ op: "delete", task_id: null, activity_id: "777" }),
+      ],
+      task: null,
+    });
+    const call = vi.fn().mockResolvedValue({ result: true });
+    const out = await drainTaskMirrorQueue(db, Date.now() + 10_000, { call });
+
+    expect(call).toHaveBeenCalledWith("crm.activity.delete", { id: "777" });
+    expect(out.done).toBe(1);
+    expect(
+      updates.find((u) => u.table === "bitrix_task_queue")!.patch.status
+    ).toBe("done");
+  });
+
+  // Apagar o que já não existe é o RESULTADO desejado, não uma falha a repetir
+  // cinco vezes.
+  it("atividade que já sumiu lá conta como feita", async () => {
+    const { db, updates } = fakeDb({
+      queue: [row({ op: "delete", task_id: null, activity_id: "777" })],
+      task: null,
+    });
+    const call = vi.fn().mockRejectedValue(new Error("NOT_FOUND"));
+    const out = await drainTaskMirrorQueue(db, Date.now() + 10_000, { call });
+
+    expect(out.done).toBe(1);
+    expect(
+      updates.find((u) => u.table === "bitrix_task_queue")!.patch.status
+    ).toBe("done");
+  });
+
+  it("excluir sem id da atividade não repete — não é falha do portal", async () => {
+    const { db, updates } = fakeDb({
+      queue: [row({ op: "delete", task_id: null, activity_id: null })],
+      task: null,
+    });
+    const call = vi.fn();
+    await drainTaskMirrorQueue(db, Date.now() + 10_000, { call });
+
+    expect(call).not.toHaveBeenCalled();
+    expect(
+      updates.find((u) => u.table === "bitrix_task_queue")!.patch.status
+    ).toBe("error");
+  });
+
+  it("anotação vira comentário e GUARDA o id", async () => {
+    const { db, updates } = fakeDb({
+      queue: [
+        row({
+          op: "comment_add",
+          target: "comment",
+          task_id: null,
+          comment_id: "c1",
+        }),
+      ],
+      task: null,
+      comment: { id: "c1", body: "Cliente pediu proposta", bitrix_comment_id: null },
+    });
+    const call = vi.fn().mockResolvedValue({ result: 555 });
+    await drainTaskMirrorQueue(db, Date.now() + 10_000, { call });
+
+    expect(call.mock.calls[0][0]).toBe("crm.timeline.comment.add");
+    expect(updates).toContainEqual({
+      table: "comments",
+      patch: { bitrix_comment_id: "555" },
+    });
+  });
+
+  // Sem esta guarda, uma retentativa duplicaria o comentário no feed.
+  it("anotação já espelhada não comenta de novo", async () => {
+    const { db } = fakeDb({
+      queue: [
+        row({
+          op: "comment_add",
+          target: "comment",
+          task_id: null,
+          comment_id: "c1",
+        }),
+      ],
+      task: null,
+      comment: { id: "c1", body: "oi", bitrix_comment_id: "555" },
+    });
+    const call = vi.fn();
+    const out = await drainTaskMirrorQueue(db, Date.now() + 10_000, { call });
+
+    expect(call).not.toHaveBeenCalled();
+    expect(out.done).toBe(1);
   });
 
   it("orçamento estourado para antes de chamar", async () => {

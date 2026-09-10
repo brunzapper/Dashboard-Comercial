@@ -1,4 +1,7 @@
-// Versão: 1.0 | Data: 08/09/2026
+// Versão: 1.1 | Data: 10/09/2026
+// v1.1 (10/09/2026): só vocabulário — o substantivo da ocorrência
+//   da série saiu do código e virou dado (SeriesConfig.noun, e
+//   tasks.occurrence_noun por tarefa).
 // Executor da ação `create_task`: abre uma tarefa vinculada ao registro.
 //
 // Não usa `createTask` (`lib/tasks/actions.ts`) de propósito — aquela é uma
@@ -59,7 +62,7 @@ export async function executeAutomationTasks(
         automation_rule_id: t.ruleId,
         created_by: batch.createdBy,
         // Topo da fila, como o notify do de-para: tarefa de automação é
-        // cobrança, e cobrança no fim da lista não é vista.
+        // série, e tarefa no fim da lista não é vista.
         position: -Date.now(),
       })
       .select("id")

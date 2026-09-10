@@ -1,4 +1,9 @@
-// Versão: 1.3 | Data: 09/09/2026
+// Versão: 1.4 | Data: 10/09/2026
+// v1.4 (10/09/2026): tarefa de SÉRIE ganha o campo "Como chamar esta"
+//   (occurrence_noun, 0137) — o nível mais específico do substantivo, acima do
+//   que a automação definiu. Só aparece em tarefa de série: numa tarefa avulsa
+//   não haveria o que sobrepor, e o `updates` do updateTask só toca a coluna
+//   quando o controle veio no envio (senão o form sem ele a apagaria).
 // v1.3 (09/09/2026): espelho da tarefa no Bitrix (0136) — o nível 3 (mais
 //   específico) da configuração; "herdar" segue a Base.
 // Painel de criação/edição de TAREFA: título, descrição, vencimento (data +
@@ -42,6 +47,11 @@ import {
   MIRROR_CHOICE_LABELS,
   type MirrorChoice,
 } from "@/lib/tasks/mirror-config";
+import {
+  DEFAULT_SERIES_NOUN,
+  MAX_SERIES_NOUN_LEN,
+  occurrenceLabel,
+} from "@/lib/series/types";
 
 const initial: TaskActionState = {};
 
@@ -234,6 +244,28 @@ export function TaskForm({
           }
         />
       </div>
+
+      {/* v1.4: só em tarefa de SÉRIE. É o substantivo que a árvore usa no
+          tronco enquanto a tarefa não tem título próprio a exibir. O nível
+          mais específico: vence o que a automação definiu. */}
+      {isEdit && task?.series_occurrence != null ? (
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="occurrence_noun">Como chamar esta</Label>
+          <Input
+            id="occurrence_noun"
+            name="occurrence_noun"
+            defaultValue={task.occurrence_noun ?? ""}
+            maxLength={MAX_SERIES_NOUN_LEN}
+            placeholder={DEFAULT_SERIES_NOUN}
+            aria-label="Substantivo desta ocorrência na árvore"
+          />
+          <p className="text-muted-foreground text-xs">
+            Aparece na árvore como{" "}
+            {occurrenceLabel(task.series_occurrence, task.occurrence_noun)}.
+            Vazio segue o nome que a automação definiu.
+          </p>
+        </div>
+      ) : null}
 
       {/* v1.1 (09/09/2026): nível 3 do espelho no Bitrix (0136). Três estados
           porque "herdar" (a Base decide) não é o mesmo que "nunca" — é o que

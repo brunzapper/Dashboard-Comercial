@@ -1,7 +1,14 @@
-// Versão: 1.3 | Data: 09/09/2026
-// Modelo da SÉRIE DE TAREFAS PERIÓDICAS (0132) — a cobrança recorrente que uma
+// Versão: 1.4 | Data: 10/09/2026
+// Modelo da SÉRIE DE TAREFAS PERIÓDICAS (0132) — a tarefa recorrente que uma
 // automação mantém sobre um registro ("enquanto o deal estiver em Nutrição,
 // abra uma tarefa a cada quinze dias").
+//
+// v1.4 (10/09/2026): o SUBSTANTIVO da ocorrência virou dado (`noun`). Antes ele
+// estava escrito no fonte, e a palavra escolhida não era a que este projeto
+// usa. Vocabulário de domínio não pertence ao código: cada organização chama a
+// própria rotina do jeito dela, e corrigir o termo no fonte só empurra o erro
+// para a organização seguinte. O padrão é "Tarefa"; a automação escolhe outro,
+// e a tarefa individual sobrepõe (tasks.occurrence_noun, 0137).
 //
 // O pedido separa duas coisas que costumam ser confundidas:
 //  - o gatilho PRIMÁRIO (quais registros participam) — são as CONDIÇÕES da
@@ -17,9 +24,11 @@ import type { WorkflowFieldSpec } from "@/lib/workflow/types";
 
 /** De onde sai a data que inicia a contagem. */
 export type SeriesAnchor =
-  // Última alteração de um campo (records.field_modified_at[<campo>]) — é o
+  // Última alteração de um campo, lida do HISTÓRICO (`audit_log`, 0135) — é o
   // "desde que mudou para esta etapa", e é o MESMO fato que a condição de
-  // tempo `field_changed` já carrega para a rodada.
+  // tempo `field_changed` já carrega para a rodada. NUNCA
+  // `records.field_modified_at`: aquilo é o marcador de proteção do sync e
+  // fica vazio para todo campo vindo do Bitrix (invariante 36).
   | { kind: "field_changed"; field: string }
   // Criação na origem (records.source_created_at).
   | { kind: "created" }
@@ -30,12 +39,12 @@ export type SeriesAnchor =
  * Limite de uma ponta da janela.
  *
  * A quarta forma de "quando parar" não está aqui: é a AUSÊNCIA de `until` —
- * cobra enquanto as condições da regra valerem, e sair da etapa faz a regra
- * deixar de casar. As três abaixo são os limites explícitos.
+ * a série segue enquanto as condições da regra valerem, e sair da etapa faz a
+ * regra deixar de casar. As três abaixo são os limites explícitos.
  *
- * v1.1 (09/09/2026): `field_changed` — para de cobrar quando ESSE campo mudar.
- * Lê o mesmo `records.field_modified_at` da âncora homônima e da condição de
- * tempo do motor, então o fato já chega na rodada sem consulta nova.
+ * v1.1 (09/09/2026): `field_changed` — encerra quando ESSE campo mudar. Lê o
+ * mesmo HISTÓRICO (`audit_log`) da âncora homônima e da condição de tempo do
+ * motor, então o fato já chega na rodada sem consulta nova.
  */
 export type SeriesBound =
   | { kind: "field"; field: string }
@@ -68,16 +77,16 @@ export interface SeriesCadence {
  * de o histórico existir.
  *
  * v1.2 (09/09/2026): "nenhum" (padrão) é o comportamento honesto — sem data de
- * início não há de onde contar, e inventar uma cobraria o vendedor por um
- * atraso que ninguém sabe se houve. "criacao" serve ao registro que já estava
- * na etapa antes de a série existir: conta da criação, que é uma data real.
+ * início não há de onde contar, e inventar uma abriria tarefa por um atraso que
+ * ninguém sabe se houve. "criacao" serve ao registro que já estava na etapa
+ * antes de a série existir: conta da criação, que é uma data real.
  */
 export type SeriesAnchorFallback = "nenhum" | "criacao";
 
-/** Quando a primeira cobrança acontece. */
+/** Quando a primeira ocorrência acontece. */
 export type SeriesFirstAt =
-  // Um ciclo depois da âncora (o padrão: entrou em Nutrição hoje, cobra em 15
-  // dias). Cobrar no mesmo instante em que o registro entrou é ruído.
+  // Um ciclo depois da âncora (o padrão: entrou em Nutrição hoje, a primeira
+  // sai em 15 dias). Abrir no mesmo instante em que o registro entrou é ruído.
   | "apos_um_ciclo"
   // No próprio dia da âncora.
   | "imediato";
@@ -89,25 +98,25 @@ export interface SeriesConfig {
   title: WorkflowFieldSpec | string;
   description?: string;
   anchor: SeriesAnchor;
-  /** v1.2: âncora que não resolve — não cobrar (padrão) ou usar a criação. */
+  /** v1.2: âncora que não resolve — não gerar nada (padrão) ou usar a criação. */
   anchorFallback?: SeriesAnchorFallback;
-  /** Janela: antes de `from` não cobra; depois de `until` para de cobrar. */
+  /** Janela: antes de `from` não gera; depois de `until` a série encerra. */
   from?: SeriesBound;
   until?: SeriesBound;
   cadence: SeriesCadence;
   firstAt: SeriesFirstAt;
-  /** Teto de cobranças por registro (0/ausente = sem teto). */
+  /** Teto de ocorrências por registro (0/ausente = sem teto). */
   maxOccurrences?: number;
   /**
-   * Quantas cobranças FUTURAS manter abertas além da devida hoje.
+   * Quantas ocorrências FUTURAS manter abertas além da devida hoje.
    *
-   * v1.2 (09/09/2026): antes a série só criava a cobrança do dia, então o
-   * vendedor não tinha como ver (nem remarcar) o que vinha pela frente — e num
-   * ciclo quinzenal isso são 15 dias sem nada na tela. Criar adiantado é seguro
+   * v1.2 (09/09/2026): antes a série só criava a do dia, então o vendedor não
+   * tinha como ver (nem remarcar) o que vinha pela frente — e num ciclo
+   * quinzenal isso são 15 dias sem nada na tela. Criar adiantado é seguro
    * porque a trava é por OCORRÊNCIA (índice único da 0132, sem
    * `completed_at is null`): repetir é 23505, que já é no-op.
    *
-   * NUNCA anda para trás: cobrança vencida que ninguém abriu não vira tarefa
+   * NUNCA anda para trás: ocorrência vencida que ninguém abriu não vira tarefa
    * retroativa — ela segue aparecendo na Tree como galho vazio, que é o que
    * mostra a falta de acompanhamento.
    */
@@ -120,6 +129,12 @@ export interface SeriesConfig {
    * espelho na Base alcançar as séries que já rodam, sem editá-las.
    */
   mirrorBitrix?: "herdar" | "sempre" | "nunca";
+  /**
+   * v1.4: como ESTA série chama cada ocorrência ("Tarefa", "Follow-up",
+   * "Visita"…). Ausente = DEFAULT_SERIES_NOUN. É rótulo de exibição — não
+   * entra em chave, identidade nem consulta.
+   */
+  noun?: string;
 }
 
 export const SERIES_SCOPE_LABELS: Record<SeriesScopeKind, string> = {
@@ -130,11 +145,43 @@ export const SERIES_SCOPE_LABELS: Record<SeriesScopeKind, string> = {
 
 /** Teto de sobrescritas declaradas (configuração humana, não carga de dados). */
 export const MAX_SERIES_SCOPES = 6;
-/** Teto de cobranças futuras mantidas abertas (0 = só a devida hoje). */
+/** Teto de ocorrências futuras mantidas abertas (0 = só a devida hoje). */
 export const MAX_SERIES_LOOKAHEAD = 12;
 export const DEFAULT_SERIES_LOOKAHEAD = 5;
 export const MIN_CADENCE_DAYS = 1;
 export const MAX_CADENCE_DAYS = 365;
+
+/**
+ * Como uma ocorrência se chama quando ninguém escolheu outro nome.
+ *
+ * v1.4 (10/09/2026): antes o termo estava escrito no fonte, e não era o que
+ * este projeto fala. "Tarefa" é o substantivo do próprio sistema; quem quiser
+ * outro escreve na regra ou na tarefa.
+ */
+export const DEFAULT_SERIES_NOUN = "Tarefa";
+export const MAX_SERIES_NOUN_LEN = 24;
+
+/**
+ * O rótulo de uma ocorrência no tronco da Tree ("3ª Tarefa").
+ *
+ * Dono ÚNICO da frase: a Tree, o editor da regra e o formulário da tarefa a
+ * consomem. Remontá-la em cada tela é como a palavra errada se espalhou por
+ * 37 arquivos da primeira vez.
+ */
+export function occurrenceLabel(
+  occurrence: number,
+  noun?: string | null
+): string {
+  const word = (noun ?? "").trim() || DEFAULT_SERIES_NOUN;
+  return `${occurrence}ª ${word}`;
+}
+
+/** Saneia um substantivo vindo de jsonb/formulário. Vazio = usar o padrão. */
+export function parseSeriesNoun(raw: unknown): string | undefined {
+  if (typeof raw !== "string") return undefined;
+  const v = raw.trim().slice(0, MAX_SERIES_NOUN_LEN);
+  return v === "" ? undefined : v;
+}
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);
@@ -194,7 +241,7 @@ function parseScopes(raw: unknown): SeriesScopeSpec[] | null {
 /**
  * Parse fail-closed da configuração da série. Devolve null para qualquer
  * estrutura fora do contrato — cadência zero, âncora sem campo, escopo
- * desconhecido. Série que "roda como der" cobra o vendedor errado.
+ * desconhecido. Série que "roda como der" abre tarefa para o vendedor errado.
  */
 export function parseSeriesConfig(raw: unknown): SeriesConfig | null {
   if (!isRecord(raw)) return null;
@@ -241,7 +288,7 @@ export function parseSeriesConfig(raw: unknown): SeriesConfig | null {
         : DEFAULT_SERIES_LOOKAHEAD,
   };
 
-  // Ausente = "nenhum": uma série existente não passa a cobrar da criação só
+  // Ausente = "nenhum": uma série existente não passa a contar da criação só
   // porque o parse ganhou uma chave nova.
   if (raw.anchorFallback === "criacao") config.anchorFallback = "criacao";
 
@@ -264,5 +311,9 @@ export function parseSeriesConfig(raw: unknown): SeriesConfig | null {
   if (raw.mirrorBitrix === "sempre" || raw.mirrorBitrix === "nunca") {
     config.mirrorBitrix = raw.mirrorBitrix;
   }
+  // v1.4: substantivo da ocorrência. Ausente/vazio = o padrão — nunca falha o
+  // parse por causa de um rótulo.
+  const noun = parseSeriesNoun(raw.noun);
+  if (noun) config.noun = noun;
   return config;
 }
