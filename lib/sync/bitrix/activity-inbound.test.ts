@@ -1,4 +1,7 @@
-// Versão: 1.0 | Data: 10/09/2026
+// Versão: 1.1 | Data: 10/09/2026
+// v1.1 (10/09/2026): a guarda de TRUNCAMENTO. O teste "apagada LÁ apaga AQUI"
+//   sozinho dava falsa segurança: ele prova que a ausência apaga, e o que
+//   faltava provar é que a ausência de uma lista CORTADA não apaga.
 // A LEITURA DE VOLTA (0137). O que está em risco aqui não é duplicar — é
 // APAGAR o que não devia e sobrescrever o que é nosso.
 //
@@ -209,6 +212,84 @@ describe("syncBitrixActivitiesInbound", () => {
     const out = await syncBitrixActivitiesInbound(db, Date.now() + 9999, apiWith([]));
     expect(out.deleted).toBe(1);
     expect(ops.some((o) => o.table === "tasks" && o.op === "delete")).toBe(true);
+  });
+
+  // O contraponto do teste acima, e o motivo de ele não bastar: a lista do dono
+  // pode acabar CORTADA (teto de páginas / orçamento). Aí a ausência não prova
+  // nada, e apagar é irreversível.
+  it("lista cortada não apaga nada", async () => {
+    const { db, ops } = fakeDb({
+      ...OWNER_SEED,
+      tasks: [
+        {
+          id: "t1",
+          record_id: "r1",
+          title: "Follow-up",
+          completed_at: null,
+          bitrix_activity_id: "777",
+        },
+      ],
+    });
+    // Sempre com `next`: o laço só para no teto de páginas, nunca no fim.
+    const api = {
+      call: vi.fn().mockImplementation((method: string) => {
+        if (method === "crm.activity.list") {
+          return Promise.resolve({ result: [], next: 50 });
+        }
+        return Promise.resolve({ result: [] });
+      }),
+    };
+    const out = await syncBitrixActivitiesInbound(db, Date.now() + 9999, api);
+    expect(out.deleted).toBe(0);
+    expect(ops.some((o) => o.table === "tasks" && o.op === "delete")).toBe(false);
+  });
+
+  // A conclusão depende do que VOLTOU, não do que faltou — então ela segue
+  // valendo mesmo com a lista cortada.
+  it("lista cortada ainda conclui o que voltou", async () => {
+    const { db, ops } = fakeDb({
+      ...OWNER_SEED,
+      tasks: [
+        {
+          id: "t1",
+          record_id: "r1",
+          title: "Follow-up",
+          completed_at: null,
+          bitrix_activity_id: "777",
+        },
+      ],
+    });
+    let page = 0;
+    const api = {
+      call: vi.fn().mockImplementation((method: string) => {
+        if (method === "crm.activity.list") {
+          page += 1;
+          return Promise.resolve({
+            result: page === 1 ? [{ ...TODO, COMPLETED: "Y" }] : [],
+            next: 50,
+          });
+        }
+        return Promise.resolve({ result: [] });
+      }),
+    };
+    const out = await syncBitrixActivitiesInbound(db, Date.now() + 9999, api);
+    expect(out.completed).toBe(1);
+    expect(ops.some((o) => o.table === "tasks" && o.op === "delete")).toBe(false);
+  });
+
+  // Uma chamada por registro não cabe num tick de minuto — o tick pede sem.
+  it("comments:false não toca a timeline", async () => {
+    const { db } = fakeDb({
+      ...OWNER_SEED,
+      attrs: [{ record_id: "r1" }],
+      tasks: [],
+    });
+    const api = apiWith([]);
+    await syncBitrixActivitiesInbound(db, Date.now() + 9999, api, {
+      comments: false,
+    });
+    const methods = api.call.mock.calls.map((c) => c[0]);
+    expect(methods).not.toContain("crm.timeline.comment.list");
   });
 
   it("atividade desconhecida vira tarefa", async () => {

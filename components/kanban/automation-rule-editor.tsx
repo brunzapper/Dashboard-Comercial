@@ -1,4 +1,8 @@
-// Versão: 1.2 | Data: 10/09/2026
+// Versão: 1.3 | Data: 10/09/2026
+// v1.3 (10/09/2026): "Espelhar com (dias)" — a antecedência com que a
+//   ocorrência vira atividade no Bitrix (`SeriesConfig.mirrorLeadDays`). Junto
+//   com "Quantas adiantar", são os dois números que decidem o que o vendedor vê
+//   aqui e o que o CRM recebe, e ambos passam a ser da regra, não do código.
 // v1.2 (10/09/2026): o SUBSTANTIVO da ocorrência virou controle ("Como chamar
 //   cada uma"). Ele estava escrito no fonte, e a palavra não era a que este
 //   projeto usa — vocabulário de domínio é do usuário, não do código. Padrão
@@ -37,8 +41,10 @@ import {
   type MirrorChoice,
 } from "@/lib/tasks/mirror-config";
 import {
+  DEFAULT_MIRROR_LEAD_DAYS,
   DEFAULT_SERIES_LOOKAHEAD,
   DEFAULT_SERIES_NOUN,
+  MAX_MIRROR_LEAD_DAYS,
   MAX_SERIES_LOOKAHEAD,
   MAX_SERIES_NOUN_LEN,
 } from "@/lib/series/types";
@@ -179,6 +185,7 @@ export interface RuleDraft {
   seriesAnchorFallback: "nenhum" | "criacao";
   /** Espelho no Bitrix (0136), nível 2: herda da Base por padrão. */
   seriesMirrorBitrix: MirrorChoice;
+  seriesMirrorLeadDays: string;
   /**
    * v1.2: como esta série chama cada ocorrência. Vazio = DEFAULT_SERIES_NOUN.
    * É rótulo de exibição (o tronco da Tree) — não entra em chave nem consulta.
@@ -403,6 +410,10 @@ export function draftToRule(draft: RuleDraft): AutomationRule | null {
           ...(draft.seriesMirrorBitrix !== "herdar"
             ? { mirrorBitrix: draft.seriesMirrorBitrix }
             : {}),
+          mirrorLeadDays: Math.min(
+            Math.max(Math.floor(Number(draft.seriesMirrorLeadDays) || 0), 0),
+            MAX_MIRROR_LEAD_DAYS
+          ),
           ...(draft.seriesGrantAttribute
             ? { grantAttribute: draft.seriesGrantAttribute }
             : {}),
@@ -574,6 +585,11 @@ export function ruleToDraft(row: AutomationRow, fieldOptions: ComboboxOption[]):
       action.type === "create_task_series"
         ? (action.series.anchorFallback ?? "nenhum")
         : "nenhum",
+    seriesMirrorLeadDays: String(
+      action?.type === "create_task_series"
+        ? (action.series.mirrorLeadDays ?? DEFAULT_MIRROR_LEAD_DAYS)
+        : DEFAULT_MIRROR_LEAD_DAYS
+    ),
     seriesMirrorBitrix:
       action.type === "create_task_series"
         ? (action.series.mirrorBitrix ?? "herdar")
@@ -1435,6 +1451,27 @@ export function AutomationRuleEditor({
                         searchable={false}
                         aria-label="Espelhar as tarefas da série no Bitrix"
                       />
+                    </div>
+                    <div className="flex w-44 flex-col gap-1">
+                      <Label className="text-xs">Espelhar com (dias)</Label>
+                      <Input
+                        type="number"
+                        min={0}
+                        max={MAX_MIRROR_LEAD_DAYS}
+                        value={draft.seriesMirrorLeadDays}
+                        onChange={(e) =>
+                          setDraft((d) =>
+                            d
+                              ? { ...d, seriesMirrorLeadDays: e.target.value }
+                              : d
+                          )
+                        }
+                        aria-label="Dias de antecedência para criar a atividade no Bitrix"
+                      />
+                      <p className="text-[11px] text-muted-foreground">
+                        A tarefa aparece aqui desde já; no Bitrix, só quando
+                        faltarem estes dias para vencer.
+                      </p>
                     </div>
                     <div className="flex w-56 flex-col gap-1">
                       <Label className="text-xs">Conceder ao registro</Label>

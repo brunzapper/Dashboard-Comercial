@@ -1,5 +1,9 @@
-// Versão: 1.3 | Data: 10/09/2026
+// Versão: 1.4 | Data: 10/09/2026
 // A OCORRÊNCIA DEVIDA de uma série — o coração da recorrência, e puro.
+//
+// v1.4 (10/09/2026): `occurrencesToOpen` — a janela de futuras passa a ser
+// reposta por CONCLUSÃO, não pela virada do ciclo. `occurrencesAhead` fica
+// para quem só quer a janela de tempo (e para a compatibilidade dos testes).
 //
 // v1.3 (10/09/2026): só vocabulário — o substantivo da ocorrência saiu do
 // código e virou dado (`SeriesConfig.noun`, lib/series/types.ts v1.4).
@@ -142,6 +146,93 @@ export function occurrencesAhead(
     if (input.untilDate && dueDate > input.untilDate.slice(0, 10)) break;
     out.push({ occurrence: n, dueDate, anchorDate: due.anchorDate });
   }
+  return out;
+}
+
+/** Uma ocorrência que já existe como tarefa, e se ela ainda está aberta. */
+export interface KnownOccurrence {
+  occurrence: number;
+  /** `completed_at is null` — é o que decide se a janela precisa repor. */
+  open: boolean;
+}
+
+/**
+ * As ocorrências a CRIAR agora para manter `keepAhead` futuras ABERTAS.
+ *
+ * v1.4 (10/09/2026): substitui `occurrencesAhead` no caminho do tick. A
+ * diferença é o gatilho da reposição, e ela importa na prática:
+ *
+ *   `occurrencesAhead` andava pelo TEMPO — emitia `due … due+N` a partir da
+ *   ocorrência devida hoje. Concluir uma não repunha nada; num ciclo quinzenal
+ *   o vendedor concluía a próxima e ficava com uma a menos na tela por 15 dias,
+ *   até a janela andar sozinha.
+ *
+ *   Aqui a reposição é por CONCLUSÃO: o estoque de futuras abertas é constante.
+ *   Concluiu uma, a seguinte do calendário entra no lugar — o vendedor sempre
+ *   vê as mesmas `keepAhead` à frente, enquanto a série valer.
+ *
+ * O que NÃO muda, e é deliberado:
+ *   - as datas continuam saindo do calendário (âncora + n × cadência).
+ *     Concluir três seguidas não antecipa nada, só revela o que vem depois;
+ *   - NUNCA anda para trás. Ocorrência vencida que ninguém abriu não vira
+ *     tarefa retroativa hoje — ela segue como galho vazio da Tree, que é onde
+ *     a falta de acompanhamento deve aparecer;
+ *   - `until`/`maxOccurrences` cortam as futuras também: não se agenda tarefa
+ *     depois do fim declarado da série.
+ */
+export function occurrencesToOpen(
+  input: OccurrenceInput,
+  opts: { keepAhead: number; known: KnownOccurrence[] }
+): OccurrencePlan[] {
+  const keepAhead = Math.max(0, Math.floor(opts.keepAhead));
+  const cadence = Math.floor(input.cadenceDays);
+  if (!Number.isFinite(cadence) || cadence < 1) return [];
+
+  // Sem a devida hoje não há de onde partir (antes da primeira, fora da janela,
+  // sem âncora). Adiantar daí seria começar a série cedo demais.
+  const due = dueOccurrence(input);
+  if (!due) return [];
+
+  const knownByN = new Map<number, boolean>();
+  for (const k of opts.known) knownByN.set(k.occurrence, k.open);
+
+  const until = input.untilDate ? input.untilDate.slice(0, 10) : null;
+  const out: OccurrencePlan[] = [];
+  const plan = (n: number): OccurrencePlan | null => {
+    if (input.maxOccurrences && n > input.maxOccurrences) return null;
+    const dueDate = addDaysIso(due.anchorDate, n * cadence);
+    if (until && dueDate > until) return null;
+    return { occurrence: n, dueDate, anchorDate: due.anchorDate };
+  };
+
+  // A devida hoje, se ainda não existe. Ela não conta como "futura".
+  if (!knownByN.has(due.occurrence)) {
+    const p = plan(due.occurrence);
+    if (!p) return out;
+    out.push(p);
+  }
+
+  // Quantas futuras já estão abertas hoje.
+  let openAhead = 0;
+  for (const [n, open] of knownByN) {
+    if (open && n > due.occurrence) openAhead += 1;
+  }
+
+  // Anda para frente pulando o que já existe (aberto OU concluído: a ocorrência
+  // aconteceu uma vez na vida — trava da 0132) até completar o estoque.
+  let n = due.occurrence + 1;
+  const ceiling = due.occurrence + keepAhead + knownByN.size + 1;
+  while (openAhead < keepAhead && n <= ceiling) {
+    if (!knownByN.has(n)) {
+      const p = plan(n);
+      // Bateu no fim da série: não há mais o que repor.
+      if (!p) break;
+      out.push(p);
+      openAhead += 1;
+    }
+    n += 1;
+  }
+
   return out;
 }
 

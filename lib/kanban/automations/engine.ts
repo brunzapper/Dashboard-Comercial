@@ -54,6 +54,7 @@ import {
   type CardFacts,
   type EvalContext,
   type RuleError,
+  type SeriesOccurrenceFact,
 } from "./evaluate";
 import { countRelatedBySource } from "../related-count";
 import { executeAutomationMoves, executeAutomationSets } from "./move";
@@ -64,6 +65,7 @@ import {
 import { loadAutomationUniverse } from "./universe";
 import {
   executeAutomationSeries,
+  executeSeriesRevocations,
   loadSeriesOccurrences,
 } from "./series";
 import { loadSeriesSettings } from "@/lib/series/load";
@@ -91,6 +93,19 @@ export interface AutomationRunSummary {
   moved: number;
   evaluated: number;
   ruleErrors: RuleError[];
+  /**
+   * Ocorrências de série que a escrita recusou por já existirem (23505).
+   *
+   * Continua FORA do `last_error` — numa corrida entre o tick e o "Executar
+   * agora" o 23505 é o resultado desejado, e poluir o erro da regra com
+   * "duplicate key" esconderia os erros de verdade. Mas descartá-lo era o
+   * outro extremo: foi por isso que uma trava de índice errada passou dias
+   * gerando dezenas de recusas por minuto sem aparecer em lugar nenhum da
+   * aplicação.
+   */
+  seriesSkipped: number;
+  /** Ocorrências devolvidas por o registro ter saído do recorte da regra. */
+  seriesRevoked: number;
   // Rodada não avaliou (config fora do escopo, dono sumido, deadline…).
   fatal?: string;
 }
@@ -120,7 +135,16 @@ function chunksOf(list: string[]): string[][] {
 export async function runAllKanbanAutomations(
   db: SupabaseClient,
   deadline: number
-): Promise<{ boards: number; moved: number; evaluated: number; errors: number }> {
+): Promise<{
+  boards: number;
+  moved: number;
+  evaluated: number;
+  errors: number;
+  /** Ocorrências de série recusadas por já existirem — ver AutomationRunSummary. */
+  seriesSkipped: number;
+  /** Ocorrências devolvidas por o registro ter saído do recorte da regra. */
+  seriesRevoked: number;
+}> {
   const { data } = await db
     .from("automation_rules")
     .select("widget_id, board_id, source_key, last_run_at")
@@ -146,6 +170,8 @@ export async function runAllKanbanAutomations(
   let moved = 0;
   let evaluated = 0;
   let errors = 0;
+  let seriesSkipped = 0;
+  let seriesRevoked = 0;
   for (const { owner } of owners) {
     if (Date.now() >= deadline) break;
     try {
@@ -153,6 +179,8 @@ export async function runAllKanbanAutomations(
       boards += 1;
       moved += summary.moved;
       evaluated += summary.evaluated;
+      seriesSkipped += summary.seriesSkipped;
+      seriesRevoked += summary.seriesRevoked;
       if (summary.fatal || summary.ruleErrors.length > 0) errors += 1;
     } catch (e) {
       errors += 1;
@@ -162,7 +190,7 @@ export async function runAllKanbanAutomations(
       );
     }
   }
-  return { boards, moved, evaluated, errors };
+  return { boards, moved, evaluated, errors, seriesSkipped, seriesRevoked };
 }
 
 export interface KanbanOwnerContext {
@@ -256,6 +284,8 @@ export async function runBoardAutomations(
     moved: 0,
     evaluated: 0,
     ruleErrors: [],
+    seriesSkipped: 0,
+    seriesRevoked: 0,
   };
   const ownerCol = ownerColumn(owner);
 
@@ -450,7 +480,10 @@ export async function runBoardAutomations(
           ),
           loadSeriesSettings(db, orgId, seriesKeys),
         ])
-      : [new Map<string, string[]>(), new Map<string, SeriesSetting[]>()];
+      : [
+          new Map<string, SeriesOccurrenceFact[]>(),
+          new Map<string, SeriesSetting[]>(),
+        ];
 
   const todayIso = todayBrasiliaIso();
   const openByRecord = new Map<string, number>();
@@ -596,11 +629,15 @@ export async function runBoardAutomations(
     schemaDefs,
     seriesSettings,
   };
-  const { moves, sets, tasks, schemaRuns, seriesTasks, ruleErrors } = decideActions(
-    rules,
-    facts,
-    evalCtx
-  );
+  const {
+    moves,
+    sets,
+    tasks,
+    schemaRuns,
+    seriesTasks,
+    revokedSeries,
+    ruleErrors,
+  } = decideActions(rules, facts, evalCtx);
   for (const e of ruleErrors) errorByRule.set(e.ruleId, e.message);
   summary.ruleErrors.push(...ruleErrors);
 
@@ -615,6 +652,17 @@ export async function runBoardAutomations(
     0,
     MAX_ACTIONS_PER_RUN - cappedMoves.length - cappedSets.length - cappedTasks.length
   );
+  // A revogação entra no MESMO teto: ela apaga tarefa e enfileira ordem no CRM,
+  // então é ação como as outras. Fica por último de propósito — o que sobra
+  // volta na rodada seguinte, e devolver tarde é melhor que não criar.
+  const cappedRevokes = revokedSeries.slice(
+    0,
+    MAX_ACTIONS_PER_RUN -
+      cappedMoves.length -
+      cappedSets.length -
+      cappedTasks.length -
+      cappedSeries.length
+  );
   // Teto próprio E o que sobrou do compartilhado — o menor dos dois.
   const cappedSchemaRuns = schemaRuns.slice(
     0,
@@ -624,7 +672,8 @@ export async function runBoardAutomations(
         cappedMoves.length -
         cappedSets.length -
         cappedTasks.length -
-        cappedSeries.length
+        cappedSeries.length -
+        cappedRevokes.length
     )
   );
 
@@ -710,10 +759,27 @@ export async function runBoardAutomations(
       createdBy: (ruleRows[0]?.created_by as string | null) ?? null,
     });
     summary.moved += result.okIds.length;
+    summary.seriesSkipped += result.skipped;
     for (const [ruleId, n] of result.createdByRule) {
       summaryMovedByRule.set(ruleId, (summaryMovedByRule.get(ruleId) ?? 0) + n);
     }
     noteFailures(result.failed, cappedSeries, "Falha ao abrir a tarefa da série");
+  }
+
+  if (cappedRevokes.length > 0) {
+    if (overBudget())
+      return { ...summary, fatal: "Orçamento de tempo esgotado." };
+    const result = await executeSeriesRevocations(db, {
+      revoked: cappedRevokes,
+      orgId,
+      createdBy: (ruleRows[0]?.created_by as string | null) ?? null,
+    });
+    summary.seriesRevoked += result.deleted;
+    noteFailures(
+      result.failed,
+      cappedRevokes,
+      "Falha ao devolver a tarefa da série"
+    );
   }
 
   if (cappedSchemaRuns.length > 0 && orgId) {

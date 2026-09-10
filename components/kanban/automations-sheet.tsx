@@ -69,6 +69,7 @@ import type { KanbanColumn } from "@/lib/kanban/types";
 import {
   DEFAULT_SERIES_LOOKAHEAD,
   DEFAULT_SERIES_NOUN,
+  DEFAULT_MIRROR_LEAD_DAYS,
 } from "@/lib/series/types";
 import {
   deleteAutomation,
@@ -338,6 +339,7 @@ export function AutomationsSheet({
                 seriesLookahead: String(DEFAULT_SERIES_LOOKAHEAD),
                 seriesAnchorFallback: "nenhum",
                 seriesMirrorBitrix: "herdar",
+                seriesMirrorLeadDays: String(DEFAULT_MIRROR_LEAD_DAYS),
                 seriesNoun: DEFAULT_SERIES_NOUN,
               })
             }

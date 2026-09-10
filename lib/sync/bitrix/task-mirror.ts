@@ -1,4 +1,8 @@
-// Versão: 1.2 | Data: 10/09/2026
+// Versão: 1.3 | Data: 10/09/2026
+// v1.3 (10/09/2026): `enqueueDueTaskMirrors` — a ocorrência de série nasce aqui
+// assim que a janela a planeja, mas só vira atividade no CRM quando o
+// vencimento entra na antecedência configurada na regra. O varredor roda no
+// tick, antes do dreno.
 // v1.2 (10/09/2026): resolução de dono EM LOTE (`loadMirrorOwners` +
 // `enqueueTaskMirrorMany`). As ações em massa concluem/excluem até 200 tarefas
 // numa chamada, e `mirrorTaskAfterWrite` resolve Base + registro POR TAREFA —
@@ -31,6 +35,15 @@
 //     23505 é NO-OP, nunca `last_error`.
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import { addDaysIso } from "@/lib/date/days";
+import { todayBrasiliaIso } from "@/lib/date/today";
+import { mirrorDueNow } from "@/lib/kanban/automations/series";
+import { parseAutomationRule } from "@/lib/kanban/automations/types";
+import {
+  DEFAULT_MIRROR_LEAD_DAYS,
+  MAX_MIRROR_LEAD_DAYS,
+  type SeriesConfig,
+} from "@/lib/series/types";
 import {
   BITRIX_OWNER_TYPE_ID,
   resolveMirror,
@@ -43,6 +56,11 @@ import { WriteBackFatal } from "./writeback";
 /** Lote por rodada e teto de tentativas — os mesmos números da 0032. */
 const BATCH = 25;
 const MAX_ATTEMPTS = 5;
+/**
+ * Teto da varredura da antecedência por rodada. O tick roda a cada minuto: o
+ * que sobrar entra na próxima, e nenhuma rodada monopoliza o orçamento.
+ */
+const MIRROR_SWEEP_LIMIT = 200;
 
 export type TaskMirrorOp =
   | "create"
@@ -358,6 +376,100 @@ export async function drainTaskMirrorQueue(
   }
 
   return { done, errors };
+}
+
+/**
+ * Enfileira o espelho das ocorrências de série cujo vencimento ENTROU na janela
+ * de antecedência (`SeriesConfig.mirrorLeadDays`).
+ *
+ * v1.3 (10/09/2026). A série cria de uma vez as próximas ocorrências — é isso
+ * que deixa o vendedor ver e remarcar o que vem —, mas mandar todas para o CRM
+ * na hora encheria a timeline do negócio de tarefa de meses à frente. Então
+ * a criação lá é ADIADA, e alguém precisa perceber quando a data chegou: é
+ * este varredor, no tick, imediatamente antes do dreno (enfileira e envia no
+ * mesmo minuto).
+ *
+ * Idempotente por construção: só olha tarefas SEM `bitrix_activity_id`, e a
+ * unicidade `uq_task_queue_pending` (task_id, op) impede a segunda ordem
+ * enquanto a primeira não drenou.
+ */
+export async function enqueueDueTaskMirrors(
+  db: SupabaseClient,
+  opts?: { limit?: number }
+): Promise<number> {
+  try {
+    const today = todayBrasiliaIso().slice(0, 10);
+    // A janela mais larga que qualquer regra pode pedir — o recorte fino é por
+    // regra, logo abaixo. Sem este teto a consulta traria a série inteira.
+    const horizon = addDaysIso(today, MAX_MIRROR_LEAD_DAYS);
+    const { data: rows } = await db
+      .from("tasks")
+      .select("id, record_id, due_date, automation_rule_id, organization_id")
+      .is("bitrix_activity_id", null)
+      .is("completed_at", null)
+      .not("series_occurrence", "is", null)
+      .not("automation_rule_id", "is", null)
+      .not("record_id", "is", null)
+      .lte("due_date", horizon)
+      .order("due_date", { ascending: true })
+      .limit(opts?.limit ?? MIRROR_SWEEP_LIMIT);
+    if (!rows || rows.length === 0) return 0;
+
+    // A antecedência e o "nunca" vivem na regra: uma consulta para todas.
+    const ruleIds = [
+      ...new Set(rows.map((t) => t.automation_rule_id as string)),
+    ];
+    const { data: ruleRows } = await db
+      .from("automation_rules")
+      .select("id, rule")
+      .in("id", ruleIds);
+    const seriesByRule = new Map<string, SeriesConfig>();
+    for (const r of ruleRows ?? []) {
+      const parsed = parseAutomationRule(r.rule);
+      if (parsed?.action.type === "create_task_series") {
+        seriesByRule.set(r.id as string, parsed.action.series);
+      }
+    }
+
+    const due = rows.filter((t) => {
+      const series = seriesByRule.get(t.automation_rule_id as string);
+      // Regra sumida ou reconfigurada para outra ação: não espelha por conta
+      // própria (o mesmo princípio do "esquema apagado" do avaliador).
+      if (!series) return false;
+      if (series.mirrorBitrix === "nunca") return false;
+      return mirrorDueNow(
+        t.due_date as string | null,
+        series.mirrorLeadDays ?? DEFAULT_MIRROR_LEAD_DAYS,
+        today
+      );
+    });
+    if (due.length === 0) return 0;
+
+    const owners = await loadMirrorOwners(
+      db,
+      due.map((t) => t.record_id as string)
+    );
+    const payload = due.flatMap((t) => {
+      const owner = owners.get(t.record_id as string);
+      const orgId = (t.organization_id as string | null) ?? null;
+      if (!owner || !orgId) return [];
+      return [
+        {
+          orgId,
+          taskId: t.id as string,
+          op: "create" as const,
+          ownerEntity: owner.entity,
+          ownerSourceId: owner.sourceId,
+          createdBy: null,
+        },
+      ];
+    });
+    await enqueueTaskMirrorMany(db, payload);
+    return payload.length;
+  } catch (e) {
+    console.error("[task-mirror] varredura da antecedência falhou:", (e as Error).message);
+    return 0;
+  }
 }
 
 /**

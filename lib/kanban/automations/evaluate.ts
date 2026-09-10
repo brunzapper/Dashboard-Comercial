@@ -1,4 +1,9 @@
-// Versão: 1.5 | Data: 10/09/2026
+// Versão: 1.6 | Data: 10/09/2026
+// v1.6 (10/09/2026): a janela da série passa a ser reposta por CONCLUSÃO
+//   (`occurrencesToOpen`), não pela virada do ciclo, e o fato
+//   `seriesOccurrences` carrega o estado de cada ocorrência para isso. Junto:
+//   a REVOGAÇÃO — registro que deixou de casar as condições devolve as
+//   ocorrências ainda não concluídas (`revokedSeries`).
 // v1.5 (10/09/2026): só vocabulário — o substantivo da ocorrência
 //   da série saiu do código e virou dado (SeriesConfig.noun, e
 //   tasks.occurrence_noun por tarefa).
@@ -58,13 +63,14 @@ import type { AvailableField } from "@/lib/widgets/fields";
 import type { FilterOp, WidgetFilter } from "@/lib/widgets/types";
 import { resolveCadence, type SeriesSetting } from "@/lib/series/cadence";
 import {
-  occurrencesAhead,
+  occurrencesToOpen,
   resolveAnchorDate,
   resolveBound,
 } from "@/lib/series/occurrence";
 import type { WorkflowDefinition } from "@/lib/workflow/types";
 import { KANBAN_OVERFLOW_KEY, type KanbanColumn } from "../types";
 import {
+  DEFAULT_MIRROR_LEAD_DAYS,
   DEFAULT_SERIES_LOOKAHEAD,
   type SeriesConfig,
 } from "@/lib/series/types";
@@ -104,9 +110,15 @@ export interface CardFacts {
   // Regras que JÁ têm tarefa aberta para este registro (ação create_task).
   // Vazio quando nenhuma regra ativa da rodada cria tarefa.
   openAutomationRuleIds: string[];
-  // Ocorrências de série JÁ criadas para este registro, como "<ruleId>:<n>".
-  // Vazio quando nenhuma regra ativa da rodada mantém série.
-  seriesOccurrences: string[];
+  /**
+   * Ocorrências de série JÁ criadas para este registro, com o estado delas.
+   * Vazio quando nenhuma regra ativa da rodada mantém série.
+   *
+   * v1.3 (10/09/2026): era `string[]` de "<ruleId>:<n>" — só respondia "esta
+   * ocorrência existe?". A janela agora repõe por CONCLUSÃO, e para isso
+   * precisa saber quantas ainda estão ABERTAS.
+   */
+  seriesOccurrences: SeriesOccurrenceFact[];
   /**
    * Atributos do registro com status 'pausado' (record_attributes, 0131).
    * Vazio quando nenhuma regra ativa da rodada concede atributo.
@@ -115,6 +127,14 @@ export interface CardFacts {
    * escrito e nunca lido.
    */
   pausedAttributes: string[];
+}
+
+/** Uma ocorrência já criada para o par (regra, registro). */
+export interface SeriesOccurrenceFact {
+  ruleId: string;
+  occurrence: number;
+  /** `completed_at is null`. */
+  open: boolean;
 }
 
 export interface EvalContext {
@@ -159,6 +179,23 @@ export interface PlannedSet {
 }
 
 /** Ocorrência de uma série decidida por uma regra create_task_series. */
+/**
+ * Uma série a DEVOLVER: o registro deixou de casar as condições da regra, e as
+ * ocorrências que ninguém concluiu não têm mais por que existir.
+ *
+ * v1.6 (10/09/2026): sem isto, um deal que sai da etapa levava consigo as
+ * tarefas da etapa antiga — abertas, no nome do vendedor, para sempre. Só as
+ * NÃO concluídas saem: o que foi feito é histórico e fica.
+ *
+ * Pausar o atributo ou desligar a cadência para um recorte NÃO revoga — nesses
+ * casos a regra continua casando, ela só não gera nada. Parar de pedir e
+ * apagar o que já foi cobrado são decisões diferentes.
+ */
+export interface PlannedSeriesRevoke {
+  recordId: string;
+  ruleId: string;
+}
+
 export interface PlannedSeriesTask {
   recordId: string;
   ruleId: string;
@@ -174,6 +211,11 @@ export interface PlannedSeriesTask {
   grantAttribute: string | null;
   /** Nível 2 do espelho no Bitrix (0136). "herdar" = segue a Base. */
   mirrorBitrix: "herdar" | "sempre" | "nunca";
+  /**
+   * Antecedência do espelho, em dias. A ocorrência nasce aqui de imediato, mas
+   * só vira atividade no CRM quando o vencimento entra nesta janela.
+   */
+  mirrorLeadDays: number;
 }
 
 /** Execução de esquema decidida por uma regra run_schema. */
@@ -383,6 +425,7 @@ export function decideActions(
   tasks: PlannedTask[];
   schemaRuns: PlannedSchemaRun[];
   seriesTasks: PlannedSeriesTask[];
+  revokedSeries: PlannedSeriesRevoke[];
   ruleErrors: RuleError[];
 } {
   const ruleErrors: RuleError[] = [];
@@ -429,13 +472,24 @@ export function decideActions(
   const tasks: PlannedTask[] = [];
   const schemaRuns: PlannedSchemaRun[] = [];
   const seriesTasks: PlannedSeriesTask[] = [];
+  const revokedSeries: PlannedSeriesRevoke[] = [];
   for (const card of cards) {
     if (card.isMock) continue;
     for (const rule of active) {
       const matched = rule.rule.conditions.every((c) =>
         evaluateCondition(c, card, ctx)
       );
-      if (!matched) continue;
+      if (!matched) {
+        // Saiu do recorte da regra (mudou de etapa, o campo virou outra coisa):
+        // as ocorrências abertas voltam. As concluídas ficam — são histórico.
+        if (
+          rule.rule.action.type === "create_task_series" &&
+          card.seriesOccurrences.some((o) => o.ruleId === rule.id && o.open)
+        ) {
+          revokedSeries.push({ recordId: card.record.id, ruleId: rule.id });
+        }
+        continue;
+      }
       const action = rule.rule.action;
       if (action.type === "move_to_column") {
         if (card.columnKey !== action.targetKey) {
@@ -498,7 +552,15 @@ export function decideActions(
       break; // primeira regra que casou consome o card (mesmo sem escrever)
     }
   }
-  return { moves, sets, tasks, schemaRuns, seriesTasks, ruleErrors };
+  return {
+    moves,
+    sets,
+    tasks,
+    schemaRuns,
+    seriesTasks,
+    revokedSeries,
+    ruleErrors,
+  };
 }
 
 /**
@@ -544,9 +606,10 @@ function planSeriesTask(
   // continua existindo e o atributo continua no registro — só não gera nada.
   if (!cadence.active) return [];
 
-  // v1.2: a devida hoje MAIS as próximas `lookahead`. Criar adiantado é seguro
-  // (trava por ocorrência) e é o que deixa o vendedor ver e remarcar o que vem.
-  const plans = occurrencesAhead(
+  // v1.3: mantém `lookahead` ocorrências FUTURAS abertas, repondo a cada
+  // conclusão (antes a janela só andava com a virada do ciclo — concluir uma
+  // deixava o vendedor com uma a menos na tela até a próxima quinzena).
+  const plans = occurrencesToOpen(
     {
       anchorDate,
       cadenceDays: cadence.days,
@@ -556,17 +619,21 @@ function planSeriesTask(
       firstAt: series.firstAt,
       maxOccurrences: series.maxOccurrences,
     },
-    series.lookahead ?? DEFAULT_SERIES_LOOKAHEAD
+    {
+      keepAhead: series.lookahead ?? DEFAULT_SERIES_LOOKAHEAD,
+      known: card.seriesOccurrences
+        .filter((o) => o.ruleId === ruleId)
+        .map((o) => ({ occurrence: o.occurrence, open: o.open })),
+    }
   );
 
   const title =
     typeof series.title === "string" ? series.title : series.title.value;
   const out: PlannedSeriesTask[] = [];
   for (const plan of plans) {
-    // Já criada: consome sem escrever (a trava de verdade é o índice único).
-    if (card.seriesOccurrences.includes(`${ruleId}:${plan.occurrence}`)) {
-      continue;
-    }
+    // Sem filtro de "já criada" aqui: `occurrencesToOpen` já recebeu o que
+    // existe e só emite o que falta. A trava de verdade segue sendo o índice
+    // único da 0132.
     out.push({
       recordId: card.record.id,
       ruleId,
@@ -579,6 +646,7 @@ function planSeriesTask(
       responsibleId: card.record.responsible_id ?? null,
       grantAttribute: series.grantAttribute ?? null,
       mirrorBitrix: series.mirrorBitrix ?? "herdar",
+      mirrorLeadDays: series.mirrorLeadDays ?? DEFAULT_MIRROR_LEAD_DAYS,
     });
   }
   return out;

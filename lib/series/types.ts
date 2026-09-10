@@ -1,4 +1,8 @@
-// Versão: 1.4 | Data: 10/09/2026
+// Versão: 1.5 | Data: 10/09/2026
+// v1.5 (10/09/2026): `mirrorLeadDays` (com quanta antecedência a ocorrência
+//   vira atividade no Bitrix) e o padrão de `lookahead` de 5 para 3. Os dois
+//   números são configuráveis na regra; o que muda aqui é só o que vale para
+//   quem não escolheu.
 // Modelo da SÉRIE DE TAREFAS PERIÓDICAS (0132) — a tarefa recorrente que uma
 // automação mantém sobre um registro ("enquanto o deal estiver em Nutrição,
 // abra uma tarefa a cada quinze dias").
@@ -124,6 +128,17 @@ export interface SeriesConfig {
   /** Atributo concedido ao registro que entra na série (ex.: "tree"). */
   grantAttribute?: string;
   /**
+   * Com quantos DIAS de antecedência a ocorrência vira atividade no Bitrix.
+   *
+   * v1.5 (10/09/2026): a tarefa nasce aqui assim que a janela a planeja — o
+   * vendedor precisa ver o que vem —, mas mandar tudo para o CRM na mesma hora
+   * enche a timeline do negócio com tarefas de meses à frente. O espelho
+   * espera o vencimento se aproximar; quem cria é o varredor do tick.
+   *
+   * Ausente = DEFAULT_MIRROR_LEAD_DAYS. 0 = só no dia do vencimento.
+   */
+  mirrorLeadDays?: number;
+  /**
    * Nível 2 da configuração do espelho no Bitrix (0136): "herdar" (o padrão,
    * segue a Base), "sempre" ou "nunca". Ausente = herdar — é o que faz ligar o
    * espelho na Base alcançar as séries que já rodam, sem editá-las.
@@ -147,7 +162,16 @@ export const SERIES_SCOPE_LABELS: Record<SeriesScopeKind, string> = {
 export const MAX_SERIES_SCOPES = 6;
 /** Teto de ocorrências futuras mantidas abertas (0 = só a devida hoje). */
 export const MAX_SERIES_LOOKAHEAD = 12;
-export const DEFAULT_SERIES_LOOKAHEAD = 5;
+export const DEFAULT_SERIES_LOOKAHEAD = 3;
+/**
+ * Antecedência padrão do espelho no Bitrix, em dias.
+ *
+ * O teto é generoso porque quem decide é quem conhece o ciclo de venda; o
+ * PADRÃO é curto porque a timeline do negócio é lida por pessoas, e tarefa
+ * de dois meses à frente ali é ruído.
+ */
+export const MAX_MIRROR_LEAD_DAYS = 180;
+export const DEFAULT_MIRROR_LEAD_DAYS = 3;
 export const MIN_CADENCE_DAYS = 1;
 export const MAX_CADENCE_DAYS = 365;
 
@@ -287,6 +311,19 @@ export function parseSeriesConfig(raw: unknown): SeriesConfig | null {
         ? Math.min(Math.max(Math.floor(raw.lookahead), 0), MAX_SERIES_LOOKAHEAD)
         : DEFAULT_SERIES_LOOKAHEAD,
   };
+
+  // Ausente = o padrão. Série gravada antes desta chave existir passa a
+  // espelhar com a antecedência padrão, sem ninguém editá-la — é o mesmo
+  // princípio do "herdar" do mirrorBitrix.
+  if (
+    typeof raw.mirrorLeadDays === "number" &&
+    Number.isFinite(raw.mirrorLeadDays)
+  ) {
+    config.mirrorLeadDays = Math.min(
+      Math.max(Math.floor(raw.mirrorLeadDays), 0),
+      MAX_MIRROR_LEAD_DAYS
+    );
+  }
 
   // Ausente = "nenhum": uma série existente não passa a contar da criação só
   // porque o parse ganhou uma chave nova.
