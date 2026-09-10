@@ -1,4 +1,12 @@
-// Versão: 1.1 | Data: 28/07/2026
+// Versão: 1.2 | Data: 10/09/2026
+// v1.2 (10/09/2026): `endRecordSeries`/`resumeRecordSeries` — encerrar a
+//   SEQUÊNCIA de uma série para UM registro, e voltar atrás. É o que a lista
+//   de tarefas e a Tree passam a perguntar ao concluir ou excluir uma
+//   ocorrência: apagar as ocorrências ABERTAS sem desligar a série faria o tick
+//   recriá-las no minuto seguinte, e desligar sem apagar deixaria o vendedor
+//   com tarefas abertas que ninguém mais quer. As duas metades, ou nenhuma.
+//   Concluídas nunca são tocadas e o atributo do registro fica (pausar ≠
+//   excluir, 0131): encerrar tira o PREVISTO, não o que aconteceu.
 // Server Actions de TAREFAS (tabela tasks, 0063). Gravação com o client do
 // usuário — a RLS decide visibilidade/edição/exclusão (vendedor só as suas;
 // `locked` bloqueia exclusão de não-admin/gestor e a flag é protegida pelo
@@ -22,6 +30,8 @@ import { todayBrasiliaIso } from "@/lib/date/today";
 import { TASK_COLS_WITH_RECORD, type TaskRow } from "./types";
 import { createServiceClient } from "@/lib/supabase/service";
 import {
+  enqueueTaskMirrorMany,
+  loadMirrorOwners,
   mirrorTaskAfterWrite,
   mirrorTaskDeletion,
 } from "@/lib/sync/bitrix/task-mirror";
@@ -732,4 +742,205 @@ export async function listDueTasks(
     .order("due_time", { ascending: true, nullsFirst: false })
     .limit(50);
   return (data ?? []) as unknown as TaskRow[];
+}
+
+/**
+ * ENCERRA a sequência de uma série para UM registro.
+ *
+ * Duas coisas, e as duas são necessárias: apagar as ocorrências ABERTAS (senão
+ * elas ficam na tela do vendedor pedindo o que já se decidiu abandonar) e
+ * gravar `active:false` no escopo do registro (senão o tick reabre a próxima
+ * no minuto seguinte). Fazer só a primeira metade seria um botão cujo efeito
+ * some sozinho.
+ *
+ * O que NÃO acontece: concluídas ficam (o que o vendedor fez é histórico, e é
+ * ele que a árvore mostra) e o atributo fica (pausar ≠ excluir, 0131) — o
+ * registro continua com árvore, agora sem tronco vivo.
+ *
+ * Mesma sequência de `deleteTask`/`deleteTasksBulk`: lê o `bitrix_activity_id`
+ * ANTES do delete (depois a linha some) e enfileira o `delete` DEPOIS de a RLS
+ * deixar passar. O espelho é best-effort — nunca derruba a exclusão local.
+ */
+export async function endRecordSeries(
+  seriesKey: string,
+  recordId: string,
+  opts: { revalidate?: boolean } = {}
+): Promise<TaskActionState & { deleted?: number }> {
+  const session = await getSessionInfo();
+  if (!session) return { ok: false, message: "Sessão expirada." };
+  const orgId = await getActiveOrgId();
+  if (!orgId) return { ok: false, message: "Organização ativa não identificada." };
+
+  const supabase = await createClient();
+  const { data: doomed, error: readError } = await supabase
+    .from("tasks")
+    .select("id, title, record_id, bitrix_activity_id")
+    .eq("record_id", recordId)
+    .eq("series_key", seriesKey)
+    .is("completed_at", null)
+    .not("series_occurrence", "is", null);
+  if (readError) {
+    return { ok: false, message: `Falha ao ler a sequência: ${readError.message}` };
+  }
+
+  let deleted = 0;
+  const ids = (doomed ?? []).map((t) => t.id as string);
+  if (ids.length > 0) {
+    // `.select()` no delete: o que voltar é o que a RLS deixou apagar.
+    const { data: gone, error } = await supabase
+      .from("tasks")
+      .delete()
+      .in("id", ids)
+      .select("id");
+    if (error) {
+      return { ok: false, message: `Falha ao encerrar: ${error.message}` };
+    }
+    const goneIds = new Set((gone ?? []).map((t) => t.id as string));
+    deleted = goneIds.size;
+    for (const t of doomed ?? []) {
+      if (!goneIds.has(t.id as string)) continue;
+      await emitWebhookEvent(
+        "task.deleted",
+        {
+          taskId: t.id as string,
+          title: (t.title as string) ?? null,
+          recordId: (t.record_id as string | null) ?? null,
+          origin: "app",
+        },
+        orgId
+      );
+    }
+    await mirrorEndedSeries(
+      supabase,
+      (doomed ?? []).flatMap((t) =>
+        goneIds.has(t.id as string) &&
+        t.bitrix_activity_id &&
+        t.record_id
+          ? [
+              {
+                recordId: t.record_id as string,
+                activityId: String(t.bitrix_activity_id),
+              },
+            ]
+          : []
+      ),
+      orgId,
+      session.user.id
+    );
+  }
+
+  const off = await setRecordSeriesActive(supabase, orgId, session.user.id, {
+    seriesKey,
+    recordId,
+    active: false,
+  });
+  if (!off.ok) return off;
+  if (opts.revalidate !== false) revalidatePath("/operacao/tarefas");
+  return { ok: true, deleted };
+}
+
+/** Volta atrás: a série volta a valer para o registro (as apagadas não voltam). */
+export async function resumeRecordSeries(
+  seriesKey: string,
+  recordId: string,
+  opts: { revalidate?: boolean } = {}
+): Promise<TaskActionState> {
+  const session = await getSessionInfo();
+  if (!session) return { ok: false, message: "Sessão expirada." };
+  const orgId = await getActiveOrgId();
+  if (!orgId) return { ok: false, message: "Organização ativa não identificada." };
+  const supabase = await createClient();
+  const res = await setRecordSeriesActive(supabase, orgId, session.user.id, {
+    seriesKey,
+    recordId,
+    active: true,
+  });
+  if (!res.ok) return res;
+  if (opts.revalidate !== false) revalidatePath("/operacao/tarefas");
+  return { ok: true };
+}
+
+/**
+ * O liga/desliga de uma série num registro — a MESMA linha de
+ * `series_settings` que guarda a cadência. Preserva `cadence_days`: encerrar a
+ * sequência não pode apagar a exceção de ritmo que alguém ajustou.
+ */
+async function setRecordSeriesActive(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  orgId: string,
+  userId: string,
+  input: { seriesKey: string; recordId: string; active: boolean }
+): Promise<TaskActionState> {
+  const { data: existing } = await supabase
+    .from("series_settings")
+    .select("cadence_days")
+    .eq("organization_id", orgId)
+    .eq("series_key", input.seriesKey)
+    .eq("scope_kind", "record")
+    .eq("scope_value", input.recordId)
+    .maybeSingle();
+
+  const { error } = await supabase.from("series_settings").upsert(
+    {
+      organization_id: orgId,
+      series_key: input.seriesKey,
+      scope_kind: "record",
+      scope_value: input.recordId,
+      cadence_days: (existing?.cadence_days as number | null) ?? null,
+      active: input.active,
+      updated_by: userId,
+    },
+    { onConflict: "organization_id,series_key,scope_kind,scope_value" }
+  );
+  if (error) {
+    // A RLS da 0132 é admin/gestor — a mesma de `setRecordCadence`.
+    return {
+      ok: false,
+      message: `Não foi possível alterar a sequência: ${error.message}`,
+    };
+  }
+  return { ok: true };
+}
+
+/**
+ * Enfileira o `delete` no CRM das ocorrências que tinham atividade lá.
+ *
+ * Molde de `mirrorDeletedBulk` (lib/kanban/bulk-actions.ts): sem `taskId` (a
+ * linha já não existe — quem identifica a ordem é o `activityId`) e pelo client
+ * de SERVIÇO, porque a fila é infra e não tem policy para o usuário.
+ */
+async function mirrorEndedSeries(
+  db: Awaited<ReturnType<typeof createClient>>,
+  doomed: { recordId: string; activityId: string }[],
+  orgId: string,
+  createdBy: string
+): Promise<void> {
+  try {
+    if (doomed.length === 0) return;
+    const owners = await loadMirrorOwners(
+      db,
+      doomed.map((t) => t.recordId)
+    );
+    await enqueueTaskMirrorMany(
+      createServiceClient(),
+      doomed.flatMap((t) => {
+        const owner = owners.get(t.recordId);
+        if (!owner) return [];
+        return [
+          {
+            orgId,
+            op: "delete" as const,
+            ownerEntity: owner.entity,
+            ownerSourceId: owner.sourceId,
+            activityId: t.activityId,
+            createdBy,
+          },
+        ];
+      })
+    );
+  } catch (e) {
+    // Best-effort, como em toda a fila do espelho: a exclusão local já
+    // aconteceu, e o portal fora do ar não pode desfazê-la.
+    console.error("[tree] espelho da sequência falhou:", (e as Error).message);
+  }
 }

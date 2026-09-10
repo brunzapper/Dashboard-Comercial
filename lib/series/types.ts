@@ -1,4 +1,9 @@
-// Versão: 1.5 | Data: 10/09/2026
+// Versão: 1.6 | Data: 10/09/2026
+// v1.6 (10/09/2026): `seriesKeyFromLabel` — deriva a CHAVE da série a partir do
+//   nome que a pessoa deu. Ela mora aqui porque é aqui que vive o `SLUG` que a
+//   valida: uma chave montada longe da régua que a aceita é uma chave que o
+//   parse recusa em silêncio (precedente literal — a semente de regra do
+//   "Novo esquema" montava um `set_field` vazio e nunca criou uma regra).
 // v1.5 (10/09/2026): `mirrorLeadDays` (com quanta antecedência a ocorrência
 //   vira atividade no Bitrix) e o padrão de `lookahead` de 5 para 3. Os dois
 //   números são configuráveis na regra; o que muda aqui é só o que vale para
@@ -212,6 +217,28 @@ function isRecord(v: unknown): v is Record<string, unknown> {
 }
 
 const SLUG = /^[a-z][a-z0-9_]{1,39}$/;
+
+/**
+ * Chave de série a partir do rótulo — sempre um slug que `SLUG` aceita.
+ *
+ * A pessoa nomeia a sequência ("Follow-up de proposta"); a identidade dela é
+ * derivada, como no `workflowKeyFromLabel` dos esquemas. Rótulo vazio ou só de
+ * símbolos não pode virar chave inválida: vira uma genérica, porque uma chave
+ * que o parse recusa deixaria a regra inerte sem dizer por quê.
+ */
+export function seriesKeyFromLabel(label: string): string {
+  const base = label
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 40)
+    .replace(/_+$/g, "");
+  const key = /^[a-z]/.test(base) ? base : `serie_${base}`.slice(0, 40);
+  // `SLUG` exige 2 caracteres no mínimo — "a" viraria chave recusada.
+  return SLUG.test(key) ? key : `serie_${Date.now().toString(36)}`.slice(0, 40);
+}
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 function parseAnchor(raw: unknown): SeriesAnchor | null {

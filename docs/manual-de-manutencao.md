@@ -1,4 +1,7 @@
-<!-- Versão: 1.40 | Data: 10/09/2026 -->
+<!-- Versão: 1.41 | Data: 10/09/2026 -->
+<!-- v1.41 (10/09/2026): §12.2 — a Tree cria/edita a automação da
+     sequência e aceita vários troncos; encerrar a sequência de UM registro;
+     "Concluir" virou botão e "Anotar" virou "Comentar", com Salvar e analisar. -->
 <!-- v1.40 (10/09/2026): §4.16 — concluir/excluir em LOTE nas três superfícies,
      e o espelho do Bitrix que passou a valer nas ações em massa. -->
 <!-- v1.39 (10/09/2026): §4.16 — o espelho do Bitrix passou a valer nos DOIS
@@ -1155,8 +1158,8 @@ registro. No modo livre ele vira mapa mental e não depende de automação nenhu
 
 **Ajustes do dia a dia — sem abrir o construtor:**
 
-- **Este deal é semanal:** na Tree do registro, mude a cadência **no campo ao
-  lado do "a cada … dia(s)"** no cabeçalho da árvore. Grava uma linha em
+- **Este deal é semanal:** na Tree do registro, mude a cadência no campo
+  "a cada … dia(s)" **do nó da sequência**. Grava uma linha em
   `series_settings` escopo `record`; a regra não é tocada, e limpar o campo
   devolve o padrão do esquema.
 - **João não participa:** exceção escopo `responsible` com `active = false`.
@@ -1164,7 +1167,21 @@ registro. No modo livre ele vira mapa mental e não depende de automação nenhu
   porque um "não" em qualquer escopo alcançado desliga.
 - **Pausar este lead:** botão Pausar na Tree. O atributo **continua lá** e o
   histórico inteiro também; o que para é a produção de tarefas. Retomar é o
-  mesmo botão.
+  mesmo botão. Pausar vale para o acompanhamento INTEIRO do registro.
+- **Encerrar UMA sequência deste lead (10/09/2026):** conclua ou exclua uma
+  ocorrência dela e responda **"e encerrar a sequência"**. Isso apaga as
+  ocorrências ainda ABERTAS e grava `active = false` no escopo `record` — as
+  duas metades, porque só a primeira o tick desfaz no minuto seguinte e só a
+  segunda deixa a tela pedindo o que já foi abandonado. Concluídas ficam.
+  **Retomar** no nó da sequência volta atrás (as apagadas não voltam).
+  Desde 10/09/2026 o desligar por REGISTRO vale mesmo que a regra não declare o
+  escopo `record` em "quem pode sobrescrever" — quem clica ali não abriu o
+  construtor. A CADÊNCIA por registro continua exigindo a declaração.
+- **Criar outra sequência para esta Base (admin, 10/09/2026):** botão **"Nova
+  sequência"** no cabeçalho da Tree, ou a engrenagem no nó de um tronco para
+  editar a regra existente. Abre o MESMO construtor de automação do quadro e do
+  Workflow, com a Base do registro como dona. Regra nova nasce DESLIGADA.
+  Um registro pode seguir várias — cada uma vira um tronco próprio na árvore.
 
 **Mexer na tarefa pela árvore.** Clicar no lápis de um nó abre a tarefa
 INTEIRA — título, descrição, vencimento, hora, hora-fim, responsável e registro
@@ -1194,12 +1211,28 @@ Três coisas que valem saber quando alguém reportar comportamento estranho:
   atividades lá; excluir em massa as remove. Antes de 10/09/2026 não valia, e
   o efeito era ruim: a leitura de volta reabria tudo no minuto seguinte.
 
-**Fazer as coisas pela árvore (10/09/2026).** Cada nó de tarefa tem a caixinha
-de concluir e a lixeira, as mesmas de /tarefas. A anotação e o nó livre do mapa
-mental também têm lixeira; o nó de **Alteração** não tem, de propósito — ele é
-um fato do histórico do registro, não algo que alguém criou. Excluir pede
-confirmação, e a tarefa excluída aqui some também da timeline do Bitrix quando
-o espelho está ligado.
+**Fazer as coisas pela árvore (10/09/2026).** Cada nó de tarefa tem o botão
+**Concluir** e a lixeira, os mesmos de /tarefas. (Era uma caixinha até
+10/09/2026; ao lado da caixinha de SELEÇÃO viravam duas caixas parecidas, e
+quem queria selecionar concluía.) O comentário e o nó livre do mapa mental
+também têm lixeira; o nó de **Alteração** não tem, de propósito — ele é um fato
+do histórico do registro, não algo que alguém criou. Excluir pede confirmação, e
+a tarefa excluída aqui some também da timeline do Bitrix quando o espelho está
+ligado. Concluir ou excluir uma ocorrência de SÉRIE pergunta antes o que fazer
+com as demais (ver "Encerrar UMA sequência deste lead", acima).
+
+**Comentar, e deixar a IA sugerir o próximo passo (10/09/2026).** O botão
+**Comentar** (ex-"Anotar") grava um comentário do registro; o botãozinho de um
+nó pendura o comentário NAQUELE nó, em vez de na ocorrência de hoje.
+**Salvar e analisar** grava o comentário e pede à IA que decida se ele pede um
+próximo passo com data — se pedir, aparece um cartão "Agendar «título» para
+dd/mm?" e o clique cria a tarefa ligada ao registro. Se não pedir, ela diz isso
+e nada acontece: a maior parte dos comentários registra o que já foi feito. O
+prazo sai do que a pessoa escreveu; sem prazo escrito, do intervalo usual de
+follow-up (proposta enviada: 2 dias úteis; sem resposta: 3 a 5 dias; reunião
+marcada: a véspera; nutrição: 14 dias). Exige IA configurada em
+Configurações → Integrações — sem ela o comentário é salvo do mesmo jeito e a
+tela avisa. **A IA nunca cria a tarefa sozinha**: o Agendar é de gente.
 
 **O nome de cada ocorrência é configurável.** Na regra, o campo **"Como chamar
 cada uma"** define o substantivo do tronco ("Tarefa" é o padrão; pode ser

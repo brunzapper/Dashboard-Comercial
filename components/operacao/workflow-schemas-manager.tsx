@@ -1,4 +1,9 @@
-// Versão: 4.0 | Data: 09/09/2026
+// Versão: 4.1 | Data: 10/09/2026
+// v4.1 (10/09/2026): a semente da regra nova virou uma SÉRIE válida
+//   (`seedSeriesDraft` do editor). A anterior montava um `set_field` de campo e
+//   valor vazios — `parseAutomationRule` recusa isso, então o botão "Criar" do
+//   gatilho "regra" devolvia "Regra incompleta" e nunca criou nada. Junto: o
+//   botão passa a exigir a Base escolhida (sem ela a regra nasceria órfã).
 // v4.0 (09/09/2026): DUAS abas — Esquemas e Execuções. Automações e fluxos do
 //   sistema deixam de ser abas e viram LINHAS da mesma lista, com filtro por
 //   tipo: um fluxo é um fluxo, e o que muda entre eles é quem dispara e onde se
@@ -59,6 +64,10 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Combobox } from "@/components/ui/combobox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  draftToRule,
+  seedSeriesDraft,
+} from "@/components/kanban/automation-rule-editor";
 import { WorkflowRunsList } from "@/components/operacao/workflow-runs-list";
 import type { ManagedSchema } from "@/components/operacao/workflow-schema-card";
 import type { StepSourceOption } from "@/components/operacao/workflow-step-editor";
@@ -399,7 +408,13 @@ export function WorkflowSchemasManager({
               <Button
                 type="button"
                 size="sm"
-                disabled={criando || novoNome.trim() === ""}
+                disabled={
+                  criando ||
+                  novoNome.trim() === "" ||
+                  // Sem Base não há dono para a regra: o saveAutomation
+                  // gravaria `source_key` vazio e a linha nasceria órfã.
+                  (novoGatilho === "regra" && novaBase === "")
+                }
                 onClick={() => {
                   const label = novoNome.trim();
                   setNovoNome("");
@@ -417,18 +432,11 @@ export function WorkflowSchemasManager({
                         name: label,
                         enabled: false,
                         position: 0,
-                        rule: {
-                          v: 1,
-                          conditions: [
-                            {
-                              kind: "time",
-                              basis: { type: "created" },
-                              op: "gte",
-                              days: 0,
-                            },
-                          ],
-                          action: { type: "set_field", field: "", value: "" },
-                        },
+                        // 10/09/2026: a semente vem do MESMO editor que vai
+                        // abrir em seguida. A anterior era um `set_field` de
+                        // campo e valor VAZIOS, que `parseAutomationRule`
+                        // recusa — este botão nunca chegou a criar uma regra.
+                        rule: draftToRule(seedSeriesDraft(label)),
                       }
                     ).then((res) => {
                       if (res.ok && res.id) {

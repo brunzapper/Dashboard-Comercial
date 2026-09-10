@@ -680,6 +680,48 @@ This version has breaking changes — APIs, conventions, and file structure may 
   /registros (um segundo editor seria a régua paralela da invariante 25). As
   RPCs de widget seguem INTOCADAS. Ver `docs/arquitetura.md` §4.24 e
   invariantes 33/34/35.
+- **A Tree CONDUZ a série, e a árvore aceita mais de um tronco (10/09/2026):**
+  criar/editar a automação de uma sequência pela árvore é o MESMO
+  `AutomationRuleEditor` do quadro e do Workflow — `tree-series-sheet.tsx` é só
+  HOST (semente por `seedSeriesDraft`, dono `AutomationOwner {kind:"source"}` =
+  a BASE do registro, regra nova nasce DESLIGADA, gate admin do
+  `saveAutomation`). Um terceiro construtor é a régua paralela da invariante 25.
+  As séries de um registro saem de `granted_by_rule_id` ∪ os
+  `automation_rule_id` das PRÓPRIAS tarefas (`record_attributes` é único por
+  registro — a 2ª série nunca chega a conceder o atributo); o id do fato carrega
+  a regra (`occ:<ruleId>:<n>`) e o agrupador sintético `series:<key>` só nasce
+  com DUAS ou mais — com UMA a saída de `deriveTree` é BYTE-IDÊNTICA (pinado).
+  Agrupador não é filtrável nem selecionável, e o fato avulso (comentário,
+  tarefa, alteração) pendura na ocorrência da série PRIMÁRIA — nunca reparta
+  por proximidade de data. **Concluir/excluir uma ocorrência PERGUNTA** o que
+  fazer com as demais (`TaskSeriesScopeDialog`, disparado do dono único
+  `useTaskRowActions` — logo vale na lista e na agenda também): "encerrar" faz
+  as DUAS metades (`endRecordSeries` apaga as ABERTAS, lendo o
+  `bitrix_activity_id` ANTES do delete, e grava `active:false` no escopo do
+  registro), porque só a primeira o tick desfaz e só a segunda deixa a tela
+  pedindo o que já se abandonou; concluídas e atributo FICAM. Por isso
+  `resolveCadence` consulta o escopo `record` SEMPRE no liga/desliga (não na
+  cadência) — ver invariante 33. `TaskCompleteButton` ("Concluir"/"Reabrir")
+  substituiu a caixa: ao lado da caixa de SELEÇÃO a forma não bastava.
+- **O verbo do comentário é DADO, e "Salvar e analisar" reusa o contrato de
+  tarefas (10/09/2026):** `TREE_COMMENT_VERB` + `TREE_NODE_KIND_LABELS.comment`
+  são os donos únicos da palavra (literal em tela é como o termo errado se
+  espalhou por 37 arquivos na 0137). "Comentar aqui" num nó grava a EXCEÇÃO de
+  parentesco por `setTreeParent` logo após o `createComment` — sem isso o
+  comentário nasce com `created_at = now()` e pendura na ocorrência de HOJE. O
+  "Salvar e analisar" (`lib/ai/analyze-comment.ts` + o enunciado em
+  `lib/import/tasks/analyze-instructions.ts`) usa o contrato `tarefas-edit`
+  INTEIRO — mesmo formato, mesmo `validateTasksEdit`; o enunciado REUSA
+  `buildTasksPromptText` e só acrescenta o comentário, o contexto do registro,
+  a data de hoje e a régua de prazo (prazo dito vence; senão, follow-up SMB de
+  SaaS; SEMPRE data absoluta). Duas decisões que não se podem desfazer sem
+  quebrar: `acoes: []` é RESPOSTA (o validador a recusa, e com razão, na outra
+  superfície — quem a reconhece é `readEmptyAnswer`, ANTES dele), e o apply NÃO
+  chama `applyTasksCore` porque o contrato não carrega vínculo com REGISTRO — o
+  `record_id` entra no FormData aqui e o choke point segue `createTask`.
+  Depois de validar, o core ESTREITA para no máximo UMA ação `criar`. A IA
+  nunca escreve: o cartão de um clique é um humano apertando o botão
+  (invariante 25).
 - **"Quando este campo mudou" é `audit_log`, NUNCA `field_modified_at` (0135,
   09/09/2026):** as duas colunas parecem a mesma coisa e não são.
   `records.field_modified_at` é o marcador de "editado LOCALMENTE depois do

@@ -1,4 +1,8 @@
-// Versão: 1.7 | Data: 10/09/2026
+// Versão: 1.8 | Data: 10/09/2026
+// v1.8 (10/09/2026): o rascunho em branco do "Nova regra" saiu daqui —
+//   virou `emptyRuleDraft()` no editor, porque a Tree passou a criar série de
+//   dentro da árvore e precisa do MESMO ponto de partida. Trinta campos
+//   copiados divergiriam no primeiro campo novo.
 // v1.7 (10/09/2026): só vocabulário — o substantivo da ocorrência
 //   da série saiu do código e virou dado (SeriesConfig.noun, e
 //   tasks.occurrence_noun por tarefa).
@@ -67,11 +71,6 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { notifyOnError } from "@/lib/feedback/notify";
 import type { KanbanColumn } from "@/lib/kanban/types";
 import {
-  DEFAULT_SERIES_LOOKAHEAD,
-  DEFAULT_SERIES_NOUN,
-  DEFAULT_MIRROR_LEAD_DAYS,
-} from "@/lib/series/types";
-import {
   deleteAutomation,
   getAutomationFieldOptions,
   listAutomations,
@@ -87,7 +86,7 @@ import type {
 import {
   ACTION_OPTIONS,
   AutomationRuleEditor,
-  emptyCond,
+  emptyRuleDraft,
   draftToRule,
   ruleToDraft,
   type RuleDraft,
@@ -306,43 +305,7 @@ export function AutomationsSheet({
           <Button
             size="sm"
             className="gap-1"
-            onClick={() =>
-              setDraft({
-                id: null,
-                name: "",
-                enabled: true,
-                conds: [emptyCond()],
-                actionType: "move_to_column",
-                taskTitle: "",
-                taskDueDays: "",
-                targetKey: "",
-                setField: "",
-                setValue: "",
-                schemaKey: "",
-                // Nasce em ensaio: armar é sempre um ato explícito.
-                schemaSimulate: true,
-                seriesTitle: "",
-                seriesKey: "",
-                seriesAnchorKind: "field_changed",
-                seriesAnchorField: "",
-                // Quinzenal: o padrão que o pedido descreve.
-                seriesCadenceDays: "14",
-                seriesScopes: [],
-                seriesFirstAt: "apos_um_ciclo",
-                seriesUntilKind: "nunca",
-                seriesUntilValue: "",
-                seriesGrantAttribute: "tree",
-                seriesFromKind: "sempre",
-                seriesFromValue: "",
-                seriesDescription: "",
-                seriesMaxOccurrences: "",
-                seriesLookahead: String(DEFAULT_SERIES_LOOKAHEAD),
-                seriesAnchorFallback: "nenhum",
-                seriesMirrorBitrix: "herdar",
-                seriesMirrorLeadDays: String(DEFAULT_MIRROR_LEAD_DAYS),
-                seriesNoun: DEFAULT_SERIES_NOUN,
-              })
-            }
+            onClick={() => setDraft(emptyRuleDraft())}
             disabled={pending || draft != null}
           >
             <Plus className="size-4" />

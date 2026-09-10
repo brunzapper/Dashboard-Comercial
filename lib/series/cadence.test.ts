@@ -1,4 +1,8 @@
-// Versão: 1.0 | Data: 09/09/2026
+// Versão: 1.1 | Data: 10/09/2026
+// v1.1 (10/09/2026): o escopo `record` no liga/desliga vale mesmo NÃO
+// declarado — a Tree grava `active:false` por registro ao encerrar a sequência,
+// e quem clica ali não abriu o construtor. A cadência segue exigindo a
+// declaração, e é essa assimetria que os testes novos pinam.
 // A cascata decide duas coisas com regras DIFERENTES, e é essa diferença que
 // os testes protegem: a cadência é do escopo MAIS PRECEDENTE que tiver número
 // gravado; o desligar é de QUALQUER escopo alcançado — um "não" não pode ser
@@ -92,6 +96,50 @@ describe("resolveCadence", () => {
       setting({ scopeKind: "responsible", scopeValue: "resp-1", cadenceDays: 30 }),
     ]);
     expect(r.days).toBe(14);
+  });
+});
+
+describe("desligar por registro sem declaração (v1.1)", () => {
+  // A série que não declara `record` em overrideScopes é o caso comum: o
+  // esquema só previu "por responsável". Encerrar a sequência de UM registro
+  // precisa valer assim mesmo, senão o tick reabre a próxima ocorrência.
+  const semRecord: SeriesCadence = {
+    defaultDays: 14,
+    overrideScopes: [{ kind: "responsible" }],
+  };
+
+  it("active:false no escopo do registro desliga", () => {
+    const r = resolveCadence(semRecord, record, [], [
+      setting({ scopeKind: "record", scopeValue: "rec-1", active: false }),
+    ]);
+    expect(r.active).toBe(false);
+    expect(r.disabledBy).toEqual({ kind: "record" });
+  });
+
+  it("mas a CADÊNCIA do escopo não declarado segue ignorada", () => {
+    const r = resolveCadence(semRecord, record, [], [
+      setting({ scopeKind: "record", scopeValue: "rec-1", cadenceDays: 30 }),
+    ]);
+    expect(r.days).toBe(14);
+    expect(r.fromScope).toBeNull();
+    expect(r.active).toBe(true);
+  });
+
+  it("nenhum outro escopo ganha o mesmo tratamento", () => {
+    // Só o registro. Desligar "por etapa" sem a etapa declarada seguiria sendo
+    // uma linha inerte — a precedência ali é decisão do esquema.
+    const r = resolveCadence(semRecord, record, [], [
+      setting({ scopeKind: "field", scopeValue: "stage=Nutrição", active: false }),
+    ]);
+    expect(r.active).toBe(true);
+  });
+
+  it("linha do registro com active:true não desliga nada", () => {
+    // É o que `setRecordCadence` grava desde a 0132: o default é `true`.
+    const r = resolveCadence(semRecord, record, [], [
+      setting({ scopeKind: "record", scopeValue: "rec-1", cadenceDays: 7 }),
+    ]);
+    expect(r.active).toBe(true);
   });
 });
 

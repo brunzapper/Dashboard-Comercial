@@ -1,4 +1,9 @@
-<!-- Versão: 1.34 | Data: 10/09/2026 -->
+<!-- Versão: 1.35 | Data: 10/09/2026 -->
+<!-- v1.35 (10/09/2026): §5.14 — a Tree passa a CRIAR e EDITAR a automação
+     da sequência (e a desenhar um tronco por série), pergunta o que fazer com
+     as demais ao concluir/excluir uma ocorrência, troca a caixinha de concluir
+     pelo botão "Concluir" e "Anotar" por "Comentar" — com "Salvar e analisar",
+     que passa o comentário pela IA para propor (nunca criar) a próxima tarefa. -->
 <!-- v1.34 (10/09/2026): §5.14 — seleção múltipla na Tree, com a cascata do
      galho e o tri-estado do pai. -->
 <!-- v1.33 (10/09/2026): §5.14 — o nó da Tree CONCLUI e EXCLUI (tarefa,
@@ -1210,7 +1215,21 @@ desfazer é soltá-lo de volta.
 
 **O que se faz dentro da árvore** (respeitando as permissões de sempre):
 
-- **Anotar** — vira um comentário do registro, o mesmo feed de /registros.
+- **Comentar** — vira um comentário do registro, o mesmo feed de /registros.
+  O botão do **cabeçalho** comenta o registro; o botãozinho **de um nó**
+  ("Comentar aqui") pendura o comentário *naquele* nó, e é assim que se
+  registra o que aconteceu numa ocorrência antiga sem que ele caia na de hoje.
+- **Salvar e analisar** — grava o comentário e pede à IA que leia o que você
+  escreveu e decida se ele pede um próximo passo com data. Se pedir, aparece um
+  cartão: *"Agendar «título» para dd/mm?"* — **Agendar** cria a tarefa, ligada a
+  este registro e com o dono dele; **Descartar** ignora. Se não pedir, ela diz
+  isso e nada é criado (a maior parte dos comentários é registro do que já
+  aconteceu, não pedido de tarefa). O prazo sai do que você escreveu ("me lembra
+  sexta", "dia 20"); sem prazo escrito, ela usa o intervalo usual de follow-up
+  do mercado (proposta enviada: 2 dias úteis; sem resposta: 3 a 5 dias; reunião
+  marcada: a véspera; nutrição: 14 dias). A IA **nunca** cria a tarefa sozinha —
+  o clique em Agendar é seu. Exige IA configurada em Configurações →
+  Integrações; sem ela, o botão avisa e o comentário é salvo do mesmo jeito.
 - **Abrir a tarefa de um nó** — o lápis no nó abre a tarefa **inteira**:
   título, descrição, vencimento, hora, hora-fim, responsável e registro
   vinculado. É o mesmo painel de /tarefas, do kanban e do feed — o que se muda
@@ -1221,15 +1240,25 @@ desfazer é soltá-lo de volta.
 - **Agendar tarefa avulsa** — pelo botão do cabeçalho. Ela nasce SEM número de
   ocorrência de propósito: é a diferença entre "o sistema pediu" e "o vendedor
   decidiu fazer" que a árvore mostra.
-- **Concluir / reabrir** — a caixinha no nó da tarefa, a mesma de /tarefas.
-  Riscar o nó é o gesto de "isto está feito"; com o espelho no Bitrix ligado,
+- **Concluir / reabrir** — o botão **Concluir** no nó da tarefa, o mesmo de
+  /tarefas. Ele é um botão com a palavra, e não uma caixinha, justamente para
+  não se confundir com a caixinha de **seleção** ao lado.
+  Concluir é o gesto de "isto está feito"; com o espelho no Bitrix ligado,
   a atividade fecha lá junto — e o contrário também: concluir a atividade no
   Bitrix fecha a tarefa aqui na sincronização seguinte, mesmo que nada mais
   tenha mudado no card.
-- **Excluir** — a lixeira, com confirmação. Vale para a **tarefa**, para a
-  **anotação** e para o **nó livre** do mapa mental. O nó de **Alteração** não
+- **Excluir** — a lixeira, com confirmação. Vale para a **tarefa**, para o
+  **comentário** e para o **nó livre** do mapa mental. O nó de **Alteração** não
   tem lixeira de propósito: ele é um fato do histórico do registro, não uma
   coisa que alguém criou.
+- **E as demais da sequência?** — ao concluir ou excluir uma tarefa que veio de
+  uma **série**, o sistema pergunta: *"só esta"* ou *"esta e encerrar a
+  sequência"*. Encerrar apaga as ocorrências ainda **abertas** deste registro e
+  **desliga a sequência para ele** — sem as duas coisas, o tick reabriria a
+  próxima no minuto seguinte. O que já foi **concluído permanece**, e o
+  acompanhamento continua na árvore; para voltar atrás, **Retomar** no nó da
+  sequência (as ocorrências já apagadas não voltam). Reabrir uma tarefa nunca
+  pergunta nada — ele não tira nada de ninguém.
 - **Selecionar vários** — a caixinha à esquerda de cada nó. Marcar um nó-pai
   (uma ocorrência, por exemplo) marca **o galho inteiro**; desmarcar um filho
   deixa o pai *parcialmente* marcado e **preserva os irmãos**, e qualquer
@@ -1240,9 +1269,25 @@ desfazer é soltá-lo de volta.
 - **Pausar / Retomar** — para (e volta a produzir) as tarefas da série. **Pausar não
   exclui nada**: o registro continua no acompanhamento e o histórico inteiro
   permanece na tela.
-- **Mudar a cadência deste registro** — o campo "a cada … dia(s)" no cabeçalho
-  grava uma exceção só dele; a regra que vale para os outros não é tocada
-  (§12.2.2). Limpar o campo devolve o padrão do esquema.
+- **Mudar a cadência deste registro** — o campo "a cada … dia(s)" **no nó da
+  sequência** grava uma exceção só dele; a regra que vale para os outros não é
+  tocada (§12.2.2). Limpar o campo devolve o padrão do esquema.
+- **Editar a automação da sequência** (admin) — a engrenagem no nó da sequência
+  abre o **mesmo construtor de automação** do quadro e do Workflow, já na regra
+  daquele tronco. Diferente da cadência acima, aqui se muda a regra que vale
+  para **todos** os registros que ela alcança.
+- **Nova sequência** (admin) — o botão do cabeçalho cria **outra** série de
+  tarefas para a Base deste registro, no mesmo construtor. Ela nasce
+  **desligada**: ligar é dizer "isto vale para a Base inteira", e essa decisão se
+  toma depois de conferir as condições. Um registro pode seguir **várias**
+  sequências — cada uma vira um tronco próprio na árvore, com o nome da regra.
+
+**Várias sequências, vários troncos.** Quando o registro segue mais de uma
+série, cada uma ganha um galho próprio com o nome da regra, e as ocorrências
+dela ficam embaixo. Com **uma só** sequência (o caso comum) a árvore continua
+exatamente como sempre foi, sem nível a mais. Comentários, tarefas avulsas e
+alterações penduram na sequência **principal** — a que concedeu o
+acompanhamento: eles aconteceram num dia, e o dia cai na janela de todas.
 
 **A data no nó é o prazo, com a mesma leitura do resto do app:** vermelha
 quando atrasada, âmbar quando vence em breve, e "sem prazo" quando não há —

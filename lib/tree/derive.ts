@@ -1,6 +1,16 @@
-// Versão: 1.1 | Data: 10/09/2026
-// A DERIVAÇÃO da árvore — pura. Dados os fatos e a forma, o parentesco.
+// Versão: 1.2 | Data: 10/09/2026
+// v1.2 (10/09/2026): VÁRIOS TRONCOS. Um registro pode participar de mais de uma
+//   série, e até aqui a árvore desenhava um só. Com duas ou mais, cada uma
+//   ganha um nó SINTÉTICO `series:<key>` por cima das ocorrências dela — do
+//   mesmo jeito que `por_tipo` já fabrica `kind:<k>`. Com UMA série (o caso de
+//   todo registro que existe hoje) a saída é BYTE-IDÊNTICA à v1.1, e é isso que
+//   o teste pina: o agrupador só aparece quando há o que separar.
 //
+//   Os fatos que não são de série (tarefa avulsa, comentário, alteração)
+//   seguem pendurando na OCORRÊNCIA em cuja janela caíram — a da série
+//   PRIMÁRIA, a que concedeu o atributo. Reparti-los entre os troncos exigiria
+//   inventar a qual sequência um comentário "pertence", e não pertence a
+//   nenhuma: ele aconteceu num dia, e o dia cai na janela de todas.
 // v1.1 (10/09/2026): só vocabulário (o agrupamento de `por_tipo`).
 //
 // Três formas, porque as três respondem perguntas diferentes:
@@ -25,6 +35,7 @@ import type {
 
 /** Ordem dos ramos na forma "por tipo" — do mais acionável ao mais passivo. */
 const KIND_ORDER: TreeNodeKind[] = [
+  "series",
   "occurrence",
   "task",
   "comment",
@@ -64,6 +75,14 @@ export interface DeriveInput {
   facts: TreeFact[];
   layout: TreeLayout;
   overrides?: TreeParentOverride[];
+  /**
+   * v1.2: a série cujas ocorrências recebem os fatos avulsos quando há mais de
+   * um tronco. Ausente = a primeira que aparecer nos fatos. É a série que
+   * CONCEDEU o atributo — a que estava sozinha na árvore antes desta versão.
+   */
+  primarySeriesKey?: string | null;
+  /** v1.2: rótulo de cada tronco (o nome da regra). Sem entrada, um genérico. */
+  seriesLabels?: Record<string, string>;
 }
 
 /**
@@ -89,8 +108,48 @@ export function deriveTree(input: DeriveInput): TreeNode[] {
   }
 
   const trunk = facts.filter((f) => f.kind === "occurrence");
+  // As séries presentes, na ordem em que os troncos aparecem. Sem chave (o
+  // formato de antes da v1.2) tudo cai num balde só e nada muda.
+  const seriesKeys: string[] = [];
+  for (const occ of trunk) {
+    const key = occ.seriesKey ?? "";
+    if (key !== "" && !seriesKeys.includes(key)) seriesKeys.push(key);
+  }
+  // O agrupador só existe quando há o que separar: com uma série (ou nenhuma)
+  // a árvore é a de sempre.
+  const grouped = input.layout === "por_ocorrencia" && seriesKeys.length > 1;
+  const primaryKey =
+    (input.primarySeriesKey && seriesKeys.includes(input.primarySeriesKey)
+      ? input.primarySeriesKey
+      : seriesKeys[0]) ?? null;
+  // Os fatos avulsos caem na janela do tronco PRIMÁRIO. Sem agrupamento, o
+  // tronco é o conjunto inteiro — exatamente como na v1.1.
+  const primaryTrunk = grouped
+    ? trunk.filter((f) => (f.seriesKey ?? "") === primaryKey)
+    : trunk;
   const roots: TreeNode[] = [];
   const kindRoots = new Map<TreeNodeKind, TreeNode>();
+  const seriesRoots = new Map<string, TreeNode>();
+
+  /** O nó sintético de uma série, criado na primeira ocorrência dela. */
+  const seriesBranch = (key: string, at: string): TreeNode => {
+    let branch = seriesRoots.get(key);
+    if (!branch) {
+      branch = toNode(
+        {
+          id: `series:${key}`,
+          kind: "series",
+          at,
+          label: input.seriesLabels?.[key] ?? SERIES_FALLBACK_LABEL,
+          seriesKey: key,
+        },
+        0
+      );
+      seriesRoots.set(key, branch);
+      roots.push(branch);
+    }
+    return branch;
+  };
 
   const attach = (child: TreeNode, parentId: string | null) => {
     const parent = parentId ? nodes.get(parentId) : null;
@@ -140,10 +199,12 @@ export function deriveTree(input: DeriveInput): TreeNode[] {
 
     // por_ocorrencia
     if (fact.kind === "occurrence") {
-      roots.push(node);
+      const key = fact.seriesKey ?? "";
+      if (grouped && key !== "") seriesBranch(key, fact.at).children.push(node);
+      else roots.push(node);
       continue;
     }
-    const occ = occurrenceFor(fact.at, trunk);
+    const occ = occurrenceFor(fact.at, primaryTrunk);
     attach(node, occ ? occ.id : null);
   }
 
@@ -165,7 +226,11 @@ export function deriveTree(input: DeriveInput): TreeNode[] {
   return roots;
 }
 
+/** Tronco cuja regra sumiu (excluída) ou cujo nome ninguém deu. */
+const SERIES_FALLBACK_LABEL = "Sequência";
+
 const KIND_LABEL: Record<TreeNodeKind, string> = {
+  series: "Sequências",
   occurrence: "Tarefas da série",
   task: "Tarefas",
   comment: "Anotações",

@@ -1,4 +1,8 @@
-// Versão: 1.3 | Data: 10/09/2026
+// Versão: 1.4 | Data: 10/09/2026
+// v1.4 (10/09/2026): `automation_rule_id` — qual regra abriu a tarefa (0129).
+// A coluna existe desde a 0129 e nunca subia ao cliente; a Tree precisa dela
+// para saber de QUAL série a ocorrência é (um registro pode seguir mais de
+// uma), e o diálogo de "encerrar a sequência" para mirar a série certa.
 // Tipos de TAREFAS (tabela tasks, 0063). Uma tarefa pode ser standalone,
 // vinculada a um registro (record_id) e/ou a um kanban de tarefas (board_id;
 // `phase` é a key da coluna). Visibilidade via RLS: view_all_records OU
@@ -35,6 +39,8 @@ export interface TaskRow {
   feed_position: number;
   is_global: boolean;
   assigned_at: string | null;
+  /** Regra de automação que abriu a tarefa (0129). null = criada à mão. */
+  automation_rule_id: string | null;
   /** Série que gerou a tarefa (0132). null = tarefa avulsa. */
   series_key: string | null;
   /** N-ésima ocorrência DERIVADA da série — nunca um contador. */
@@ -48,7 +54,7 @@ export interface TaskRow {
 }
 
 export const TASK_COLS =
-  "id, title, description, record_id, board_id, phase, due_date, due_time, due_time_end, completed_at, completed_by, responsible_id, created_by, position, locked, parent_task_id, pinned, feed_position, is_global, assigned_at, series_key, series_occurrence, occurrence_noun, created_at, updated_at";
+  "id, title, description, record_id, board_id, phase, due_date, due_time, due_time_end, completed_at, completed_by, responsible_id, created_by, position, locked, parent_task_id, pinned, feed_position, is_global, assigned_at, automation_rule_id, series_key, series_occurrence, occurrence_noun, created_at, updated_at";
 
 // Mesmo select com o título do registro vinculado (join FK record_id).
 export const TASK_COLS_WITH_RECORD = `${TASK_COLS}, record:records(title)`;

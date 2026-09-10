@@ -1,4 +1,13 @@
-// Versão: 1.2 | Data: 10/09/2026
+// Versão: 1.3 | Data: 10/09/2026
+// v1.3 (10/09/2026): a guarda da régua paralela passou a NOMEAR as três actions
+//   que não podem estar aqui (`completeTask`/`reopenTask`/`deleteTask`) em vez
+//   de proibir o módulo inteiro. Motivo: a Tree passou a oferecer "Retomar
+//   sequência", e `resumeRecordSeries` mora no mesmo arquivo — a proibição por
+//   módulo reprovaria um import legítimo e diria a coisa errada sobre o que a
+//   invariante protege. O que ela protege é concluir e excluir, que têm dono.
+//   Entram também: o botão "Concluir" no lugar da caixa, o rótulo do
+//   comentário vindo do modelo, e o nó que viaja no "Comentar aqui".
+// v1.2 | Data: 10/09/2026
 // v1.2 (10/09/2026): o nó CONCLUI e EXCLUI. Abrir a tarefa inteira não bastava
 //   — o TaskSheet é editor e por desenho não faz nem uma coisa nem outra, e a
 //   árvore era o único lugar do app onde não dava para fechar uma tarefa nem
@@ -151,8 +160,31 @@ describe("o nó conclui e exclui, sem régua paralela", () => {
   it("concluir/reabrir e excluir vêm do hook da LISTA de tarefas", () => {
     expect(widget).toContain("useTaskRowActions");
     expect(widget).toContain("@/components/tarefas/task-list");
-    // Uma cópia local das actions seria a régua paralela da invariante 25.
-    expect(widget).not.toContain('from "@/lib/tasks/actions"');
+    // Uma cópia local DESTAS actions seria a régua paralela da invariante 25.
+    // O módulo inteiro não é proibido: `resumeRecordSeries` mora nele e é uma
+    // ação de SÉRIE, que a árvore legitimamente oferece.
+    for (const action of ["completeTask", "reopenTask", "deleteTask"]) {
+      expect(widget).not.toContain(action);
+    }
+  });
+
+  it("concluir é uma PALAVRA, não uma segunda caixa", () => {
+    // Duas caixas lado a lado (a de selecionar e a de concluir) viravam
+    // armadilha; a diferença de forma não bastou.
+    expect(widget).toContain("TaskCompleteButton");
+    expect(widget).not.toContain("TaskCompleteCheckbox");
+    const list = readFileSync("components/tarefas/task-list.tsx", "utf8");
+    expect(list).toContain('"Reabrir" : "Concluir"');
+    // A caixa que SOBRA é a de seleção — essa continua sendo um Checkbox.
+    expect(list).toContain("<Checkbox");
+  });
+
+  it("a ocorrência pergunta o que fazer com as demais da sequência", () => {
+    const list = readFileSync("components/tarefas/task-list.tsx", "utf8");
+    expect(list).toContain("TaskSeriesScopeDialog");
+    expect(list).toContain("endRecordSeries");
+    // Reabrir não tira nada de ninguém: não pergunta.
+    expect(list).toMatch(/Reabrir nunca pergunta/);
   });
 
   it("anotação e nó livre têm exclusão, cada uma pelo dono dela", () => {
@@ -166,6 +198,38 @@ describe("o nó conclui e exclui, sem régua paralela", () => {
 
   it("nó de ALTERAÇÃO não oferece ação (é fato do audit_log)", () => {
     expect(widget).not.toMatch(/kind === "change"[\s\S]{0,200}Delete/);
+  });
+
+  it("o comentário tem UM dono do rótulo, e o nó do clique viaja", () => {
+    // "Anotar" virou "Comentar", e o verbo mora no modelo — literal novo em
+    // tela é como a palavra errada se espalhou por 37 arquivos na 0137.
+    expect(widget).toContain("TREE_COMMENT_VERB");
+    expect(widget).not.toContain('"Anotar"');
+    // v1.6: o nó chegava e era descartado — "Comentar aqui" na 3ª ocorrência
+    // fazia exatamente o mesmo que o botão do cabeçalho.
+    expect(widget).toContain("nodeId: target.id");
+    const actions = readFileSync("app/(app)/dashboards/tree-actions.ts", "utf8");
+    expect(actions).toContain("setTreeParent(recordId, `comment:${res.id}`");
+  });
+
+  it("criar sequência reusa o construtor de automação, não um segundo", () => {
+    const sheet = readFileSync(
+      "components/dashboards/charts/tree-series-sheet.tsx",
+      "utf8"
+    );
+    expect(sheet).toContain("AutomationRuleEditor");
+    expect(sheet).toContain("saveAutomation");
+    // O dono é a BASE do registro — série é regra, e regra tem Base.
+    expect(sheet).toContain('kind: "source"');
+  });
+
+  it("a IA propõe, o usuário agenda — ela nunca escreve", () => {
+    expect(widget).toContain("analyzeComment");
+    expect(widget).toContain("applyCommentTask");
+    const core = readFileSync("lib/ai/analyze-comment.ts", "utf8");
+    // O apply grava pelo choke point de sempre, e re-valida antes.
+    expect(core).toContain("validateTasksEdit");
+    expect(core).toContain("createTask(");
   });
 });
 

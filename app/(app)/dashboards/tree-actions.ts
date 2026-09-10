@@ -1,4 +1,20 @@
-// Versão: 1.6 | Data: 10/09/2026
+// Versão: 1.7 | Data: 10/09/2026
+// v1.7 (10/09/2026): (a) a árvore devolve VÁRIAS séries (uma por regra que
+//   gerou tarefa para o registro, e não só a que concedeu o atributo) mais a
+//   Base do registro, para o editor de automação abrir dentro da Tree;
+//   (b) encerrar/retomar a sequência de um registro mora em
+//   `lib/tasks/actions.ts` (`endRecordSeries`/`resumeRecordSeries`), ao lado do
+//   `completeTask`/`deleteTask` que a lista de tarefas já usa: a pergunta "e as
+//   demais da sequência?" não é da árvore, é de toda tela que fecha uma
+//   ocorrência;
+//   (c) `analyzeComment`/`applyCommentTask` — o "Salvar e analisar" do
+//   comentário (núcleo em lib/ai/analyze-comment.ts; estas são casca fina, como
+//   toda action de IA do §4.17);
+//   (d) `addTreeNote` aceita o nó em que a pessoa clicou: "Comentar aqui" na 3ª
+//   ocorrência gravava o comentário com `created_at = now()`, e ele pendurava
+//   na ocorrência de HOJE — o botão do nó era idêntico ao do cabeçalho. Agora a
+//   EXCEÇÃO de parentesco é gravada logo depois (`setTreeParent`, que existia
+//   desde a 0133 e não tinha um chamador sequer).
 // v1.6 (10/09/2026): `deleteTreeNodesBulk` — a seleção múltipla da Tree apaga
 // vários nós livres de uma vez. Mesmo `.is("node_ref", null)` do unitário: a
 // EXCEÇÃO de parentesco não é um nó, e apagá-la aqui desfaria em silêncio um
@@ -43,6 +59,14 @@ import { todayBrasiliaIso } from "@/lib/date/today";
 import { createClient } from "@/lib/supabase/server";
 import { createComment } from "@/lib/comments/actions";
 import {
+  analyzeCommentCore,
+  applyCommentTaskCore,
+  type ApplyCommentTaskState,
+  type CommentAnalysisState,
+} from "@/lib/ai/analyze-comment";
+import { loadSources } from "@/lib/config/sources";
+import { rootSources } from "@/lib/sources";
+import {
   BULK_MAX_ITEMS,
   chunk,
   fanOut,
@@ -53,6 +77,7 @@ import {
 import { deriveTree } from "@/lib/tree/derive";
 import { loadRecordTreeFacts } from "@/lib/tree/load";
 import { TREE_WINDOW_STEP, type TreeWindow } from "@/lib/tree/load";
+import type { TreeSeriesInfo } from "@/lib/tree/load";
 import type { TreeLayout, TreeNode } from "@/lib/tree/model";
 import { TASK_COLS_WITH_RECORD, type TaskRow } from "@/lib/tasks/types";
 import type { OptionItem } from "@/lib/records/types";
@@ -64,12 +89,12 @@ export interface TreeActionState {
 
 export interface TreeData {
   nodes: TreeNode[];
-  series: {
-    key: string;
-    cadenceDays: number;
-    active: boolean;
-    anchorDate: string | null;
-  } | null;
+  /**
+   * v1.7: as séries do registro, a PRIMÁRIA (a que concedeu o atributo)
+   * primeiro. Era uma só — e por isso a segunda série de um registro não tinha
+   * tronco na árvore. Ver lib/tree/load.ts v1.5.
+   */
+  series: TreeSeriesInfo[];
   /** Atributo que sustenta a árvore (para pausar/retomar sem excluir). */
   attribute: { id: string; status: "ativo" | "pausado" } | null;
   recordTitle: string;
@@ -82,17 +107,27 @@ export interface TreeData {
   tasks: TaskRow[];
   /** Responsáveis ativos — o `TaskFormContext` do editor (padrão da agenda). */
   responsibles: OptionItem[];
+  /**
+   * v1.7: a Base RAIZ do registro — o dono das automações de série que a Tree
+   * cria e edita (`AutomationOwner {kind:"source"}`). Resolvida pelo CATÁLOGO,
+   * nunca por `toSourceKey` (identidade não serve com sub-fontes na jogada).
+   */
+  sourceKey: string | null;
+  /** v1.7: o usuário pode configurar automação de Base? (o gate é admin.) */
+  canConfigureSeries: boolean;
   message?: string;
 }
 
 const EMPTY: TreeData = {
   nodes: [],
-  series: null,
+  series: [],
   attribute: null,
   recordTitle: "",
   hasMore: false,
   tasks: [],
   responsibles: [],
+  sourceKey: null,
+  canConfigureSeries: false,
 };
 
 /** A árvore de um registro, já derivada na forma pedida. */
@@ -106,8 +141,13 @@ export async function loadRecordTree(
   const orgId = await getActiveOrgId();
   const supabase = await createClient();
 
-  const [{ data: record }, { data: attr }, { data: taskRows }, { data: resps }] =
-    await Promise.all([
+  const [
+    { data: record },
+    { data: attr },
+    { data: taskRows },
+    { data: resps },
+    sources,
+  ] = await Promise.all([
     supabase
       .from("records")
       .select(
@@ -140,12 +180,28 @@ export async function loadRecordTree(
       .is("canonical_id", null)
       .eq("active", true)
       .order("display_name"),
-    ]);
+    // v1.7: o catálogo de Bases. É dele que sai a source-key do registro — a
+    // resolução por identidade (`toSourceKey`) não serve com sub-fontes na
+    // jogada, e é o catálogo que sabe qual raiz tem este `record_type`.
+    loadSources(supabase, orgId),
+  ]);
   if (!record) {
     // Pode ser RLS (o registro existe e o usuário não o vê) — dizer "não
     // encontrado" é o mesmo dos dois lados, e é o certo: não revelamos a
     // existência de um registro que a pessoa não pode ver.
     return { ...EMPTY, message: "Registro não encontrado." };
+  }
+
+  // v1.7: as regras de série do registro. A PRIMEIRA é a que concedeu o
+  // atributo (a primária, dona da janela dos fatos avulsos); as demais saem
+  // das PRÓPRIAS tarefas — `record_attributes` é único por registro, então uma
+  // segunda série nunca chega a ser `granted_by_rule_id`.
+  const primaryRuleId = (attr?.granted_by_rule_id as string | null) ?? null;
+  const ruleIds: string[] = primaryRuleId ? [primaryRuleId] : [];
+  for (const t of taskRows ?? []) {
+    const rid = (t as { automation_rule_id?: string | null }).automation_rule_id;
+    const occ = (t as { series_occurrence?: number | null }).series_occurrence;
+    if (rid && occ != null && !ruleIds.includes(rid)) ruleIds.push(rid);
   }
 
   const facts = await loadRecordTreeFacts(supabase, {
@@ -154,13 +210,22 @@ export async function loadRecordTree(
     fieldModifiedAt:
       (record.field_modified_at as Record<string, string> | null) ?? null,
     orgId,
-    ruleId: (attr?.granted_by_rule_id as string | null) ?? null,
+    ruleIds,
     todayIso: todayBrasiliaIso(),
     window,
   });
 
+  const seriesLabels: Record<string, string> = {};
+  for (const s of facts.series) seriesLabels[s.key] = s.ruleName;
+
   return {
-    nodes: deriveTree({ facts: facts.facts, layout, overrides: facts.overrides }),
+    nodes: deriveTree({
+      facts: facts.facts,
+      layout,
+      overrides: facts.overrides,
+      primarySeriesKey: facts.series.find((s) => s.primary)?.key ?? null,
+      seriesLabels,
+    }),
     series: facts.series,
     attribute: attr
       ? { id: attr.id as string, status: attr.status as "ativo" | "pausado" }
@@ -172,6 +237,13 @@ export async function loadRecordTree(
       id: r.id as string,
       label: (r.display_name as string) ?? "",
     })),
+    sourceKey:
+      rootSources(sources).find(
+        (s) => s.recordType === (record.record_type as string)
+      )?.key ?? null,
+    // Espelho do gate de `saveAutomation` para dono de Base (a RLS da 0127
+    // segue sendo a muralha). Esconder o botão é melhor que deixá-lo falhar.
+    canConfigureSeries: session.roles.includes("admin"),
   };
 }
 
@@ -186,14 +258,45 @@ export async function loadRecordTree(
 export async function addTreeNote(
   recordId: string,
   body: string,
-  opts: { revalidate?: boolean } = {}
-): Promise<TreeActionState> {
+  opts: { revalidate?: boolean; parentRef?: string | null } = {}
+): Promise<TreeActionState & { commentId?: string }> {
   const res = await createComment({ recordId }, body);
-  if (!res.ok) {
-    return { ok: false, message: res.message ?? "Falha ao anotar." };
+  if (!res.ok || !res.id) {
+    return { ok: false, message: res.message ?? "Falha ao comentar." };
+  }
+  // v1.7: comentário feito EM CIMA de um nó fica pendurado nele. Sem isto, ele
+  // caía na ocorrência de hoje — que é onde ele nasce, não onde foi escrito.
+  // Falha aqui não desfaz o comentário: ele existe, só ficou no lugar derivado.
+  if (opts.parentRef) {
+    await setTreeParent(recordId, `comment:${res.id}`, opts.parentRef, {
+      revalidate: false,
+    });
   }
   if (opts.revalidate !== false) revalidatePath("/dashboards");
-  return { ok: true };
+  return { ok: true, commentId: res.id };
+}
+
+/**
+ * "Salvar e analisar": o comentário já foi salvo; isto lê o texto e devolve a
+ * PROPOSTA de tarefa (ou nada). Casca fina — o núcleo, o gate de IA e a
+ * validação vivem em lib/ai/analyze-comment.ts.
+ */
+export async function analyzeComment(
+  recordId: string,
+  comment: string
+): Promise<CommentAnalysisState> {
+  return analyzeCommentCore({ recordId, comment });
+}
+
+/** Agenda o que a análise propôs. RE-VALIDA e grava por `createTask`. */
+export async function applyCommentTask(
+  recordId: string,
+  raw: string,
+  opts: { revalidate?: boolean } = {}
+): Promise<ApplyCommentTaskState> {
+  const res = await applyCommentTaskCore({ recordId, raw });
+  if (res.ok && opts.revalidate !== false) revalidatePath("/dashboards");
+  return res;
 }
 
 /**
