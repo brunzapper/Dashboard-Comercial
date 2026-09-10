@@ -84,6 +84,11 @@ const SERIE_COMPLETA = {
       firstAt: "imediato" as const,
       maxOccurrences: 20,
       lookahead: 5,
+      // v1.3: a antecedência do espelho é gravada SEMPRE, como o lookahead —
+      // os dois são números que o usuário escolheu numa caixa. Deixá-los
+      // implícitos faria uma mudança do padrão no código mudar, em silêncio, o
+      // comportamento de uma regra que já roda em produção.
+      mirrorLeadDays: 3,
       grantAttribute: "tree",
     },
   },

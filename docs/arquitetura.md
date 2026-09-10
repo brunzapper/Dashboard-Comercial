@@ -1,4 +1,11 @@
-<!-- Versão: 1.84 | Data: 10/09/2026 -->
+<!-- Versão: 1.85 | Data: 10/09/2026 -->
+<!-- v1.85 (10/09/2026): §4.24/§4.25 — a leitura de volta estava pendurada num
+     ramo INALCANÇÁVEL do runner e nunca rodou; passa a rodar no fim real do job
+     e, sem a timeline, a cada minuto. A guarda de truncamento ("não vi" não é
+     "não existe") antes do ramo de exclusão. Na série: janela reposta por
+     CONCLUSÃO (occurrencesToOpen), revogação de quem sai do recorte,
+     antecedência configurável do espelho (mirrorLeadDays) e a 0138, que tira
+     as linhas de série do índice da 0129. Invariante 33 atualizada. -->
 <!-- v1.84 (10/09/2026): §4.25 — seleção múltipla de tarefas e anotações (o
      hook único, a cascata tri-estado da Tree) e a correção do espelho nas
      ações em massa, que com a leitura de volta da 0137 virou regressão. -->
@@ -4721,12 +4728,45 @@ Registro sem histórico não cobra: `anchorFallback` ("nenhum", o padrão, ou
 construção, então a série só abria a ocorrência do dia - num ciclo quinzenal, o
 vendedor passava 15 dias sem ver nada e sem poder remarcar o que vinha.
 `occurrencesAhead` (pura, irmã de `occurrencesUntil`) devolve a devida agora
-MAIS as `lookahead` seguintes (padrão 5); `planSeriesTask` passou a devolver
-uma LISTA. Criar adiantado é seguro porque a trava é por ocorrência: repetir é
-23505, que já é no-op, e o executor já era um laço. **Nunca anda para trás**:
-ocorrência de ciclo anterior ao que está em aberto não é criada retroativamente -
-ela segue aparecendo na Tree como galho vazio, que é onde a falta de
-acompanhamento deve aparecer, e não como uma tarefa vencida fabricada hoje.
+MAIS as `lookahead` seguintes; `planSeriesTask` passou a devolver uma LISTA.
+Criar adiantado é seguro porque a trava é por ocorrência: repetir é 23505, que
+já é no-op, e o executor já era um laço. **Nunca anda para trás**: ocorrência de
+ciclo anterior ao que está em aberto não é criada retroativamente - ela segue
+aparecendo na Tree como galho vazio, que é onde a falta de acompanhamento deve
+aparecer, e não como uma tarefa vencida fabricada hoje.
+
+**A reposição por CONCLUSÃO (10/09/2026).** A janela acima anda pelo TEMPO:
+concluir uma ocorrência não repõe nada, e num ciclo quinzenal o vendedor ficava
+com uma a menos na tela até virar o ciclo. `occurrencesToOpen` substitui
+`occurrencesAhead` no caminho do tick e mantém `lookahead` ocorrências FUTURAS
+**abertas** — concluiu uma, a seguinte do calendário entra no lugar. As datas
+continuam saindo do calendário (âncora + n × cadência): concluir três seguidas
+não antecipa nada, só revela o que vem depois. Para isso o fato
+`CardFacts.seriesOccurrences` deixou de ser `"<ruleId>:<n>"` e passou a carregar
+o estado de conclusão de cada ocorrência. O padrão de `lookahead` passou de 5
+para 3, e ele é configurável na regra ("Quantas adiantar").
+
+**A revogação (10/09/2026).** Registro que deixa de casar as CONDIÇÕES da regra
+(o deal saiu de Nutrição) devolve as ocorrências ainda não concluídas:
+`decideActions` emite `revokedSeries` no ramo `!matched`, e
+`executeSeriesRevocations` apaga as abertas e enfileira o `delete` da atividade
+no CRM. As CONCLUÍDAS ficam — são histórico, e a Tree as desenha. O atributo do
+registro também fica: pausar ≠ excluir. A revogação é segura porque no escopo de
+Base o universo é a Base INTEIRA sem teto (`runRecordList` usa `fetchAll` quando
+não há `settings.limit`), então "está no universo e não casou" é conclusão
+firme; registro ausente do universo nunca é revogado. Pausar o atributo ou
+desligar a cadência para um recorte **não** revoga: ali a regra continua
+casando, ela só não gera nada — parar de pedir e apagar o que já foi pedido são
+decisões diferentes.
+
+**A antecedência do espelho (10/09/2026).** A ocorrência nasce aqui assim que a
+janela a planeja, mas mandá-la ao CRM na mesma hora encheria a timeline do
+negócio de tarefa de meses à frente. `SeriesConfig.mirrorLeadDays` (padrão 3,
+configurável em "Espelhar com (dias)") adia o espelho: `executeAutomationSeries`
+só chama `mirrorTaskAfterWrite` quando `mirrorDueNow` aprova, e
+`enqueueDueTaskMirrors` (varredor do tick, imediatamente ANTES do dreno)
+enfileira as que amadureceram. Idempotente por construção: só olha tarefas sem
+`bitrix_activity_id`, e `uq_task_queue_pending` impede a segunda ordem.
 
 **Pausar agora PARA de verdade.** O `status='pausado'` do atributo era escrito
 pelo executor e não era lido por linha nenhuma do motor - a promessa da 0131
@@ -4905,14 +4945,37 @@ reler o deal não diz nada sobre as atividades dele. O que se lê fora do perío
 detecta por ausência: a atividade apagada não emite evento nenhum, ela
 simplesmente não volta na lista do dono.
 
-**Por isso o inbound é GANCHO pós-job, não uma fase do plano.** O runner é
-passo a passo e não guarda o que já viu entre páginas — não teria como
-distinguir "sumiu" de "está na página seguinte". `syncBitrixActivitiesInbound`
+**Por isso o inbound não é uma fase do plano.** O runner é passo a passo e não
+guarda o que já viu entre páginas — não teria como distinguir "sumiu" de "está
+na página seguinte". `syncBitrixActivitiesInbound`
 (`lib/sync/bitrix/activity-inbound.ts`) lê o dono INTEIRO de uma vez, em lotes
 de 40, com orçamento próprio, no molde de `runAutoMatchIncremental` e
-`reconcileAllKanbanAllocationFields`. Roda SEMPRE que o job termina, inclusive
-quando ele não escreveu nada: um job vazio é exatamente o caso em que há
-conclusão esperando para ser lida.
+`reconcileAllKanbanAllocationFields`.
+
+**Onde ele roda (corrigido em 10/09/2026).** A 0137 pendurou o gancho no ramo
+`phaseIndex >= plan.length` de `stepJob`, e esse ramo é INALCANÇÁVEL: o
+`phase_index` só chega ao fim do plano no MESMO update que grava
+`status:'done'`, e o passo seguinte volta no guard de estado terminal. O bloco
+`if (done)` que de fato executa chamava os outros quatro ganchos pós-job e
+esquecia esse — resultado, a leitura de volta nunca rodou, nem pelo tick, nem
+pelo botão Reconciliar. Hoje ele roda em DOIS lugares, e a divisão é por
+CUSTO no portal:
+
+- **no tick de minuto**, com `{ comments: false }` — conciliar tarefas é UMA
+  chamada de `crm.activity.list` por lote de 40 donos, então cabe;
+- **no `if (done)` do job**, rodada completa (~1×/hora com o reconcile
+  automático) — os comentários são uma chamada POR registro, e isso não cabe
+  num tick de minuto.
+
+Roda inclusive quando o job não escreveu nada: um job vazio é exatamente o caso
+em que há conclusão esperando para ser lida.
+
+**"Não vi" não é "não existe".** `listActivities` devolve `{ items, truncated }`:
+a leitura pode parar antes do fim da lista (teto de 20 páginas, orçamento de
+tempo). Com `truncated`, o ramo de EXCLUSÃO é pulado — conclusão e criação
+seguem, porque dependem do que VOLTOU, não do que faltou. Sem essa guarda, um
+dono com muitas atividades apagaria em definitivo as tarefas das páginas não
+lidas.
 
 **Quem escreve o quê** — a linha que evita o cabo de guerra:
 
@@ -5568,14 +5631,23 @@ principalmente — para mantenedores humanos.
     um contador, nunca "última execução" gravada: tick que não rodou não
     dessincroniza a série, e a ocorrência que ninguém abriu segue existindo como
     fato (é ela que vira o galho vazio na árvore). A série mantém abertas a
-    devida hoje MAIS as `lookahead` seguintes (`occurrencesAhead`, padrão 5) e
-    **nunca anda para trás**: ocorrência de ciclo anterior ao que está em aberto
-    não vira tarefa retroativa. Atributo `pausado` PARA a ocorrência
+    devida hoje MAIS `lookahead` ocorrências FUTURAS, repostas a cada CONCLUSÃO
+    (`occurrencesToOpen`, padrão 3 e configurável na regra), e **nunca anda para
+    trás**: ocorrência de ciclo anterior ao que está em aberto não vira tarefa
+    retroativa. Registro que deixa de casar as condições devolve as ocorrências
+    ainda não concluídas (`revokedSeries` → `executeSeriesRevocations`); as
+    concluídas e o atributo ficam. `SeriesConfig.mirrorLeadDays` adia o espelho
+    no CRM até o vencimento se aproximar — quem cria as que amadurecem é
+    `enqueueDueTaskMirrors`, no tick. Atributo `pausado` PARA a ocorrência
     (`CardFacts.pausedAttributes`) — o status precisa ser LIDO, não só escrito. A trava de verdade é
     `uq_tasks_series_occurrence` e 23505 é NO-OP, jamais `last_error`
     (precedente 0129). O índice é DELIBERADAMENTE sem `completed_at is null`
     — o da 0129 significa "uma tarefa ABERTA por vez", este significa "a 3ª
-    quinzena aconteceu uma vez na vida"; não os uniformize. A cascata da
+    quinzena aconteceu uma vez na vida"; não os uniformize. E o da 0129 é
+    DELIBERADAMENTE `series_occurrence is null` (0138): sem isso ele vencia
+    sobre este, reduzia toda série a UMA tarefa aberta por registro e gerava
+    dezenas de 23505 por minuto — no-op na aplicação, visíveis só no log do
+    PostgREST. A cascata da
     cadência (`lib/series/cadence.ts`) tem travessias DIFERENTES de propósito:
     cadência vence o PRIMEIRO escopo com número, `active=false` em QUALQUER
     escopo alcançado desliga (um "não" é mais forte que um "sim"). O padrão

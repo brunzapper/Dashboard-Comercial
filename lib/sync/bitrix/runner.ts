@@ -1,4 +1,9 @@
-// Versão: 1.6 | Data: 10/09/2026
+// Versão: 1.7 | Data: 10/09/2026
+// v1.7 (10/09/2026): o gancho da v1.6 estava pendurado num ramo INALCANÇÁVEL
+//   (`phaseIndex >= plan.length` com o job ainda `running` não acontece), então
+//   a leitura de volta nunca rodou — nem pelo tick, nem pelo botão Reconciliar.
+//   Passa a ser chamado no `if (done)` do passo de trabalho, que é onde o job
+//   de fato termina. A chamada do ramo antigo fica como rede.
 // v1.6 (10/09/2026): a LEITURA DE VOLTA das atividades (0137) entra como
 //   gancho pós-job. Ela NÃO é uma fase do plano de propósito: a exclusão só se
 //   detecta por ausência na lista do dono, e um plano paginado passo a passo
@@ -565,6 +570,12 @@ export async function stepJob(db: SupabaseClient, jobId: string): Promise<StepPr
       await maybeAutoMatchAfterJob(db, { ...job, totals });
       await maybeRunKanbanAutomationsAfterJob(db, { ...job, totals });
       await maybeSyncKanbanAllocationAfterJob(db, { ...job, totals });
+      // v1.7: É AQUI que o job termina de verdade. O ramo de cima
+      // (phaseIndex >= plan.length) nunca é alcançado: `phase_index` só chega
+      // ao fim do plano no MESMO update que grava status:'done', e o passo
+      // seguinte volta no guard de estado terminal. Ter a chamada só lá deixou
+      // a leitura de volta inteira sem rodar desde a 0137.
+      await maybeSyncActivitiesAfterJob(db);
     }
 
     return {

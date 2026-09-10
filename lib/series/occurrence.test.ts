@@ -1,6 +1,7 @@
 // Versão: 1.2 | Data: 09/09/2026
 // v1.1 (09/09/2026): o `until` por ALTERAÇÃO de campo (a quarta forma de
 //   encerrar).
+// v1.4 (10/09/2026): `occurrencesToOpen` — a janela reposta por CONCLUSÃO.
 // v1.2 (09/09/2026): `occurrencesAhead` (as ocorrências futuras) e o
 //   `anchorFallback` do registro sem histórico.
 // A ocorrência devida é o relógio da série. O que estes testes protegem:
@@ -12,6 +13,7 @@ import { describe, expect, it } from "vitest";
 import {
   dueOccurrence,
   occurrencesAhead,
+  occurrencesToOpen,
   occurrencesUntil,
   resolveAnchorDate,
   resolveBound,
@@ -270,6 +272,126 @@ describe("occurrencesAhead", () => {
     expect(occurrencesAhead({ ...base, todayIso: "2026-09-05" }, 5)).toEqual([]);
     // Sem âncora, idem.
     expect(occurrencesAhead({ ...base, anchorDate: null }, 5)).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// v1.4 — a janela reposta por CONCLUSÃO.
+//
+// O que separa isto de `occurrencesAhead`: lá a janela anda com o TEMPO, então
+// concluir uma ocorrência deixava o vendedor com uma a menos na tela até virar
+// o ciclo. Aqui o estoque de futuras abertas é constante — concluiu uma, a
+// seguinte do calendário entra no lugar.
+// ---------------------------------------------------------------------------
+describe("occurrencesToOpen", () => {
+  const base = {
+    anchorDate: "2026-09-01",
+    cadenceDays: 14,
+    todayIso: "2026-09-29",
+    firstAt: "apos_um_ciclo" as const,
+  };
+  const open = (n: number) => ({ occurrence: n, open: true });
+  const done = (n: number) => ({ occurrence: n, open: false });
+
+  it("do zero, abre a devida hoje e completa o estoque de futuras", () => {
+    const plans = occurrencesToOpen(base, { keepAhead: 3, known: [] });
+    expect(plans.map((p) => p.occurrence)).toEqual([2, 3, 4, 5]);
+    expect(plans[0].dueDate).toBe("2026-09-29");
+  });
+
+  it("com o estoque cheio, não abre nada", () => {
+    const plans = occurrencesToOpen(base, {
+      keepAhead: 3,
+      known: [open(2), open(3), open(4), open(5)],
+    });
+    expect(plans).toEqual([]);
+  });
+
+  // O pedido literal: "adicionando 1 a cada vez que uma for concluída".
+  it("concluir uma FUTURA repõe exatamente uma", () => {
+    const plans = occurrencesToOpen(base, {
+      keepAhead: 3,
+      known: [open(2), done(3), open(4), open(5)],
+    });
+    expect(plans.map((p) => p.occurrence)).toEqual([6]);
+  });
+
+  // A devida hoje não é uma "futura": concluí-la não muda o estoque à frente.
+  it("concluir a DEVIDA não repõe (o estoque de futuras segue cheio)", () => {
+    const plans = occurrencesToOpen(base, {
+      keepAhead: 3,
+      known: [done(2), open(3), open(4), open(5)],
+    });
+    expect(plans).toEqual([]);
+  });
+
+  it("concluir tudo recomeça o estoque a partir da próxima do calendário", () => {
+    const plans = occurrencesToOpen(base, {
+      keepAhead: 3,
+      known: [done(2), done(3), done(4), done(5)],
+    });
+    expect(plans.map((p) => p.occurrence)).toEqual([6, 7, 8]);
+  });
+
+  // A mesma invariante do occurrencesAhead: a série não fabrica passado.
+  it("NUNCA anda para trás, mesmo com âncora antiga e nada criado", () => {
+    const plans = occurrencesToOpen(
+      { ...base, anchorDate: "2026-01-01" },
+      { keepAhead: 3, known: [] }
+    );
+    expect(plans.map((p) => p.occurrence)).toEqual([19, 20, 21, 22]);
+  });
+
+  it("keepAhead 0 mantém só a devida hoje", () => {
+    expect(
+      occurrencesToOpen(base, { keepAhead: 0, known: [] }).map(
+        (p) => p.occurrence
+      )
+    ).toEqual([2]);
+    expect(
+      occurrencesToOpen(base, { keepAhead: 0, known: [open(2)] })
+    ).toEqual([]);
+  });
+
+  it("a borda final corta a reposição em vez de estourá-la", () => {
+    const plans = occurrencesToOpen(
+      { ...base, untilDate: "2026-10-20" },
+      { keepAhead: 3, known: [] }
+    );
+    expect(plans.map((p) => p.dueDate)).toEqual(["2026-09-29", "2026-10-13"]);
+  });
+
+  it("respeita o teto de ocorrências", () => {
+    const plans = occurrencesToOpen(
+      { ...base, maxOccurrences: 4 },
+      { keepAhead: 3, known: [] }
+    );
+    expect(plans.map((p) => p.occurrence)).toEqual([2, 3, 4]);
+  });
+
+  it("sem ocorrência devida hoje não abre nada", () => {
+    expect(
+      occurrencesToOpen({ ...base, todayIso: "2026-09-05" }, {
+        keepAhead: 3,
+        known: [],
+      })
+    ).toEqual([]);
+    expect(
+      occurrencesToOpen({ ...base, anchorDate: null }, {
+        keepAhead: 3,
+        known: [],
+      })
+    ).toEqual([]);
+  });
+
+  // Ocorrência concluída NUNCA renasce: a trava da 0132 é "aconteceu uma vez
+  // na vida", e reabrir a 3ª porque ela foi concluída seria pedir duas vezes.
+  it("não recria ocorrência que já existe, aberta ou concluída", () => {
+    const plans = occurrencesToOpen(base, {
+      keepAhead: 2,
+      known: [done(2), done(3), open(4)],
+    });
+    expect(plans.map((p) => p.occurrence)).toEqual([5]);
   });
 });
 

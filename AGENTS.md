@@ -697,12 +697,43 @@ This version has breaking changes — APIs, conventions, and file structure may 
   timestamp; a 0135 é só o índice `(record_id, field, changed_at desc)` (o
   `idx_audit_record` não recorta por campo). Sem histórico ⇒ não cobra
   (`anchorFallback` "nenhum" é o padrão; "criacao" usa `source_created_at`) —
-  nenhum caminho inventa data. Junto: `occurrencesAhead` mantém abertas a
-  ocorrência devida hoje MAIS as `lookahead` (padrão 5) e NUNCA anda para trás
-  (vencida que ninguém abriu segue como galho vazio da Tree, não vira tarefa
-  retroativa); e o atributo `pausado` passou a PARAR a série
+  nenhum caminho inventa data. Junto: a janela de ocorrências futuras NUNCA
+  anda para trás (vencida que ninguém abriu segue como galho vazio da Tree, não
+  vira tarefa retroativa); e o atributo `pausado` passou a PARAR a série
   (`CardFacts.pausedAttributes`) — o status era escrito e nunca lido. Ver
   `docs/arquitetura.md` §4.24 e invariantes 33/36.
+- **A janela da série se repõe por CONCLUSÃO, e quem sai do recorte devolve o
+  que não fez (10/09/2026):** `occurrencesToOpen` (`lib/series/occurrence.ts`,
+  puro) substituiu `occurrencesAhead` no caminho do tick — mantém `lookahead`
+  ocorrências FUTURAS ABERTAS (padrão 3, configurável na regra), repondo uma a
+  cada conclusão; antes a janela andava pelo TEMPO e concluir uma deixava o
+  vendedor com uma a menos até virar o ciclo. Por isso
+  `CardFacts.seriesOccurrences` deixou de ser `"<ruleId>:<n>"` e carrega o
+  ESTADO de cada ocorrência (`loadSeriesOccurrences` traz `completed_at`). As
+  datas seguem do calendário (âncora + n × cadência): concluir três seguidas não
+  antecipa nada. **Revogação:** registro que deixa de casar as CONDIÇÕES da
+  regra emite `revokedSeries` no ramo `!matched` de `decideActions`, e
+  `executeSeriesRevocations` apaga as ABERTAS e enfileira o `delete` da
+  atividade no CRM — concluídas e atributo FICAM (pausar ≠ excluir). Só é
+  seguro porque o universo de Base é a Base INTEIRA sem teto (`fetchAll`):
+  registro ausente do universo NUNCA é revogado. Atributo pausado ou cadência
+  desligada para um recorte NÃO revogam (a regra segue casando; parar de pedir
+  e apagar o que já foi pedido são decisões diferentes). **Antecedência do
+  espelho:** `SeriesConfig.mirrorLeadDays` (padrão 3, configurável) adia a
+  criação no CRM até o vencimento se aproximar — `mirrorDueNow` é o dono ÚNICO
+  da conta (executor da série + varredor), e `enqueueDueTaskMirrors` roda no
+  tick ANTES do dreno. NÃO recrie as RPCs para nada disso.
+- **O índice da 0129 NÃO é das tarefas de série (0138, 10/09/2026):**
+  `uq_tasks_open_per_automation` ganhou `and series_occurrence is null`. As duas
+  travas guardam coisas diferentes — a 0129 é "uma tarefa ABERTA por vez"
+  (`create_task`), a 0132 é "a N-ésima ocorrência aconteceu uma vez na vida"
+  (`create_task_series`, várias abertas lado a lado DE PROPÓSITO) — e sem o
+  recorte a primeira vencia sobre a segunda, reduzindo toda série a UMA tarefa
+  aberta por registro. Cada rodada do tick tentava inserir as demais e todas
+  batiam em 23505, que o executor trata como no-op: invisível na aplicação,
+  dezenas por minuto no log do PostgREST. Por isso `SeriesOutcome.skipped` agora
+  chega ao resumo da rodada (`AutomationRunSummary.seriesSkipped`) — segue FORA
+  do `last_error`, mas deixa de ser mudo. NUNCA uniformize os dois índices.
 - **Tarefa espelhada no Bitrix é FILA + id externo (0136, 09/09/2026):** a
   tarefa daqui vira ATIVIDADE do CRM (`crm.activity.add`, TYPE_ID 6 /
   PROVIDER_ID CRM_TODO) na timeline do negócio — não o módulo Tasks. A chamada
@@ -733,10 +764,22 @@ This version has breaking changes — APIs, conventions, and file structure may 
   com pendência aqui (`crm.activity.list` com `@OWNER_ID`), e é a mesma
   leitura que detecta EXCLUSÃO — que não emite nada: a atividade apagada
   simplesmente não volta na lista. Por isso o inbound
-  (`lib/sync/bitrix/activity-inbound.ts`) é GANCHO pós-job, nunca uma fase do
-  plano: o runner é paginado passo a passo e não distingue "sumiu" de "está na
-  próxima página". Ele roda mesmo com o job sem nada escrito — é justamente aí
-  que há conclusão esperando. QUEM ESCREVE O QUÊ é a linha que evita o cabo de
+  (`lib/sync/bitrix/activity-inbound.ts`) NÃO é uma fase do plano: o runner é
+  paginado passo a passo e não distingue "sumiu" de "está na próxima página".
+  Ele roda mesmo com o job sem nada escrito — é justamente aí que há conclusão
+  esperando. **ONDE ele roda (corrigido em 10/09/2026):** a 0137 pendurou o
+  gancho no ramo `phaseIndex >= plan.length` de `stepJob`, que é INALCANÇÁVEL
+  (o `phase_index` só chega ao fim do plano no MESMO update que grava
+  `status:'done'`, e o passo seguinte volta no guard de estado terminal) — a
+  leitura de volta inteira nunca rodou, nem pelo tick nem pelo botão
+  Reconciliar. Hoje são DOIS sítios, divididos por CUSTO: o `if (done)` do
+  passo de trabalho leva a rodada COMPLETA (~1×/h), e o tick de minuto chama com
+  `{ comments: false }` — conciliar tarefas é UMA chamada de `crm.activity.list`
+  por lote de 40 donos, mas a timeline é uma chamada POR registro e não cabe num
+  tick. **`listActivities` devolve `{ items, truncated }` e lista truncada NÃO
+  autoriza o ramo de exclusão** (teto de páginas / orçamento): "não vi" não é
+  "não existe", e aqui a exclusão é definitiva; conclusão e criação seguem,
+  porque dependem do que VOLTOU. QUEM ESCREVE O QUÊ é a linha que evita o cabo de
   guerra: conteúdo (título/descrição/prazo/responsável) de tarefa já espelhada
   é DAQUI (o outbound leva); `COMPLETED`, a exclusão e a atividade CRM_TODO
   ainda desconhecida são DE LÁ. O inbound NUNCA sobrescreve conteúdo de tarefa

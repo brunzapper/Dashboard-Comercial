@@ -1,4 +1,9 @@
-// Versão: 1.0 | Data: 10/09/2026
+// Versão: 1.1 | Data: 10/09/2026
+// v1.1 (10/09/2026): `InboundOptions.comments` (o tick de minuto concilia
+//   tarefas e deixa a timeline para o gancho pós-job — custo por registro) e a
+//   guarda de TRUNCAMENTO: lista cortada pelo teto de páginas ou pelo orçamento
+//   não autoriza o ramo de exclusão. "Não vi" não é "não existe", e aqui a
+//   exclusão é definitiva.
 // O BITRIX DE VOLTA (0137): atividade concluída, apagada ou criada LÁ vira
 // tarefa concluída, apagada ou criada AQUI — e o comentário da timeline vira
 // anotação do registro.
@@ -64,6 +69,22 @@ const MAX_PAGES = 20;
 const MAX_OWNERS = 400;
 /** Timeline: uma chamada por registro, então o teto é mais apertado. */
 const MAX_COMMENT_OWNERS = 60;
+
+/**
+ * v1.1: as duas metades desta rodada têm custo MUITO diferente no portal.
+ *
+ * Conciliar tarefas é UMA chamada de `crm.activity.list` por lote de 40 donos
+ * (o filtro `@OWNER_ID` aceita lista). Puxar comentários é uma chamada POR
+ * registro — com algumas dezenas de registros em acompanhamento, rodar isso a
+ * cada minuto seriam milhares de chamadas por hora para trazer quase nada.
+ *
+ * Por isso o tick de minuto pede `comments: false` e o gancho pós-job (que roda
+ * ~1×/hora) leva a rodada completa.
+ */
+export interface InboundOptions {
+  /** Puxar a timeline dos registros com o atributo `tree`. Padrão: sim. */
+  comments?: boolean;
+}
 
 export interface InboundResult {
   completed: number;
@@ -206,14 +227,29 @@ export async function pendingActivityOwners(
   return out;
 }
 
+/** O que a listagem devolveu, e se ela chegou ao FIM da lista do dono. */
+interface ActivityListing {
+  items: BitrixActivity[];
+  /**
+   * A leitura parou antes do fim (teto de páginas ou orçamento de tempo).
+   *
+   * Existe porque a EXCLUSÃO aqui se detecta por ausência: sem esta distinção,
+   * uma lista cortada na metade faria toda tarefa das páginas não lidas parecer
+   * apagada no portal — e o ramo de exclusão apaga definitivo. "Não vi" não é
+   * "não existe".
+   */
+  truncated: boolean;
+}
+
 /** Lê TODAS as páginas de um filtro de atividade (dentro do teto). */
 async function listActivities(
   api: BitrixCallable,
   filter: Record<string, unknown>,
   deadline: number
-): Promise<BitrixActivity[]> {
-  const out: BitrixActivity[] = [];
+): Promise<ActivityListing> {
+  const items: BitrixActivity[] = [];
   let start = 0;
+  let truncated = true;
   for (let page = 0; page < MAX_PAGES; page += 1) {
     if (Date.now() >= deadline) break;
     const res = (await api.call<BitrixActivity[]>("crm.activity.list", {
@@ -222,11 +258,15 @@ async function listActivities(
       order: { ID: "ASC" },
       start,
     })) as { result: BitrixActivity[]; next?: number };
-    out.push(...(res.result ?? []));
-    if (typeof res.next !== "number") break;
+    items.push(...(res.result ?? []));
+    // Sem `next` é o fim da lista: só aqui a ausência vira prova.
+    if (typeof res.next !== "number") {
+      truncated = false;
+      break;
+    }
     start = res.next;
   }
-  return out;
+  return { items, truncated };
 }
 
 /**
@@ -246,7 +286,7 @@ async function reconcileOwnerBatch(
   const res = { ...EMPTY };
   const bySourceId = new Map(owners.map((o) => [o.sourceId, o]));
 
-  const activities = await listActivities(
+  const { items: activities, truncated } = await listActivities(
     api,
     {
       OWNER_TYPE_ID: BITRIX_OWNER_TYPE_ID[entity],
@@ -282,6 +322,10 @@ async function reconcileOwnerBatch(
     // registros (0121) é de `records`, e uma tarefa apagada no CRM não deixa
     // nada para restaurar do outro lado.
     if (!activity) {
+      // v1.1: lista cortada não prova ausência — a atividade pode estar na
+      // página que não foi lida. Conclusão e criação seguem (essas dependem do
+      // que VOLTOU, não do que faltou); só a exclusão espera a lista inteira.
+      if (truncated) continue;
       await db.from("tasks").delete().eq("id", task.id as string);
       await emitWebhookEvent(
         "task.deleted",
@@ -470,7 +514,8 @@ async function pullComments(
 export async function syncBitrixActivitiesInbound(
   db: SupabaseClient,
   deadline: number,
-  client?: BitrixCallable
+  client?: BitrixCallable,
+  opts?: InboundOptions
 ): Promise<InboundResult> {
   const owners = await pendingActivityOwners(db);
   if (owners.length === 0) return { ...EMPTY };
@@ -491,11 +536,13 @@ export async function syncBitrixActivitiesInbound(
     }
   }
 
-  total.comments = await pullComments(
-    db,
-    api,
-    owners.filter((o) => o.tree),
-    deadline
-  );
+  if (opts?.comments !== false) {
+    total.comments = await pullComments(
+      db,
+      api,
+      owners.filter((o) => o.tree),
+      deadline
+    );
+  }
   return total;
 }
