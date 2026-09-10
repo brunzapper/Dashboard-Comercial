@@ -1,4 +1,9 @@
-// Versão: 1.0 | Data: 08/09/2026
+// Versão: 1.1 | Data: 10/09/2026
+// v1.1 (10/09/2026): a ação `excluir` e o modo `allowDelete`.
+// O que os testes novos protegem é a LINHA: sem o modo, `excluir` é ação
+// desconhecida (é isso que mantém /operacao/tarefas sem exclusão em lote); com
+// ele, o alvo resolve como qualquer outro — MENOS ocorrência de série, que o
+// tick recriaria, fazendo a IA prometer algo que não gruda.
 // Guardas do contrato `tarefas-edit`. O que se pina aqui é o conjunto de
 // silêncios que o validador transforma em erro corrigível: título ambíguo
 // (escolher um seria adivinhar), hora final órfã (o choke point a DESCARTA
@@ -21,6 +26,7 @@ function makeCtx(over: Partial<TasksEditContext> = {}): TasksEditContext {
         responsibleId: null,
         dueDate: null,
         dueTime: "09:00",
+        fromSeries: false,
       },
       {
         id: "t2",
@@ -31,6 +37,7 @@ function makeCtx(over: Partial<TasksEditContext> = {}): TasksEditContext {
         responsibleId: null,
         dueDate: null,
         dueTime: null,
+        fromSeries: false,
       },
       {
         id: "t3",
@@ -41,6 +48,7 @@ function makeCtx(over: Partial<TasksEditContext> = {}): TasksEditContext {
         responsibleId: null,
         dueDate: null,
         dueTime: null,
+        fromSeries: false,
       },
     ],
     responsibles: [{ id: "r1", name: "Maria Silva" }],
@@ -62,10 +70,16 @@ function makeCtx(over: Partial<TasksEditContext> = {}): TasksEditContext {
   };
 }
 
-const run = (acoes: unknown[], ctx = makeCtx()) =>
+const run = (
+  acoes: unknown[],
+  ctx = makeCtx(),
+  /** v1.1: o modo da superfície (só a Tree liga a exclusão). */
+  opts?: { allowDelete?: boolean }
+) =>
   validateTasksEdit(
     JSON.stringify({ formato: "tarefas-edit", versao: 1, acoes }),
-    ctx
+    ctx,
+    opts
   );
 
 describe("resolução do alvo", () => {
@@ -193,5 +207,91 @@ describe("serializeTasksEdit", () => {
     expect(again.ok ? [] : again.errors).toEqual([]);
     if (!again.ok) return;
     expect(again.actions).toEqual(first.actions);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// v1.1 — `excluir` e o modo por superfície.
+// ---------------------------------------------------------------------------
+describe("excluir só existe com allowDelete", () => {
+  const excluir = [{ acao: "excluir", tarefa: "Enviar contrato" }];
+
+  it("SEM o modo é ação desconhecida — /operacao/tarefas segue sem exclusão", () => {
+    const v = run(excluir);
+    expect(v.ok).toBe(false);
+    if (!v.ok) {
+      expect(v.errors.join(" ")).toContain('"acao" inválida');
+      // A frase lista só o que aquela superfície aceita.
+      expect(v.errors.join(" ")).toContain("criar, editar ou concluir");
+    }
+  });
+
+  it("COM o modo resolve o alvo como qualquer outra ação", () => {
+    const v = run(excluir, makeCtx(), { allowDelete: true });
+    expect(v.ok).toBe(true);
+    if (v.ok) {
+      expect(v.actions).toEqual([
+        { acao: "excluir", alvo: { id: "t1", titulo: "Enviar contrato" } },
+      ]);
+    }
+  });
+
+  it("excluir alcança a CONCLUÍDA — some com ela, não é o mesmo que fechar", () => {
+    const v = run([{ acao: "excluir", tarefa: "Tarefa fechada" }], makeCtx(), {
+      allowDelete: true,
+    });
+    expect(v.ok).toBe(true);
+  });
+
+  it("título que não existe segue erro, com o modo ligado", () => {
+    const v = run([{ acao: "excluir", tarefa: "Não existe" }], makeCtx(), {
+      allowDelete: true,
+    });
+    expect(v.ok).toBe(false);
+  });
+
+  it("o round-trip do serialize devolve a ação", () => {
+    const v = run(excluir, makeCtx(), { allowDelete: true });
+    if (!v.ok) throw new Error("esperava ok");
+    expect(serializeTasksEdit(v.actions)).toContain('"acao": "excluir"');
+  });
+});
+
+describe("ocorrência de série não se exclui por aqui", () => {
+  // Excluir uma ocorrência sem desligar a série é desfeito pelo tick no minuto
+  // seguinte: a trava `uq_tasks_series_occurrence` só impede recriar enquanto a
+  // linha existe. A IA prometeria algo que não gruda.
+  const base = makeCtx();
+  const comSerie = makeCtx({
+    tasks: base.tasks.map((t) =>
+      t.id === "t1" ? { ...t, fromSeries: true } : t
+    ),
+  });
+
+  it("excluir é recusado, e o erro ensina a saída", () => {
+    const v = run([{ acao: "excluir", tarefa: "Enviar contrato" }], comSerie, {
+      allowDelete: true,
+    });
+    expect(v.ok).toBe(false);
+    if (!v.ok) {
+      expect(v.errors.join(" ")).toMatch(/sequência periódica/i);
+      expect(v.errors.join(" ")).toMatch(/Conclua-a|encerre a sequência/i);
+    }
+  });
+
+  it("concluir a MESMA tarefa passa — isso gruda", () => {
+    const v = run([{ acao: "concluir", tarefa: "Enviar contrato" }], comSerie, {
+      allowDelete: true,
+    });
+    expect(v.ok).toBe(true);
+  });
+
+  it("editar (remarcar) a MESMA tarefa passa", () => {
+    const v = run(
+      [{ acao: "editar", tarefa: "Enviar contrato", data: "2026-09-20" }],
+      comSerie,
+      { allowDelete: true }
+    );
+    expect(v.ok).toBe(true);
   });
 });

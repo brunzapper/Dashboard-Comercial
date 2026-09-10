@@ -1,4 +1,9 @@
-// Versão: 1.0 | Data: 10/09/2026
+// Versão: 1.1 | Data: 10/09/2026
+// v1.1 (10/09/2026): as quatro ações e o modo `allowDelete`. O que os testes
+// novos protegem: o SPEC desta superfície ENSINA a exclusão, o de
+// /operacao/tarefas continua dizendo que ela não existe, e os dois saem da
+// MESMA função — um prompt que dissesse as duas coisas ao mesmo tempo se
+// contradiria.
 // Paridade do enunciado do "Salvar e analisar" (molde de ./instructions.test.ts).
 //
 // O que estes testes protegem, e é o que torna a superfície reusável em vez de
@@ -7,10 +12,11 @@
 // alguém escrever aqui um segundo formato, a primeira asserção reprova.
 //
 // E o caso que decide o desenho: aqui `acoes: []` é RESPOSTA, não erro. A
-// pergunta é "vale agendar?"; sem um jeito de dizer "não", o modelo inventa uma
-// tarefa para todo comentário e a função vira ruído. O validador do contrato
-// segue recusando a lista vazia (na outra superfície ela é o modelo não tendo
-// trabalhado) — quem reconhece o "não" é o core, antes dele.
+// pergunta é "o comentário muda alguma coisa?"; sem um jeito de dizer "não", o
+// modelo inventa uma ação para todo comentário e a função vira ruído. O
+// validador do contrato segue recusando a lista vazia (na outra superfície ela
+// é o modelo não tendo trabalhado) — quem reconhece o "não" é o core, antes
+// dele.
 import { describe, expect, it } from "vitest";
 
 import { DEFAULT_TASK_PHASES } from "@/lib/kanban/types";
@@ -20,7 +26,7 @@ import {
   COMMENT_ANALYSIS_RULES,
   MAX_COMMENT_TASK_ACTIONS,
 } from "./analyze-instructions";
-import { TASKS_SPEC } from "./instructions";
+import { TASKS_SPEC, tasksSpec } from "./instructions";
 import { TASKS_EDIT_FORMAT, TASKS_EDIT_VERSION } from "./types";
 import type { TasksEditContext } from "./types";
 import { validateTasksEdit } from "./validate";
@@ -36,6 +42,7 @@ const ctx: TasksEditContext = {
       responsibleId: "r1",
       dueDate: null,
       dueTime: null,
+      fromSeries: false,
     },
   ],
   responsibles: [{ id: "r1", name: "Maria Silva" }],
@@ -52,13 +59,24 @@ const prompt = buildCommentAnalysisPrompt({
   todayIso: "2026-09-10",
   record: { title: "Acme Ltda", stage: "Proposta", responsible: "Maria Silva" },
   catalogJson: JSON.stringify({ tarefas_deste_registro: [] }),
+  allowDelete: true,
 });
 
 describe("o enunciado REUSA o SPEC de tarefas", () => {
   it("o formato inteiro vem de lá, não copiado aqui", () => {
-    expect(prompt).toContain(TASKS_SPEC);
+    // Com `allowDelete` o SPEC é o da mesma função, na variante com exclusão.
+    expect(prompt).toContain(tasksSpec({ allowDelete: true }));
     expect(COMMENT_ANALYSIS_RULES).not.toContain(TASKS_EDIT_FORMAT);
     expect(COMMENT_ANALYSIS_RULES).not.toContain(`"versao": ${TASKS_EDIT_VERSION}`);
+  });
+
+  it("o SPEC desta superfície ENSINA a exclusão; o da outra a NEGA", () => {
+    // Um prompt com as duas frases ao mesmo tempo se contradiria — por isso a
+    // regra é derivada do modo, não escrita duas vezes.
+    expect(prompt).toContain('"excluir"');
+    expect(TASKS_SPEC).toContain("NÃO existe ação de exclusão");
+    expect(TASKS_SPEC).not.toContain('"excluir"');
+    expect(prompt).not.toContain("NÃO existe ação de exclusão");
   });
 
   it("o contexto que só esta superfície tem chega ao texto", () => {
@@ -80,15 +98,23 @@ describe("o enunciado REUSA o SPEC de tarefas", () => {
   });
 });
 
-describe("as duas restrições estão ditas, e são as que o core impõe", () => {
-  it("no máximo uma ação, e ela é 'criar'", () => {
-    expect(MAX_COMMENT_TASK_ACTIONS).toBe(1);
-    expect(COMMENT_ANALYSIS_RULES).toContain("EXATAMENTE UMA");
-    expect(COMMENT_ANALYSIS_RULES).toContain('"editar"');
-    expect(COMMENT_ANALYSIS_RULES).toMatch(/NUNCA use "editar" nem "concluir"/);
+describe("o que o enunciado promete, o core impõe", () => {
+  it("o teto de ações aparece no texto", () => {
+    expect(MAX_COMMENT_TASK_ACTIONS).toBe(3);
+    expect(COMMENT_ANALYSIS_RULES).toContain(
+      `no máximo ${MAX_COMMENT_TASK_ACTIONS} ações`
+    );
   });
 
-  it("dizer que NÃO há o que agendar é uma saída explícita", () => {
+  it("as quatro ações estão descritas, com quando usar cada uma", () => {
+    for (const acao of ["criar", "editar", "concluir", "excluir"]) {
+      expect(COMMENT_ANALYSIS_RULES).toContain(`"${acao}"`);
+    }
+    // A confusão que custa caro: concluir é "aconteceu", excluir é "não vai".
+    expect(COMMENT_ANALYSIS_RULES).toMatch(/Não confunda com concluir/);
+  });
+
+  it("dizer que NADA mudou é uma saída explícita", () => {
     expect(COMMENT_ANALYSIS_RULES).toContain('"acoes": []');
   });
 });

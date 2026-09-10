@@ -1,4 +1,9 @@
-<!-- Versão: 1.87 | Data: 10/09/2026 -->
+<!-- Versão: 1.88 | Data: 10/09/2026 -->
+<!-- v1.88 (10/09/2026): §4.24 — o "Salvar e analisar" da Tree passou a propor
+     criar/editar/concluir/excluir (até 3). `excluir` entra como MODO do mesmo
+     validador (allowDelete), /operacao/tarefas segue sem; ocorrência de série
+     não é alvo de exclusão (o tick a recria); e o executor por ação virou
+     compartilhado em lib/ai/apply-task-action.ts. -->
 <!-- v1.87 (10/09/2026): §4.17 — o adaptador do Gemini transmite SEMPRE (o
      `:generateContent` apanhava 503 sob carga enquanto o painel do dashboard,
      que transmite, passava no mesmo minuto) e falha de transporte passou a
@@ -5055,6 +5060,45 @@ a data de hoje em Brasília e a régua de prazo) e duas restrições que o core
 impõe DEPOIS de validar: no máximo uma ação, e só `criar` — `editar`/`concluir`
 mexeriam numa tarefa que ninguém mandou mexer, a partir de um texto que a pessoa
 escreveu para si mesma.
+
+**As quatro ações (10/09/2026).** A primeira versão propunha só `criar`, e o
+comentário real raramente é só isso: "ele pediu para adiar a proposta para
+sexta e cancelar a demo de amanhã" é um editar e um excluir, e a IA respondia
+sugerindo uma TERCEIRA tarefa. Hoje a proposta cobre `criar`/`editar`/
+`concluir`/`excluir`, até `MAX_COMMENT_TASK_ACTIONS` (3) por comentário — três
+porque o cartão é de UM clique, e uma lista longa ali é uma lista que ninguém
+lê antes de clicar.
+
+`excluir` **não existia** no contrato, e a ausência era deliberada (precedente
+do contrato de operações). Ela entra como MODO da superfície —
+`validateTasksEdit(raw, ctx, { allowDelete: true })` —, o precedente literal do
+`{ selection: true }` de `validateRecordsUpdate`: um validador só, com um flag,
+nunca um segundo contrato. `/operacao/tarefas` segue sem exclusão, que é onde a
+decisão foi tomada: numa tela de lista, apagar em lote a partir de linguagem
+natural é destrutivo demais. Pelo mesmo motivo o SPEC é FUNÇÃO do modo
+(`tasksSpec({ allowDelete })`) — a regra "NÃO existe ação de exclusão" e a que
+ensina a usá-la não podem estar no mesmo prompt, e `TASKS_SPEC` segue
+byte-idêntico para a outra tela.
+
+**Ocorrência de série não se exclui por aqui.** Excluir uma sem desligar a
+série NÃO GRUDA: `uq_tasks_series_occurrence` só impede recriar enquanto a
+linha existe, então o tick reabre a ocorrência no minuto seguinte e a pessoa
+acha que a ação falhou. Encerrar de verdade são as duas metades
+(`endRecordSeries`), e isso é decisão humana no `TaskSeriesScopeDialog`. A
+recusa vive no VALIDADOR, junto do ramo de `excluir` — é parte do que a ação
+significa —, alimentada por `TasksEditContext.tasks[].fromSeries`. Editar
+(remarcar) e concluir persistem e seguem permitidos.
+
+**O executor por ação é compartilhado** (`lib/ai/apply-task-action.ts`,
+extraído de `applyTasksCore`): é ele que guarda as duas armadilhas que custaram
+caro — o `updateTask` monta o UPDATE do FormData INTEIRO (então o apply parte
+da LINHA ATUAL e sobrepõe o delta, senão mudar só a data apaga descrição,
+responsável e o vínculo com o registro) e a fase é choke point PRÓPRIO
+(`moveTaskPhase`). Uma segunda cópia reencontraria as duas uma a uma. O
+`recordId` do `criar` vai como ARGUMENTO, nunca do JSON — o contrato não
+carrega vínculo com registro de propósito, e a tarefa nascida de um comentário
+precisa nascer na árvore daquele. O apply devolve resultado POR ITEM: falha de
+uma não aborta as outras.
 
 A régua de prazo: **o prazo dito no comentário vence sempre**; sem prazo dito,
 o intervalo usual de follow-up numa venda SMB de SaaS (proposta enviada: 2 dias

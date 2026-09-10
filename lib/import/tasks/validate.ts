@@ -13,6 +13,7 @@ import { stripCodeFence } from "@/lib/import/dashboard/validate";
 
 import {
   MAX_AI_TASK_ACTIONS,
+  type TasksEditModes,
   TASKS_EDIT_FORMAT,
   TASKS_EDIT_VERSION,
   type ParsedTaskAction,
@@ -28,7 +29,22 @@ const KEYS_BY_ACAO: Record<string, Set<string>> = {
   criar: new Set(["acao", "titulo", "quadro", ...CAMPOS]),
   editar: new Set(["acao", "tarefa", "novo_titulo", ...CAMPOS]),
   concluir: new Set(["acao", "tarefa"]),
+  // v1.1: só aceita com `allowDelete` — ver `acoesAceitas` abaixo.
+  excluir: new Set(["acao", "tarefa"]),
 };
+
+/** As ações que ESTA superfície aceita, e a frase que as lista no erro. */
+function acoesAceitas(allowDelete: boolean): { set: Set<string>; frase: string } {
+  return allowDelete
+    ? {
+        set: new Set(["criar", "editar", "concluir", "excluir"]),
+        frase: "criar, editar, concluir ou excluir",
+      }
+    : {
+        set: new Set(["criar", "editar", "concluir"]),
+        frase: "criar, editar ou concluir",
+      };
+}
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const TIME_RE = /^\d{2}:\d{2}$/;
@@ -61,7 +77,8 @@ export function serializeTasksEdit(actions: ParsedTaskAction[]): string {
     ...(a.fase ? { fase: a.fase.label } : {}),
   });
   const acoes = actions.map((a) => {
-    if (a.acao === "concluir") return { acao: a.acao, tarefa: a.alvo.titulo };
+    if (a.acao === "concluir" || a.acao === "excluir")
+      return { acao: a.acao, tarefa: a.alvo.titulo };
     if (a.acao === "criar")
       return {
         acao: a.acao,
@@ -85,10 +102,14 @@ export function serializeTasksEdit(actions: ParsedTaskAction[]): string {
 
 export function validateTasksEdit(
   raw: string,
-  ctx: TasksEditContext
+  ctx: TasksEditContext,
+  opts?: TasksEditModes
 ): TasksEditValidation {
   const errors: string[] = [];
   const warnings: string[] = [];
+  // Molde do `{ selection: true }` de validateRecordsUpdate: um validador só,
+  // com um modo — nunca um segundo contrato para a superfície nova.
+  const aceitas = acoesAceitas(opts?.allowDelete === true);
 
   let obj: Record<string, unknown>;
   try {
@@ -258,10 +279,10 @@ export function validateTasksEdit(
       return;
     }
     const acao = asString(rawA.acao);
-    const allowed = KEYS_BY_ACAO[acao];
+    const allowed = aceitas.set.has(acao) ? KEYS_BY_ACAO[acao] : undefined;
     if (!allowed) {
       errors.push(
-        `${where}: "acao" inválida ("${acao}"). Use criar, editar ou concluir.`
+        `${where}: "acao" inválida ("${acao}"). Use ${aceitas.frase}.`
       );
       return;
     }
@@ -278,6 +299,7 @@ export function validateTasksEdit(
       phase: string;
       boardId: string | null;
       dueTime: string | null;
+      fromSeries: boolean;
     } | null => {
       const titulo = asString(rawA.tarefa);
       if (!titulo) {
@@ -308,6 +330,7 @@ export function validateTasksEdit(
         phase: t.phase,
         boardId: t.boardId,
         dueTime: t.dueTime,
+        fromSeries: t.fromSeries,
       };
     };
 
@@ -315,6 +338,27 @@ export function validateTasksEdit(
       const alvo = resolveAlvo(true);
       if (!alvo) return;
       actions.push({ acao: "concluir", alvo: { id: alvo.id, titulo: alvo.titulo } });
+      return;
+    }
+
+    if (acao === "excluir") {
+      // Concluída também se exclui: some com o registro da tarefa, não é o
+      // mesmo que fechá-la.
+      const alvo = resolveAlvo(false);
+      if (!alvo) return;
+      if (alvo.fromSeries) {
+        // Excluir ocorrência de série NÃO GRUDA: a trava
+        // `uq_tasks_series_occurrence` só impede recriar enquanto a linha
+        // existe, então o tick reabre a ocorrência no minuto seguinte e a
+        // pessoa fica achando que a ação falhou. Encerrar de verdade são as
+        // DUAS metades (apagar as abertas + desligar a série no escopo do
+        // registro), e isso é decisão humana, no diálogo da árvore.
+        errors.push(
+          `${where}: "${alvo.titulo}" veio de uma sequência periódica e não pode ser excluída assim — o sistema a recria. Conclua-a, ou encerre a sequência pela árvore.`
+        );
+        return;
+      }
+      actions.push({ acao: "excluir", alvo: { id: alvo.id, titulo: alvo.titulo } });
       return;
     }
 

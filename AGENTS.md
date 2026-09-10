@@ -747,6 +747,26 @@ This version has breaking changes — APIs, conventions, and file structure may 
   Depois de validar, o core ESTREITA para no máximo UMA ação `criar`. A IA
   nunca escreve: o cartão de um clique é um humano apertando o botão
   (invariante 25).
+- **A IA do comentário faz as QUATRO ações, e `excluir` é MODO da superfície
+  (10/09/2026):** o "Salvar e analisar" da Tree propõe `criar`/`editar`/
+  `concluir`/`excluir`, até `MAX_COMMENT_TASK_ACTIONS` (3). `excluir` não
+  existia no contrato `tarefas-edit` — a ausência era deliberada — e entra por
+  `validateTasksEdit(raw, ctx, { allowDelete: true })`, precedente literal do
+  `{ selection: true }` de `validateRecordsUpdate`: UM validador com um flag,
+  nunca um segundo contrato. `/operacao/tarefas` segue SEM exclusão (apagar em
+  lote por linguagem natural numa tela de lista é destrutivo demais) e o SPEC é
+  função do modo (`tasksSpec({ allowDelete })`) — as duas regras opostas não
+  cabem no mesmo prompt, e `TASKS_SPEC` fica byte-idêntico para a outra tela.
+  **Ocorrência de SÉRIE nunca é alvo de `excluir`:** sem desligar a série a
+  exclusão não gruda (`uq_tasks_series_occurrence` só impede recriar enquanto a
+  linha existe, e o tick reabre no minuto seguinte) — a recusa vive no
+  VALIDADOR, alimentada por `TasksEditContext.tasks[].fromSeries`, e a saída é
+  concluir ou encerrar a sequência pelo diálogo. Editar/concluir seguem
+  permitidos. O executor por ação é ÚNICO
+  (`lib/ai/apply-task-action.ts`, compartilhado com `applyTasksCore`): é ele
+  que guarda o merge a partir da LINHA ATUAL (o `updateTask` monta o UPDATE do
+  form inteiro — chave ausente vira NULL) e a fase pelo `moveTaskPhase`;
+  `recordId` do `criar` vem do ARGUMENTO, nunca do JSON. Resultado POR ITEM.
 - **"Quando este campo mudou" é `audit_log`, NUNCA `field_modified_at` (0135,
   09/09/2026):** as duas colunas parecem a mesma coisa e não são.
   `records.field_modified_at` é o marcador de "editado LOCALMENTE depois do
