@@ -1,4 +1,12 @@
-// Versão: 1.1 | Data: 10/09/2026
+// Versão: 1.2 | Data: 11/09/2026
+// v1.2 (11/09/2026): ADIAR a sequência — `snoozeUntil` numa linha de exceção.
+//   Uma linha com `active: false` + `snoozeUntil: D` vale como desligada ATÉ D,
+//   e a partir de D deixa de valer sozinha. Escolhi assim para não abrir ramo
+//   novo: a travessia de liga/desliga já existia, e `occurrencesToOpen`/o tick
+//   seguem intocados — a série volta porque a exceção expirou, não porque
+//   alguém a religou. `snoozeUntil` sem `active: false` não significa nada (e o
+//   app nunca grava assim): quem desliga é o `active`.
+// v1.1 (10/09/2026)
 // v1.1 (10/09/2026): o escopo `record` passa a ser SEMPRE consultado na
 //   travessia do LIGA/DESLIGA, esteja ou não declarado em `overrideScopes`.
 //   Motivo: a Tree passou a oferecer "encerrar a sequência para este registro"
@@ -36,6 +44,11 @@ export interface SeriesSetting {
   /** null = não mexe na cadência (a linha existe só para ligar/desligar). */
   cadenceDays: number | null;
   active: boolean;
+  /**
+   * v1.2: com `active: false`, o dia em que a série volta a valer
+   * (`YYYY-MM-DD`). Null = desligamento sem data de volta, o de sempre.
+   */
+  snoozeUntil?: string | null;
 }
 
 export interface CadenceResolution {
@@ -46,6 +59,12 @@ export interface CadenceResolution {
   fromScope: SeriesScopeSpec | null;
   /** Qual escopo desligou, quando desligado. */
   disabledBy: SeriesScopeSpec | null;
+  /**
+   * v1.2: quando o desligamento tem data de volta, ela. É o que deixa a tela
+   * dizer "adiada até 31/10" em vez de "desligada" — a diferença entre um
+   * acompanhamento abandonado e um combinado com o cliente.
+   */
+  snoozedUntil?: string | null;
 }
 
 /** Chave de um escopo para um registro concreto — a mesma que a linha grava. */
@@ -99,19 +118,43 @@ export function resolveCadence(
   cadence: SeriesCadence,
   record: RecordRow,
   available: AvailableField[],
-  settings: SeriesSetting[]
+  settings: SeriesSetting[],
+  /**
+   * v1.2: hoje em Brasília, para o adiamento expirar sozinho. Omitir mantém o
+   * comportamento da v1.1 (um adiamento sem data de referência é lido como
+   * desligamento) — nenhum chamador existente muda de resultado.
+   */
+  todayIso?: string
 ): CadenceResolution {
   const index = settingsIndex(settings);
   let days = cadence.defaultDays;
   let fromScope: SeriesScopeSpec | null = null;
   let disabledBy: SeriesScopeSpec | null = null;
+  let snoozedUntil: string | null = null;
+
+  /**
+   * A linha desliga a série HOJE?
+   *
+   * v1.2: `snoozeUntil` no futuro desliga e diz até quando; vencido, a linha
+   * simplesmente deixa de valer — ninguém precisa apagá-la, e uma rodada
+   * perdida não deixa a série adiada para sempre.
+   */
+  const desliga = (hit: SeriesSetting): boolean => {
+    if (hit.active) return false;
+    const until = hit.snoozeUntil?.slice(0, 10);
+    if (!until || !todayIso) return true;
+    return todayIso.slice(0, 10) < until;
+  };
 
   for (const scope of cadence.overrideScopes) {
     const value = scopeValueFor(scope, record, available);
     if (!value) continue;
     const hit = index.get(keyOf(scope.kind, value));
     if (!hit) continue;
-    if (!hit.active && !disabledBy) disabledBy = scope;
+    if (desliga(hit) && !disabledBy) {
+      disabledBy = scope;
+      snoozedUntil = hit.snoozeUntil?.slice(0, 10) ?? null;
+    }
     if (hit.cadenceDays != null && fromScope == null) {
       days = hit.cadenceDays;
       fromScope = scope;
@@ -122,8 +165,17 @@ export function resolveCadence(
   // `cadence_days` gravada num escopo não declarado segue sendo ignorada.
   if (!disabledBy && !cadence.overrideScopes.some((s) => s.kind === "record")) {
     const hit = index.get(keyOf("record", record.id));
-    if (hit && !hit.active) disabledBy = RECORD_SCOPE;
+    if (hit && desliga(hit)) {
+      disabledBy = RECORD_SCOPE;
+      snoozedUntil = hit.snoozeUntil?.slice(0, 10) ?? null;
+    }
   }
 
-  return { days, active: disabledBy == null, fromScope, disabledBy };
+  return {
+    days,
+    active: disabledBy == null,
+    fromScope,
+    disabledBy,
+    snoozedUntil: disabledBy ? snoozedUntil : null,
+  };
 }

@@ -1,4 +1,13 @@
 // Versão: 1.2 | Data: 10/09/2026
+// v1.3 (11/09/2026): `snoozeRecordSeries` — ADIAR a sequência até um dia, em
+//   vez de encerrá-la. "O cliente pediu para contactar no fim de outubro" não é
+//   o mesmo que "parei de acompanhar este registro", e até aqui só havia a
+//   segunda. As metades são as MESMAS do `endRecordSeries` (extraídas para
+//   `dropOpenOccurrences`): apagar as ABERTAS sem desligar seria desfeito pelo
+//   tick, e desligar sem apagar deixaria vencidas na tela pedindo o que já se
+//   adiou. A diferença é o RECORTE (só as que vencem ANTES do dia combinado —
+//   as posteriores já estão onde deveriam) e a data de volta gravada na linha,
+//   que faz a série se religar sozinha (0139).
 // v1.2 (10/09/2026): `endRecordSeries`/`resumeRecordSeries` — encerrar a
 //   SEQUÊNCIA de uma série para UM registro, e voltar atrás. É o que a lista
 //   de tarefas e a Tree passam a perguntar ao concluir ou excluir uma
@@ -772,62 +781,11 @@ export async function endRecordSeries(
   if (!orgId) return { ok: false, message: "Organização ativa não identificada." };
 
   const supabase = await createClient();
-  const { data: doomed, error: readError } = await supabase
-    .from("tasks")
-    .select("id, title, record_id, bitrix_activity_id")
-    .eq("record_id", recordId)
-    .eq("series_key", seriesKey)
-    .is("completed_at", null)
-    .not("series_occurrence", "is", null);
-  if (readError) {
-    return { ok: false, message: `Falha ao ler a sequência: ${readError.message}` };
-  }
-
-  let deleted = 0;
-  const ids = (doomed ?? []).map((t) => t.id as string);
-  if (ids.length > 0) {
-    // `.select()` no delete: o que voltar é o que a RLS deixou apagar.
-    const { data: gone, error } = await supabase
-      .from("tasks")
-      .delete()
-      .in("id", ids)
-      .select("id");
-    if (error) {
-      return { ok: false, message: `Falha ao encerrar: ${error.message}` };
-    }
-    const goneIds = new Set((gone ?? []).map((t) => t.id as string));
-    deleted = goneIds.size;
-    for (const t of doomed ?? []) {
-      if (!goneIds.has(t.id as string)) continue;
-      await emitWebhookEvent(
-        "task.deleted",
-        {
-          taskId: t.id as string,
-          title: (t.title as string) ?? null,
-          recordId: (t.record_id as string | null) ?? null,
-          origin: "app",
-        },
-        orgId
-      );
-    }
-    await mirrorEndedSeries(
-      supabase,
-      (doomed ?? []).flatMap((t) =>
-        goneIds.has(t.id as string) &&
-        t.bitrix_activity_id &&
-        t.record_id
-          ? [
-              {
-                recordId: t.record_id as string,
-                activityId: String(t.bitrix_activity_id),
-              },
-            ]
-          : []
-      ),
-      orgId,
-      session.user.id
-    );
-  }
+  const dropped = await dropOpenOccurrences(supabase, orgId, session.user.id, {
+    seriesKey,
+    recordId,
+  });
+  if (!dropped.ok) return dropped;
 
   const off = await setRecordSeriesActive(supabase, orgId, session.user.id, {
     seriesKey,
@@ -836,7 +794,140 @@ export async function endRecordSeries(
   });
   if (!off.ok) return off;
   if (opts.revalidate !== false) revalidatePath("/operacao/tarefas");
-  return { ok: true, deleted };
+  return { ok: true, deleted: dropped.deleted };
+}
+
+/**
+ * ADIA a sequência de um registro até `untilIso` — as duas metades, de novo.
+ *
+ * A diferença para `endRecordSeries` é o RECORTE e a volta: apaga só as
+ * ocorrências abertas que venceriam ANTES do dia combinado (as posteriores já
+ * estão onde deveriam estar) e grava a data de religamento, que o
+ * `resolveCadence` faz expirar sozinha — ninguém precisa lembrar de retomar.
+ *
+ * Consequência assumida: quando o adiamento vence, a ocorrência devida naquele
+ * dia do calendário nasce com o prazo dela, que pode ser alguns dias atrás. É o
+ * calendário sendo honesto — `occurrencesToOpen` recusa fabricar tarefa
+ * retroativa de propósito, e antecipar a data seria inventar um combinado.
+ */
+export async function snoozeRecordSeries(
+  seriesKey: string,
+  recordId: string,
+  untilIso: string,
+  opts: { revalidate?: boolean } = {}
+): Promise<TaskActionState & { deleted?: number }> {
+  const session = await getSessionInfo();
+  if (!session) return { ok: false, message: "Sessão expirada." };
+  const orgId = await getActiveOrgId();
+  if (!orgId) return { ok: false, message: "Organização ativa não identificada." };
+  const until = untilIso.slice(0, 10);
+  if (!DATE_RE.test(until)) {
+    return { ok: false, message: "Data de retorno inválida." };
+  }
+  if (until <= todayBrasiliaIso()) {
+    // Adiar para hoje ou para trás não adia nada — e gravaria uma linha
+    // desligada que já nasce vencida, parecendo um encerramento que some
+    // sozinho no minuto seguinte.
+    return { ok: false, message: "Escolha uma data futura para retomar." };
+  }
+
+  const supabase = await createClient();
+  const dropped = await dropOpenOccurrences(supabase, orgId, session.user.id, {
+    seriesKey,
+    recordId,
+    dueBefore: until,
+  });
+  if (!dropped.ok) return dropped;
+
+  const off = await setRecordSeriesActive(supabase, orgId, session.user.id, {
+    seriesKey,
+    recordId,
+    active: false,
+    snoozeUntil: until,
+  });
+  if (!off.ok) return off;
+  if (opts.revalidate !== false) revalidatePath("/operacao/tarefas");
+  return { ok: true, deleted: dropped.deleted };
+}
+
+/**
+ * Apaga as ocorrências ABERTAS de uma série num registro (metade comum de
+ * encerrar e de adiar).
+ *
+ * `dueBefore` recorta por prazo — é o que separa "não quero mais isso" de "não
+ * agora". Sem ele, todas as abertas.
+ *
+ * Mesma sequência de `deleteTask`: lê o `bitrix_activity_id` ANTES do delete
+ * (depois a linha some) e enfileira o `delete` DEPOIS de a RLS deixar passar.
+ * Concluídas nunca entram: o que aconteceu, aconteceu.
+ */
+async function dropOpenOccurrences(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  orgId: string,
+  userId: string,
+  input: { seriesKey: string; recordId: string; dueBefore?: string }
+): Promise<TaskActionState & { deleted: number }> {
+  let q = supabase
+    .from("tasks")
+    .select("id, title, record_id, bitrix_activity_id")
+    .eq("record_id", input.recordId)
+    .eq("series_key", input.seriesKey)
+    .is("completed_at", null)
+    .not("series_occurrence", "is", null);
+  // Ocorrência sem prazo não existe (a série o deriva do calendário), então o
+  // recorte não precisa de um ramo para null.
+  if (input.dueBefore) q = q.lt("due_date", input.dueBefore);
+  const { data: doomed, error: readError } = await q;
+  if (readError) {
+    return {
+      ok: false,
+      message: `Falha ao ler a sequência: ${readError.message}`,
+      deleted: 0,
+    };
+  }
+
+  const ids = (doomed ?? []).map((t) => t.id as string);
+  if (ids.length === 0) return { ok: true, deleted: 0 };
+
+  // `.select()` no delete: o que voltar é o que a RLS deixou apagar.
+  const { data: gone, error } = await supabase
+    .from("tasks")
+    .delete()
+    .in("id", ids)
+    .select("id");
+  if (error) {
+    return { ok: false, message: `Falha ao encerrar: ${error.message}`, deleted: 0 };
+  }
+  const goneIds = new Set((gone ?? []).map((t) => t.id as string));
+  for (const t of doomed ?? []) {
+    if (!goneIds.has(t.id as string)) continue;
+    await emitWebhookEvent(
+      "task.deleted",
+      {
+        taskId: t.id as string,
+        title: (t.title as string) ?? null,
+        recordId: (t.record_id as string | null) ?? null,
+        origin: "app",
+      },
+      orgId
+    );
+  }
+  await mirrorEndedSeries(
+    supabase,
+    (doomed ?? []).flatMap((t) =>
+      goneIds.has(t.id as string) && t.bitrix_activity_id && t.record_id
+        ? [
+            {
+              recordId: t.record_id as string,
+              activityId: String(t.bitrix_activity_id),
+            },
+          ]
+        : []
+    ),
+    orgId,
+    userId
+  );
+  return { ok: true, deleted: goneIds.size };
 }
 
 /** Volta atrás: a série volta a valer para o registro (as apagadas não voltam). */
@@ -869,7 +960,13 @@ async function setRecordSeriesActive(
   supabase: Awaited<ReturnType<typeof createClient>>,
   orgId: string,
   userId: string,
-  input: { seriesKey: string; recordId: string; active: boolean }
+  input: {
+    seriesKey: string;
+    recordId: string;
+    active: boolean;
+    /** v1.3: dia em que a série volta sozinha (0139). Ausente = sem volta. */
+    snoozeUntil?: string;
+  }
 ): Promise<TaskActionState> {
   const { data: existing } = await supabase
     .from("series_settings")
@@ -888,6 +985,9 @@ async function setRecordSeriesActive(
       scope_value: input.recordId,
       cadence_days: (existing?.cadence_days as number | null) ?? null,
       active: input.active,
+      // Sempre EXPLÍCITO: religar ou encerrar depois de um adiamento tem de
+      // apagar a data de volta, senão a linha antiga a ressuscitaria.
+      snooze_until: input.snoozeUntil ?? null,
       updated_by: userId,
     },
     { onConflict: "organization_id,series_key,scope_kind,scope_value" }

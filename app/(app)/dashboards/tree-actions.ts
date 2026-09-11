@@ -1,4 +1,11 @@
-// Versão: 1.7 | Data: 10/09/2026
+// Versão: 1.8 | Data: 11/09/2026
+// v1.8 (11/09/2026): o "Salvar e analisar" virou CONVERSA — as actions agora
+//   abrem/rodam/aplicam/descartam um fio de `tree_ai_threads` (0139). São
+//   cascas finas, como antes: gate, turnos e prévia moram no núcleo
+//   (lib/ai/analyze-comment.ts). `analyzeComment`/`applyCommentTask` saíram:
+//   a primeira não tinha onde guardar o que respondeu, e a segunda recebia o
+//   JSON do CLIENTE — agora ele sai da linha (precedente da 0098).
+// v1.7 | Data: 10/09/2026
 // v1.7 (10/09/2026): (a) a árvore devolve VÁRIAS séries (uma por regra que
 //   gerou tarefa para o registro, e não só a que concedeu o atributo) mais a
 //   Base do registro, para o editor de automação abrir dentro da Tree;
@@ -59,10 +66,13 @@ import { todayBrasiliaIso } from "@/lib/date/today";
 import { createClient } from "@/lib/supabase/server";
 import { createComment } from "@/lib/comments/actions";
 import {
-  analyzeCommentCore,
-  applyCommentTaskCore,
+  applyCommentThreadCore,
+  dismissCommentThreadCore,
+  listCommentThreadsCore,
+  openCommentThreadCore,
+  runCommentThreadCore,
   type ApplyCommentTaskState,
-  type CommentAnalysisState,
+  type CommentThread,
 } from "@/lib/ai/analyze-comment";
 import { loadSources } from "@/lib/config/sources";
 import { rootSources } from "@/lib/sources";
@@ -277,26 +287,48 @@ export async function addTreeNote(
 }
 
 /**
- * "Salvar e analisar": o comentário já foi salvo; isto lê o texto e devolve a
- * PROPOSTA de tarefa (ou nada). Casca fina — o núcleo, o gate de IA e a
- * validação vivem em lib/ai/analyze-comment.ts.
+ * "Salvar e analisar", parte 1: abre o fio. RÁPIDO de propósito — o dock
+ * precisa de algo para mostrar antes de a IA responder.
+ *
+ * Cascas finas, como toda action de IA do §4.17: gate, turnos, validação e
+ * prévia vivem em lib/ai/analyze-comment.ts.
  */
-export async function analyzeComment(
+export async function openCommentThread(
   recordId: string,
+  recordTitle: string,
   comment: string
-): Promise<CommentAnalysisState> {
-  return analyzeCommentCore({ recordId, comment });
+): Promise<{ ok: boolean; message?: string; thread?: CommentThread }> {
+  return openCommentThreadCore({ recordId, recordTitle, comment });
 }
 
-/** Agenda o que a análise propôs. RE-VALIDA e grava por `createTask`. */
-export async function applyCommentTask(
-  recordId: string,
-  raw: string,
+/** Parte 2: roda um turno — a primeira análise, ou uma réplica do usuário. */
+export async function runCommentThread(
+  threadId: string,
+  reply?: string
+): Promise<{ ok: boolean; message?: string; thread?: CommentThread }> {
+  return runCommentThreadCore({ threadId, reply });
+}
+
+/** As conversas abertas deste usuário — o dock as reencontra depois de um F5. */
+export async function listCommentThreads(): Promise<CommentThread[]> {
+  return listCommentThreadsCore();
+}
+
+/** Aplica a proposta da conversa. RE-VALIDA e grava pelos choke points. */
+export async function applyCommentThread(
+  threadId: string,
   opts: { revalidate?: boolean } = {}
 ): Promise<ApplyCommentTaskState> {
-  const res = await applyCommentTaskCore({ recordId, raw });
+  const res = await applyCommentThreadCore(threadId);
   if (res.ok && opts.revalidate !== false) revalidatePath("/dashboards");
   return res;
+}
+
+/** Fecha a conversa sem aplicar nada. */
+export async function dismissCommentThread(
+  threadId: string
+): Promise<{ ok: boolean; message?: string }> {
+  return dismissCommentThreadCore(threadId);
 }
 
 /**

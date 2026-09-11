@@ -1,4 +1,7 @@
-// Versão: 1.0 | Data: 09/09/2026
+// Versão: 1.1 | Data: 11/09/2026
+// v1.1 (11/09/2026): `snooze_until` (0139) entra no SELECT. Sem ele a linha de
+// um adiamento chegaria ao `resolveCadence` como desligamento puro — a série
+// ficaria parada para sempre em vez de voltar no dia combinado.
 // Leitura das exceções de cadência (`series_settings`, 0132).
 //
 // Aceita org EXPLÍCITA porque o chamador principal é o tick (service role, que
@@ -11,7 +14,7 @@ import type { SeriesSetting } from "./cadence";
 import type { SeriesScopeKind } from "./types";
 
 const SELECT =
-  "id, series_key, scope_kind, scope_value, cadence_days, active, note, updated_at";
+  "id, series_key, scope_kind, scope_value, cadence_days, active, snooze_until, note, updated_at";
 
 export interface SeriesSettingRow extends SeriesSetting {
   id: string;
@@ -28,6 +31,7 @@ function toRow(r: Record<string, unknown>): SeriesSettingRow {
     scopeValue: r.scope_value as string,
     cadenceDays: (r.cadence_days as number | null) ?? null,
     active: r.active !== false,
+    snoozeUntil: (r.snooze_until as string | null) ?? null,
     note: (r.note as string | null) ?? null,
     updatedAt: r.updated_at as string,
   };

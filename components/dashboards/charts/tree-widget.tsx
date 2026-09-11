@@ -1,3 +1,12 @@
+// Versão: 1.8 | Data: 11/09/2026
+// v1.8 (11/09/2026): a proposta da IA saiu daqui para o DOCK do painel.
+//   O bug que isso conserta primeiro é o mais bobo: `submitDraft` fechava o
+//   compositor ANTES de disparar a análise, e o compositor era o único lugar
+//   que renderizava o spinner — a tela ficava literalmente muda enquanto a IA
+//   trabalhava. Mas mover o estado não foi só por isso: aqui dentro ele não
+//   sobrevive ao clique na próxima linha da tabela (o widget segue o foco e
+//   remonta) nem à troca de aba, e o pedido é poder comentar no próximo
+//   registro enquanto a análise do anterior ainda roda.
 // Versão: 1.7 | Data: 10/09/2026
 // v1.7 (10/09/2026): a proposta da IA deixou de ser só "agendar". Ela cobre
 //   criar, editar, concluir e excluir (até 3 por comentário), porque o que a
@@ -98,14 +107,17 @@ import {
   useTaskRowActions,
 } from "@/components/tarefas/task-list";
 import { deleteComment } from "@/lib/comments/actions";
+import {
+  useAiSuggestions,
+  useHasAiSuggestions,
+} from "@/components/dashboards/ai-suggestions-context";
 import { classifyDue, DUE_STATUS_LABELS } from "@/lib/tasks/alerts";
 import { DEFAULT_DATE_FORMAT, formatDateValue } from "@/lib/widgets/format";
 import type { TaskRow } from "@/lib/tasks/types";
 import { cn } from "@/lib/utils";
 import {
   addTreeNote,
-  analyzeComment,
-  applyCommentTask,
+
   deleteTreeNode,
   loadRecordTree,
   setRecordCadence,
@@ -609,16 +621,12 @@ export function TreeWidget({
   const [draft, setDraft] = useState<{ text: string; nodeId: string | null } | null>(
     null
   );
-  // v1.6: a proposta da IA, esperando um clique. `null` = nada proposto.
-  // v1.7: são ATÉ TRÊS ações (criar/editar/concluir/excluir), então o cartão
-  // lista o que vai acontecer — um título solto não diria que algo some.
-  const [proposal, setProposal] = useState<{
-    json: string;
-    acoes: { resumo: string; destrutiva: boolean }[];
-  } | null>(null);
-  // Mensagem da análise (inclusive "não há nada a agendar", que é resposta).
-  const [aiMessage, setAiMessage] = useState<string | null>(null);
-  const [analyzing, startAnalyze] = useTransition();
+  // v1.8: a proposta da IA NÃO mora mais aqui. Ela é uma conversa no dock do
+  // painel (ai-suggestions-context) — este widget só a ABRE. O estado tinha de
+  // sair daqui: o widget segue o registro em foco, então clicar na próxima
+  // linha da tabela o remonta, e a análise em curso ia junto.
+  const dock = useAiSuggestions();
+  const hasDock = useHasAiSuggestions();
   const { save } = useBackgroundSave();
   const lastJson = useRef<string>("");
 
@@ -741,8 +749,6 @@ export function TreeWidget({
     const text = draft.text.trim();
     const parentRef = draft.nodeId;
     setDraft(null);
-    setAiMessage(null);
-    setProposal(null);
     save({
       key: "tree-note",
       context: "Não foi possível comentar",
@@ -752,28 +758,15 @@ export function TreeWidget({
     // A árvore recarrega depois da escrita: o nó novo é um FATO, e ela o lê.
     window.setTimeout(() => void refresh(), 600);
     if (!analyze) return;
-    startAnalyze(async () => {
-      const res = await analyzeComment(effectiveRecordId, text);
-      if (!res.ok) return setAiMessage(res.message ?? "A análise falhou.");
-      if (!res.json) {
-        // Resposta legítima: o comentário não pedia próximo passo.
-        return setAiMessage(res.message ?? "Nada a agendar a partir deste comentário.");
-      }
-      setProposal({ json: res.json, acoes: res.acoes ?? [] });
+    // A partir daqui é o dock: ele abre a conversa (com o comentário já
+    // dentro), mostra que a IA está trabalhando e guarda a proposta até alguém
+    // confirmar. Fechar o compositor aqui deixou de esconder o feedback —
+    // ele não está mais neste componente.
+    dock.start({
+      recordId: effectiveRecordId,
+      recordTitle: data.recordTitle,
+      comment: text,
     });
-  };
-
-  /** Aceita a proposta. RE-VALIDA no servidor e grava pelo `createTask`. */
-  const acceptProposal = () => {
-    if (!proposal) return;
-    const raw = proposal.json;
-    setProposal(null);
-    save({
-      key: "tree-ai-task",
-      context: "Não foi possível agendar",
-      action: () => applyCommentTask(effectiveRecordId, raw, { revalidate: false }),
-    });
-    window.setTimeout(() => void refresh(), 600);
   };
 
   // O editor de tarefa escreve pelos choke points de sempre; a árvore só
@@ -863,51 +856,6 @@ export function TreeWidget({
         </p>
       ) : null}
 
-      {/* v1.6: o cartão da IA. Ele aparece DEPOIS de o comentário ter sido
-          salvo, e agendar é um clique — mas é um clique de gente: quem
-          re-valida e grava é o servidor, pelo `createTask` de sempre. */}
-      {proposal ? (
-        <div className="border-primary/50 bg-primary/5 flex flex-col gap-2 rounded-md border p-2">
-          <span className="flex items-center gap-2 text-sm">
-            <Sparkles className="text-primary size-4 shrink-0" />A IA sugere:
-          </span>
-          <ul className="flex flex-col gap-0.5 pl-6 text-sm">
-            {proposal.acoes.map((a, i) => (
-              <li
-                key={i}
-                className={cn(
-                  "list-disc",
-                  // Excluir é a única do lote que some com dado, e o clique é
-                  // um só: ela não pode parecer igual às outras.
-                  a.destrutiva && "text-destructive font-medium"
-                )}
-              >
-                {a.resumo}
-              </li>
-            ))}
-          </ul>
-          <span className="flex flex-wrap gap-2">
-            <Button type="button" size="sm" onClick={acceptProposal}>
-              Aplicar
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              onClick={() => setProposal(null)}
-            >
-              Descartar
-            </Button>
-          </span>
-        </div>
-      ) : null}
-
-      {aiMessage && !proposal ? (
-        <p className="text-muted-foreground text-xs" role="status">
-          {aiMessage}
-        </p>
-      ) : null}
-
       {draft ? (
         <div className="flex flex-wrap items-center gap-2 rounded-md border p-2">
           <Input
@@ -927,23 +875,21 @@ export function TreeWidget({
             Salvar
           </Button>
           {/* Salvar e analisar: a IA lê o texto e decide se ele pede um próximo
-              passo. "Não pede" é resposta legítima — e é a mais comum. */}
-          <Button
-            type="button"
-            size="sm"
-            variant="secondary"
-            className="gap-1"
-            disabled={analyzing}
-            title="Salva o comentário e pede à IA que avalie se cabe agendar uma tarefa a partir dele."
-            onClick={() => submitDraft(true)}
-          >
-            {analyzing ? (
-              <Loader2 className="size-3.5 animate-spin" />
-            ) : (
+              passo. "Não pede" é resposta legítima — e é a mais comum.
+              v1.8: só onde há dock (no viewer público de snapshot não há). */}
+          {hasDock ? (
+            <Button
+              type="button"
+              size="sm"
+              variant="secondary"
+              className="gap-1"
+              title="Salva o comentário e pede à IA que avalie o que ele muda nas tarefas deste registro. A conversa abre no canto da tela."
+              onClick={() => submitDraft(true)}
+            >
               <Sparkles className="size-3.5" />
-            )}
-            Salvar e analisar
-          </Button>
+              Salvar e analisar
+            </Button>
+          ) : null}
           <Button
             type="button"
             variant="ghost"

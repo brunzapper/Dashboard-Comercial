@@ -1,3 +1,7 @@
+// Versão: 1.4 | Data: 11/09/2026
+// v1.4 (11/09/2026): a conversa da IA saiu do widget para o DOCK do painel, e
+//   a guarda passou a pinar a LINHA nova: o widget só abre o fio, o estado é do
+//   contexto, e o pop-up é um só para todas as conversas.
 // Versão: 1.3 | Data: 10/09/2026
 // v1.3 (10/09/2026): a guarda da régua paralela passou a NOMEAR as três actions
 //   que não podem estar aqui (`completeTask`/`reopenTask`/`deleteTask`) em vez
@@ -224,8 +228,6 @@ describe("o nó conclui e exclui, sem régua paralela", () => {
   });
 
   it("a IA propõe, o usuário aplica — ela nunca escreve", () => {
-    expect(widget).toContain("analyzeComment");
-    expect(widget).toContain("applyCommentTask");
     const core = readFileSync("lib/ai/analyze-comment.ts", "utf8");
     // O apply RE-VALIDA antes de escrever, e escreve pelo executor que a tela
     // de tarefas usa — nunca por um caminho local (invariante 25).
@@ -238,9 +240,39 @@ describe("o nó conclui e exclui, sem régua paralela", () => {
       "moveTaskPhase(",
       "completeTask(",
       "deleteTask(",
+      // v1.4: adiar a sequência são DUAS metades (apagar as abertas antes do
+      // dia + gravar a volta) e elas moram no choke point, não aqui.
+      "snoozeRecordSeries(",
     ]) {
       expect(exec).toContain(chokePoint);
     }
+  });
+
+  it("o widget só ABRE a conversa — o estado dela é do dock", () => {
+    // v1.4: o widget segue o registro em foco, então remonta a cada clique da
+    // tabela e some ao trocar de aba. Com a proposta guardada aqui, a análise
+    // em curso morria junto — e era aqui que ficava o único spinner da tela,
+    // dentro do compositor que o próprio submit fechava antes de chamar a IA.
+    expect(widget).toContain("useAiSuggestions");
+    expect(widget).toContain("dock.start(");
+    for (const local of ["setProposal", "applyCommentThread("]) {
+      expect(widget).not.toContain(local);
+    }
+  });
+
+  it("o dock é UM para todas as conversas, e reusa o log de chat", () => {
+    const dock = readFileSync(
+      "components/dashboards/ai-suggestions-dock.tsx",
+      "utf8"
+    );
+    // Um segundo componente de conversa seria a régua paralela da invariante
+    // 25 — e este já sabe desenhar o estado "gerando".
+    expect(dock).toContain("AiChatLog");
+    // A setinha existe porque a moldura é compartilhada: com três análises em
+    // curso, três cartões empilhados cobririam o painel.
+    expect(dock).toContain("Conversa anterior");
+    expect(dock).toContain("Próxima conversa");
+    expect(dock).toContain("Minimizar");
   });
 });
 

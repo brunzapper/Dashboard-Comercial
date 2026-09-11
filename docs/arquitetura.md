@@ -1,4 +1,8 @@
-<!-- Versão: 1.88 | Data: 10/09/2026 -->
+<!-- Versão: 1.89 | Data: 11/09/2026 -->
+<!-- v1.89 (11/09/2026): §4.24 — o alvo da IA de tarefas ganhou `tarefa_data`
+     (sem ela, ocorrência de série era inendereçável e a IA devolvia a pergunta),
+     o verbo `adiar_sequencia` + `series_settings.snooze_until` (0139), e a
+     análise virou conversa persistida num dock compartilhado do painel. -->
 <!-- v1.88 (10/09/2026): §4.24 — o "Salvar e analisar" da Tree passou a propor
      criar/editar/concluir/excluir (até 3). `excluir` entra como MODO do mesmo
      validador (allowDelete), /operacao/tarefas segue sem; ocorrência de série
@@ -5100,6 +5104,66 @@ carrega vínculo com registro de propósito, e a tarefa nascida de um comentári
 precisa nascer na árvore daquele. O apply devolve resultado POR ITEM: falha de
 uma não aborta as outras.
 
+**Decidir, não perguntar (11/09/2026).** O caso que forçou a mudança: "O Oscar
+me pediu para contactar no final de outubro", num registro cuja série tem três
+ocorrências abertas. A resposta foi *"existem múltiplas tarefas com o título
+Acompanhar deal em Nutrição, especifique a data"*. Duas coisas erradas de uma
+vez, e a primeira é estrutural: **o alvo era só o TÍTULO**, e numa série todas
+as ocorrências se chamam igual — com as 3 abertas do padrão (`lookahead`),
+`editar`/`concluir`/`excluir` caíam SEMPRE no ramo de ambiguidade. O verbo
+`excluir` entregue na véspera nunca funcionou justamente nas tarefas de que a
+Tree é feita.
+
+A saída é uma segunda coordenada no alvo: **`tarefa_data`** (`YYYY-MM-DD`, ou
+`null` para a sem prazo), filtrada em `resolveAlvo` ANTES do teste de
+ambiguidade. O catálogo já publicava o prazo por tarefa; faltava o contrato
+deixar a IA usá-lo. Não pode se chamar `data` porque em `editar` esse nome já é
+a data NOVA. A ambiguidade segue ERRO quando nem a data resolve (mesmo título,
+mesmo dia) — aí é empate de verdade —, e a mensagem sem a chave passou a ENSINAR
+a saída em vez de mandar renomear a tarefa na tela, coisa que numa série não se
+pode fazer. A chave vale nas DUAS superfícies: homônimo existe em
+/operacao/tarefas também, e é um contrato só. `serializeTasksEdit` a devolve ao
+fio quando foi ela que desempatou, senão a prévia reinjetada cairia de novo no
+erro que acabou de resolver.
+
+A segunda coisa errada era a pergunta. Quem escreve um comentário não está dando
+uma ordem, e devolver "especifique qual" transforma um atalho de um clique em
+trabalho que a pessoa não tinha antes de escrever. A régua de escolha ficou no
+ENUNCIADO (é julgamento, não validade) e é PRÓPRIA desta superfície — em
+/operacao/tarefas houve ordem direta, e ali perguntar segue certo: em geral a
+relevante é a PRÓXIMA a vencer; quando o comentário empurra o assunto para uma
+data, são relevantes todas as que venceriam antes dela; na dúvida, age sobre a
+mais próxima e diz em `notas` o que deixou de fora. Recusar só no empate real.
+
+**`adiar_sequencia`: a primitiva honesta (11/09/2026).** "Contactar no fim de
+outubro" sobre uma série não é N edições de tarefa. Remarcar as três ocorrências
+para 31/10 empilha três tarefas iguais no mesmo dia, e o tick abre a quarta
+assim mesmo — o que a frase quer dizer é *"não me peça isso até lá"*, uma
+decisão sobre a SEQUÊNCIA. O verbo entra atrás do modo `allowSeries` (mesmo
+molde de um-validador-um-flag), com a série resolvida pelo RÓTULO contra o
+catálogo fresco; a `key` nunca vem do JSON. `TasksEditContext.series` só é
+publicado quando o registro TEM série e o usuário pode gravar a exceção
+(admin/gestor, a RLS da 0132) — propor o que ele não poderia aplicar seria um
+cartão que só falha depois do clique.
+
+O apply vai por `snoozeRecordSeries` (`lib/tasks/actions.ts`), que é o mesmo par
+de metades do `endRecordSeries` — extraído para `dropOpenOccurrences`, não
+copiado: apaga as ocorrências ABERTAS que venceriam ANTES do dia combinado
+(lendo `bitrix_activity_id` antes do delete, invariante 38; as posteriores já
+estão onde deveriam) e grava `active:false` + `snooze_until` na linha de escopo
+`record`. As duas metades, ou nenhuma: só a primeira o tick desfaz, e só a
+segunda deixa a tela pedindo o que já se adiou.
+
+O `snooze_until` (0139) foi desenhado para NÃO abrir ramo novo em lugar nenhum:
+a linha com `active = false` + `snooze_until = D` vale como "desligada ATÉ D", e
+a travessia de liga/desliga de `resolveCadence` só ganhou a condição
+`hoje < snooze_until`. `occurrencesToOpen` e o tick ficam intocados — a série
+volta sozinha porque a exceção EXPIROU, não porque alguém a religou, e uma
+rodada perdida nunca deixa um registro adiado para sempre. Consequência
+assumida: ao vencer o adiamento, a ocorrência devida naquele dia do calendário
+nasce com o prazo dela, que pode estar alguns dias atrás — é o calendário sendo
+honesto, e antecipar a data seria inventar um combinado que ninguém fez.
+
 A régua de prazo: **o prazo dito no comentário vence sempre**; sem prazo dito,
 o intervalo usual de follow-up numa venda SMB de SaaS (proposta enviada: 2 dias
 úteis; sem resposta: 3–5 dias; reunião marcada: a véspera; objeção de momento:
@@ -5118,6 +5182,40 @@ tarefa que nasce de um comentário precisa nascer NA ÁRVORE daquele registro �
 `createTask`. A IA nunca escreve (invariante 25): o cartão "Agendar «título»
 para dd/mm?" é um clique de gente, e quem re-valida com catálogo fresco e grava
 é o servidor.
+
+**O dock das sugestões (11/09/2026).** O terceiro defeito do mesmo relato:
+*nada na tela dizia que a análise estava acontecendo*. O spinner existia, mas
+`submitDraft` chamava `setDraft(null)` ANTES de disparar a IA — e o compositor,
+que o continha, desmontava no mesmo frame. A tela ficava literalmente muda.
+
+Mover o feedback para outro canto do widget não resolveria o resto do pedido:
+poder responder à IA sem escrever um comentário novo, e manter VÁRIAS conversas
+em andamento para comentar no próximo registro enquanto a análise do anterior
+roda. Nada disso cabe num estado do widget Tree, que segue o registro em foco
+(remonta a cada clique da tabela) e some ao trocar de aba. O estado subiu para
+`AiSuggestionsProvider` (`components/dashboards/ai-suggestions-context.tsx`),
+montado ao lado do `RecordFocusProvider` no `dashboard-client`, e a tela é o
+`AiSuggestionsDock`: um pop-up flutuante, NÃO modal (a pessoa continua
+trabalhando), minimizável para um botão com a contagem do que espera decisão, e
+UM só para todas as conversas — com três análises em curso, três cartões
+empilhados cobririam o painel, então a moldura é a mesma e `‹ 2/3 ›` troca o
+conteúdo. O log é o `AiChatLog` que o painel de dashboards e o sheet da Home já
+usam; um segundo componente de conversa seria a régua paralela da invariante 25,
+e este já sabe desenhar o estado "gerando".
+
+A conversa é PERSISTIDA em `tree_ai_threads` (0139), no molde da 0124 — com uma
+diferença: lá a chave é o escopo (uma sessão por tela), aqui são várias
+simultâneas por usuário, então a linha tem `id` próprio. Como na 0098, o
+SERVIDOR é dono dos turnos e da prévia: a réplica manda só o texto dela, e
+`applyCommentThreadCore` lê o JSON da LINHA (nunca de um argumento) e
+RE-VALIDA com catálogo fresco. A prévia pendente entra no enunciado do turno
+seguinte com a semântica "a sua resposta SUBSTITUI esta proposta inteira" — a
+mesma do painel de dashboards; sem ela, "só a próxima" chegaria sem o que está
+corrigindo. Abrir o fio e rodar o turno são DUAS actions de propósito: a
+primeira é rápida e grava a linha com o comentário já dentro, que é o que o dock
+mostra enquanto a IA trabalha (e o que faz um F5 no meio da análise reencontrar
+a conversa em vez de perdê-la). Falha parcial no apply mantém o fio ABERTO: é
+nele que se pede o conserto do que não entrou.
 
 Testes: `lib/attributes/registry.test.ts`, `lib/series/{occurrence,cadence}.test.ts`
 (incl. `occurrencesAhead` nunca andando para trás e o `anchorFallback`),

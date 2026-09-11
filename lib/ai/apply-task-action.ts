@@ -1,4 +1,9 @@
-// Versão: 1.0 | Data: 10/09/2026
+// Versão: 1.1 | Data: 11/09/2026
+// v1.1 (11/09/2026): `adiar_sequencia`. Ela é a única ação do contrato que NÃO
+// mexe numa tarefa — vai por `snoozeRecordSeries`, que é o mesmo par de metades
+// que o diálogo da árvore já usa para encerrar uma sequência. Um caminho
+// próprio aqui (apagar + gravar a exceção à mão) seria a régua paralela da
+// invariante 25, e é justamente o par de metades que é fácil errar pela metade.
 // APLICAR uma ação do contrato `tarefas-edit` — extraído de
 // `lib/ai/manage-tasks.ts` quando o "Salvar e analisar" da Tree passou a
 // propor editar/concluir/excluir além de criar.
@@ -23,6 +28,7 @@ import {
   createTask,
   deleteTask,
   moveTaskPhase,
+  snoozeRecordSeries,
   updateTask,
 } from "@/lib/tasks/actions";
 import type { ParsedTaskAction } from "@/lib/import/tasks/types";
@@ -73,6 +79,20 @@ export async function applyTaskAction(
   a: ParsedTaskAction,
   opts: { rowById: Map<string, TaskFullRow>; recordId?: string }
 ): Promise<ApplyTaskActionResult> {
+  if (a.acao === "adiar_sequencia") {
+    // As duas metades (apagar as abertas antes do dia + gravar a volta) moram
+    // no choke point; aqui só se escolhe o registro, que vem do ARGUMENTO.
+    if (!opts.recordId) {
+      return { ok: false, message: "Sem registro em contexto para adiar." };
+    }
+    const res = await snoozeRecordSeries(a.serie.key, opts.recordId, a.ate, {
+      revalidate: false,
+    });
+    return res.ok
+      ? { ok: true }
+      : { ok: false, message: res.message ?? "Falha ao adiar a sequência." };
+  }
+
   if (a.acao === "concluir") {
     const res = await completeTask(a.alvo.id);
     return res.ok ? { ok: true } : { ok: false, message: res.message ?? "Falha ao concluir." };
@@ -140,14 +160,21 @@ export async function applyTaskAction(
 
 /** A frase de UMA ação, para a prévia. Dono único do texto do resumo. */
 export function summaryOfTaskAction(a: ParsedTaskAction): string {
-  if (a.acao === "concluir") return `concluir · "${a.alvo.titulo}"`;
-  if (a.acao === "excluir") return `excluir · "${a.alvo.titulo}"`;
+  if (a.acao === "adiar_sequencia")
+    return `adiar a sequência "${a.serie.label}" até ${a.ate}`;
+  // A data do alvo entra na frase quando foi ela que desempatou: com três
+  // ocorrências de mesmo título, "concluir · Acompanhar deal" não diz qual.
+  const quando = (alvo: { data?: string | null }): string =>
+    alvo.data === undefined ? "" : alvo.data ? ` (${alvo.data})` : " (sem prazo)";
+  if (a.acao === "concluir")
+    return `concluir · "${a.alvo.titulo}"${quando(a.alvo)}`;
+  if (a.acao === "excluir") return `excluir · "${a.alvo.titulo}"${quando(a.alvo)}`;
   const parts: string[] = [];
   if (a.acao === "criar") {
     parts.push(`criar · "${a.titulo}"`);
     if (a.quadro) parts.push(`quadro: ${a.quadro.nome}`);
   } else {
-    parts.push(`editar · "${a.alvo.titulo}"`);
+    parts.push(`editar · "${a.alvo.titulo}"${quando(a.alvo)}`);
     if (a.novoTitulo) parts.push(`renomear p/ "${a.novoTitulo}"`);
   }
   if (a.responsavel !== undefined)
@@ -163,4 +190,8 @@ export function summaryOfTaskAction(a: ParsedTaskAction): string {
 
 /** O título que identifica a ação no resultado por item. */
 export const tituloOfTaskAction = (a: ParsedTaskAction): string =>
-  a.acao === "criar" ? a.titulo : a.alvo.titulo;
+  a.acao === "criar"
+    ? a.titulo
+    : a.acao === "adiar_sequencia"
+      ? a.serie.label
+      : a.alvo.titulo;

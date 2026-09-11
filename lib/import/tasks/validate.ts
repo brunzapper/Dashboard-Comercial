@@ -1,4 +1,14 @@
-// Versão: 1.0 | Data: 08/09/2026
+// Versão: 1.1 | Data: 11/09/2026
+// v1.1 (11/09/2026): o alvo aceita `tarefa_data`, e existe `adiar_sequencia`.
+//
+// O que estava quebrado: o alvo era SÓ o título, e numa série todas as
+// ocorrências têm o mesmo. Com as 3 abertas do padrão, `editar`/`concluir`/
+// `excluir` caíam sempre no ramo de ambiguidade — o verbo `excluir` entregue na
+// véspera nunca funcionou nas tarefas de que a Tree é feita. A data já estava no
+// catálogo; faltava o contrato deixar a IA usá-la. A ambiguidade segue ERRO
+// quando nem a data resolve (mesmo título, mesmo dia): aí é empate de verdade.
+//
+// `adiar_sequencia` não mexe em tarefa nenhuma — ver ParsedTaskSnoozeSeries.
 // Validador do contrato `tarefas-edit` (§4.17). FAIL-CLOSED por item: chave
 // desconhecida, título não-resolvido (0 hits lista as visíveis; >1 =
 // ambiguidade), fase fora das colunas do quadro efetivo, data/hora malformada
@@ -18,6 +28,7 @@ import {
   TASKS_EDIT_VERSION,
   type ParsedTaskAction,
   type ParsedTaskFields,
+  type ParsedTaskTarget,
   type TaskPhaseRef,
   type TasksEditContext,
   type TasksEditValidation,
@@ -25,25 +36,35 @@ import {
 
 const TOP_KEYS = new Set(["formato", "versao", "acoes", "notas"]);
 const CAMPOS = ["descricao", "responsavel", "data", "hora", "hora_fim", "fase"];
+/** v1.1: a segunda coordenada do alvo, em toda ação que referencia tarefa. */
+const ALVO = ["acao", "tarefa", "tarefa_data"];
 const KEYS_BY_ACAO: Record<string, Set<string>> = {
   criar: new Set(["acao", "titulo", "quadro", ...CAMPOS]),
-  editar: new Set(["acao", "tarefa", "novo_titulo", ...CAMPOS]),
-  concluir: new Set(["acao", "tarefa"]),
-  // v1.1: só aceita com `allowDelete` — ver `acoesAceitas` abaixo.
-  excluir: new Set(["acao", "tarefa"]),
+  editar: new Set([...ALVO, "novo_titulo", ...CAMPOS]),
+  concluir: new Set(ALVO),
+  // v1.1 (10/09): só aceita com `allowDelete` — ver `acoesAceitas` abaixo.
+  excluir: new Set(ALVO),
+  // v1.1 (11/09): só com `allowSeries`. Não tem alvo de TAREFA.
+  adiar_sequencia: new Set(["acao", "sequencia", "ate"]),
 };
 
 /** As ações que ESTA superfície aceita, e a frase que as lista no erro. */
-function acoesAceitas(allowDelete: boolean): { set: Set<string>; frase: string } {
-  return allowDelete
-    ? {
-        set: new Set(["criar", "editar", "concluir", "excluir"]),
-        frase: "criar, editar, concluir ou excluir",
-      }
-    : {
-        set: new Set(["criar", "editar", "concluir"]),
-        frase: "criar, editar ou concluir",
-      };
+function acoesAceitas(modes: TasksEditModes): { set: Set<string>; frase: string } {
+  const set = new Set(["criar", "editar", "concluir"]);
+  const nomes = ["criar", "editar", "concluir"];
+  if (modes.allowDelete === true) {
+    set.add("excluir");
+    nomes.push("excluir");
+  }
+  if (modes.allowSeries === true) {
+    set.add("adiar_sequencia");
+    nomes.push("adiar_sequencia");
+  }
+  const frase =
+    nomes.length === 1
+      ? nomes[0]
+      : `${nomes.slice(0, -1).join(", ")} ou ${nomes[nomes.length - 1]}`;
+  return { set, frase };
 }
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -66,6 +87,11 @@ const shortList = (names: string[]): string => {
  * prévia pendente no turno seguinte — por isso precisa ser re-validável.
  */
 export function serializeTasksEdit(actions: ParsedTaskAction[]): string {
+  // v1.1: a data do alvo volta ao fio SÓ quando ela foi o que desempatou. Sem
+  // isso, a prévia reinjetada de uma ocorrência de série cairia de novo no erro
+  // de ambiguidade que ela acabou de resolver.
+  const alvoData = (alvo: { data?: string | null }): Record<string, unknown> =>
+    alvo.data !== undefined ? { tarefa_data: alvo.data } : {};
   const campos = (a: ParsedTaskFields): Record<string, unknown> => ({
     ...(a.descricao !== undefined ? { descricao: a.descricao } : {}),
     ...(a.responsavel !== undefined
@@ -77,8 +103,10 @@ export function serializeTasksEdit(actions: ParsedTaskAction[]): string {
     ...(a.fase ? { fase: a.fase.label } : {}),
   });
   const acoes = actions.map((a) => {
+    if (a.acao === "adiar_sequencia")
+      return { acao: a.acao, sequencia: a.serie.label, ate: a.ate };
     if (a.acao === "concluir" || a.acao === "excluir")
-      return { acao: a.acao, tarefa: a.alvo.titulo };
+      return { acao: a.acao, tarefa: a.alvo.titulo, ...alvoData(a.alvo) };
     if (a.acao === "criar")
       return {
         acao: a.acao,
@@ -89,6 +117,7 @@ export function serializeTasksEdit(actions: ParsedTaskAction[]): string {
     return {
       acao: a.acao,
       tarefa: a.alvo.titulo,
+      ...alvoData(a.alvo),
       ...(a.novoTitulo ? { novo_titulo: a.novoTitulo } : {}),
       ...campos(a),
     };
@@ -108,8 +137,8 @@ export function validateTasksEdit(
   const errors: string[] = [];
   const warnings: string[] = [];
   // Molde do `{ selection: true }` de validateRecordsUpdate: um validador só,
-  // com um modo — nunca um segundo contrato para a superfície nova.
-  const aceitas = acoesAceitas(opts?.allowDelete === true);
+  // com modos — nunca um segundo contrato para a superfície nova.
+  const aceitas = acoesAceitas(opts ?? {});
 
   let obj: Record<string, unknown>;
   try {
@@ -290,12 +319,20 @@ export function validateTasksEdit(
       if (!allowed.has(k)) errors.push(`${where}: chave desconhecida "${k}".`);
     }
 
-    /** Resolve o alvo pelo título, entre as tarefas VISÍVEIS. */
+    /**
+     * Resolve o alvo entre as tarefas VISÍVEIS: título + (v1.1) a data.
+     *
+     * O título sozinho nunca resolveu uma ocorrência de série — elas têm todas
+     * o mesmo, e o padrão são 3 abertas. `tarefa_data` é a segunda coordenada,
+     * e o catálogo já a publica por tarefa. `null` mira explicitamente a SEM
+     * prazo; ausente = o título tem de bastar.
+     */
     const resolveAlvo = (
       soAbertas: boolean
     ): {
       id: string;
       titulo: string;
+      data?: string | null;
       phase: string;
       boardId: string | null;
       dueTime: string | null;
@@ -306,20 +343,50 @@ export function validateTasksEdit(
         errors.push(`${where}: "tarefa" é obrigatória (o título atual).`);
         return null;
       }
-      const hits = (tasksByTitle.get(normalizeName(titulo)) ?? []).filter(
+
+      const temData = "tarefa_data" in rawA;
+      let alvoData: string | null = null;
+      if (temData && rawA.tarefa_data !== null) {
+        alvoData = asString(rawA.tarefa_data);
+        if (!DATE_RE.test(alvoData)) {
+          errors.push(
+            `${where}: "tarefa_data" precisa ser YYYY-MM-DD (recebi "${alvoData}").`
+          );
+          return null;
+        }
+      }
+
+      const mesmoTitulo = (tasksByTitle.get(normalizeName(titulo)) ?? []).filter(
         (t) => !soAbertas || !t.completed
       );
+      const hits = temData
+        ? mesmoTitulo.filter((t) => (t.dueDate?.slice(0, 10) ?? null) === alvoData)
+        : mesmoTitulo;
+
       if (hits.length === 0) {
+        const quando = temData
+          ? alvoData
+            ? ` com prazo em ${alvoData}`
+            : " sem prazo"
+          : "";
+        const datas = mesmoTitulo.map((t) => t.dueDate ?? "sem prazo");
         errors.push(
-          `${where}: não encontrei a tarefa "${titulo}"${soAbertas ? " em aberto" : ""}.`
+          `${where}: não encontrei a tarefa "${titulo}"${quando}${soAbertas ? " em aberto" : ""}.` +
+            (temData && datas.length > 0
+              ? ` Prazos com esse título: ${shortList(datas)}.`
+              : "")
         );
         return null;
       }
       if (hits.length > 1) {
-        // Título é a única identidade do contrato; escolher uma seria
-        // adivinhar em qual das tarefas homônimas o usuário mandou escrever.
+        // Com a data já aplicada, sobrar mais de uma é empate DE VERDADE
+        // (mesmo título, mesmo dia) — escolher seria adivinhar. Sem a data, a
+        // saída é ela: por isso o erro ensina o campo em vez de mandar
+        // renomear a tarefa na tela.
         errors.push(
-          `${where}: "${titulo}" casa com ${hits.length} tarefas. Renomeie uma delas na tela ou faça a edição por lá.`
+          temData
+            ? `${where}: "${titulo}" tem ${hits.length} tarefas no mesmo dia. Renomeie uma delas na tela ou faça a edição por lá.`
+            : `${where}: "${titulo}" casa com ${hits.length} tarefas. Informe "tarefa_data" com o prazo da que você quer — os prazos são ${shortList(mesmoTitulo.map((t) => t.dueDate ?? "sem prazo"))}.`
         );
         return null;
       }
@@ -327,6 +394,7 @@ export function validateTasksEdit(
       return {
         id: t.id,
         titulo: t.title,
+        ...(temData ? { data: alvoData } : {}),
         phase: t.phase,
         boardId: t.boardId,
         dueTime: t.dueTime,
@@ -334,10 +402,56 @@ export function validateTasksEdit(
       };
     };
 
+    /** O alvo já resolvido, no formato do modelo (com a data que desempatou). */
+    const alvoRef = (a: {
+      id: string;
+      titulo: string;
+      data?: string | null;
+    }): ParsedTaskTarget => ({
+      id: a.id,
+      titulo: a.titulo,
+      ...("data" in a ? { data: a.data } : {}),
+    });
+
+    if (acao === "adiar_sequencia") {
+      // Não resolve tarefa nenhuma: o alvo é a SÉRIE do registro em contexto.
+      const series = ctx.series ?? [];
+      const nome = asString(rawA.sequencia);
+      const ate = asString(rawA.ate);
+      if (series.length === 0) {
+        errors.push(
+          `${where}: não há sequência periódica neste registro que você possa adiar.`
+        );
+        return;
+      }
+      // Uma só, e sem nome dito: é ela. Com várias o nome é obrigatório —
+      // escolher seria adivinhar de qual acompanhamento a pessoa falou.
+      const serie =
+        !nome && series.length === 1
+          ? series[0]
+          : series.find((x) => normalizeName(x.label) === normalizeName(nome));
+      if (!serie) {
+        errors.push(
+          `${where}: sequência "${nome}" não existe neste registro. Disponíveis: ${shortList(series.map((x) => x.label))}.`
+        );
+        return;
+      }
+      if (!DATE_RE.test(ate)) {
+        errors.push(`${where}: "ate" precisa ser YYYY-MM-DD (recebi "${ate}").`);
+        return;
+      }
+      actions.push({
+        acao: "adiar_sequencia",
+        serie: { key: serie.key, label: serie.label },
+        ate,
+      });
+      return;
+    }
+
     if (acao === "concluir") {
       const alvo = resolveAlvo(true);
       if (!alvo) return;
-      actions.push({ acao: "concluir", alvo: { id: alvo.id, titulo: alvo.titulo } });
+      actions.push({ acao: "concluir", alvo: alvoRef(alvo) });
       return;
     }
 
@@ -358,7 +472,7 @@ export function validateTasksEdit(
         );
         return;
       }
-      actions.push({ acao: "excluir", alvo: { id: alvo.id, titulo: alvo.titulo } });
+      actions.push({ acao: "excluir", alvo: alvoRef(alvo) });
       return;
     }
 
@@ -409,7 +523,7 @@ export function validateTasksEdit(
     const { mudou: _m, ...fields } = campos;
     actions.push({
       acao: "editar",
-      alvo: { id: alvo.id, titulo: alvo.titulo },
+      alvo: alvoRef(alvo),
       ...(novoTitulo ? { novoTitulo } : {}),
       ...fields,
     });
