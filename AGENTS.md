@@ -796,6 +796,29 @@ This version has breaking changes — APIs, conventions, and file structure may 
   `todayIso` lê adiamento como desligamento: fail-closed é não gerar tarefa que
   ninguém pediu. Ao vencer, a ocorrência nasce com o prazo do CALENDÁRIO, que
   pode estar dias atrás — antecipar seria inventar um combinado.
+- **Turno de IA NUNCA é Server Action — ele congela todas as outras
+  (11/09/2026):** o Next despacha Server Actions **uma de cada vez por
+  cliente** (está na doc desta versão:
+  `node_modules/next/dist/docs/01-app/02-guides/server-actions.md` — *"dispatches
+  Server Actions one at a time per client… use a Route Handler for non-mutation
+  requests"*). Um turno de IA dura até `AI_LOOP_TURN_BUDGET_MS` (240s), então
+  como action ele segura a fila do cliente INTEIRA: enquanto a IA analisava um
+  comentário, `loadRecordTree` — também action — ficava atrás dela e a Tree não
+  carregava OUTRO registro, que é exatamente o que o dock existe para permitir.
+  Valia para todo o painel (filtro rápido, salvar widget, kanban). Por isso os
+  TRÊS turnos entram por rota: `/api/dashboards/[id]/ai-turn`,
+  `/api/operacao/[scope]/ai-turn` e `/api/tree/ai-turn`, todas rodando o MESMO
+  núcleo (gate/turnos/persistência não se duplicam) e todas recuperando à mão o
+  **anti-CSRF** (`origin === host`) que a action tinha embutido — é a única
+  proteção que se perde ao sair dela. Ação CURTA e MUTAÇÃO seguem action
+  (abrir o fio, aplicar, descartar): é o caso em que a doc manda ficar. O
+  formato é NDJSON com `{"type":"state"}` SEMPRE por último (inclusive em erro
+  de gate), e não é enfeite: um POST de dois minutos sem byte trafegando apanha
+  de timeout de ociosidade em proxy — daí também o `x-accel-buffering: no`. O
+  laço de leitura tem dono ÚNICO, `readNdjsonTurn` (`lib/ai/read-ndjson-turn.ts`):
+  ele estava copiado byte a byte nos dois painéis e o dock seria a terceira
+  cópia. Falha de stream NÃO marca a conversa como perdida — o turno pode ter
+  concluído no servidor, e a linha persiste.
 - **A conversa da IA vive no DOCK do painel, e o servidor é dono dela
   (11/09/2026):** o estado da análise saiu do `tree-widget` para
   `AiSuggestionsProvider` + `AiSuggestionsDock` (montados ao lado do

@@ -1,3 +1,10 @@
+// Versão: 1.5 | Data: 11/09/2026
+// v1.5 (11/09/2026): a guarda de que o TURNO da IA não é Server Action. O Next
+//   as despacha uma de cada vez por cliente, então um turno de até 240s segurava
+//   `loadRecordTree` atrás dele — com a análise rodando, clicar noutra linha
+//   deixava a Tree em "Carregando…" até a IA terminar. É invisível numa leitura
+//   de diff e reaparece na primeira vez que alguém "simplificar" a rota de volta
+//   para uma action.
 // Versão: 1.4 | Data: 11/09/2026
 // v1.4 (11/09/2026): a conversa da IA saiu do widget para o DOCK do painel, e
 //   a guarda passou a pinar a LINHA nova: o widget só abre o fio, o estado é do
@@ -257,6 +264,54 @@ describe("o nó conclui e exclui, sem régua paralela", () => {
     expect(widget).toContain("dock.start(");
     for (const local of ["setProposal", "applyCommentThread("]) {
       expect(widget).not.toContain(local);
+    }
+  });
+
+  it("o TURNO da IA não é Server Action — ele congelaria a Tree", () => {
+    // A doc desta versão do Next: "dispatches Server Actions one at a time per
+    // client… use a Route Handler for non-mutation requests". `loadRecordTree`
+    // é action, então um turno de 240s como action a deixa na fila.
+    const actions = readFileSync(
+      "app/(app)/dashboards/tree-actions.ts",
+      "utf8"
+    );
+    expect(actions).not.toContain("runCommentThreadCore");
+    expect(actions).toContain("/api/tree/ai-turn");
+    // As curtas FICAM actions — abrir é um insert, e aplicar/descartar são
+    // mutações, que é o caso em que a doc manda ficar na action.
+    for (const fica of [
+      "openCommentThreadCore",
+      "applyCommentThreadCore",
+      "dismissCommentThreadCore",
+    ]) {
+      expect(actions).toContain(fica);
+    }
+
+    const ctx = readFileSync(
+      "components/dashboards/ai-suggestions-context.tsx",
+      "utf8"
+    );
+    expect(ctx).toContain('fetch("/api/tree/ai-turn"');
+    expect(ctx).not.toContain("runCommentThread(");
+
+    // A rota roda o MESMO núcleo (gate e persistência não se duplicam) e
+    // recupera o anti-CSRF que a action tinha embutido.
+    const route = readFileSync("app/api/tree/ai-turn/route.ts", "utf8");
+    expect(route).toContain("runCommentThreadCore");
+    expect(route).toContain("origem inválida");
+    expect(route).toContain("maxDuration");
+  });
+
+  it("o laço de NDJSON tem UM dono — três cópias seria a régua paralela", () => {
+    for (const consumidor of [
+      "components/dashboards/ai-suggestions-context.tsx",
+      "components/dashboards/ai-edit-panel.tsx",
+      "components/operacao/ai-operacao-panel.tsx",
+    ]) {
+      const src = readFileSync(consumidor, "utf8");
+      expect(src).toContain("readNdjsonTurn");
+      // Quem tem o laço próprio é só lib/ai/read-ndjson-turn.ts.
+      expect(src).not.toContain("getReader()");
     }
   });
 

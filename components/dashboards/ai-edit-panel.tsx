@@ -1,3 +1,8 @@
+// Versão: 1.2 | Data: 11/09/2026
+// v1.2 (11/09/2026): o laço de leitura do NDJSON virou `readNdjsonTurn`
+// (lib/ai/read-ndjson-turn.ts). Estava byte a byte igual ao do painel da
+// Operação, e o dock da Tree ia ser a terceira cópia — régua paralela da
+// invariante 25. Comportamento e mensagens de erro idênticos.
 // Versão: 1.1 | Data: 26/07/2026
 // Painel "Editar com IA" DENTRO do dashboard — sessão persistida por
 // (usuário, board) em dashboard_ai_sessions (0098). Sempre modo EDITAR (alvo =
@@ -52,6 +57,7 @@ import {
 // Tipo direto do núcleo (server-only, mas `import type` é apagado no build) —
 // a action não re-exporta tipos (quebraria o chunk de actions; ver lá).
 import type { AiEditSessionState } from "@/lib/ai/edit-session";
+import { readNdjsonTurn } from "@/lib/ai/read-ndjson-turn";
 import { AI_PROVIDER_LABELS, isAiProvider } from "@/lib/ai/models";
 
 type PanelState = "closed" | "open" | "collapsed";
@@ -171,35 +177,10 @@ export function AiEditPanel({
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ message: text, autoApply }),
       });
-      if (!res.ok || !res.body) {
-        throw new Error(`o servidor respondeu ${res.status}.`);
-      }
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-      let finalState: AiEditSessionState | null = null;
-      const handleLine = (raw: string) => {
-        const trimmed = raw.trim();
-        if (!trimmed) return;
-        const evt = JSON.parse(trimmed) as
-          | { type: "thought"; text: string }
-          | { type: "state"; state: AiEditSessionState };
-        if (evt.type === "thought") setLiveThought((t) => t + evt.text);
-        else if (evt.type === "state") finalState = evt.state;
-      };
-      for (;;) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        let nl: number;
-        while ((nl = buffer.indexOf("\n")) >= 0) {
-          handleLine(buffer.slice(0, nl));
-          buffer = buffer.slice(nl + 1);
-        }
-      }
-      if (buffer.trim()) handleLine(buffer);
-      if (!finalState) throw new Error("resposta incompleta do servidor.");
-      absorb(finalState);
+      const state = await readNdjsonTurn<AiEditSessionState>(res, {
+        onThought: (chunk) => setLiveThought((t) => t + chunk),
+      });
+      absorb(state);
     } catch (err) {
       // O turno pode ter concluído no servidor mesmo com o stream perdido —
       // a sessão persiste no banco; um F5/reabrir recarrega o estado real.

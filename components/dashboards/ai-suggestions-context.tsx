@@ -1,3 +1,12 @@
+// Versão: 1.1 | Data: 11/09/2026
+// v1.1 (11/09/2026): o TURNO saiu da Server Action para a rota
+//   `/api/tree/ai-turn`. Não é preferência de transporte: o Next despacha
+//   Server Actions UMA DE CADA VEZ por cliente, e o turno segura a fila por até
+//   240s — enquanto a IA analisava, clicar noutra linha da tabela deixava a
+//   Tree em "Carregando…" até a análise acabar, porque `loadRecordTree` também
+//   é action e ficava atrás dela. Era o oposto do que o dock existe para fazer.
+//   Junto veio o raciocínio ao vivo (o cano NDJSON já precisava existir para o
+//   POST longo não apanhar de timeout de ociosidade).
 // Versão: 1.0 | Data: 11/09/2026
 // As conversas com a IA que estão em andamento neste painel — o estado que o
 // dock desenha.
@@ -27,15 +36,24 @@ import {
 import {
   listCommentThreads,
   openCommentThread,
-  runCommentThread,
 } from "@/app/(app)/dashboards/tree-actions";
 import type { CommentThread } from "@/lib/ai/analyze-comment";
+import { readNdjsonTurn } from "@/lib/ai/read-ndjson-turn";
 import { notifyActionError } from "@/lib/feedback/notify";
+
+/** O que a rota devolve na linha final. */
+type TurnState = { ok: boolean; message?: string; thread?: CommentThread };
 
 interface AiSuggestions {
   threads: CommentThread[];
   /** Ids dos fios com um turno em voo — o dock mostra o "pensando" neles. */
   busy: Set<string>;
+  /**
+   * v1.1: raciocínio ao vivo POR FIO. Um campo só misturaria o de duas
+   * conversas transmitindo ao mesmo tempo — que é o caso de uso do dock.
+   * Efêmero: nada disto vai para a linha.
+   */
+  thoughts: Map<string, string>;
   /** Fio aberto no dock (null = nenhum). */
   openId: string | null;
   open: (id: string | null) => void;
@@ -64,6 +82,7 @@ export function AiSuggestionsProvider({
   const [busy, setBusy] = useState<Set<string>>(new Set());
   const [openId, setOpenId] = useState<string | null>(null);
   const [minimized, setMinimized] = useState(false);
+  const [thoughts, setThoughts] = useState<Map<string, string>>(new Map());
 
   // Uma carga só, na montagem: reencontra as conversas que ficaram esperando
   // confirmação de antes do F5. Não fica em polling — quem muda a linha é este
@@ -95,7 +114,46 @@ export function AiSuggestionsProvider({
       else next.delete(id);
       return next;
     });
+    // O raciocínio some junto com o "ocupado": ele explica a ESPERA, e depois
+    // do resultado só seria ruído sobre a proposta.
+    if (!on) {
+      setThoughts((prev) => {
+        if (!prev.has(id)) return prev;
+        const next = new Map(prev);
+        next.delete(id);
+        return next;
+      });
+    }
   }, []);
+
+  /**
+   * Um turno, pela ROTA (nunca por action — ver o cabeçalho).
+   *
+   * Falha de rede não marca a conversa como perdida: o turno pode ter concluído
+   * no servidor mesmo com o stream cortado, e a linha persiste. Reabrir o dock
+   * recarrega o estado real — mesma regra dos painéis de dashboard e Operação.
+   */
+  const runTurn = useCallback(
+    async (threadId: string, reply?: string): Promise<CommentThread | null> => {
+      const res = await fetch("/api/tree/ai-turn", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ threadId, ...(reply ? { reply } : {}) }),
+      });
+      const state = await readNdjsonTurn<TurnState>(res, {
+        onThought: (chunk) =>
+          setThoughts((prev) => {
+            const next = new Map(prev);
+            next.set(threadId, (next.get(threadId) ?? "") + chunk);
+            return next;
+          }),
+      });
+      if (state.thread) return state.thread;
+      notifyActionError("A análise falhou", state.message);
+      return null;
+    },
+    []
+  );
 
   const start = useCallback<AiSuggestions["start"]>(
     (input) => {
@@ -119,15 +177,19 @@ export function AiSuggestionsProvider({
         setMinimized(false);
         mark(id, true);
         try {
-          const res = await runCommentThread(id);
-          if (res.thread) upsert(res.thread);
-          else notifyActionError("A análise falhou", res.message);
+          const thread = await runTurn(id);
+          if (thread) upsert(thread);
+        } catch (err) {
+          notifyActionError(
+            "A análise falhou",
+            err instanceof Error ? err.message : String(err)
+          );
         } finally {
           mark(id, false);
         }
       })();
     },
-    [mark, upsert]
+    [mark, runTurn, upsert]
   );
 
   const reply = useCallback<AiSuggestions["reply"]>(
@@ -135,15 +197,19 @@ export function AiSuggestionsProvider({
       void (async () => {
         mark(threadId, true);
         try {
-          const res = await runCommentThread(threadId, text);
-          if (res.thread) upsert(res.thread);
-          else notifyActionError("A análise falhou", res.message);
+          const thread = await runTurn(threadId, text);
+          if (thread) upsert(thread);
+        } catch (err) {
+          notifyActionError(
+            "A análise falhou",
+            err instanceof Error ? err.message : String(err)
+          );
         } finally {
           mark(threadId, false);
         }
       })();
     },
-    [mark, upsert]
+    [mark, runTurn, upsert]
   );
 
   const close = useCallback((threadId: string) => {
@@ -155,6 +221,7 @@ export function AiSuggestionsProvider({
     () => ({
       threads,
       busy,
+      thoughts,
       openId,
       open: setOpenId,
       minimized,
@@ -163,7 +230,7 @@ export function AiSuggestionsProvider({
       reply,
       close,
     }),
-    [threads, busy, openId, minimized, start, reply, close]
+    [threads, busy, thoughts, openId, minimized, start, reply, close]
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
@@ -177,6 +244,7 @@ export function AiSuggestionsProvider({
 const INERT: AiSuggestions = {
   threads: [],
   busy: new Set(),
+  thoughts: new Map(),
   openId: null,
   open: () => {},
   minimized: false,

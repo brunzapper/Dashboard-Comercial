@@ -1,3 +1,10 @@
+// Versão: 1.9 | Data: 11/09/2026
+// v1.9 (11/09/2026): `runCommentThread` SAIU. Turno de IA não pode ser Server
+//   Action: o Next as despacha uma de cada vez por cliente, e um turno de até
+//   240s segurava a fila — com a análise rodando, `loadRecordTree` ficava atrás
+//   dela e a Tree não carregava outro registro. O turno agora entra por
+//   `/api/tree/ai-turn`, que roda o MESMO núcleo. As outras três continuam
+//   actions: são curtas, e aplicar/descartar são mutações.
 // Versão: 1.8 | Data: 11/09/2026
 // v1.8 (11/09/2026): o "Salvar e analisar" virou CONVERSA — as actions agora
 //   abrem/rodam/aplicam/descartam um fio de `tree_ai_threads` (0139). São
@@ -70,7 +77,6 @@ import {
   dismissCommentThreadCore,
   listCommentThreadsCore,
   openCommentThreadCore,
-  runCommentThreadCore,
   type ApplyCommentTaskState,
   type CommentThread,
 } from "@/lib/ai/analyze-comment";
@@ -301,13 +307,8 @@ export async function openCommentThread(
   return openCommentThreadCore({ recordId, recordTitle, comment });
 }
 
-/** Parte 2: roda um turno — a primeira análise, ou uma réplica do usuário. */
-export async function runCommentThread(
-  threadId: string,
-  reply?: string
-): Promise<{ ok: boolean; message?: string; thread?: CommentThread }> {
-  return runCommentThreadCore({ threadId, reply });
-}
+// Parte 2 (o turno) NÃO mora aqui: é a rota `/api/tree/ai-turn`. Ver o
+// cabeçalho — Server Action de 240s congela todas as outras do cliente.
 
 /** As conversas abertas deste usuário — o dock as reencontra depois de um F5. */
 export async function listCommentThreads(): Promise<CommentThread[]> {
