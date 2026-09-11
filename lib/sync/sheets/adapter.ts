@@ -1,4 +1,4 @@
-// Versão: 1.4 | Data: 03/08/2026
+// Versão: 1.5 | Data: 11/09/2026
 // Sync da planilha "Estudo de Fechamentos" (aba Site) → records. Fonte PUSH
 // (o Apps Script empurra a cada hora via /api/sync/sheets) — por isso não
 // implementa o contrato SyncAdapter (backfill/reconcile) de lib/sync/adapter;
@@ -26,6 +26,19 @@
 //   bump de last_synced_at em linha inalterada — semântica do ingest) e audit
 //   em lote único. Devolve também touchedRecordIds p/ a cauda incremental da
 //   rota (lib/sync/post-ingest.ts).
+// v1.5 (11/09/2026): ADOÇÃO por impressão digital + `title` sincronizado. A
+//   chave natural deriva de conteúdo MUTÁVEL (nome+data), então renomear a
+//   empresa na planilha mintava um source_id novo: o adapter INSERIA e o
+//   registro antigo ficava órfão somando nos dashboards, levando junto a
+//   curadoria manual (3 casos em ago/2026). Agora, quando o hash não encontra
+//   existente, `loadAdoptionCandidates`+`pickAdoptions` procuram o registro pela
+//   impressão digital que o payload já carrega — e-mail + dia — e o ADOTAM,
+//   re-chaveando o source_id, em vez de inserir. Detalhes e os fail-closed em
+//   ./adoptions.ts. Junto:
+//   `title` entrou em CORE_SYNC_FIELDS — sem ele a adoção gravaria tudo MENOS o
+//   nome, e a tela seguiria mostrando o título antigo. Devolve `seenSourceIds`
+//   (toda linha recebida, inclusive a inalterada) p/ a varredura do push
+//   (./sweep.ts) e `adopted` p/ o rastro na resposta da rota.
 import { createHash } from "node:crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
@@ -38,8 +51,10 @@ import {
 import { anchorNaiveToBrasilia } from "@/lib/date/normalize";
 import {
   emptyResult,
+  escapeLikePattern,
   isProtected,
   leadTimeDays,
+  normalizeEmail,
   normalizeName,
   recordError,
   recordOutcome,
@@ -48,6 +63,11 @@ import {
   type ExistingRecord,
   type SyncResult,
 } from "@/lib/sync/shared";
+import {
+  loadAdoptionCandidates,
+  pickAdoptions,
+  type AdoptionCandidate,
+} from "@/lib/sync/sheets/adoptions";
 
 export interface SheetSiteRow {
   name: string;
@@ -68,14 +88,35 @@ export interface SheetSiteRow {
   lead_time_days: number | null;
 }
 
+/** Registro adotado: a linha mudou de nome e reassumiu o registro existente. */
+export interface SheetAdoption {
+  recordId: string;
+  /** source_id anterior (hash do nome ANTIGO) — o que estava gravado. */
+  from: string;
+  /** source_id novo (hash do nome de hoje) — para onde foi re-chaveado. */
+  to: string;
+  title: string;
+}
+
 export interface SheetSyncOutcome {
   result: SyncResult;
   // Ids inseridos/atualizados NESTE push — a rota os passa à cauda
   // incremental (auto-match + recalc direcionado).
   touchedRecordIds: string[];
+  // Chave natural de TODA linha recebida — inserida, atualizada, adotada e
+  // `skipped` por inalterada. É o conjunto "visto" que alimenta a varredura
+  // (./sweep.ts). NÃO derive esse conjunto dos registros TOCADOS: o adapter não
+  // atualiza linha inalterada (ver passo 5), então em regime estável quase nada
+  // é tocado e a varredura mandaria a base inteira para a Lixeira.
+  seenSourceIds: string[];
+  // Rastro das adoções deste push (vai no JSON da resposta da rota).
+  adopted: SheetAdoption[];
 }
 
-const CORE_SYNC_FIELDS = ["stage", "value", "mrr", "sale_type", "channel"] as const;
+// `title` entrou na v1.5: com a adoção, renomear na planilha vira UPDATE — sem
+// ele o registro seria atualizado em tudo MENOS no nome. `isProtected` continua
+// preservando rename feito à mão no app.
+const CORE_SYNC_FIELDS = ["title", "stage", "value", "mrr", "sale_type", "channel"] as const;
 
 // Lookups por URL (in/ilikeAnyOf com hash de 64 chars ou e-mails) em chunks
 // curtos — mesma razão do LOOKUP_BATCH do ingest; escritas (corpo do POST)
@@ -98,16 +139,6 @@ function numOrNull(v: unknown): number | null {
 function sourceIdFor(name: string, createdAt: string): string {
   const key = `${normalizeName(name)}|${createdAt.trim()}`;
   return createHash("sha256").update(key).digest("hex");
-}
-
-function normalizeEmail(v: string | null): string | null {
-  const s = strOrNull(v);
-  return s ? s.toLowerCase() : null;
-}
-
-// Escapa os curingas do LIKE (%/_) p/ o ilikeAnyOf casar o e-mail LITERAL.
-function escapeLikePattern(v: string): string {
-  return v.replace(/[\\%_]/g, (m) => `\\${m}`);
 }
 
 // Leads relacionados por e-mail, em LOTE (case-insensitive; o mais recente por
@@ -173,8 +204,14 @@ export async function syncEstudoFechamentosRows(
     }
     byId.set(sourceId, row);
   }
-  if (byId.size === 0) return { result, touchedRecordIds: touched };
+  if (byId.size === 0) {
+    return { result, touchedRecordIds: touched, seenSourceIds: [], adopted: [] };
+  }
   const batch = [...byId.entries()];
+  // Conjunto VISTO: a chave natural de toda linha recebida, independente do que
+  // o push escreveu. Ver o comentário de SheetSyncOutcome.seenSourceIds.
+  const seenSourceIds = batch.map(([id]) => id);
+  const adopted: SheetAdoption[] = [];
 
   const [formulaDefs, customDateKeys] = await Promise.all([
     loadFormulaDefs(db),
@@ -217,8 +254,10 @@ export async function syncEstudoFechamentosRows(
 
   // 3) Existentes do lote (chave natural sob uq_records_source), em chunks.
   const existingById = new Map<string, ExistingRecord>();
+  // `title` NÃO entra avulso: ele está em CORE_SYNC_FIELDS desde a v1.5 e sai
+  // duplicado no select do PostgREST se for listado aqui também.
   const existingCols =
-    "id, source_id, title, currency, closed, field_modified_at, last_synced_at, " +
+    "id, source_id, currency, closed, field_modified_at, last_synced_at, " +
     "custom_fields, responsible_id, operation_id, related_lead_id, lead_time_days, " +
     CORE_SYNC_FIELDS.join(", ");
   const allIds = batch.map(([id]) => id);
@@ -230,11 +269,53 @@ export async function syncEstudoFechamentosRows(
       .in("source_id", allIds.slice(i, i + LOOKUP_BATCH));
     if (error) {
       recordError(result, "venda_site", `select existentes: ${error.message}`);
-      return { result, touchedRecordIds: touched };
+      return { result, touchedRecordIds: touched, seenSourceIds, adopted };
     }
     for (const r of data ?? []) {
       const rec = r as unknown as ExistingRecord & { source_id: string };
       existingById.set(rec.source_id, rec);
+    }
+  }
+
+  // 3b) ADOÇÃO: linha que o hash não encontrou pode ser um registro que já
+  //     existe sob OUTRO nome (alguém editou o "Name" na planilha). Procura
+  //     pela impressão digital e-mail + dia e reassume o registro em vez de
+  //     inserir — ver ./adoptions.ts para a régua e os fail-closed. Só roda
+  //     para o que faltou: em regime estável, zero consulta.
+  const adoptionByNewId = new Map<string, AdoptionCandidate>();
+  const pendingAdoption = batch
+    .filter(([sourceId]) => !existingById.has(sourceId))
+    .map(([sourceId, row]) => ({
+      sourceId,
+      email: normalizeEmail(row.email),
+      // `created_at` da planilha já É o dia de Brasília (yyyy-MM-dd).
+      day: row.created_at.trim().slice(0, 10),
+    }));
+  if (pendingAdoption.some((p) => p.email !== null)) {
+    try {
+      const candidates = await loadAdoptionCandidates(db, {
+        recordType: "venda_site",
+        sourceSystem: "sheet_site",
+        columns: existingCols,
+        emails: pendingAdoption.map((p) => p.email),
+        batchSize: LOOKUP_BATCH,
+      });
+      // Registro já casado pelo hash com OUTRA linha deste push não é adotável
+      // — teria dois donos.
+      const claimed = new Set([...existingById.values()].map((e) => e.id));
+      const { picks, ambiguous } = pickAdoptions(pendingAdoption, candidates, claimed);
+      for (const [newId, cand] of picks) adoptionByNewId.set(newId, cand);
+      for (const sourceId of ambiguous) {
+        recordError(
+          result,
+          "venda_site",
+          `adoção ambígua (2+ registros com o mesmo e-mail no mesmo dia): ${sourceId}`
+        );
+      }
+    } catch (e) {
+      // Adoção é melhoria, não pré-requisito: falhar aqui não pode derrubar o
+      // push. Sem ela o comportamento volta a ser o de antes (insere).
+      recordError(result, "venda_site", `adoção: ${(e as Error).message}`);
     }
   }
 
@@ -260,7 +341,8 @@ export async function syncEstudoFechamentosRows(
   }[] = [];
 
   for (const [sourceId, row] of batch) {
-    const existing = existingById.get(sourceId) ?? null;
+    const adoption = adoptionByNewId.get(sourceId) ?? null;
+    const existing = existingById.get(sourceId) ?? adoption?.record ?? null;
     const responsibleId = responsibleIdOf(row);
     const operationId = responsibleId
       ? (operationByResponsible.get(responsibleId) ?? null)
@@ -345,6 +427,7 @@ export async function syncEstudoFechamentosRows(
     }
 
     const mapped: Record<string, unknown> = {
+      title: row.name,
       stage: row.etapa_crm,
       value: row.contract,
       mrr: row.mrr,
@@ -355,6 +438,26 @@ export async function syncEstudoFechamentosRows(
     const updates: Record<string, unknown> = {};
     let changed = false;
     let customChanged = false;
+
+    if (adoption) {
+      // Re-chaveia o registro para a identidade de hoje: sem isso o próximo
+      // push voltaria a não encontrá-lo pelo hash e pagaria a adoção de novo.
+      // Livre sob uq_records_source — este hash não achou ninguém no passo 3.
+      updates.source_id = sourceId;
+      audits.push({
+        record_id: existing.id,
+        field: "source_id",
+        old_value: adoption.sourceId,
+        new_value: sourceId,
+      });
+      adopted.push({
+        recordId: existing.id,
+        from: adoption.sourceId,
+        to: sourceId,
+        title: row.name,
+      });
+      changed = true;
+    }
 
     for (const f of CORE_SYNC_FIELDS) {
       if (isProtected(f, existing)) continue;
@@ -418,7 +521,9 @@ export async function syncEstudoFechamentosRows(
             "lead_time_days" in updates ? updates.lead_time_days : existing.lead_time_days
           ),
           // Valores efetivos das colunas textuais (condicionais SE/E/OU).
-          title: existing.title,
+          // `title` passa pelo `eff` desde a v1.5: ele agora é sincronizado, e
+          // fórmula que testa o nome tem de ver o nome NOVO na mesma rodada.
+          title: eff("title"),
           record_type: "venda_site",
           source_system: "sheet_site",
           stage: eff("stage"),
@@ -505,5 +610,5 @@ export async function syncEstudoFechamentosRows(
     );
   }
 
-  return { result, touchedRecordIds: touched };
+  return { result, touchedRecordIds: touched, seenSourceIds, adopted };
 }

@@ -1,4 +1,7 @@
-<!-- Versão: 1.41 | Data: 10/09/2026 -->
+<!-- Versão: 1.42 | Data: 11/09/2026 -->
+<!-- v1.42 (11/09/2026): §setup 7 — Apps Script v1.2 (enquadramento do push) e
+     o runbook da varredura: como ler o ensaio, quando ligar e o que fazer
+     quando o teto recusa. -->
 <!-- v1.41 (10/09/2026): §12.2 — a Tree cria/edita a automação da
      sequência e aceita vários troncos; encerrar a sequência de UM registro;
      "Concluir" virou botão e "Anotar" virou "Comentar", com Salvar e analisar. -->
@@ -203,14 +206,41 @@ Ordem completa para levantar o sistema num projeto Supabase + Vercel novos:
    lista em Configurações → Responsáveis e monte as Operações.
 7. **Planilha "Estudo de Fechamentos"** — instale o Apps Script
    `integrations/apps-script/push_estudo_fechamentos.gs` na planilha (instruções no
-   cabeçalho do arquivo) e rode `installHourlyTrigger()`. O script v1.1
-   (03/08/2026) envia em chunks de ≤500 linhas — se a instalação for antiga
-   (push da planilha inteira, que estourava o teto de 60s da rota com 504),
-   basta recolar o arquivo: o trigger existente continua válido (mesmo nome de
-   função) e o servidor aceita os dois formatos. Nota: regra de auto-match em
+   cabeçalho do arquivo) e rode `installHourlyTrigger()`. O script v1.2
+   (11/09/2026) envia em chunks de ≤500 linhas e ENQUADRA a rodada
+   (`push_id`/`chunk`/`chunks`) — se a instalação for antiga, basta recolar o
+   arquivo: o trigger existente continua válido (mesmo nome de função) e o
+   servidor aceita os dois formatos (sem enquadramento, a varredura abaixo
+   simplesmente não roda). Nota: regra de auto-match em
    que `venda_site` é só o lado B roda por inteiro na cauda incremental
    pós-push (limitada por orçamento de tempo); se um par antigo-A × novo-B
    ficar sem casar, use "Executar todas" em Campos → Matches.
+
+   **Renomear empresa na planilha.** Desde 11/09/2026 renomear o "Name" de uma
+   linha é UPDATE do mesmo registro: o adapter reconhece a linha pela
+   impressão digital e-mail + dia e reassume o registro (ver §4.5 da
+   arquitetura). Antes disso criava um registro novo e deixava o antigo órfão
+   somando nos dashboards — os 3 casos de agosto/2026 foram limpos por
+   `supabase/apply/trash-sheet-orphans-2026-08.sql`. Se o e-mail mudar JUNTO
+   com o nome, a adoção não acontece (é uma linha nova para todos os efeitos) e
+   quem aposenta o antigo é a varredura.
+
+   **Varredura (o que sai da planilha vai para a Lixeira).** Controlada por
+   `SHEET_SWEEP_MODE`: ausente ou `dry` = ENSAIO (calcula e reporta, não
+   escreve), `on` = liga, `off` = desliga. O resultado sai no corpo da resposta
+   do push, que o Logger do Apps Script já imprime — leia em
+   Extensões → Apps Script → Execuções. Rotina de ativação: deixe em ensaio por
+   uma semana, confira que `would_sweep` é 0 nas rodadas em que ninguém mexeu
+   na planilha e só então ponha `on`.
+   - `refused_cap` — a varredura apagaria mais que 10% da base e se recusou.
+     Quase sempre é planilha truncada, filtrada ou meio-lida: confira a aba
+     Site antes de qualquer coisa. O `sample` traz os 10 primeiros títulos e
+     `curated` diz quantos deles têm edição manual no app.
+   - `refused_incomplete` / `refused_poisoned` — push parcial (um chunk falhou).
+     Nada foi varrido; o próximo trigger horário recompleta sozinho.
+   - `refused_empty` — chegou push sem linhas. Com o script v1.2 isso não
+     acontece (ele nem envia); se aparecer, é script antigo ou chamada manual.
+   - Varreu o que não devia? Restaure em /registros → Lixeira (30 dias).
 8. **Conferência** — rode as queries de verificação do `supabase/README.md`
    (políticas `anon` em snapshots = 0 linhas; EXECUTE das funções de snapshot só
    `service_role`; contagem de mocks = 302).

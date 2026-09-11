@@ -1,4 +1,9 @@
-<!-- Versão: 1.90 | Data: 11/09/2026 -->
+<!-- Versão: 1.91 | Data: 11/09/2026 -->
+<!-- v1.91 (11/09/2026): §4.5 (Sheets) — a identidade da linha da planilha
+     deixou de ser só o hash de nome+data: renomear a empresa criava registro
+     novo e deixava o antigo órfão somando nos dashboards. Adoção por
+     impressão digital (e-mail + dia) no adapter + varredura do push (0140)
+     para a linha realmente apagada. -->
 <!-- v1.90 (11/09/2026): §4.24 — o turno da IA do comentário saiu da Server
      Action para /api/tree/ai-turn. Server Action é despachada uma de cada vez
      por cliente: um turno de 240s segurava loadRecordTree e a Tree não
@@ -1125,7 +1130,43 @@ exceção: sempre recomputados).
 - **Sheets**: o Apps Script (`integrations/apps-script/push_estudo_fechamentos.gs`)
   faz POST horário em `/api/sync/sheets`, protegido por `SYNC_SECRET` — desde
   o v1.1 (03/08/2026) em chunks de ≤500 linhas (o servidor segue aceitando o
-  push inteiro legado; guardas de 20k linhas/4 MB só falham rápido). O adapter
+  push inteiro legado; guardas de 20k linhas/4 MB só falham rápido).
+  **Identidade da linha (11/09/2026).** A chave natural é
+  `sha256(normalizeName(nome)|data)` — derivada de conteúdo MUTÁVEL. Editar o
+  "Name" na aba Site mintava um `source_id` novo: o adapter INSERIA e o
+  registro antigo ficava órfão somando nos dashboards, levando junto a
+  curadoria manual (responsável, lead vinculado, `field_modified_at`). Foram 3
+  casos em agosto/2026, todos por sufixo entre parênteses. A correção NÃO foi
+  mudar a chave (re-chavear a base faria todo registro parecer novo) nem
+  carimbar um id na planilha: quando o hash não encontra existente,
+  `lib/sync/sheets/adoptions.ts` procura o registro pela impressão digital que
+  o payload JÁ carrega — **e-mail + dia** — e o ADOTA, re-chaveando o
+  `source_id` para o hash de hoje. Renomear virou UPDATE, sem migração e sem
+  backfill. O dia faz parte da impressão digital de propósito: sem ele, a 2ª
+  venda de um cliente recorrente seria adotada pelo registro da 1ª e as duas
+  virariam uma só — estrago pior que a duplicata. O preço é que correção de
+  DATA não é adotada (cria registro novo, e quem aposenta o antigo é a
+  varredura). Fail-closed em toda dúvida: sem e-mail não adota, 2+ candidatos
+  não adota (reporta ambiguidade), registro já casado pelo hash com outra
+  linha do push não é adotável, e registro na Lixeira nunca é ressuscitado —
+  ao contrário da busca PRIMÁRIA, que segue sem filtro de `deleted_at`
+  (invariante 30). Junto veio `title` em `CORE_SYNC_FIELDS`: sem ele a adoção
+  gravaria tudo MENOS o nome.
+  **Varredura do push (0140).** O adapter é upsert puro — sabe o que chegou,
+  nunca o que sumiu. O `.gs` v1.2 enquadra a rodada (`push_id` + `chunk`/
+  `chunks`), cada chunk deposita em `sync_push_seen` as chaves que viu e o
+  ÚLTIMO dispara `sheet_push_sweep`, que manda à Lixeira o que não veio. O
+  conjunto visto sai de `SheetSyncOutcome.seenSourceIds` — **toda linha
+  recebida, inclusive a `skipped` por inalterada**; derivá-lo dos registros
+  TOCADOS mandaria a base inteira para a Lixeira, já que em regime estável
+  quase nada é escrito. Fail-closed em três camadas: push sem enquadramento
+  (script legado) nunca varre; rodada com erro marca o push `poisoned`, e push
+  envenenado não varre; falha ao REGISTRAR o que o chunk viu (infra) responde
+  não-2xx e o `.gs` aborta os seguintes, então o quadro não fecha sem aquele
+  chunk. Erro de LINHA fica fora dessa lista de propósito — segue 200, como
+  sempre foi: derrubar o push por uma linha ruim pararia a integração enquanto
+  ela existisse na planilha, e o `poisoned` já cobre o risco. Mais o teto de
+  10% e o `SHEET_SWEEP_MODE`, que é `dry` por padrão. O adapter
   (`lib/sync/sheets/adapter.ts` v1.4) trabalha em LOTE, na forma do
   `ingestRows`: responsáveis via `resolveResponsiblesByName` (1 leitura por
   push), existentes por `.in("source_id")`, leads por e-mail via `ilikeAnyOf`

@@ -1,4 +1,4 @@
-// Versão: 1.1 | Data: 03/08/2026
+// Versão: 1.2 | Data: 11/09/2026
 // Apps Script — Fonte B (planilha "Estudo de Fechamentos", aba "Site").
 // Fluxo: Planilha "Estudo de Fechamentos" + "Inbound Zapper" (Leads Base, só
 // para Lead Time) → Apps Script (trigger horário) → POST /api/sync/sheets.
@@ -9,6 +9,19 @@
 // restantes e o próximo trigger recompleta. O servidor segue aceitando o
 // formato antigo (planilha inteira) — recolar este arquivo é o que ativa o
 // chunking; o trigger existente continua válido (mesmo nome de função).
+// v1.2 (11/09/2026): ENQUADRAMENTO do push (push_id + chunk/chunks). Como cada
+// chunk é um POST separado, nenhum request isolado vê a planilha inteira — sem
+// o enquadramento o servidor não tem como saber que uma linha SUMIU da aba
+// Site. Com ele, o último chunk fecha o quadro e dispara a varredura (0140):
+// registro que não veio vai para a Lixeira. Duas garantias que dependem deste
+// arquivo e NÃO podem ser afrouxadas:
+//   1) abortar no primeiro chunk não-2xx (o `throw` abaixo) — é o que impede o
+//      quadro de fechar com a planilha meio-enviada;
+//   2) NÃO enviar nada quando a leitura sai vazia — planilha vazia é quase
+//      sempre erro (aba renomeada, filtro, permissão), e um push vazio
+//      "completo" pediria a varredura da base inteira.
+// Servidor sem o enquadramento (ou script antigo) segue aceito: sem push_id a
+// varredura simplesmente não roda.
 //
 // SETUP (uma vez):
 // 1) Na planilha "Estudo de Fechamentos": Extensões → Apps Script, cole este arquivo.
@@ -102,15 +115,32 @@ function pushEstudoFechamentos() {
     });
   });
 
+  // Leitura vazia NÃO é um push vazio: é sinal de problema (aba renomeada,
+  // filtro ativo, permissão perdida). Enviar aqui fecharia um quadro
+  // "completo" com zero linhas e pediria a varredura da base inteira.
+  if (rows.length === 0) {
+    Logger.log('Nenhuma linha lida na aba "%s" — nada enviado.', CONFIG.salesSheet);
+    return;
+  }
+
   // Envia em chunks sequenciais: cada request fica pequena e rápida no
   // servidor. Falha num chunk aborta os restantes (idempotente — o próximo
   // trigger horário reenvia tudo e recompleta).
+  // O pushId identifica ESTA rodada: os chunks se somam no servidor e o último
+  // fecha o quadro. Um id por execução — reenviar o mesmo chunk não conta 2x.
+  const pushId = Utilities.getUuid();
   const CHUNK_SIZE = 500;
   const totalChunks = Math.max(1, Math.ceil(rows.length / CHUNK_SIZE));
   for (let i = 0; i < rows.length; i += CHUNK_SIZE) {
     const chunk = rows.slice(i, i + CHUNK_SIZE);
     const chunkNo = Math.floor(i / CHUNK_SIZE) + 1;
-    const payload = { source: 'estudo_fechamentos_site', rows: chunk };
+    const payload = {
+      source: 'estudo_fechamentos_site',
+      push_id: pushId,
+      chunk: chunkNo,
+      chunks: totalChunks,
+      rows: chunk
+    };
     const response = UrlFetchApp.fetch(endpoint, {
       method: 'post',
       contentType: 'application/json',

@@ -1815,6 +1815,45 @@ This version has breaking changes — APIs, conventions, and file structure may 
   INTOCADOS. Fiscalizado por `lib/workflow/*.test.ts` +
   `lib/workflow/{steps,seeds}/*.test.ts`. Ver `docs/arquitetura.md` §4.23 e
   invariante 32.
+- **Identidade de fonte PUSH não deriva de conteúdo MUTÁVEL; reconciliação no
+  ADAPTER, nunca no RPC (0140, 11/09/2026):** a chave natural da planilha
+  "Estudo de Fechamentos" é `sha256(normalizeName(nome)|data)` — renomear a
+  empresa na aba Site mintava um `source_id` novo, o adapter INSERIA e o
+  registro antigo ficava órfão somando nos dashboards, levando junto a
+  curadoria manual (3 casos em ago/2026). A correção NÃO foi re-chavear a base
+  nem carimbar id na planilha: quando o hash não acha existente,
+  `lib/sync/sheets/adoptions.ts` procura pela impressão digital que o payload
+  já carrega — **e-mail + dia** — e ADOTA o registro, re-chaveando o
+  `source_id`. O DIA é parte da impressão digital de propósito: sem ele a 2ª
+  venda de um cliente recorrente seria fundida na 1ª, estrago pior que a
+  duplicata — NÃO troque por "e-mail sozinho" para cobrir correção de data (ela
+  cria registro novo e quem aposenta o antigo é a varredura). Fail-closed: sem
+  e-mail não adota; 2+ candidatos não adota; registro já casado pelo hash com
+  outra linha do push não é adotável; e a busca de adoção filtra
+  `deleted_at is null` — ao contrário da PRIMÁRIA, que segue sem o filtro
+  (invariante 30) — senão ressuscitaria quem um admin mandou para a Lixeira.
+  `title` está em `CORE_SYNC_FIELDS` desde então: sem ele a adoção grava tudo
+  MENOS o nome. **Varredura (0140):** o que não veio num push COMPLETO saiu da
+  planilha e vai para a Lixeira. O `.gs` enquadra a rodada (`push_id` +
+  `chunk`/`chunks`) porque cada chunk é um POST separado e nenhum request vê a
+  planilha inteira; só o ÚLTIMO chunk varre. O conjunto visto sai de
+  `seenSourceIds` = TODA linha recebida, **inclusive a `skipped` por
+  inalterada** — derivá-lo dos registros TOCADOS mandaria a base inteira para
+  a Lixeira (o adapter não escreve linha inalterada, de propósito). NUNCA varra
+  push parcial — três camadas, nessa ordem: push sem enquadramento não varre;
+  rodada com erro marca o push `poisoned` e push envenenado não varre; falha ao
+  REGISTRAR o que o chunk viu (infra) responde não-2xx e o `.gs` aborta os
+  seguintes, então o quadro não fecha sem aquele chunk. Erro de LINHA fica
+  FORA dessa lista de propósito: segue 200, porque derrubar o push por causa de
+  uma linha ruim pararia a integração enquanto ela existisse na planilha (o
+  gatilho horário reenviaria e falharia de novo, para sempre) — o `poisoned` já
+  cobre o risco sem custar disponibilidade. Teto de 10% +
+  `SHEET_SWEEP_MODE` com padrão `dry`. O `set_config('app.allow_protected_change','on',true)` vive
+  DENTRO do `security definer` `sheet_push_sweep`, nunca na rota — e afrouxar o
+  trigger da 0121 para um papel de sync está fora de questão. Os RPCs de widget
+  ficam INTOCADOS (a lixeira já entra neles desde a 0121). Fiscalizado por
+  `lib/sync/sheets/{adoptions,sweep,adapter}.test.ts` +
+  `tests/apps-script-estudo-push.test.ts`. Ver `docs/arquitetura.md` §4.5.
 - **Lixeira de registros (0121): `deleted_at` só muda por ADMIN e toda leitura
   nova de `records` decide EXPLICITAMENTE sobre a lixeira (07/08/2026):**
   soft delete de 30 dias — enviar/restaurar/purgar SÓ pelas actions de
