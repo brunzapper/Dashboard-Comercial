@@ -1,4 +1,9 @@
 // @vitest-environment jsdom
+// Versão: 1.1 | Data: 11/09/2026
+// v1.1 (11/09/2026): o raciocínio ao vivo. Ele existe porque o turno saiu da
+// Server Action para a rota NDJSON — e o cano precisava existir de qualquer
+// forma: Server Action congela todas as outras do cliente, e um POST de dois
+// minutos sem byte trafegando apanha de timeout de ociosidade.
 // Versão: 1.0 | Data: 11/09/2026
 // O dock das sugestões da IA.
 //
@@ -41,6 +46,7 @@ function mountDock(over: Record<string, unknown> = {}) {
   const value = {
     threads: [thread()],
     busy: new Set<string>(),
+    thoughts: new Map<string, string>(),
     openId: "t1",
     open: vi.fn(),
     minimized: false,
@@ -199,3 +205,34 @@ describe("a réplica dispensa escrever outro comentário", () => {
 // O import estático existe só para o arquivo falhar cedo se o componente sumir;
 // os testes usam o import dinâmico porque cada um remonta o contexto.
 void AiSuggestionsDock;
+
+describe("o raciocínio ao vivo (v1.1)", () => {
+  it("aparece sob o 'Analisando…' do fio que está transmitindo", async () => {
+    vi.resetModules();
+    mountDock({
+      busy: new Set(["t1"]),
+      thoughts: new Map([["t1", "Lendo as tarefas abertas…"]]),
+    });
+    const { AiSuggestionsDock: Dock } = await import("./ai-suggestions-dock");
+    render(<Dock />);
+    expect(screen.getByText("Lendo as tarefas abertas…")).toBeTruthy();
+  });
+
+  it("é POR FIO — o da outra conversa não vaza para esta", async () => {
+    // Duas análises podem transmitir ao mesmo tempo (é o caso de uso do dock);
+    // um campo só misturaria o raciocínio das duas.
+    vi.resetModules();
+    mountDock({
+      threads: [thread(), thread({ id: "t2", recordTitle: "Beta SA" })],
+      busy: new Set(["t1", "t2"]),
+      thoughts: new Map([
+        ["t1", "pensando na Acme"],
+        ["t2", "pensando na Beta"],
+      ]),
+    });
+    const { AiSuggestionsDock: Dock } = await import("./ai-suggestions-dock");
+    render(<Dock />);
+    expect(screen.getByText("pensando na Acme")).toBeTruthy();
+    expect(screen.queryByText("pensando na Beta")).toBeNull();
+  });
+});

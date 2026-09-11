@@ -1,3 +1,11 @@
+// Versão: 1.3 | Data: 11/09/2026
+// v1.3 (11/09/2026): `runCommentThreadCore` aceita `onThought`, e o turno deixou
+//   de ser chamado por Server Action — passou para a rota
+//   `/api/tree/ai-turn`. O motivo é estrutural, não estético: o Next despacha
+//   Server Actions UMA DE CADA VEZ por cliente, e este turno segura a fila por
+//   até 240s. Enquanto a IA analisava, `loadRecordTree` (também action) ficava
+//   atrás dela e a Tree não carregava OUTRO registro — justamente o que o dock
+//   existe para permitir. O núcleo não mudou de lugar: a rota o chama igual.
 // Versão: 1.2 | Data: 11/09/2026
 // v1.2 (11/09/2026): a análise virou CONVERSA, e ela mora numa linha
 //   (`tree_ai_threads`, 0139) em vez de num `useState` do widget.
@@ -459,6 +467,11 @@ export async function openCommentThreadCore(input: {
 export async function runCommentThreadCore(input: {
   threadId: string;
   reply?: string;
+  /**
+   * v1.3: raciocínio do modelo, em pedaços — a rota o transmite como NDJSON e
+   * o dock o mostra sob o "Analisando…". Efêmero: nunca entra na linha.
+   */
+  onThought?: (chunk: string) => void;
 }): Promise<{ ok: boolean; message?: string; thread?: CommentThread }> {
   const session = await getSessionInfo();
   if (!session) return { ok: false, message: "Sessão expirada." };
@@ -534,6 +547,7 @@ export async function runCommentThreadCore(input: {
       if (!n.ok) return { ok: false, errors: n.errors };
       return { ok: true, value: { actions: n.actions, warnings: v.warnings } };
     },
+    onThought: input.onThought,
   });
 
   if (!result.ok) {

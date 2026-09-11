@@ -1,4 +1,8 @@
-<!-- Versão: 1.89 | Data: 11/09/2026 -->
+<!-- Versão: 1.90 | Data: 11/09/2026 -->
+<!-- v1.90 (11/09/2026): §4.24 — o turno da IA do comentário saiu da Server
+     Action para /api/tree/ai-turn. Server Action é despachada uma de cada vez
+     por cliente: um turno de 240s segurava loadRecordTree e a Tree não
+     carregava outro registro durante a análise. -->
 <!-- v1.89 (11/09/2026): §4.24 — o alvo da IA de tarefas ganhou `tarefa_data`
      (sem ela, ocorrência de série era inendereçável e a IA devolvia a pergunta),
      o verbo `adiar_sequencia` + `series_settings.snooze_until` (0139), e a
@@ -5202,6 +5206,33 @@ empilhados cobririam o painel, então a moldura é a mesma e `‹ 2/3 ›` troca
 conteúdo. O log é o `AiChatLog` que o painel de dashboards e o sheet da Home já
 usam; um segundo componente de conversa seria a régua paralela da invariante 25,
 e este já sabe desenhar o estado "gerando".
+
+**O turno não é Server Action, e isso não é detalhe de transporte
+(11/09/2026).** A primeira versão do dock chamava `runCommentThread` como
+action, e o defeito apareceu no uso: *enquanto a IA analisava um comentário, a
+Tree não carregava outro registro*. A causa é do Next, e está na doc desta
+versão — *"dispatches Server Actions one at a time per client… use a Route
+Handler for non-mutation requests"*. Um turno dura até 240s
+(`AI_LOOP_TURN_BUDGET_MS`), `loadRecordTree` também é action, e ela ficava na
+fila atrás dele; valia para o painel inteiro (filtro rápido, salvar widget,
+kanban). Era o oposto do que o dock existe para fazer.
+
+O turno passou para `/api/tree/ai-turn`, o terceiro da mesma família
+(`/api/dashboards/[id]/ai-turn`, `/api/operacao/[scope]/ai-turn`), rodando o
+MESMO `runCommentThreadCore` e recuperando à mão o **anti-CSRF**
+(`origin === host`) que a action tinha embutido — a única proteção que se perde
+ao sair dela. Só o turno saiu: abrir o fio é um insert, e aplicar/descartar são
+mutações, que é o caso em que a doc manda ficar na action.
+
+O formato é NDJSON com o estado SEMPRE na última linha (inclusive em erro de
+gate), e não é enfeite: um POST de dois minutos sem byte trafegando apanha de
+timeout de ociosidade em proxy — daí também o `x-accel-buffering: no`. Como o
+cano passou a existir, o `onThought` do laço de geração chega ao `busyDetail`
+que o `AiChatLog` já tinha, e a espera deixou de ser opaca; o raciocínio é
+guardado POR FIO (`thoughts: Map`), porque duas conversas podem transmitir ao
+mesmo tempo e um campo só as misturaria. O laço de leitura tem dono ÚNICO,
+`readNdjsonTurn` (`lib/ai/read-ndjson-turn.ts`): ele estava copiado byte a byte
+nos dois painéis, e este seria a terceira cópia.
 
 A conversa é PERSISTIDA em `tree_ai_threads` (0139), no molde da 0124 — com uma
 diferença: lá a chave é o escopo (uma sessão por tela), aqui são várias

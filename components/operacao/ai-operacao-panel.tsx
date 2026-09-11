@@ -1,3 +1,7 @@
+// Versão: 1.1 | Data: 11/09/2026
+// v1.1 (11/09/2026): o laço de leitura do NDJSON virou `readNdjsonTurn` —
+// ele estava byte a byte igual aqui e no painel de dashboards, e o dock da
+// Tree ia ser a terceira cópia (régua paralela da invariante 25).
 // Versão: 1.0 | Data: 07/09/2026
 // Painel de IA da OPERAÇÃO — a "janela própria" que aparece enquanto se está
 // dentro de /operacao, ESCOPADA pela sub-área aberta (o layout resolve o
@@ -24,6 +28,7 @@ import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { usePanelWidth } from "@/components/ui/use-panel-width";
+import { readNdjsonTurn } from "@/lib/ai/read-ndjson-turn";
 import { AiChatLog, type AiChatEntry } from "@/components/dashboards/ai-chat-log";
 import { useOperacaoAiScope } from "@/components/operacao/ai-scope-context";
 import type { OperacaoAiScopeMeta } from "@/lib/ai/operacao/scopes";
@@ -133,33 +138,10 @@ export function AiOperacaoPanel({
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ message: text, target }),
       });
-      if (!res.ok || !res.body) throw new Error(`o servidor respondeu ${res.status}.`);
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-      let finalState: OperacaoAiState | null = null;
-      const handleLine = (rawLine: string) => {
-        const trimmed = rawLine.trim();
-        if (!trimmed) return;
-        const evt = JSON.parse(trimmed) as
-          | { type: "thought"; text: string }
-          | { type: "state"; state: OperacaoAiState };
-        if (evt.type === "thought") setLiveThought((t) => t + evt.text);
-        else if (evt.type === "state") finalState = evt.state;
-      };
-      for (;;) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        let nl: number;
-        while ((nl = buffer.indexOf("\n")) >= 0) {
-          handleLine(buffer.slice(0, nl));
-          buffer = buffer.slice(nl + 1);
-        }
-      }
-      if (buffer.trim()) handleLine(buffer);
-      if (!finalState) throw new Error("resposta incompleta do servidor.");
-      absorb(finalState);
+      const state = await readNdjsonTurn<OperacaoAiState>(res, {
+        onThought: (chunk) => setLiveThought((t) => t + chunk),
+      });
+      absorb(state);
     } catch (err) {
       // O turno pode ter concluído no servidor mesmo com o stream perdido — a
       // sessão persiste; um F5/reabrir recarrega o estado real.

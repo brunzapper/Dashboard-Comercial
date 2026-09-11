@@ -1,3 +1,6 @@
+// Versão: 1.1 | Data: 11/09/2026
+// v1.1 (11/09/2026): o log mostra o raciocínio ao vivo sob o "Analisando…"
+// (`busyDetail`, prop que o AiChatLog já tinha para os outros dois painéis).
 // Versão: 1.0 | Data: 11/09/2026
 // O DOCK das sugestões da IA: um pop-up flutuante, minimizável, COMPARTILHADO
 // por todas as conversas em andamento, com setinha para navegar entre elas.
@@ -186,6 +189,7 @@ export function AiSuggestionsDock() {
         entries={thread.chat}
         busy={busy}
         busyLabel="Analisando o comentário…"
+        busyDetail={dock.thoughts.get(thread.id)}
         className="max-h-[40vh] min-h-16"
       />
 
