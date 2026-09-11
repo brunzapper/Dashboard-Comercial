@@ -1,4 +1,4 @@
-// Versão: 1.2 | Data: 03/08/2026
+// Versão: 1.3 | Data: 11/09/2026
 // v1.1 (09/07/2026): Fase 8 — SyncResult ganha quebra por entidade (byEntity) e
 //   amostras de erro (errorSamples); helpers recordOutcome/recordError param de
 //   engolir a mensagem do erro — o painel de Sync mostra leads vs deals e o que
@@ -6,6 +6,12 @@
 // v1.2 (03/08/2026): resolveResponsiblesByName movida de lib/import/ingest.ts
 //   — o adapter da planilha (lib/sync/sheets/adapter.ts) passou a resolver
 //   responsáveis em lote e a implementação vive aqui, comum às duas fontes.
+// v1.3 (11/09/2026): normalizeEmail/escapeLikePattern saíram de
+//   lib/sync/sheets/adapter.ts — a adoção por impressão digital
+//   (lib/sync/sheets/adoptions.ts) precisa das MESMAS regras de normalização e
+//   de escape que o lookup de lead por e-mail já usava; deixá-las privadas no
+//   adapter obrigaria a uma cópia (e um e-mail normalizado de um jeito num
+//   lado e de outro no outro deixa de casar em silêncio).
 // Utilidades comuns a QUALQUER fonte de sync (Bitrix, Sheets, ...): resultado
 // padrão, conflito por campo (edição manual protege contra sobrescrita) e
 // resolução de operação primária de um responsável. Extraído de
@@ -192,4 +198,23 @@ export function normalizeName(v: string | null | undefined): string {
     .normalize("NFD")
     .replace(/[̀-ͯ]/g, "")
     .replace(/\s+/g, " ");
+}
+
+/**
+ * E-mail em forma canônica de COMPARAÇÃO (trim + lowercase). Vazio vira null —
+ * string vazia nunca deve casar com string vazia num lookup por e-mail.
+ */
+export function normalizeEmail(v: string | null | undefined): string | null {
+  if (v == null) return null;
+  const s = String(v).trim();
+  return s === "" ? null : s.toLowerCase();
+}
+
+/**
+ * Escapa os curingas do LIKE (%/_/\) para o `ilikeAnyOf` do PostgREST casar o
+ * valor LITERAL. Não dispensa o pós-filtro por igualdade exata em quem chama:
+ * ILIKE segue sendo case-insensitive por desenho, e é disso que precisamos.
+ */
+export function escapeLikePattern(v: string): string {
+  return v.replace(/[\\%_]/g, (m) => `\\${m}`);
 }

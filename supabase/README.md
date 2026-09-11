@@ -1,3 +1,6 @@
+<!-- Versão: 1.9 | Data: 11/09/2026 -->
+<!-- v1.9 (11/09/2026): seção da 0140 (varredura do push da planilha) +
+     recolagem do push_estudo_fechamentos.gs v1.2. Migração ANTES do deploy. -->
 <!-- Versão: 1.8 | Data: 22/08/2026 -->
 <!-- v1.8 (22/08/2026): Apps Script v3.2 — conserto dos hiperlinks (fórmula
      parseada no locale pt-BR virava #ERROR!; agora rich text). Republicação
@@ -596,3 +599,50 @@ como texto puro (sem itálico na nota, sem negrito na faixa aplicada). Nenhuma
 migração é envolvida, e a mesma memória já aparece formatada na tela
 (Remuneração → Visão geral → clicar no Realizado de um fator) sem depender do
 Apps Script. Regra geral: **kind novo no payload exige republicar o `.gs`**.
+
+## Como aplicar a 0140 (varredura do push da planilha "Estudo de Fechamentos")
+
+**Aplicar ANTES do deploy.** A rota nova chama `sync_push_record_chunk` a cada
+chunk; sem a migração ela devolve erro e o push do Apps Script falha (o sync
+para até a migração entrar). A migração é puramente ADITIVA — duas tabelas e
+três funções, nenhuma linha existente é tocada.
+
+1. Cole `migrations/0140_sheet_push_sweep.sql` no SQL Editor e execute
+   (idempotente).
+2. Deploy do app.
+3. **Recole o `.gs`** (v1.2): na planilha, Extensões → Apps Script → cole
+   `integrations/apps-script/push_estudo_fechamentos.gs`. O trigger existente
+   continua válido (mesmo nome de função). Sem recolar, o push segue
+   funcionando e a varredura simplesmente não roda (falta o `push_id`).
+
+**A varredura nasce em ENSAIO.** `SHEET_SWEEP_MODE` ausente (ou `dry`) faz a
+rodada calcular e reportar o que apagaria **sem escrever nada**. O relatório sai
+no corpo da resposta do push, que o Logger do Apps Script imprime
+(Extensões → Apps Script → Execuções). Rode assim por uma semana; se
+`would_sweep` for 0 nas rodadas em que ninguém mexeu na planilha, ponha
+`SHEET_SWEEP_MODE=on` nas Environment Variables da Vercel. `off` desliga.
+
+**Conferência depois de aplicar:**
+
+```sql
+-- Nenhuma policy nas tabelas de enquadramento (service role only): 0 linhas.
+select tablename, policyname from pg_policies
+where tablename in ('sync_push_runs', 'sync_push_seen');
+
+-- EXECUTE só para service_role nas três funções novas.
+select p.proname, r.rolname
+from pg_proc p
+join pg_namespace n on n.oid = p.pronamespace
+cross join lateral aclexplode(p.proacl) a
+join pg_roles r on r.oid = a.grantee
+where n.nspname = 'public'
+  and p.proname in ('sheet_push_sweep', 'sync_push_record_chunk',
+                    'sync_push_purge_stale')
+  and a.privilege_type = 'EXECUTE';
+```
+
+**Limpeza pontual que acompanhou a entrega.** Os 3 registros órfãos de
+agosto/2026 (criados quando alguém renomeou empresas na aba Site, antes da
+adoção por e-mail + dia) foram enviados à Lixeira por
+`apply/trash-sheet-orphans-2026-08.sql`, já aplicado em 11/09/2026. O arquivo
+fica como registro e traz o roteiro para desfazer.

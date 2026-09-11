@@ -1,4 +1,4 @@
-// Versão: 1.1 | Data: 03/08/2026
+// Versão: 1.2 | Data: 11/09/2026
 // Recebe o push horário do Apps Script (planilha "Estudo de Fechamentos",
 // aba Site) e sincroniza para `records`. Protegido por SYNC_SECRET — mesmo
 // padrão dos endpoints do Bitrix. Fonte PUSH: não há botão manual na UI.
@@ -7,12 +7,34 @@
 // (escopo venda_site, com orçamento de tempo) + guardas de tamanho: a soma
 // loop-por-linha + cauda global estourava o teto de 60s do plano da Vercel
 // (FUNCTION_INVOCATION_TIMEOUT) em todo push com a planilha inteira.
+// v1.2 (11/09/2026): enquadramento do push (push_id/chunk/chunks) + VARREDURA
+// no último chunk — registro que saiu da planilha vai para a Lixeira (0140).
+// O que protege a varredura de rodar sobre uma planilha meio-lida:
+//   - push SEM enquadramento (script legado) nunca varre nada;
+//   - rodada com erro envenena o push, e push envenenado não varre;
+//   - falha ao REGISTRAR o que o chunk viu (infra) responde não-2xx, e o .gs
+//     aborta os chunks seguintes — o quadro não fecha sem esse chunk.
+// Deliberadamente NÃO entra nessa lista: erro de LINHA. Ele segue devolvendo
+// 200, como sempre foi. Derrubar o push por causa de uma linha ruim pararia a
+// integração inteira enquanto ela existisse na planilha (o gatilho horário
+// reenviaria e falharia de novo, para sempre), e o `poisoned` já cobre o risco
+// sem custar disponibilidade.
 import { NextResponse } from "next/server";
 
 import { syncSecretAuthorized } from "@/lib/auth/sync-secret";
 import { createServiceClient } from "@/lib/supabase/service";
 import { syncEstudoFechamentosRows, type SheetSiteRow } from "@/lib/sync/sheets/adapter";
 import { runIncrementalPostSync } from "@/lib/sync/post-ingest";
+import {
+  isLastChunk,
+  purgeStalePushRuns,
+  readPushFrame,
+  recordPushChunk,
+  resolveSourceOrg,
+  runSheetSweep,
+  sweepMode,
+  type SweepReport,
+} from "@/lib/sync/sheets/sweep";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -32,9 +54,16 @@ const TAIL_BUDGET_MS = 40_000;
 // SYNC_SECRET com comparação constant-time — ver lib/auth/sync-secret.ts.
 const authorized = syncSecretAuthorized;
 
+const RECORD_TYPE = "venda_site";
+const SOURCE_SYSTEM = "sheet_site";
+
 interface Payload {
   source?: string;
   rows?: unknown[];
+  // Enquadramento (v1.2 do .gs). Ausente = modo legado, sem varredura.
+  push_id?: unknown;
+  chunk?: unknown;
+  chunks?: unknown;
 }
 
 function toNumber(v: unknown): number | null {
@@ -103,7 +132,61 @@ export async function POST(request: Request) {
     const db = createServiceClient();
     const startedAt = new Date().toISOString();
     const t0 = Date.now();
-    const { result, touchedRecordIds } = await syncEstudoFechamentosRows(db, rows);
+    const { result, touchedRecordIds, seenSourceIds, adopted } =
+      await syncEstudoFechamentosRows(db, rows);
+
+    // ---- Enquadramento + varredura (0140) ----
+    const frame = readPushFrame(payload as Record<string, unknown>);
+    const mode = sweepMode();
+    let sweep: SweepReport | undefined;
+    if (frame && mode !== "off") {
+      const orgId = await resolveSourceOrg(db, RECORD_TYPE);
+      if (!orgId) {
+        // Sem org resolvida não dá para escopar a varredura. Segue o sync.
+        result.errorSamples.push("[venda_site] varredura: org da base não resolvida");
+      } else {
+        if (frame.chunk === 1) await purgeStalePushRuns(db);
+        const recorded = await recordPushChunk(db, {
+          frame,
+          organizationId: orgId,
+          recordType: RECORD_TYPE,
+          sourceSystem: SOURCE_SYSTEM,
+          seenSourceIds,
+          // Rodada com erro não varre. Margem barata: o conjunto visto sai do
+          // payload (é completo mesmo com linha ruim), mas adiar a varredura
+          // para a próxima hora não custa nada e cobre o que não anteciparmos.
+          poisoned: result.errors > 0,
+        });
+        if (!recorded.ok) {
+          // Falha de INFRA: não sabemos o que este chunk viu, e o quadro pode
+          // fechar sem ele — aí a varredura apagaria justamente o que não foi
+          // registrado. Envenena (best-effort) E devolve não-2xx para o .gs
+          // abortar os chunks seguintes. É transitório: o gatilho da próxima
+          // hora recomeça o push do zero.
+          await recordPushChunk(db, {
+            frame,
+            organizationId: orgId,
+            recordType: RECORD_TYPE,
+            sourceSystem: SOURCE_SYSTEM,
+            seenSourceIds: [],
+            poisoned: true,
+          }).catch(() => {});
+          return NextResponse.json(
+            { ok: false, error: `registro do chunk: ${recorded.error}`, result },
+            { status: 500 }
+          );
+        }
+        if (isLastChunk(frame)) {
+          sweep = await runSheetSweep(db, frame.pushId, { dryRun: mode !== "on" });
+        }
+      }
+    }
+
+    // NOTA: linha com erro NÃO derruba o push (segue 200, como sempre foi).
+    // Derrubar aqui pararia a integração inteira enquanto uma linha ruim
+    // existisse na planilha — o gatilho horário reenviaria e falharia de novo,
+    // para sempre. Quem protege a varredura de rodar sobre dado incompleto é o
+    // `poisoned` acima, que é preciso e não custa disponibilidade.
     // Após importar as vendas do site: casa com os leads (auto-match) e refaz
     // o lead time + campos com match:<fonte> — INCREMENTAL, só quando este
     // push escreveu algo (best-effort — não falha o push).
@@ -119,7 +202,10 @@ export async function POST(request: Request) {
     } catch {
       /* ignora: a sincronização das linhas já foi persistida. */
     }
-    return NextResponse.json({ ok: true, result });
+    // `adopted` e `sweep` saem no corpo de propósito: o Logger do Apps Script
+    // já imprime a resposta, então as adoções e o que a varredura faria ficam
+    // visíveis na execução do gatilho sem nenhuma infra de observabilidade.
+    return NextResponse.json({ ok: true, result, adopted, sweep });
   } catch (error) {
     return NextResponse.json(
       { ok: false, error: (error as Error).message },

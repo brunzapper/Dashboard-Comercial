@@ -1,9 +1,17 @@
-// Versão: 1.0 | Data: 03/08/2026
+// Versão: 1.1 | Data: 11/09/2026
 // Adapter da planilha em LOTE (v1.4): o contrato destes testes é o formato
 // das consultas — O(1) leituras de responsibles por push, existentes por
 // .in("source_id"), leads por ilikeAnyOf — e o skip-unchanged do update
 // (re-push idempotente não gera escrita nem audit; era o churn que estourava
 // o teto de 60s da rota). Fake client de tests/helpers (sem banco).
+// v1.1 (11/09/2026): ADOÇÃO (v1.5 do adapter). O bloco no fim deste arquivo
+// trava a regressão que motivou a correção — renomear a empresa na planilha
+// NÃO pode virar INSERT — e os fail-closed que impedem o remédio de ser pior
+// que a doença: nunca fundir duas vendas de um cliente recorrente, nunca
+// adotar registro ambíguo e nunca ressuscitar registro da Lixeira. Também
+// pina `seenSourceIds` incluindo a linha INALTERADA: é dele que a varredura
+// (./sweep.ts) decide o que sobrou fora da planilha, e derivá-lo dos
+// registros tocados mandaria a base inteira para a Lixeira.
 import { createHash } from "node:crypto";
 
 import { describe, expect, it } from "vitest";
@@ -76,6 +84,7 @@ const hasEq = (q: RecordedQuery, col: string, val: unknown) =>
 function recordsHandler(opts: {
   existing?: Record<string, unknown>[];
   leads?: Record<string, unknown>[];
+  candidates?: Record<string, unknown>[];
 }): TableHandler {
   return (q) => {
     const insertStep = q.steps.find((s) => s.method === "insert");
@@ -88,6 +97,14 @@ function recordsHandler(opts: {
       return { data: null, error: null };
     }
     if (hasEq(q, "record_type", "lead")) return { data: opts.leads ?? [], error: null };
+    // Adoção (v1.5): mesma tabela, mas a cadeia é reconhecível — recorta por
+    // record_type venda_site e busca por e-mail, não por source_id.
+    if (
+      hasEq(q, "record_type", "venda_site") &&
+      q.steps.some((st) => st.method === "ilikeAnyOf")
+    ) {
+      return { data: opts.candidates ?? [], error: null };
+    }
     if (hasEq(q, "source_system", "sheet_site")) {
       return { data: opts.existing ?? [], error: null };
     }
@@ -232,7 +249,13 @@ describe("syncEstudoFechamentosRows (lote)", () => {
         records: recordsHandler({
           existing: [
             existingRecord({ id: "e1", source_id: sid("Cliente Um", "2026-08-01") }),
-            existingRecord({ id: "e2", source_id: sid("Cliente Dois", "2026-08-01") }),
+            existingRecord({
+              id: "e2",
+              source_id: sid("Cliente Dois", "2026-08-01"),
+              // `title` é sincronizado desde a v1.5: sem o nome certo aqui a
+              // linha teria UPDATE e o teste deixaria de provar o skip.
+              title: "Cliente Dois",
+            }),
           ],
         }),
       },
@@ -313,5 +336,170 @@ describe("syncEstudoFechamentosRows (lote)", () => {
       .args[0] as Record<string, unknown>[];
     expect(payload).toHaveLength(1);
     expect(payload[0].value).toBe(100);
+  });
+
+  // ===================== ADOÇÃO (v1.5) =====================
+  // O bug: a chave natural é hash(nome|data). Renomear a empresa na planilha
+  // mintava um source_id novo, o adapter INSERIA e o registro antigo ficava
+  // órfão somando nos dashboards, levando junto a curadoria manual.
+
+  function candidate(over: Record<string, unknown> = {}): Record<string, unknown> {
+    return {
+      ...existingRecord(),
+      id: "e1",
+      source_id: sid("Cliente Um", "2026-08-01"),
+      title: "Cliente Um",
+      source_created_at: "2026-08-01T00:00:00-03:00",
+      email: "contato@cliente.com",
+      responsible_id: "r-manual",
+      ...over,
+    };
+  }
+
+  // Escopados em `records`: o insert de audit_log também é um insert.
+  const updateOf = (fake: { queries: RecordedQuery[] }) =>
+    fake.queries.find(
+      (q) => q.table === "records" && q.steps.some((st) => st.method === "update")
+    );
+  const insertOf = (fake: { queries: RecordedQuery[] }) =>
+    fake.queries.find(
+      (q) => q.table === "records" && q.steps.some((st) => st.method === "insert")
+    );
+
+  it("renomear a empresa ADOTA o registro: UPDATE com re-chaveamento, zero INSERT", async () => {
+    const fake = fakeSupabase({
+      tables: {
+        field_definitions: [],
+        audit_log: [],
+        records: recordsHandler({ existing: [], candidates: [candidate()] }),
+      },
+    });
+    const rows = [
+      sheetRow({ name: "Cliente Um (Agencia X)", email: "contato@cliente.com" }),
+    ];
+    const { result, adopted } = await syncEstudoFechamentosRows(fake.db, rows);
+
+    expect(result.inserted).toBe(0);
+    expect(result.updated).toBe(1);
+    expect(insertOf(fake)).toBeUndefined();
+
+    const updates = updateOf(fake)!.steps.find((st) => st.method === "update")!
+      .args[0] as Record<string, unknown>;
+    // Re-chaveia para a identidade de hoje (senão o próximo push adota de novo)
+    // e grava o nome novo (title entrou em CORE_SYNC_FIELDS na v1.5).
+    expect(updates.source_id).toBe(sid("Cliente Um (Agencia X)", "2026-08-01"));
+    expect(updates.title).toBe("Cliente Um (Agencia X)");
+    // A curadoria manual fica onde estava: o registro é o MESMO.
+    expect(updates.responsible_id).toBeUndefined();
+    expect(adopted).toEqual([
+      {
+        recordId: "e1",
+        from: sid("Cliente Um", "2026-08-01"),
+        to: sid("Cliente Um (Agencia X)", "2026-08-01"),
+        title: "Cliente Um (Agencia X)",
+      },
+    ]);
+  });
+
+  it("cliente recorrente (mesmo e-mail, OUTRO dia) não é adotado — insere", async () => {
+    // O caso perigoso: adotar aqui FUNDIRIA duas vendas reais. É por isso que a
+    // impressão digital inclui o dia.
+    const fake = fakeSupabase({
+      tables: {
+        field_definitions: [],
+        records: recordsHandler({ existing: [], candidates: [candidate()] }),
+      },
+    });
+    const rows = [
+      sheetRow({
+        name: "Cliente Um",
+        email: "contato@cliente.com",
+        created_at: "2026-09-01",
+      }),
+    ];
+    const { result, adopted } = await syncEstudoFechamentosRows(fake.db, rows);
+    expect(result.inserted).toBe(1);
+    expect(adopted).toEqual([]);
+  });
+
+  it("2+ candidatos no mesmo dia: não adota, insere e reporta ambiguidade", async () => {
+    const fake = fakeSupabase({
+      tables: {
+        field_definitions: [],
+        records: recordsHandler({
+          existing: [],
+          candidates: [candidate({ id: "e1" }), candidate({ id: "e2" })],
+        }),
+      },
+    });
+    const rows = [
+      sheetRow({ name: "Cliente Um (X)", email: "contato@cliente.com" }),
+    ];
+    const { result, adopted } = await syncEstudoFechamentosRows(fake.db, rows);
+    expect(result.inserted).toBe(1);
+    expect(adopted).toEqual([]);
+    expect(result.errorSamples.join(" ")).toContain("ambígua");
+  });
+
+  it("linha sem e-mail nunca adota", async () => {
+    const fake = fakeSupabase({
+      tables: {
+        field_definitions: [],
+        records: recordsHandler({ existing: [], candidates: [candidate()] }),
+      },
+    });
+    const { result, adopted } = await syncEstudoFechamentosRows(fake.db, [
+      sheetRow({ name: "Cliente Um (X)", email: null }),
+    ]);
+    expect(result.inserted).toBe(1);
+    expect(adopted).toEqual([]);
+    // Sem e-mail nem sequer consulta candidatos.
+    expect(
+      fake.queries.some((q) => q.steps.some((st) => st.method === "ilikeAnyOf"))
+    ).toBe(false);
+  });
+
+  it("candidato já casado pelo hash com outra linha do push não é adotável", async () => {
+    // e1 é o existente de "Cliente Um"; a linha renomeada não pode reassumi-lo,
+    // senão o registro teria dois donos no mesmo push.
+    const fake = fakeSupabase({
+      tables: {
+        field_definitions: [],
+        audit_log: [],
+        records: recordsHandler({
+          existing: [candidate()],
+          candidates: [candidate()],
+        }),
+      },
+    });
+    const rows = [
+      sheetRow({ name: "Cliente Um", email: "contato@cliente.com" }),
+      sheetRow({ name: "Cliente Um (X)", email: "contato@cliente.com" }),
+    ];
+    const { result, adopted } = await syncEstudoFechamentosRows(fake.db, rows);
+    expect(adopted).toEqual([]);
+    expect(result.inserted).toBe(1);
+  });
+
+  it("seenSourceIds cobre a linha INALTERADA (o que a varredura enxerga)", async () => {
+    const fake = fakeSupabase({
+      tables: {
+        field_definitions: [],
+        records: recordsHandler({
+          existing: [existingRecord({ id: "e1" })], // idêntica ao payload
+        }),
+      },
+    });
+    const rows = [sheetRow({ name: "Cliente Um" }), sheetRow({ name: "Cliente Dois" })];
+    const { result, seenSourceIds, touchedRecordIds } =
+      await syncEstudoFechamentosRows(fake.db, rows);
+
+    expect(result.skipped).toBe(1); // "Cliente Um" não mudou: nenhuma escrita
+    expect(touchedRecordIds).toHaveLength(1); // só o inserido
+    // ...mas AS DUAS foram vistas. Derivar o conjunto de `touchedRecordIds`
+    // mandaria a linha inalterada para a Lixeira na varredura seguinte.
+    expect(new Set(seenSourceIds)).toEqual(
+      new Set([sid("Cliente Um", "2026-08-01"), sid("Cliente Dois", "2026-08-01")])
+    );
   });
 });
