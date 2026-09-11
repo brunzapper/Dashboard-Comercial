@@ -1,3 +1,7 @@
+// Versão: 1.2 | Data: 11/09/2026
+// v1.2 (11/09/2026): a análise virou conversa persistida (`tree_ai_threads`,
+// 0139). O que entra aqui é a guarda ESTÁTICA da linha que a persistência
+// existe para desenhar: o servidor é dono dos turnos e da prévia.
 // Versão: 1.0 | Data: 10/09/2026
 // Os dois pontos de decisão que só existem no "Salvar e analisar" — e que, por
 // serem só desta superfície, são exatamente os que podem divergir do contrato
@@ -11,6 +15,8 @@
 //  - `narrow`: o TETO de ações. Quais ações existem é decisão do validador
 //    (o modo `allowDelete`), não daqui — aqui fica só o que é próprio de ler
 //    UM comentário, que rende poucas coisas.
+import { readFileSync } from "node:fs";
+
 import { describe, expect, it } from "vitest";
 
 import { MAX_COMMENT_TASK_ACTIONS } from "@/lib/import/tasks/analyze-instructions";
@@ -98,5 +104,51 @@ describe("narrow — o teto desta superfície", () => {
     const r = narrow([criar, criar, criar, criar]);
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.errors[0]).toContain(String(MAX_COMMENT_TASK_ACTIONS));
+  });
+});
+
+/**
+ * Guardas estáticas do fio persistido. A verdade mora na linha, e é ela que o
+ * apply lê — precedente literal da 0098 ("nada bruto viaja do cliente").
+ */
+describe("a conversa é do SERVIDOR", () => {
+  const core = readFileSync("lib/ai/analyze-comment.ts", "utf8");
+
+  it("o apply lê o JSON da LINHA, nunca de um argumento", () => {
+    const i = core.indexOf("export async function applyCommentThreadCore");
+    expect(i).toBeGreaterThan(-1);
+    const bloco = core.slice(i, i + 2500);
+    // A assinatura recebe só o id do fio: se um dia ela voltar a aceitar o
+    // JSON, este teste cai antes de alguém reparar.
+    expect(bloco).toContain("threadId: string");
+    expect(bloco).not.toMatch(/raw:\s*string/);
+    expect(bloco).toContain("thread.pending.json");
+    // E RE-VALIDA com catálogo fresco antes de qualquer escrita.
+    expect(bloco).toContain("validateTasksEdit");
+  });
+
+  it("os turnos anteriores saem da linha, não do cliente", () => {
+    const i = core.indexOf("export async function runCommentThreadCore");
+    const bloco = core.slice(i, i + 3000);
+    expect(bloco).toContain("thread.turns");
+    expect(bloco).toContain("priorTurns");
+    // A réplica é a ÚNICA coisa que o cliente manda.
+    expect(bloco).toContain("input.reply");
+  });
+
+  it("o fio nasce com o comentário dentro, ANTES de a IA ser chamada", () => {
+    // É o que dá ao dock o que mostrar enquanto a análise roda — e o que faz um
+    // F5 no meio dela reencontrar a conversa.
+    const i = core.indexOf("export async function openCommentThreadCore");
+    const bloco = core.slice(i, i + 2000);
+    expect(bloco).toContain('kind: "user"');
+    expect(bloco).not.toContain("runJsonGenerationLoop");
+  });
+
+  it("adiar a sequência só é oferecido a quem pode gravar a exceção", () => {
+    // A RLS de series_settings é admin/gestor. Propor o que a pessoa não pode
+    // aplicar é um cartão que só falha depois do clique.
+    expect(core).toContain("canWriteSeries");
+    expect(core).toMatch(/allowSeries:\s*\(ctx\.series\?\.length \?\? 0\) > 0/);
   });
 });

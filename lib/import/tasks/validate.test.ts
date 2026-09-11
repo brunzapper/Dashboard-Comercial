@@ -1,3 +1,10 @@
+// Versão: 1.2 | Data: 11/09/2026
+// v1.2 (11/09/2026): `tarefa_data` e `adiar_sequencia`.
+// O caso que estes testes guardam é o que a v1.1 não cobria e que quebrou em
+// produção: numa SÉRIE todas as ocorrências têm o mesmo título, então
+// `editar`/`concluir`/`excluir` caíam sempre no ramo de ambiguidade. A data é a
+// saída, e o erro sem ela precisa ENSINAR a saída em vez de mandar renomear a
+// tarefa na tela.
 // Versão: 1.1 | Data: 10/09/2026
 // v1.1 (10/09/2026): a ação `excluir` e o modo `allowDelete`.
 // O que os testes novos protegem é a LINHA: sem o modo, `excluir` é ação
@@ -70,11 +77,33 @@ function makeCtx(over: Partial<TasksEditContext> = {}): TasksEditContext {
   };
 }
 
+/**
+ * Uma SÉRIE: três ocorrências, mesmo título, prazos diferentes. É a forma
+ * normal de uma sequência periódica — e era exatamente o que o contrato não
+ * sabia endereçar.
+ */
+function ctxSerie(): TasksEditContext {
+  const base = makeCtx();
+  const occ = (id: string, dueDate: string) => ({
+    ...base.tasks[0],
+    id,
+    title: "Acompanhar deal em Nutrição",
+    dueDate,
+    dueTime: null,
+    fromSeries: true,
+  });
+  return {
+    ...base,
+    tasks: [occ("s1", "2026-09-15"), occ("s2", "2026-09-30"), occ("s3", "2026-10-15")],
+    series: [{ key: "nutricao", label: "Acompanhamento de Nutrição" }],
+  };
+}
+
 const run = (
   acoes: unknown[],
   ctx = makeCtx(),
   /** v1.1: o modo da superfície (só a Tree liga a exclusão). */
-  opts?: { allowDelete?: boolean }
+  opts?: { allowDelete?: boolean; allowSeries?: boolean }
 ) =>
   validateTasksEdit(
     JSON.stringify({ formato: "tarefas-edit", versao: 1, acoes }),
@@ -293,5 +322,176 @@ describe("ocorrência de série não se exclui por aqui", () => {
       { allowDelete: true }
     );
     expect(v.ok).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// v1.2 — o alvo por data, e a sequência como alvo.
+// ---------------------------------------------------------------------------
+describe("ocorrências homônimas se resolvem pela DATA", () => {
+  it("sem tarefa_data segue ambíguo — mas o erro ensina a saída", () => {
+    const v = run([{ acao: "editar", tarefa: "Acompanhar deal em Nutrição", data: "2026-10-31" }], ctxSerie());
+    expect(v.ok).toBe(false);
+    if (!v.ok) {
+      // O erro antigo mandava "renomear uma delas na tela": impossível numa
+      // série, e foi o que fez a IA devolver a pergunta para o usuário.
+      expect(v.errors.join(" ")).toContain("tarefa_data");
+      expect(v.errors.join(" ")).toContain("2026-09-15");
+    }
+  });
+
+  it("com tarefa_data mira a ocorrência certa", () => {
+    const v = run(
+      [
+        {
+          acao: "editar",
+          tarefa: "Acompanhar deal em Nutrição",
+          tarefa_data: "2026-09-30",
+          data: "2026-10-31",
+        },
+      ],
+      ctxSerie()
+    );
+    expect(v.ok).toBe(true);
+    if (v.ok) {
+      const a = v.actions[0];
+      expect(a.acao === "editar" && a.alvo.id).toBe("s2");
+      expect(a.acao === "editar" && a.alvo.data).toBe("2026-09-30");
+    }
+  });
+
+  it("data que não existe nesse título é erro, e lista os prazos", () => {
+    const v = run(
+      [
+        {
+          acao: "concluir",
+          tarefa: "Acompanhar deal em Nutrição",
+          tarefa_data: "2026-12-01",
+        },
+      ],
+      ctxSerie()
+    );
+    expect(v.ok).toBe(false);
+    if (!v.ok) expect(v.errors.join(" ")).toContain("2026-10-15");
+  });
+
+  it("tarefa_data null mira a SEM prazo", () => {
+    const ctx = ctxSerie();
+    ctx.tasks.push({ ...ctx.tasks[0], id: "s0", dueDate: null });
+    const v = run(
+      [
+        {
+          acao: "concluir",
+          tarefa: "Acompanhar deal em Nutrição",
+          tarefa_data: null,
+        },
+      ],
+      ctx
+    );
+    expect(v.ok).toBe(true);
+    if (v.ok) expect(v.actions[0].acao === "concluir" && v.actions[0].alvo.id).toBe("s0");
+  });
+
+  it("duas de mesmo título no MESMO dia seguem erro — aí é empate de verdade", () => {
+    const ctx = ctxSerie();
+    ctx.tasks.push({ ...ctx.tasks[0], id: "s9" });
+    const v = run(
+      [
+        {
+          acao: "concluir",
+          tarefa: "Acompanhar deal em Nutrição",
+          tarefa_data: "2026-09-15",
+        },
+      ],
+      ctx
+    );
+    expect(v.ok).toBe(false);
+    if (!v.ok) expect(v.errors.join(" ")).toContain("mesmo dia");
+  });
+
+  it("o round-trip devolve a data que desempatou", () => {
+    // Sem isso, a prévia reinjetada cairia de novo no erro que ela resolveu.
+    const v = run(
+      [
+        {
+          acao: "concluir",
+          tarefa: "Acompanhar deal em Nutrição",
+          tarefa_data: "2026-09-15",
+        },
+      ],
+      ctxSerie()
+    );
+    if (!v.ok) throw new Error("esperava ok");
+    const json = serializeTasksEdit(v.actions);
+    expect(json).toContain('"tarefa_data": "2026-09-15"');
+    const again = validateTasksEdit(json, ctxSerie());
+    expect(again.ok).toBe(true);
+  });
+
+  it("título único segue funcionando SEM a chave (nada mudou para quem já usava)", () => {
+    const v = run([{ acao: "concluir", tarefa: "Enviar contrato" }]);
+    expect(v.ok).toBe(true);
+    if (v.ok) expect(serializeTasksEdit(v.actions)).not.toContain("tarefa_data");
+  });
+});
+
+describe("adiar_sequencia", () => {
+  const adiar = [
+    { acao: "adiar_sequencia", sequencia: "Acompanhamento de Nutrição", ate: "2026-10-31" },
+  ];
+
+  it("não existe sem o modo", () => {
+    const v = run(adiar, ctxSerie());
+    expect(v.ok).toBe(false);
+    if (!v.ok) expect(v.errors.join(" ")).toContain('"acao" inválida');
+  });
+
+  it("com o modo, resolve a série pelo RÓTULO", () => {
+    const v = run(adiar, ctxSerie(), { allowSeries: true });
+    expect(v.ok).toBe(true);
+    if (v.ok) {
+      expect(v.actions).toEqual([
+        {
+          acao: "adiar_sequencia",
+          serie: { key: "nutricao", label: "Acompanhamento de Nutrição" },
+          ate: "2026-10-31",
+        },
+      ]);
+    }
+  });
+
+  it("registro SEM série recusa mesmo com o modo ligado", () => {
+    // É o que protege quem não pode gravar em series_settings: o core não
+    // publica a lista, e aí o verbo não tem alvo possível.
+    const v = run(adiar, makeCtx(), { allowSeries: true });
+    expect(v.ok).toBe(false);
+    if (!v.ok) expect(v.errors.join(" ")).toMatch(/não há sequência/i);
+  });
+
+  it("com UMA série, o nome é dispensável", () => {
+    const v = run(
+      [{ acao: "adiar_sequencia", ate: "2026-10-31" }],
+      ctxSerie(),
+      { allowSeries: true }
+    );
+    expect(v.ok).toBe(true);
+  });
+
+  it("data malformada é erro", () => {
+    const v = run(
+      [{ acao: "adiar_sequencia", sequencia: "Acompanhamento de Nutrição", ate: "31/10/2026" }],
+      ctxSerie(),
+      { allowSeries: true }
+    );
+    expect(v.ok).toBe(false);
+  });
+
+  it("faz round-trip pelo validador", () => {
+    const v = run(adiar, ctxSerie(), { allowSeries: true });
+    if (!v.ok) throw new Error("esperava ok");
+    const again = validateTasksEdit(serializeTasksEdit(v.actions), ctxSerie(), {
+      allowSeries: true,
+    });
+    expect(again.ok ? [] : again.errors).toEqual([]);
   });
 });

@@ -1,3 +1,7 @@
+// Versão: 3.1 | Data: 11/09/2026
+// v3.1 (11/09/2026): o painel hospeda o dock das sugestões da IA
+// (AiSuggestionsProvider + AiSuggestionsDock). Ver o módulo do contexto: a
+// conversa precisa sobreviver ao widget Tree que a abriu.
 // Versão: 3.0 | Data: 08/09/2026
 // v3.0 (08/09/2026): atualização automática SILENCIOSA. O refetch do lote de
 //   engine disparado pelo EVENT BUS (realtime → sync do Bitrix, que roda a
@@ -47,6 +51,8 @@
 "use client";
 
 import { RecordFocusProvider } from "./record-focus-context";
+import { AiSuggestionsProvider } from "./ai-suggestions-context";
+import { AiSuggestionsDock } from "./ai-suggestions-dock";
 import {
   useCallback,
   useEffect,
@@ -996,6 +1002,11 @@ export function DashboardClient({
     {/* Registro em foco do painel: a tabela publica no clique, os widgets Tree
         sem registro fixo consomem. Efêmero por decisão — ver o módulo. */}
     <RecordFocusProvider>
+    {/* v3.1: as conversas com a IA a partir de um comentário. Aqui em cima, e não
+        dentro do widget Tree: o widget segue o registro em foco (remonta a cada
+        clique da tabela) e some ao trocar de aba — com o estado lá dentro, a
+        análise em curso morria junto. */}
+    <AiSuggestionsProvider>
     <div className="flex flex-col gap-4">
       {/* pr-8: afasta a toolbar do sino fixo (TaskBell, topo-direito) */}
       <div className="flex items-center justify-between pr-8">
@@ -1260,6 +1271,8 @@ export function DashboardClient({
         </div>
       </DashboardPendingProvider>
     </div>
+    <AiSuggestionsDock />
+    </AiSuggestionsProvider>
     </RecordFocusProvider>
     </DashboardHistoryProvider>
   );

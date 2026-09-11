@@ -600,7 +600,10 @@ function planSeriesTask(
     series.cadence,
     card.record,
     ctx.available,
-    ctx.seriesSettings?.get(series.key) ?? []
+    ctx.seriesSettings?.get(series.key) ?? [],
+    // O adiamento da 0139 expira sozinho: sem o dia de hoje o tick trataria a
+    // linha como desligamento e a série nunca voltaria.
+    ctx.todayIso
   );
   // Desligado para este recorte (responsável, registro, etapa…): a série
   // continua existindo e o atributo continua no registro — só não gera nada.

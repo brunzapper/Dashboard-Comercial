@@ -1,4 +1,17 @@
-// Versão: 1.1 | Data: 10/09/2026
+// Versão: 1.2 | Data: 11/09/2026
+// v1.2 (11/09/2026): DECIDIR, não perguntar — e a sequência como alvo.
+//
+//   O caso real: "O Oscar me pediu para contactar no final de outubro" num
+//   registro com série quinzenal. A resposta foi "existem múltiplas tarefas com
+//   esse título, especifique a data". Duas coisas erradas de uma vez: ela não
+//   TINHA como escolher (faltava `tarefa_data` no contrato — v1.1 do validador)
+//   e não DEVIA perguntar. Quem escreve um comentário não está dando uma ordem:
+//   devolver a pergunta transforma um atalho de um clique em trabalho a mais
+//   que a pessoa não tinha antes de escrever.
+//
+//   A régua de escolha fica aqui, e não no validador, porque é julgamento e não
+//   validade — e é PRÓPRIA desta superfície: em /operacao/tarefas houve uma
+//   ordem direta, e ali perguntar qual das duas segue sendo o certo.
 // v1.1 (10/09/2026): as QUATRO ações. A v1.0 mandava usar só "criar" e proibia
 // o resto; um comentário real ("ele pediu para adiar a proposta e cancelar a
 // demo de amanhã") é um editar e um excluir, e a IA respondia propondo uma
@@ -40,7 +53,20 @@ const section = (title: string, body: string): string =>
  */
 export const MAX_COMMENT_TASK_ACTIONS = 3;
 
-export const COMMENT_ANALYSIS_RULES = `Você está lendo UM comentário que a pessoa acabou de escrever no
+/**
+ * A régua de leitura do comentário. É função do MODO pela mesma razão que o
+ * SPEC é (v1.2 de instructions.ts): mandar preferir `adiar_sequencia` num turno
+ * em que a ação não existe é ensinar e negar na mesma página.
+ */
+export function commentAnalysisRules(opts: { allowSeries?: boolean } = {}): string {
+  const adiar = opts.allowSeries === true;
+  const preferirAdiar = adiar
+    ? `\n  — e aí prefira "adiar_sequencia" à edição de uma por uma: ela resolve as
+  várias de uma vez e evita empilhar tarefas iguais no mesmo dia. Nesse caso
+  acrescente TAMBÉM um "criar" para o dia combinado: adiar sozinho tira tudo da
+  tela e não deixa nada lembrando do compromisso até ele vencer;`
+    : ";";
+  return `Você está lendo UM comentário que a pessoa acabou de escrever no
 acompanhamento de um registro comercial. Decida o que ele muda na lista de
 tarefas DESTE registro — no máximo ${MAX_COMMENT_TASK_ACTIONS} ações.
 
@@ -58,6 +84,22 @@ Se o comentário não muda nada — só registra um fato, um desabafo, um dado d
 cadastro — devolva "acoes": [] e explique em uma linha em "notas". Não invente
 ação para ter o que devolver: essa é a resposta mais comum.
 
+DECIDA — nunca devolva a pergunta. Quem escreveu não está te dando uma ordem,
+está contando o que houve; pedir para "especificar qual tarefa" transforma um
+atalho num trabalho a mais. Quando o título casar com várias (é o normal numa
+sequência periódica: todas as ocorrências se chamam igual), escolha pelos
+prazos do catálogo e informe a escolha em "notas":
+
+- em geral a relevante é a PRÓXIMA a vencer;
+- quando o comentário empurra o assunto para uma data ("me procure no fim de
+  outubro", "só em novembro"), são relevantes TODAS as que venceriam antes
+  dessa data${preferirAdiar}
+- na dúvida entre duas igualmente plausíveis, aja sobre a mais próxima e diga
+  em "notas" o que deixou de fora.
+
+Só existe um caso de recusar: quando nem os prazos separam as tarefas (duas com
+o mesmo título no mesmo dia). Aí explique em "notas" em vez de chutar.
+
 PRAZO, para "criar" e para o "data" de "editar" — nesta ordem:
 1. Se o comentário DIZ quando ("sexta", "semana que vem", "dia 20", "em 3
    dias"), use isso, resolvido contra a data de hoje informada abaixo.
@@ -73,6 +115,10 @@ PRAZO, para "criar" e para o "data" de "editar" — nesta ordem:
 
 Só preencha "hora" se o comentário marcar horário. Não invente responsável: sem
 nome citado, omita o campo — a tarefa nasce com o dono do registro.`;
+}
+
+/** A variante sem a sequência — a que os testes de formato usam. */
+export const COMMENT_ANALYSIS_RULES = commentAnalysisRules();
 
 export interface CommentAnalysisInput {
   /** O texto que a pessoa escreveu, cru. */
@@ -85,6 +131,9 @@ export interface CommentAnalysisInput {
   catalogJson: string;
   /** v1.1: esta superfície liga a exclusão — o SPEC muda com ela. */
   allowDelete?: boolean;
+  /** v1.2: e o adiamento da sequência, quando o registro tem uma e a pessoa
+   * pode gravá-lo (ver o catálogo do core). */
+  allowSeries?: boolean;
 }
 
 /**
@@ -109,8 +158,12 @@ export function buildCommentAnalysisPrompt(input: CommentAnalysisInput): string 
     buildTasksPromptText({
       catalogJson: input.catalogJson,
       allowDelete: input.allowDelete,
+      allowSeries: input.allowSeries,
     }) +
-    section("O QUE FAZER AQUI", COMMENT_ANALYSIS_RULES) +
+    section(
+      "O QUE FAZER AQUI",
+      commentAnalysisRules({ allowSeries: input.allowSeries })
+    ) +
     section("CONTEXTO", contexto) +
     section("O COMENTÁRIO", input.comment)
   );

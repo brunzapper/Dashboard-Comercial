@@ -1,3 +1,8 @@
+// Versão: 1.2 | Data: 11/09/2026
+// v1.2 (11/09/2026): o ADIAMENTO (`snoozeUntil`, 0139). O que estes testes
+// guardam é a expiração: um adiamento que não vence sozinho é um acompanhamento
+// abandonado sem que ninguém tenha decidido abandoná-lo — e uma rodada perdida
+// não pode fazer isso acontecer.
 // Versão: 1.1 | Data: 10/09/2026
 // v1.1 (10/09/2026): o escopo `record` no liga/desliga vale mesmo NÃO
 // declarado — a Tree grava `active:false` por registro ao encerrar a sequência,
@@ -160,5 +165,74 @@ describe("scopeValueFor", () => {
     const semEtapa = { id: "r", responsible_id: null, custom_fields: {} } as never;
     expect(scopeValueFor({ kind: "field", field: "stage" }, semEtapa, [])).toBeNull();
     expect(scopeValueFor({ kind: "responsible" }, semEtapa, [])).toBeNull();
+  });
+});
+
+describe("adiamento (snoozeUntil, 0139)", () => {
+  const semRecord: SeriesCadence = {
+    defaultDays: 14,
+    overrideScopes: [{ kind: "responsible" }],
+  };
+  const adiada = (until: string) =>
+    setting({
+      scopeKind: "record",
+      scopeValue: "rec-1",
+      active: false,
+      snoozeUntil: until,
+    });
+
+  it("no futuro, desliga E diz até quando", () => {
+    const r = resolveCadence(semRecord, record, [], [adiada("2026-10-31")], "2026-09-11");
+    expect(r.active).toBe(false);
+    expect(r.snoozedUntil).toBe("2026-10-31");
+  });
+
+  it("vencido, a linha deixa de valer sozinha — ninguém precisa apagá-la", () => {
+    // É o que separa "adiei para outubro" de "parei de acompanhar": em 31/10 a
+    // série volta por si, mesmo que o tick tenha pulado rodadas no caminho.
+    const r = resolveCadence(semRecord, record, [], [adiada("2026-10-31")], "2026-10-31");
+    expect(r.active).toBe(true);
+    expect(r.snoozedUntil).toBeNull();
+  });
+
+  it("sem snoozeUntil, é o desligamento de sempre — sem data de volta", () => {
+    const r = resolveCadence(
+      semRecord,
+      record,
+      [],
+      [setting({ scopeKind: "record", scopeValue: "rec-1", active: false })],
+      "2026-09-11"
+    );
+    expect(r.active).toBe(false);
+    expect(r.snoozedUntil).toBeNull();
+  });
+
+  it("sem o dia de hoje, um adiamento lê como desligamento (compat da v1.1)", () => {
+    // Chamador antigo não passa `todayIso`: fail-closed é não gerar tarefa que
+    // ninguém pediu, nunca o contrário.
+    const r = resolveCadence(semRecord, record, [], [adiada("2026-10-31")]);
+    expect(r.active).toBe(false);
+  });
+
+  it("a cadência de uma linha adiada segue valendo quando ela expira", () => {
+    // A mesma linha guarda as duas coisas (0132): adiar não pode apagar o
+    // ritmo que alguém ajustou.
+    const r = resolveCadence(
+      cadence,
+      record,
+      [],
+      [
+        setting({
+          scopeKind: "record",
+          scopeValue: "rec-1",
+          cadenceDays: 7,
+          active: false,
+          snoozeUntil: "2026-10-31",
+        }),
+      ],
+      "2026-11-01"
+    );
+    expect(r.active).toBe(true);
+    expect(r.days).toBe(7);
   });
 });

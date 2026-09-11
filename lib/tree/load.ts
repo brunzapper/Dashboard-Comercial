@@ -204,7 +204,10 @@ export async function loadRecordTreeFacts(
         config.cadence,
         input.record,
         available,
-        settings.get(config.key) ?? []
+        settings.get(config.key) ?? [],
+        // v1.6: sem o dia de hoje, um adiamento (0139) leria como desligamento
+        // permanente e a Tree diria "desligada" para sempre.
+        input.todayIso
       );
       series.push({
         key: config.key,

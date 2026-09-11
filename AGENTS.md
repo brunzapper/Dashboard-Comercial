@@ -767,6 +767,55 @@ This version has breaking changes — APIs, conventions, and file structure may 
   que guarda o merge a partir da LINHA ATUAL (o `updateTask` monta o UPDATE do
   form inteiro — chave ausente vira NULL) e a fase pelo `moveTaskPhase`;
   `recordId` do `criar` vem do ARGUMENTO, nunca do JSON. Resultado POR ITEM.
+- **A IA do comentário DECIDE o alvo, e "adiar a sequência" é uma ação
+  (11/09/2026):** o alvo do contrato `tarefas-edit` ganhou a segunda coordenada
+  **`tarefa_data`** (`YYYY-MM-DD` ou `null`), filtrada em `resolveAlvo` ANTES do
+  teste de ambiguidade. Sem ela o alvo era só o TÍTULO — e numa série todas as
+  ocorrências se chamam igual, então `editar`/`concluir`/`excluir` caíam SEMPRE
+  no ramo de ambiguidade: o `excluir` da véspera nunca funcionou nas tarefas de
+  que a Tree é feita. Vale nas DUAS superfícies (homônimo existe em
+  /operacao/tarefas também; é um contrato só), o `serializeTasksEdit` a devolve
+  ao fio quando foi ela que desempatou (senão a prévia reinjetada cai no erro
+  que resolveu) e o empate REAL (mesmo título, mesmo dia) segue erro. A postura
+  "decida, nunca devolva a pergunta" fica SÓ no enunciado da Tree
+  (`commentAnalysisRules`, função do modo como o `tasksSpec`): quem comenta não
+  deu uma ordem — em /operacao/tarefas deu, e ali perguntar segue certo.
+  **`adiar_sequencia`** (modo `allowSeries`, mesmo molde do `allowDelete`) existe
+  porque "contactar no fim de outubro" sobre uma série não é N edições: remarcar
+  as três ocorrências empilha três tarefas no mesmo dia e o tick abre a quarta
+  assim mesmo. Série resolvida pelo RÓTULO; `TasksEditContext.series` só é
+  publicado com série NO registro E permissão de gravar a exceção (admin/gestor,
+  RLS da 0132) — propor o que não se pode aplicar é cartão que só falha depois
+  do clique. Apply por `snoozeRecordSeries`, o MESMO par de metades do
+  `endRecordSeries` (extraído em `dropOpenOccurrences`, nunca copiado): apaga as
+  ABERTAS que venceriam ANTES do dia e grava `active:false` + `snooze_until`.
+  **`series_settings.snooze_until` (0139) não abre ramo novo**: `active = false`
+  + `snooze_until = D` é "desligada ATÉ D" e `resolveCadence` só ganhou
+  `hoje < snooze_until` — `occurrencesToOpen` e o tick INTOCADOS, a série volta
+  porque a exceção EXPIROU (rodada perdida nunca adia para sempre). Chamador sem
+  `todayIso` lê adiamento como desligamento: fail-closed é não gerar tarefa que
+  ninguém pediu. Ao vencer, a ocorrência nasce com o prazo do CALENDÁRIO, que
+  pode estar dias atrás — antecipar seria inventar um combinado.
+- **A conversa da IA vive no DOCK do painel, e o servidor é dono dela
+  (11/09/2026):** o estado da análise saiu do `tree-widget` para
+  `AiSuggestionsProvider` + `AiSuggestionsDock` (montados ao lado do
+  `RecordFocusProvider` no `dashboard-client`). Não é preciosismo: o widget
+  segue o registro em foco (remonta a cada clique da tabela) e some ao trocar de
+  aba, então a análise em curso morria junto — e o `submitDraft` fechava o
+  compositor, ÚNICO lugar que renderizava o spinner, ANTES de chamar a IA (a
+  tela ficava muda). O pop-up é NÃO modal, minimizável (botão com a contagem do
+  que espera decisão) e **UM só para todas as conversas**, com `‹ 2/3 ›` — três
+  cartões empilhados cobririam o painel. O log é o `AiChatLog` que o painel de
+  dashboards e o sheet da Home já usam; um segundo componente de conversa é a
+  régua paralela da invariante 25. Persistência em `tree_ai_threads` (0139,
+  molde da 0124 com `id` próprio: várias conversas simultâneas por usuário, não
+  uma por escopo). Como na 0098, o SERVIDOR guarda turnos e prévia — a réplica
+  manda só o texto dela e `applyCommentThreadCore` lê o JSON da LINHA, nunca de
+  um argumento, RE-VALIDANDO com catálogo fresco. Abrir o fio e rodar o turno
+  são DUAS actions de propósito: a primeira grava a linha com o comentário
+  dentro, e é ela que dá ao dock o que mostrar enquanto a IA trabalha (e faz um
+  F5 no meio reencontrar a conversa). Falha parcial no apply mantém o fio
+  ABERTO. NÃO recrie as RPCs para nada disso.
 - **"Quando este campo mudou" é `audit_log`, NUNCA `field_modified_at` (0135,
   09/09/2026):** as duas colunas parecem a mesma coisa e não são.
   `records.field_modified_at` é o marcador de "editado LOCALMENTE depois do
