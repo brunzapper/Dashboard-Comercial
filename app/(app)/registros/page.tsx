@@ -76,7 +76,9 @@ import {
   loadResponsibleCanon,
 } from "@/lib/config/responsible-canon";
 import { cn } from "@/lib/utils";
-import { getActiveOrgId } from "@/lib/auth/org";
+import { getActiveOrg } from "@/lib/auth/org";
+import { loadUserSettings } from "@/lib/config/user-settings";
+import { resolveUiPrefs, userUiPrefs } from "@/lib/config/ui-prefs";
 import { loadOrgAiConfigPublic } from "@/lib/ai/config";
 import { SyncPanel } from "@/components/sync/sync-panel";
 import { WritebackPendingBadge } from "@/components/sync/writeback-pending-badge";
@@ -87,6 +89,7 @@ import { RecordsAiInsertSheet } from "@/components/registros/ai-insert-sheet";
 import { RecordsAiUpdateSheet } from "@/components/registros/ai-update-sheet";
 import { RecordsTable } from "@/components/registros/records-table";
 import { Button } from "@/components/ui/button";
+import { BackLink } from "@/components/ui/back-link";
 
 // Rede de segurança p/ as Server Actions desta página. 300 cobre o turno da
 // inserção por IA (laço com orçamento de 240s, como na Home); no plano
@@ -361,8 +364,17 @@ export default async function RegistrosPage({
 
   // IA por org (0096): habilita o botão "Inserir com IA" nas bases manuais.
   // Só a config PÚBLICA (provider/model/hasKey) — a chave nunca sai do server.
-  const orgId = await getActiveOrgId();
+  const org = await getActiveOrg();
+  const orgId = org?.id ?? null;
   const ai = orgId ? await loadOrgAiConfigPublic(orgId) : null;
+
+  // Preferências de interface (0141): o painel de detalhe abre com a ficha
+  // completa ou enxuta conforme a escolha do usuário (padrão: completa nesta
+  // tela — é onde se confere o registro).
+  const uiPrefs = resolveUiPrefs(
+    session ? userUiPrefs(await loadUserSettings(session.user.id)) : null,
+    org?.uiPrefs
+  );
 
   // Último sync (painel admin).
   let lastSyncedAt: string | null = null;
@@ -421,6 +433,10 @@ export default async function RegistrosPage({
 
   return (
     <div className="flex flex-col gap-6">
+      {/* Caminho de volta ao Workspace (12/09/2026): a seção tem navegação
+          própria de pastas/bases e nenhuma saída além da barra lateral, que
+          pode estar oculta. */}
+      <BackLink href="/" label="Workspace" className="-ml-2 self-start" />
       {/* pr-8: afasta o cluster de botões do sino fixo (TaskBell, topo-direito) */}
       <div className="flex items-start justify-between gap-4 pr-8">
         <div>
@@ -596,6 +612,8 @@ export default async function RegistrosPage({
         detailFields={detailFields}
         offBaseDefs={offBaseDefs}
         knownFieldKeys={knownFieldKeys}
+        showAllFields={uiPrefs.values.recordPanelAllFields}
+        showAllFieldsLocked={uiPrefs.locked.has("recordPanelAllFields")}
         sort={sort}
         responsibles={responsibles}
         operations={operations}

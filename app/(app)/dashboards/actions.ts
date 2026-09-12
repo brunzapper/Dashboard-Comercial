@@ -1,4 +1,10 @@
-// Versão: 1.12 | Data: 07/09/2026
+// Versão: 1.13 | Data: 12/09/2026
+// v1.13 (12/09/2026): preferências de INTERFACE (0141) — saveUiPrefs (camada
+//   do usuário; a TRAVA da org é decidida no resolver, não aqui),
+//   toggleSidebarPinned/saveSidebarPins (itens fixados na barra: guardam
+//   id/key, nunca rótulo) e saveBoardDescription (coluna `description`, fora
+//   de `settings` porque updateDashboardSettings sobrescreve aquela coluna
+//   inteira). duplicateBoard passou a copiar a descrição.
 // v1.12 (07/09/2026): applyPresetDefinition PRESERVA os vínculos LOCAIS do
 //   widget kanban (KANBAN_LOCAL_KEYS = allocationFieldKey/taskBoardId) no
 //   update in-place, como já fazia com `pages`. O export passou a removê-los
@@ -63,6 +69,14 @@ import { revalidatePath } from "next/cache";
 import { getSessionInfo } from "@/lib/auth/session";
 import { getActiveOrgId } from "@/lib/auth/org";
 import { loadOrgFeatures } from "@/lib/config/org-features";
+import {
+  normalizeSidebarPins,
+  toggleSidebarPin,
+  userSidebarPins,
+  type SidebarPin,
+  type SidebarPinKind,
+  type UiPrefs,
+} from "@/lib/config/ui-prefs";
 import { createClient } from "@/lib/supabase/server";
 import {
   PRESETS,
@@ -472,7 +486,7 @@ export async function duplicateBoard(
 
   const { data: src } = await supabase
     .from("dashboards")
-    .select("id, name, kind, settings, status, organization_id")
+    .select("id, name, kind, settings, status, organization_id, description")
     .eq("id", id)
     .maybeSingle();
   if (!src) return { ok: false, message: "Board não encontrado." };
@@ -520,6 +534,8 @@ export async function duplicateBoard(
     visible_to_roles: [],
     is_shared: false,
     settings: dashSettings,
+    // Descrição (0141) acompanha a cópia — é texto do board, não vínculo local.
+    description: src.description ?? null,
     // A cópia herda a org do ORIGINAL (multi-org, 0090).
     ...(src.organization_id
       ? { organization_id: src.organization_id }
@@ -901,7 +917,14 @@ export async function saveLastFieldFilter(
 // Read-modify-write para preservar chaves futuras. RLS garante que cada
 // usuário só toca a própria linha. Fire-and-forget no cliente.
 export interface UserAppSettings {
+  // LEGADO (pré-0141): a preferência da barra fixa vive hoje em `uiPrefs`.
+  // A chave solta continua sendo LIDA (normalizeUiPrefs a promove) e nunca é
+  // reescrita às cegas — linha antiga segue válida sem migração de dado.
   sidebarPinned?: boolean;
+  // Preferências de INTERFACE do usuário (camada 3 de lib/config/ui-prefs.ts).
+  uiPrefs?: UiPrefs;
+  // Itens fixados na barra lateral (ids/keys, nunca rótulos).
+  sidebarItems?: SidebarPin[];
   // Marca d'água da seção "Novas" do sino de tarefas (ISO): tarefas
   // criadas/reatribuídas depois disso contam como novas.
   tasksSeenAt?: string;
@@ -946,6 +969,105 @@ export async function updateUserSettings(
     },
     { onConflict: "user_id" }
   );
+}
+
+// Patch das preferências de INTERFACE do usuário (camada 3 — ver
+// lib/config/ui-prefs.ts). Read-modify-write do bloco `uiPrefs`, preservando as
+// demais chaves de user_settings. A TRAVA da org não é verificada aqui de
+// propósito: o valor gravado é a escolha pessoal, que volta a valer se a org
+// destravar — o resolver é quem ignora o override enquanto a trava existe.
+export async function saveUiPrefs(patch: UiPrefs): Promise<void> {
+  const session = await getSessionInfo();
+  if (!session) return;
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("user_settings")
+    .select("settings")
+    .eq("user_id", session.user.id)
+    .maybeSingle();
+  const current = (data?.settings as UserAppSettings | null) ?? {};
+  await supabase.from("user_settings").upsert(
+    {
+      user_id: session.user.id,
+      settings: {
+        ...current,
+        uiPrefs: { ...(current.uiPrefs ?? {}), ...patch },
+      },
+    },
+    { onConflict: "user_id" }
+  );
+}
+
+/**
+ * Fixa/desfixa um item na barra lateral (dashboard, kanban, kanban de widget ou
+ * card de Operação). Não valida o alvo: a barra resolve os rótulos pela consulta
+ * escopada pela RLS e DESCARTA o que não voltar — item excluído ou sem acesso
+ * some sozinho, e nunca vira link quebrado.
+ */
+export async function toggleSidebarPinned(
+  kind: SidebarPinKind,
+  id: string
+): Promise<ActionState> {
+  const session = await getSessionInfo();
+  if (!session) return { ok: false, message: "Sessão expirada." };
+  if (!id) return { ok: false, message: "Item inválido." };
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("user_settings")
+    .select("settings")
+    .eq("user_id", session.user.id)
+    .maybeSingle();
+  const current = (data?.settings as UserAppSettings | null) ?? {};
+  const next = toggleSidebarPin(userSidebarPins(current), { kind, id });
+  await supabase.from("user_settings").upsert(
+    { user_id: session.user.id, settings: { ...current, sidebarItems: next } },
+    { onConflict: "user_id" }
+  );
+  return { ok: true };
+}
+
+/** Reordena/limpa a lista de fixados (usada pelo gerenciador da barra). */
+export async function saveSidebarPins(pins: SidebarPin[]): Promise<void> {
+  const session = await getSessionInfo();
+  if (!session) return;
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("user_settings")
+    .select("settings")
+    .eq("user_id", session.user.id)
+    .maybeSingle();
+  const current = (data?.settings as UserAppSettings | null) ?? {};
+  await supabase.from("user_settings").upsert(
+    {
+      user_id: session.user.id,
+      settings: { ...current, sidebarItems: normalizeSidebarPins(pins) },
+    },
+    { onConflict: "user_id" }
+  );
+}
+
+/**
+ * Descrição livre do board (coluna `dashboards.description`, 0141) — exibida no
+ * card do hub quando a preferência de interface pedir. Coluna, e não chave de
+ * `settings`: updateDashboardSettings sobrescreve aquela coluna inteira.
+ * A RLS de update (dono/admin) é a muralha.
+ */
+export async function saveBoardDescription(
+  id: string,
+  description: string
+): Promise<ActionState> {
+  const session = await getSessionInfo();
+  if (!session) return { ok: false, message: "Sessão expirada." };
+  if (!id) return { ok: false, message: "Board inválido." };
+  const text = description.trim();
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("dashboards")
+    .update({ description: text === "" ? null : text })
+    .eq("id", id);
+  if (error) return { ok: false, message: "Não foi possível salvar a descrição." };
+  revalidatePath("/");
+  return { ok: true };
 }
 
 // ---------------- Espaço de grid v2 (grade fina) ----------------

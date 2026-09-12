@@ -1,4 +1,8 @@
-// Versão: 1.5 | Data: 05/08/2026
+// Versão: 1.6 | Data: 12/09/2026
+// v1.6 (12/09/2026): NAVEGAÇÃO FOCADA (espelho de /operacao). Dentro de uma
+//   área, a fileira de sub-abas sumiu e no lugar entra o botão de VOLTAR ao
+//   painel (/configuracoes, que deixou de redirecionar e virou a tela com as
+//   áreas). O <h1> de cada área vem da própria página dela.
 // Seção "Configurações": agrupa as telas admin (Operações, Responsáveis, Metas,
 // Usuários) como sub-abas. Cada sub-aba mantém o mesmo
 // v1.5 (05/08/2026): Remuneração moveu p/ /operacao/remuneracao (sub-aba da
@@ -35,10 +39,8 @@ import {
   type OverrideEffect,
 } from "@/lib/auth/access";
 import { loadOrgFeatures } from "@/lib/config/org-features";
-import {
-  SettingsTabs,
-  type SettingsTab,
-} from "@/components/configuracoes/settings-tabs";
+import { type SettingsTab } from "@/components/configuracoes/settings-tabs";
+import { FocusedAreaHeader } from "@/components/configuracoes/focused-area-header";
 
 // Tema (preferências visuais) e Conta (senha própria) não têm gating: valem
 // para qualquer autenticado. As demais seguem restritas por papel/permissão;
@@ -117,9 +119,8 @@ export default async function ConfiguracoesLayout({
   if (tabs.length === 0) redirect("/");
 
   return (
-    <div className="flex flex-col gap-6">
-      <h1 className="text-2xl font-semibold">Configurações</h1>
-      <SettingsTabs tabs={tabs} />
+    <div className="flex flex-col gap-4">
+      <FocusedAreaHeader indexHref="/configuracoes" title="Configurações" />
       <div>{children}</div>
     </div>
   );

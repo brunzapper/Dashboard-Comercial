@@ -45,6 +45,7 @@ import {
   AutoOperationsManager,
   type AutoOperationsConfigRow,
 } from "@/components/configuracoes/auto-operations-manager";
+import { BackLink } from "@/components/ui/back-link";
 
 // Título da aba (template do layout completa "— {appName}").
 export const metadata = { title: "Bases" };
@@ -185,9 +186,7 @@ export default async function FontesPage() {
             de CSV em Registros.
           </p>
         </div>
-        <Button asChild variant="outline">
-          <Link href="/registros">Voltar a Registros</Link>
-        </Button>
+        <BackLink href="/registros" label="Registros" />
       </div>
       <SourceFoldersManager folders={folders} sources={sources} />
       <SourcesManager

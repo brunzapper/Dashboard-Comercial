@@ -18,6 +18,7 @@ import {
   ImportWizard,
   type ImportFieldOption,
 } from "@/components/importacao/import-wizard";
+import { BackLink } from "@/components/ui/back-link";
 
 // Rede de segurança p/ as Server Actions desta página. 300 cobre o turno da
 // sugestão de mapeamento por IA (laço com orçamento de 240s); no plano
@@ -64,9 +65,7 @@ export default async function ImportarPage() {
             vez de duplicar, e edições feitas no app são preservadas.
           </p>
         </div>
-        <Button asChild variant="outline">
-          <Link href="/registros">Voltar a Registros</Link>
-        </Button>
+        <BackLink href="/registros" label="Registros" />
       </div>
       <ImportWizard sources={sources} fields={fields} ai={ai} />
     </div>

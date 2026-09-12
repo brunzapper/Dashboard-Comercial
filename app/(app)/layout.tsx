@@ -1,4 +1,11 @@
-// Versão: 1.8 | Data: 05/08/2026
+// Versão: 1.9 | Data: 12/09/2026
+// v1.9 (12/09/2026): a barra lateral virou PERSONALIZÁVEL (0141) — seção
+//   "Fixados" com os dashboards, kanbans e módulos de Operação que o usuário
+//   alfinetou no hub, resolvidos aqui (resolveSidebarPins) porque só o servidor
+//   sabe o rótulo atual e o que a RLS ainda entrega. O custo fica em ZERO para
+//   quem não fixou nada: sem lista, nenhuma consulta nova — e este layout roda
+//   em toda página. Também desce as preferências da barra (fixar / abrir ao
+//   aproximar da borda) já resolvidas nas três camadas, com as travas da org.
 // v1.8 (05/08/2026): Agenda e Tarefas saíram do nav lateral — viraram cards
 //   padrão de OPERAÇÃO no hub Workspace (aba "Operação" de /; páginas em
 //   /operacao/*, catálogo em lib/operacao/cards.ts). O TaskBell segue
@@ -35,6 +42,13 @@ import {
   mergeSourceLabels,
 } from "@/lib/config/source-labels";
 import { loadUserSettings } from "@/lib/config/user-settings";
+import {
+  resolveUiPrefs,
+  userSidebarPins,
+  userUiPrefs,
+} from "@/lib/config/ui-prefs";
+import { resolveSidebarPins } from "@/lib/config/sidebar-pins";
+import { allowedOperacaoCards } from "@/lib/operacao/cards";
 import { loadGoalMetrics } from "@/lib/config/goal-metrics";
 import { resolveTheme } from "@/lib/theme";
 import { ROLE_LABELS, type RoleKey } from "@/lib/auth/roles";
@@ -130,8 +144,21 @@ export default async function AppLayout({
       loadGoalMetrics(supabase),
     ]);
   const sourceLabels = mergeSourceLabels(labelsValue, sources);
-  const initialPinned =
-    (settings as { sidebarPinned?: boolean }).sidebarPinned ?? false;
+  // Preferências de interface: padrão do app → org (com trava) → usuário.
+  const uiPrefs = resolveUiPrefs(userUiPrefs(settings), org?.uiPrefs);
+  // Itens fixados: só consulta se houver lista (o caso comum é vazio, e este
+  // layout roda em TODA navegação). allowedOperacaoCards é cache()d por
+  // request — o hub e o layout de /operacao reusam sem custo.
+  const pins = userSidebarPins(settings);
+  const pinnedItems =
+    pins.length > 0
+      ? await resolveSidebarPins(
+          supabase,
+          pins,
+          org?.id ?? null,
+          await allowedOperacaoCards()
+        )
+      : [];
   // Tema efetivo (usuário ?? org ?? padrão) — o ThemeSync abaixo corrige
   // cookie defasado (dispositivo novo / padrão da org alterado).
   const resolvedTheme = resolveTheme(
@@ -149,7 +176,7 @@ export default async function AppLayout({
         </p>
         <p className="text-muted-foreground text-xs">{org?.name ?? "Zapper"}</p>
       </div>
-      <SidebarNav items={items} />
+      <SidebarNav items={items} pinned={pinnedItems} />
       <div className="mt-auto border-t pt-3">
         <div className="px-3 pb-2">
           <p className="truncate text-xs font-medium">{user.email}</p>
@@ -185,7 +212,10 @@ export default async function AppLayout({
         <Toaster />
         <ThemeSync resolved={resolvedTheme} />
         <AppShell
-          initialPinned={initialPinned}
+          initialPinned={uiPrefs.values.sidebarPinned}
+          initialHoverEdge={uiPrefs.values.sidebarHoverEdge}
+          pinnedLocked={uiPrefs.locked.has("sidebarPinned")}
+          hoverEdgeLocked={uiPrefs.locked.has("sidebarHoverEdge")}
           sidebar={sidebarContent}
           topRight={<TaskBell initialCount={dueCount ?? 0} />}
         >

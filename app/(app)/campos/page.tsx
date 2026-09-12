@@ -51,6 +51,7 @@ import {
   CurrenciesManager,
   type CurrencyRateRow,
 } from "@/components/configuracoes/currencies-manager";
+import { BackLink } from "@/components/ui/back-link";
 
 // Título da aba (template do layout completa "— {appName}").
 export const metadata = { title: "Campos" };
@@ -142,6 +143,9 @@ export default async function CamposPage() {
 
   return (
     <div className="flex flex-col gap-6">
+      {/* Caminho de volta ao Workspace (12/09/2026): as abas desta tela são
+          internas (useState) e não levam a lugar nenhum fora dela. */}
+      <BackLink href="/" label="Workspace" className="-ml-2 self-start" />
       <h1 className="text-2xl font-semibold">Campos</h1>
       <CamposTabs
         campos={

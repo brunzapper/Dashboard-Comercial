@@ -22,6 +22,7 @@ import {
   type SyncJobLogRow,
 } from "@/components/configuracoes/sync-jobs-log";
 import type { SyncResult } from "@/lib/sync/shared";
+import { BackLink } from "@/components/ui/back-link";
 
 // Título da aba (template do layout completa "— {appName}").
 export const metadata = { title: "Log de sincronização" };
@@ -91,9 +92,7 @@ export default async function LogPage() {
             Sincronizações com o Bitrix e fila de write-back.
           </p>
         </div>
-        <Button asChild variant="outline">
-          <Link href="/registros">Voltar a Registros</Link>
-        </Button>
+        <BackLink href="/registros" label="Registros" />
       </div>
       <div className="flex flex-col gap-3">
         <div>

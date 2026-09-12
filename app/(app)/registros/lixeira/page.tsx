@@ -24,6 +24,7 @@ import {
   TrashTable,
   type TrashItem,
 } from "@/components/registros/trash-table";
+import { BackLink } from "@/components/ui/back-link";
 
 // Título da aba (template do layout completa "— {appName}").
 export const metadata = { title: "Lixeira de registros" };
@@ -108,9 +109,7 @@ export default async function LixeiraPage() {
             depois são excluídos definitivamente.
           </p>
         </div>
-        <Button asChild variant="outline">
-          <Link href="/registros">Voltar aos registros</Link>
-        </Button>
+        <BackLink href="/registros" label="Registros" />
       </div>
       <TrashTable items={items} />
     </div>

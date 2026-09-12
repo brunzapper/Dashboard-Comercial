@@ -1,4 +1,8 @@
-// Versão: 1.1 | Data: 27/07/2026
+// Versão: 1.2 | Data: 12/09/2026
+// v1.2 (12/09/2026): ActiveOrg.uiPrefs — padrão de INTERFACE da org + travas
+//   por chave (ui_prefs, 0141), consumido por resolveUiPrefs
+//   (lib/config/ui-prefs.ts). O select tolera a coluna ausente pelo MESMO
+//   fallback do theme (pré-migração ⇒ padrão vazio).
 // v1.1 (27/07/2026): ActiveOrg.theme — padrão visual da org (0108), consumido
 //   por resolveTheme (lib/theme.ts); select tolera a coluna ausente
 //   (pré-migração ⇒ theme null).
@@ -17,6 +21,11 @@ import { cookies } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
 import { getSessionInfo } from "@/lib/auth/session";
 import { normalizeOrgTheme, type OrgThemeDefault } from "@/lib/theme";
+import {
+  EMPTY_ORG_UI_PREFS,
+  normalizeOrgUiPrefs,
+  type OrgUiPrefs,
+} from "@/lib/config/ui-prefs";
 
 export const ORG_COOKIE = "active_org";
 
@@ -29,6 +38,9 @@ export interface ActiveOrg {
   multiOrg: boolean;
   // Padrão visual da org (0108) — null sem padrão/pré-migração.
   theme: OrgThemeDefault | null;
+  // Padrão de INTERFACE da org + travas por chave (0141). Pré-migração /
+  // sem padrão ⇒ EMPTY_ORG_UI_PREFS (nunca null: resolveUiPrefs itera sempre).
+  uiPrefs: OrgUiPrefs;
 }
 
 interface Membership {
@@ -73,11 +85,11 @@ export const getActiveOrg = cache(async function getActiveOrg(): Promise<
   if (!chosen) return null;
 
   const supabase = await createClient();
-  // Pré-migração 0108 (coluna theme ausente): o select com theme falha —
-  // refaz sem a coluna para não derrubar o contexto de org inteiro.
+  // Pré-migração 0108/0141 (coluna theme/ui_prefs ausente): o select completo
+  // falha — refaz sem as colunas para não derrubar o contexto de org inteiro.
   let { data: org } = await supabase
     .from("organizations")
-    .select("id, name, app_name, theme")
+    .select("id, name, app_name, theme, ui_prefs")
     .eq("id", chosen.organization_id)
     .maybeSingle();
   if (!org) {
@@ -86,7 +98,9 @@ export const getActiveOrg = cache(async function getActiveOrg(): Promise<
       .select("id, name, app_name")
       .eq("id", chosen.organization_id)
       .maybeSingle();
-    org = fallback.data ? { ...fallback.data, theme: null } : null;
+    org = fallback.data
+      ? { ...fallback.data, theme: null, ui_prefs: null }
+      : null;
   }
   if (!org) return null;
   return {
@@ -96,6 +110,7 @@ export const getActiveOrg = cache(async function getActiveOrg(): Promise<
     isOrgAdmin: chosen.is_org_admin,
     multiOrg: memberships.length > 1,
     theme: normalizeOrgTheme(org.theme),
+    uiPrefs: org.ui_prefs ? normalizeOrgUiPrefs(org.ui_prefs) : EMPTY_ORG_UI_PREFS,
   };
 });
 

@@ -177,6 +177,8 @@ export function RecordsTable({
   orphanColumns,
   coreDefs,
   detailFields,
+  showAllFields,
+  showAllFieldsLocked,
   offBaseDefs,
   knownFieldKeys,
   sort,
@@ -203,6 +205,9 @@ export function RecordsTable({
   coreDefs: FieldDefinition[];
   // Catálogo do painel de detalhe (100% dos campos).
   detailFields: FieldDefinition[];
+  /** Preferência resolvida (0141) do painel de detalhe — ver ui-prefs.ts. */
+  showAllFields?: boolean;
+  showAllFieldsLocked?: boolean;
   offBaseDefs: FieldDefinition[];
   knownFieldKeys: string[];
   // Ordenação ATIVA já validada pelo server (null = ordem padrão).
@@ -497,6 +502,8 @@ export function RecordsTable({
           record={detailRecord}
           fields={fields}
           detailFields={detailFields}
+          showAllFields={showAllFields}
+          showAllFieldsLocked={showAllFieldsLocked}
           offBaseDefs={offBaseDefs}
           coreDefs={coreDefs}
           knownFieldKeys={knownFieldKeys}

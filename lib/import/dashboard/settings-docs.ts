@@ -352,6 +352,7 @@ export const DASHBOARD_SETTINGS_DOC = {
   canvas: `"canvas": { "cols": 12, "rowHeight": 30 },   // escala CLÁSSICA (sem gridVersion); com "gridVersion": 2 = grade FINA (base 120) — ver regra 8 do SPEC`,
   dateFormat: `"dateFormat": "dd/mm/aaaa",          // dd/mm/aaaa | dd/mm/aa | mm/aa`,
   background: `"background": { "mode": "solid", "color": "#f8fafc" },  // fundo do dashboard; gradiente: { "mode": "gradient", "from": "#eef2ff", "to": "#fdf2f8", "angle": 135 }`,
+  outerBackground: `"outerBackground": { "mode": "same" },  // fundo do ENTORNO (cabeçalho, abas, barra de período e a janela); "same" herda o fundo interno. Também aceita { "mode": "solid", "color": "#0b1220" } ou { "mode": "gradient", "from": "...", "to": "...", "angle": 135 }; ausente = tema do sistema`,
   fontScale: `"fontScale": 1,                      // escala global de fonte (1 = 100%)`,
   hideComparisonLabels: `"hideComparisonLabels": true,        // oculta o texto "vs. período…" de TODOS os Cards (badge de variação fica; override por card em comparison.hideLabel)`,
   hideBusinessDayBadges: `"hideBusinessDayBadges": true,       // oculta o selo "Nº dia útil" de todos os widgets (override por widget em appearance.hideBusinessDayBadge)`,

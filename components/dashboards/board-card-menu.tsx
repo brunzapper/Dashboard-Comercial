@@ -1,4 +1,8 @@
-// Versão: 1.1 | Data: 23/07/2026
+// Versão: 1.3 | Data: 12/09/2026
+// v1.3 (12/09/2026): item "Descrição" (coluna dashboards.description, 0141) —
+//   o texto que o card do hub exibe quando a preferência de interface pede.
+//   O posicionamento saiu daqui: quem posiciona é o card (o alfinete de fixar
+//   fica ao lado, e ele existe mesmo para quem não vê este menu).
 // Menu "⋮" dos cards do hub (dashboards E kanbans): substitui o botão de
 // lixeira. Itens por status (0087): ativo → Duplicar/Arquivar/Excluir (vai à
 // Lixeira, reversível — sem confirmação); arquivado → Desarquivar/Duplicar/
@@ -22,6 +26,7 @@ import {
   Database,
   FileJson,
   MoreVertical,
+  Text,
   Trash2,
   Undo2,
   Users,
@@ -52,6 +57,7 @@ import {
   restoreBoard,
   trashBoard,
 } from "@/app/(app)/dashboards/actions";
+import { BoardDescriptionDialog } from "./board-description-dialog";
 import { toast } from "sonner";
 
 import { notifyOnError } from "@/lib/feedback/notify";
@@ -68,17 +74,21 @@ export function BoardCardMenu({
   status,
   canManage,
   canDuplicate,
+  description = "",
 }: {
   id: string;
   kanban: boolean;
   status: BoardStatus;
   canManage: boolean;
   canDuplicate: boolean;
+  /** Texto atual da descrição (coluna `description`, 0141). */
+  description?: string;
 }) {
   const [pending, startTransition] = useTransition();
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [sourcesOpen, setSourcesOpen] = useState(false);
   const [accessOpen, setAccessOpen] = useState(false);
+  const [descOpen, setDescOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const noun = kanban ? "kanban" : "dashboard";
@@ -141,7 +151,7 @@ export function BoardCardMenu({
   if (!canManage && !(canDuplicate && !trashed)) return null;
 
   return (
-    <div className="absolute top-3 right-3">
+    <div className="relative">
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button
@@ -178,6 +188,16 @@ export function BoardCardMenu({
               {status === "archived" && canManage ? (
                 <DropdownMenuItem onSelect={() => run(restoreBoard)}>
                   <ArchiveRestore className="size-4" /> Desarquivar
+                </DropdownMenuItem>
+              ) : null}
+              {canManage ? (
+                <DropdownMenuItem
+                  onSelect={(e) => {
+                    e.preventDefault();
+                    setDescOpen(true);
+                  }}
+                >
+                  <Text className="size-4" /> Descrição
                 </DropdownMenuItem>
               ) : null}
               {canManage ? (
@@ -236,6 +256,14 @@ export function BoardCardMenu({
           {error}
         </p>
       ) : null}
+
+      <BoardDescriptionDialog
+        boardId={id}
+        kanban={kanban}
+        initialValue={description}
+        open={descOpen}
+        onOpenChange={setDescOpen}
+      />
 
       <BoardSourcesDialog
         boardId={id}
