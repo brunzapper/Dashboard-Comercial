@@ -1,4 +1,7 @@
-<!-- Versão: 1.43 | Data: 12/09/2026 -->
+<!-- Versão: 1.44 | Data: 12/09/2026 -->
+<!-- v1.44 (12/09/2026): §4.17 — os controles de exibição do hub viraram
+     engrenagem admin-only (não-admin fica com cartão↔lista) e passaram a valer
+     sem recarregar. -->
 <!-- v1.43 (12/09/2026): §4.17 — runbook da personalização da interface:
      padrão da organização, a diferença entre TRAVAR (reversível) e
      "Aplicar a todos" (apaga a escolha de cada um), e os tokens de tema. -->
@@ -1390,9 +1393,15 @@ organização define. Depois disso todo mundo passa a ver o padrão da org e pod
 escolher de novo — mas o que estava escolhido **não volta**. Por isso tem
 confirmação. Se o objetivo é só padronizar a visão atual, prefira a trava.
 
-Para ajustar apenas a **própria** visão, o admin usa os mesmos controles que
-todo mundo, na barra acima dos cards do Workspace ou da Operação — nada ali
-toca a visão de outra pessoa.
+Para ajustar apenas a **própria** visão, o admin usa a **engrenagem** ao lado
+do alternador cartão↔lista, no Workspace ou no painel de Operação — colunas,
+altura do card, exibir descrição e exibir nível de acesso. Nada ali toca a
+visão de outra pessoa. Vendedor e gestor veem só o alternador cartão↔lista; o
+resto vem do padrão da organização.
+
+Os controles valem **na hora**, sem recarregar: o que muda é estado da tela, e
+a gravação vai em segundo plano. Se um controle aparecer desabilitado, a
+organização travou aquela chave (o motivo está no title).
 
 **Cores do sistema**: os dez tokens (fundo, texto, cartões, silenciado, bordas
 e as três da barra lateral) têm colunas separadas para claro e escuro, porque

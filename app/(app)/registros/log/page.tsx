@@ -90,7 +90,7 @@ export default async function LogPage() {
             Sincronizações com o Bitrix e fila de write-back.
           </p>
         </div>
-        <BackLink href="/registros" label="Registros" />
+        <BackLink fallback="/registros" fallbackLabel="Registros" />
       </div>
       <div className="flex flex-col gap-3">
         <div>

@@ -1,4 +1,7 @@
-// Versão: 1.6 | Data: 07/09/2026
+// Versão: 1.7 | Data: 12/09/2026
+// v1.7 (12/09/2026): botão de VOLTAR no topo (leva à tela anterior, não a um
+//   destino fixo) — o quadro não tinha saída além da barra lateral, que pode
+//   estar oculta.
 // v1.6 (07/09/2026): botão "Configurar com IA" (KanbanAiSheet) ao lado das
 //   Automações, no MESMO recorte delas (modo registros, sem colunas por
 //   data). Prop `ai` = metadados públicos do provedor da org; sem ela o
@@ -32,6 +35,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { CalendarDays, Download, List, SquareKanban } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { BackLink } from "@/components/ui/back-link";
 import { buildCsv, csvFilename, downloadCsv } from "@/lib/export/csv";
 import { kanbanBoardToCsv } from "@/lib/export/kanban";
 import { Combobox, type ComboboxOption } from "@/components/ui/combobox";
@@ -277,6 +281,9 @@ export function KanbanPageClient({
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-4">
+      {/* Saída do quadro: leva à tela anterior (a barra lateral pode estar
+          oculta, e o kanban é aberto por link direto o tempo todo). */}
+      <BackLink fallback="/" fallbackLabel="Workspace" className="-ml-2 self-start" />
       {/* pr-8: afasta a toolbar do sino fixo (TaskBell, topo-direito) */}
       <div className="flex flex-wrap items-center justify-between gap-3 pr-8">
         <div className="min-w-0">

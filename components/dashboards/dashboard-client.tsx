@@ -1,4 +1,10 @@
-// Versão: 3.2 | Data: 12/09/2026
+// Versão: 3.3 | Data: 12/09/2026
+// v3.3 (12/09/2026): botão de VOLTAR no topo do board — e a superfície EXTERNA deixou de vazar para dentro dos
+//   widgets. O marcador data-board-chrome estava na RAIZ do painel — ou seja,
+//   envolvia o grid —, e a regra de texto secundário de globals.css alcança
+//   descendentes: todo rótulo de gráfico, eixo e célula de tabela era
+//   recolorido. Agora são dois wrappers que excluem o grid (cabeçalho+abas e
+//   barra de período+aviso), e o <main> pinta só o FUNDO.
 // v3.2 (12/09/2026): o tema do dashboard passou a ter DUAS superfícies. A
 //   INTERNA é a de sempre (a caixa do grid, settings.background). A EXTERNA
 //   (settings.outerBackground) pinta o entorno — cabeçalho, abas, barra de
@@ -86,6 +92,7 @@ import {
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { BackLink } from "@/components/ui/back-link";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -1061,7 +1068,15 @@ export function DashboardClient({
         clique da tabela) e some ao trocar de aba — com o estado lá dentro, a
         análise em curso morria junto. */}
     <AiSuggestionsProvider>
-    <div className="flex flex-col gap-4" data-board-chrome>
+    <div className="flex flex-col gap-4">
+      {/* data-board-chrome = cabeçalho + abas. O marcador NÃO pode envolver o
+          grid: a regra de texto secundário (globals.css) alcança descendentes e
+          recoloriria rótulo de gráfico, eixo e célula de tabela — era o que
+          quebrava as cores do dashboard ao escolher uma cor externa. */}
+      <div className="flex flex-col gap-4" data-board-chrome>
+      {/* Saída do board: leva à tela anterior (a barra lateral pode estar
+          oculta, e o dashboard é onde mais se entra por link direto). */}
+      <BackLink fallback="/" fallbackLabel="Workspace" className="-ml-2 self-start" />
       {/* pr-8: afasta a toolbar do sino fixo (TaskBell, topo-direito) */}
       <div className="flex items-center justify-between pr-8">
         {renaming ? (
@@ -1208,8 +1223,12 @@ export function DashboardClient({
           onChange={saveTabs}
         />
       ) : null}
+      </div>
 
       <DashboardPendingProvider>
+        {/* Segundo trecho de cromo: a barra de período e o aviso de posição
+            ficam sobre a superfície externa; o grid, logo abaixo, fica FORA. */}
+        <div className="flex flex-col gap-4" data-board-chrome>
         {barEnabled ? (
           <PeriodFilter
             available={availableForBuilder}
@@ -1253,6 +1272,7 @@ export function DashboardClient({
             </button>
           </div>
         ) : null}
+        </div>
 
         <div
           className={backgroundCss ? "rounded-lg p-3" : undefined}

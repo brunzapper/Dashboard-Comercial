@@ -1841,6 +1841,18 @@ This version has breaking changes — APIs, conventions, and file structure may 
   que o catálogo é código. O número de colunas do hub entra por CSS var
   (`--hub-cols` + a regra `[data-hub-grid]`), NUNCA por `grid-cols-${n}`:
   Tailwind v4 varre classes LITERAIS e a classe dinâmica sairia sem regra.
+  **A EXIBIÇÃO é estado de CLIENTE (12/09/2026):** os cards são RSC, então
+  mudar um controle só aparecia depois de recarregar — e o `router.refresh()`
+  de reconciliação reentregava o valor ANTIGO do servidor por cima do que a
+  pessoa acabara de escolher (a caixa desmarcava sozinha). Quem manda na tela
+  é o `HubDisplayProvider` (`components/home/hub-display-context.tsx`), semeado
+  do servidor e persistindo com `reconcile: false`: o servidor só precisa estar
+  certo no PRÓXIMO carregamento. Consumidor novo de card do hub lê o contexto,
+  nunca props de exibição. Por isso os cards são Client Components e o
+  `accessLabel` dos cards de Operação desce PRONTO do servidor —
+  `areaAccessLabel` mora em `lib/auth/access.ts`, que é server-only.
+  Só o alternador cartão↔lista é de todo mundo; colunas, altura do card,
+  descrição e nível de acesso ficam atrás da ENGRENAGEM, visível só ao admin.
   Ver `docs/arquitetura.md` §4.7.
 - **Token de tema é WHITELIST, e a superfície externa do dashboard é variável
   CSS (12/09/2026):** além de `--brand-base`, um conjunto CURADO
@@ -1862,6 +1874,13 @@ This version has breaking changes — APIs, conventions, and file structure may 
   de `dashboard-tabs.tsx`) e quem publica LIMPA no desmonte. Chave nova em
   `DashboardSettings` exige entrada em `DASHBOARD_SETTINGS_DOC` — sem ela o
   `npm run typecheck` quebra. RPCs de widget INTOCADAS.
+  **A cor de texto NUNCA desce por herança (12/09/2026):** o `<main>` pinta só
+  o FUNDO, e o marcador `[data-board-chrome]` cobre exclusivamente cabeçalho,
+  abas e barra de período — NUNCA o grid. A primeira versão o pôs na raiz do
+  painel e a regra `[data-board-chrome] .text-muted-foreground` alcançou todo
+  descendente: rótulo de gráfico, eixo e célula de tabela mudavam de cor ao
+  escolher uma cor externa. Marcador novo vai em wrapper que exclui os
+  widgets, e nada de `color` em elemento que os contenha.
 - **Painel de detalhe do registro tem UMA montagem (12/09/2026):** o painel do
   dashboard (`loadRowPanel`) e o de `/registros` (`RecordEditForm`) derivam dos
   MESMOS helpers — `lib/records/detail-fields.ts` (`coreDetailRows`,

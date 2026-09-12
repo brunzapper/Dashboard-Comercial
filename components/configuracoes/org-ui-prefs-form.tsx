@@ -1,4 +1,6 @@
-// Versão: 1.0 | Data: 12/09/2026
+// Versão: 1.1 | Data: 12/09/2026
+// v1.1 (12/09/2026): altura do card entrou no catálogo — degraus próprios
+//   (automática + 64..320px), porque o seletor de colunas não serve para px.
 // Padrão de INTERFACE da organização (0141) — só org_admin.
 //
 // Três coisas distintas, que a tela precisa manter distintas:
@@ -30,7 +32,9 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import {
+  MAX_CARD_HEIGHT,
   MAX_HUB_COLUMNS,
+  MIN_CARD_HEIGHT,
   MIN_HUB_COLUMNS,
   UI_PREF_DEFAULTS,
   UI_PREF_KEYS,
@@ -45,7 +49,15 @@ import {
 } from "@/app/(app)/configuracoes/tema/actions";
 
 const LAYOUT_KEYS = new Set<UiPrefKey>(["hubLayout", "operacaoLayout"]);
-const NUMBER_KEYS = new Set<UiPrefKey>(["hubColumns", "operacaoColumns"]);
+const COLUMN_KEYS = new Set<UiPrefKey>(["hubColumns", "operacaoColumns"]);
+const HEIGHT_KEYS = new Set<UiPrefKey>(["hubCardHeight", "operacaoCardHeight"]);
+
+/** Degraus da altura do card (0 = automática). */
+const HEIGHT_STEPS = (() => {
+  const steps: number[] = [MIN_CARD_HEIGHT];
+  for (let n = 64; n <= MAX_CARD_HEIGHT; n += 32) steps.push(n);
+  return steps;
+})();
 
 export function OrgUiPrefsForm({
   initialValues,
@@ -144,7 +156,7 @@ export function OrgUiPrefsForm({
                     <option value="grid">Grade</option>
                     <option value="list">Lista</option>
                   </select>
-                ) : NUMBER_KEYS.has(key) ? (
+                ) : COLUMN_KEYS.has(key) ? (
                   <select
                     value={defined ? String(effective) : ""}
                     onChange={(e) =>
@@ -164,6 +176,26 @@ export function OrgUiPrefsForm({
                     ).map((n) => (
                       <option key={n} value={n}>
                         {n} coluna{n > 1 ? "s" : ""}
+                      </option>
+                    ))}
+                  </select>
+                ) : HEIGHT_KEYS.has(key) ? (
+                  <select
+                    value={defined ? String(effective) : ""}
+                    onChange={(e) =>
+                      setValue(
+                        key,
+                        e.target.value === ""
+                          ? undefined
+                          : (Number(e.target.value) as UiPrefs[typeof key])
+                      )
+                    }
+                    className="border-input h-8 w-full rounded-md border bg-transparent px-2 text-sm"
+                  >
+                    <option value="">Sem padrão</option>
+                    {HEIGHT_STEPS.map((n) => (
+                      <option key={n} value={n}>
+                        {n === 0 ? "Automática" : `${n}px`}
                       </option>
                     ))}
                   </select>

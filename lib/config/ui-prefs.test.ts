@@ -1,15 +1,17 @@
-// Versão: 1.0 | Data: 12/09/2026
+// Versão: 1.1 | Data: 12/09/2026
 // Guarda do motor de preferências de INTERFACE (0141): precedência das três
 // camadas, semântica da TRAVA (org vence, mas não apaga o override), parse
 // fail-safe por chave e a promoção da chave legada `sidebarPinned`.
 import { describe, expect, it } from "vitest";
 
 import {
+  MAX_CARD_HEIGHT,
   MAX_HUB_COLUMNS,
   MAX_SIDEBAR_PINS,
   UI_PREF_DEFAULTS,
   UI_PREF_KEYS,
   UI_PREF_LABELS,
+  clampCardHeight,
   clampColumns,
   normalizeOrgUiPrefs,
   normalizeSidebarPins,
@@ -33,6 +35,13 @@ describe("normalizeUiPrefs", () => {
       outraCoisa: true,
     });
     expect(out).toEqual({ hubColumns: 4 });
+  });
+
+  it("altura do card é clampada; 0 significa automática", () => {
+    expect(clampCardHeight(0)).toBe(0);
+    expect(clampCardHeight(-40)).toBe(0);
+    expect(clampCardHeight(9999)).toBe(MAX_CARD_HEIGHT);
+    expect(clampCardHeight("120")).toBeUndefined();
   });
 
   it("colunas são clampadas ao intervalo aceito", () => {

@@ -1,4 +1,7 @@
-// Versão: 1.0 | Data: 12/09/2026
+// Versão: 1.1 | Data: 12/09/2026
+// v1.1 (12/09/2026): `hubCardHeight`/`operacaoCardHeight` — altura mínima do
+//   card. Em LISTA o card nasce de uma linha só e ficava fino demais para
+//   quem usa o hub como tela de trabalho; 0 = automático (altura natural).
 // Preferências de INTERFACE em TRÊS camadas, resolvidas AQUI e em nenhum outro
 // lugar: padrão do app → padrão da ORGANIZAÇÃO (organizations.ui_prefs, 0141)
 // → preferência do USUÁRIO (user_settings.settings.uiPrefs).
@@ -26,11 +29,14 @@ export interface UiPrefs {
   hubColumns?: number;
   hubShowDescription?: boolean;
   hubShowAccess?: boolean;
+  /** Altura MÍNIMA do card em px; 0 = automática (altura natural). */
+  hubCardHeight?: number;
   // ----- hub/painel: cards de Operação -----
   operacaoLayout?: HubLayout;
   operacaoColumns?: number;
   operacaoShowDescription?: boolean;
   operacaoShowAccess?: boolean;
+  operacaoCardHeight?: number;
   // ----- barra lateral -----
   sidebarPinned?: boolean;
   /** Revelar a barra ao aproximar do canto esquerdo da tela. */
@@ -42,6 +48,10 @@ export interface UiPrefs {
 
 export const MIN_HUB_COLUMNS = 1;
 export const MAX_HUB_COLUMNS = 6;
+/** 0 = automático; acima disso, altura mínima do card em px. */
+export const MIN_CARD_HEIGHT = 0;
+export const MAX_CARD_HEIGHT = 320;
+export const CARD_HEIGHT_STEP = 8;
 
 /**
  * Padrão do app. Descrição nasce DESLIGADA nas duas famílias (requisito: o
@@ -53,10 +63,12 @@ export const UI_PREF_DEFAULTS: Required<UiPrefs> = {
   hubColumns: 3,
   hubShowDescription: false,
   hubShowAccess: true,
+  hubCardHeight: 0,
   operacaoLayout: "grid",
   operacaoColumns: 3,
   operacaoShowDescription: false,
   operacaoShowAccess: false,
+  operacaoCardHeight: 0,
   sidebarPinned: false,
   sidebarHoverEdge: true,
   recordPanelAllFields: false,
@@ -73,10 +85,12 @@ export const UI_PREF_LABELS: Record<UiPrefKey, string> = {
   hubColumns: "Painéis: número de colunas",
   hubShowDescription: "Painéis: exibir descrição",
   hubShowAccess: "Painéis: exibir nível de acesso",
+  hubCardHeight: "Painéis: altura do card",
   operacaoLayout: "Operação: formato (grade/lista)",
   operacaoColumns: "Operação: número de colunas",
   operacaoShowDescription: "Operação: exibir descrição",
   operacaoShowAccess: "Operação: exibir nível de acesso",
+  operacaoCardHeight: "Operação: altura do card",
   sidebarPinned: "Barra lateral: fixada",
   sidebarHoverEdge: "Barra lateral: abrir ao aproximar da borda",
   recordPanelAllFields: "Registro: exibir campos vazios",
@@ -95,6 +109,13 @@ export function clampColumns(v: unknown): number | undefined {
   if (typeof v !== "number" || !Number.isFinite(v)) return undefined;
   const n = Math.round(v);
   return Math.min(MAX_HUB_COLUMNS, Math.max(MIN_HUB_COLUMNS, n));
+}
+
+/** Idem para a altura do card (0 = automático). */
+export function clampCardHeight(v: unknown): number | undefined {
+  if (typeof v !== "number" || !Number.isFinite(v)) return undefined;
+  const n = Math.round(v);
+  return Math.min(MAX_CARD_HEIGHT, Math.max(MIN_CARD_HEIGHT, n));
 }
 
 /**
@@ -118,10 +139,12 @@ export function normalizeUiPrefs(
   put("hubColumns", clampColumns(raw.hubColumns));
   put("hubShowDescription", boolOrUndef(raw.hubShowDescription));
   put("hubShowAccess", boolOrUndef(raw.hubShowAccess));
+  put("hubCardHeight", clampCardHeight(raw.hubCardHeight));
   put("operacaoLayout", layoutOrUndef(raw.operacaoLayout));
   put("operacaoColumns", clampColumns(raw.operacaoColumns));
   put("operacaoShowDescription", boolOrUndef(raw.operacaoShowDescription));
   put("operacaoShowAccess", boolOrUndef(raw.operacaoShowAccess));
+  put("operacaoCardHeight", clampCardHeight(raw.operacaoCardHeight));
   put("sidebarPinned", boolOrUndef(raw.sidebarPinned));
   put("sidebarHoverEdge", boolOrUndef(raw.sidebarHoverEdge));
   put("recordPanelAllFields", boolOrUndef(raw.recordPanelAllFields));
