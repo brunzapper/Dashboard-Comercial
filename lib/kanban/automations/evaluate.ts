@@ -1,4 +1,14 @@
-// Versão: 1.6 | Data: 10/09/2026
+// Versão: 1.7 | Data: 12/09/2026
+// v1.7 (12/09/2026): condição de campo sobre DATA compara por DIA de Brasília,
+//   não por string. "Antes/depois de uma data específica" simplesmente não
+//   funcionava: o caminho local termina em localeCompare, então "15/08/2026" <
+//   "01/09/2026" (formato BR, o que se digita) dava FALSO, e "até 01/09" perdia
+//   os registros do próprio dia 1 (lexicalmente "2026-09-01T14:…" > "2026-09-01").
+//   O ramo novo só age quando OS DOIS lados são data — fora disso o
+//   comportamento fica byte-idêntico. Divergência DELIBERADA em relação ao SQL
+//   (que compara instante no núcleo e texto no custom): estes filtros nunca
+//   descem ao RPC (o universo da rodada vem sem filtro), e "antes de tal data"
+//   tem o DIA como unidade. Ver invariante 40.
 // v1.6 (10/09/2026): a janela da série passa a ser reposta por CONCLUSÃO
 //   (`occurrencesToOpen`), não pela virada do ciclo, e o fato
 //   `seriesOccurrences` carrega o estado de cada ocorrência para isso. Junto:
@@ -54,6 +64,8 @@
 // IDEMPOTÊNCIA decidida no snapshot: valor atual igual ao alvo consome o card
 // SEM emitir escrita (zero churn de audit/webhook no tick por minuto).
 import { addDaysIso, daysSince } from "@/lib/date/days";
+import { brasiliaDayOf } from "@/lib/date/normalize";
+import { coerceDate } from "@/lib/import/csv";
 import type { RecordRow } from "@/lib/records/types";
 import type { AggCondition } from "@/lib/records/formulas";
 import { EDITABLE_CORE_COLUMNS } from "@/lib/config/core-writeback";
@@ -278,6 +290,35 @@ function scalar(v: unknown): v is string | number | boolean {
 }
 
 /**
+ * Os DOIS lados da comparação são data? Então o resultado é a ordem dos DIAS de
+ * Brasília (negativo/zero/positivo); null = alguém não é data, e aí quem decide
+ * segue sendo o caminho de sempre.
+ *
+ * O `coerceDate` cobre o formato BR (dd/mm/aaaa) nos DOIS lados: a UI emite
+ * `AAAA-MM-DD` desde 12/09/2026, mas quem escreveu "01/09/2026" numa condição
+ * antes disso tinha uma regra que nunca casou, e um campo de TEXTO pode guardar
+ * a data nesse formato (só o tipo `data` passa pela coerção na gravação).
+ * Assimetria entre os lados aqui seria armadilha silenciosa.
+ */
+function dayOf(v: unknown): string | null {
+  const iso = brasiliaDayOf(v);
+  if (iso) return iso;
+  // Valor não-string nunca é data (número tipo 20260901 não vira dia).
+  return typeof v === "string" ? brasiliaDayOf(coerceDate(v)) : null;
+}
+
+function compareByDay(
+  raw: unknown,
+  value: string | number | boolean
+): number | null {
+  const limit = dayOf(value);
+  if (!limit) return null;
+  const day = dayOf(raw);
+  if (!day) return null;
+  return day < limit ? -1 : day > limit ? 1 : 0;
+}
+
+/**
  * Um valor cru passa por um WidgetFilter? Avaliação LOCAL usada nas condições
  * de campo e nos filtros de registros conectados. Op desconhecido/valor não
  * escalar → false (fail-closed).
@@ -318,6 +359,20 @@ export function fieldFilterMatches(
     : filter.value;
   if (!scalar(value) || (typeof value === "number" && !Number.isFinite(value)))
     return false;
+  // DATA antes de texto/número (v1.7): os ops `_num` ficam fora de propósito
+  // (pedem número explicitamente), e fora disso o ramo só age quando os dois
+  // lados são data — o resto do universo passa reto e inalterado.
+  if (!filter.op.endsWith("_num")) {
+    const cmp = compareByDay(rawOf(filter.field), value);
+    if (cmp != null) {
+      if (op === "=") return cmp === 0;
+      if (op === "<>") return cmp !== 0;
+      if (op === "<") return cmp < 0;
+      if (op === ">") return cmp > 0;
+      if (op === "<=") return cmp <= 0;
+      return cmp >= 0; // ">="
+    }
+  }
   return recordMatchesConds(rawOf, [{ ref: filter.field, op, value }]);
 }
 

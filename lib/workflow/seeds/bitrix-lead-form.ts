@@ -1,3 +1,11 @@
+// Versão: 1.2 | Data: 12/09/2026
+// v1.2 (12/09/2026): `defaultValue` do campo de e-mail — lead sem e-mail vai
+//   com "sememail@sememail.com" em vez de deixar o campo vazio no CRM. É só
+//   DADO: o motor já preenchia a caixa com o defaultValue e já caía nele quando
+//   o campo chegava vazio, nos dois lados, sem mudança nenhuma de código.
+//   Atenção: `ensureDefaultWorkflowSchemas` semeia uma vez por org, então a org
+//   que já existe só pega isto pelo runbook
+//   supabase/apply/backfill-lead-form-email.sql.
 // Versão: 1.1 | Data: 09/09/2026
 // v1.1 (09/09/2026): LEAD_SOURCE_KEY corrigido de "lead" (o record_type)
 //   para "leads" (a source-key do catálogo, que é o que a action procura).
@@ -34,6 +42,13 @@ export const BITRIX_LEAD_FORM_DESCRIPTION =
  * contra o catálogo (BUILTIN_SOURCES), que é a pergunta que importa.
  */
 const LEAD_SOURCE_KEY = "leads";
+
+/**
+ * Endereço usado quando o lead não tem e-mail (12/09/2026). Fica aqui, no
+ * esquema, porque é vocabulário do negócio — não de código: trocar o endereço é
+ * editar um dado, e outro formulário pode querer outro (ou nenhum).
+ */
+const SEM_EMAIL = "sememail@sememail.com";
 
 export function bitrixLeadFormDefinition(): WorkflowDefinition {
   return {
@@ -77,6 +92,15 @@ export function bitrixLeadFormDefinition(): WorkflowDefinition {
           visible: true,
           order: 3,
           placeholder: "maria@acme.com.br",
+          // Lead sem e-mail é lançado do mesmo jeito, e o CRM precisa de ALGO
+          // no campo para não ficar com uma lacuna que ninguém sabe ler. O
+          // endereço é DADO daqui, não constante no código: é o esquema que
+          // decide o que preencher, e quem preenche pode sobrescrever.
+          // O mecanismo já existia dos dois lados e não precisou de mudança:
+          // `FieldInput` inicializa a caixa com o defaultValue, e `readForm`
+          // cai nele quando o campo chega VAZIO — então a garantia vale também
+          // para quem apaga o conteúdo antes de enviar.
+          defaultValue: SEM_EMAIL,
         },
         {
           key: "fonte",

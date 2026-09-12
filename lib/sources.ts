@@ -1,3 +1,8 @@
+// Versão: 2.4 | Data: 12/09/2026
+// v2.4 (12/09/2026): bitrixEntityOfSource — qual entidade do CRM corresponde a
+//   uma Base, para montar link do portal. A resolução estava ad hoc em vários
+//   sítios (automações, ações em massa, criação de registro); este é o lugar
+//   onde ela pertence, já que é uma pergunta sobre a FONTE.
 // Versão: 2.3 | Data: 12/08/2026
 // Fase 8: definição das FONTES do produto. Cada fonte mapeia 1:1 num record_type
 // do núcleo `records`, então "fonte" é açúcar sobre record_type — usado na aba
@@ -222,6 +227,27 @@ export function recordTypeOf(
 ): string {
   const def = sources.find((s) => s.key === key);
   return def?.recordType ?? toRecordType(key);
+}
+
+/**
+ * Entidade do CRM que corresponde a uma Base, para montar link do Bitrix
+ * (`bitrixEntityUrl`, lib/workflow/steps/bitrix.ts). null = a Base não tem par
+ * no CRM, e aí NÃO existe link — nunca chute um.
+ *
+ * `data_sources.bitrix_activity_owner` é a declaração explícita (é ela que o
+ * espelho de tarefas já usa, 0136); sem ela, os dois record_types BUILTIN que
+ * vêm do CRM respondem por si — `lead` é lead e `negocio` é deal. Base local
+ * (CSV, planilha, manual) fica em null mesmo tendo registros.
+ */
+export function bitrixEntityOfSource(
+  key: string,
+  sources: SourceDef[] = BUILTIN_SOURCES
+): "deal" | "lead" | null {
+  const def = sources.find((s) => s.key === key);
+  if (def?.bitrixActivityOwner) return def.bitrixActivityOwner;
+  const rt = recordTypeOf(key, sources);
+  if (rt === "lead") return "lead";
+  return rt === "negocio" ? "deal" : null;
 }
 
 /** Predicado (WidgetFilter[]) que recorta as linhas da pai; [] p/ fontes raiz. */

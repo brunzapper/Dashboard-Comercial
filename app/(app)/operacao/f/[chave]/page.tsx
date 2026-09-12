@@ -1,3 +1,8 @@
+// Versão: 1.1 | Data: 12/09/2026
+// v1.1 (12/09/2026): duas colunas — o formulário e, ao lado, os lançamentos
+//   dos últimos 7 dias na Base de destino (com link do CRM). Quem lança em
+//   série precisava sair da tela para conferir o que acabou de mandar. Junto, o
+//   gatilho de "Preencher com IA", condicionado à org ter IA configurada.
 // Versão: 1.0 | Data: 08/09/2026
 // Página de UM formulário do Workflow (0126) — a superfície que o esquema
 // produz, fora da fábrica que o criou.
@@ -15,10 +20,12 @@ import { notFound } from "next/navigation";
 import { requireSettingsArea } from "@/lib/auth/access";
 import { getActiveOrgId } from "@/lib/auth/org";
 import { createClient } from "@/lib/supabase/server";
+import { loadOrgAiConfigPublic } from "@/lib/ai/config";
 import { loadWorkflowOptions } from "@/lib/workflow/options";
 import { loadWorkflowSchemaByKey } from "@/lib/workflow/schemas";
 import { visibleFields } from "@/lib/workflow/types";
 import { WorkflowRunner } from "@/components/operacao/workflow-runner";
+import { WorkflowRecentPanel } from "@/components/operacao/workflow-recent-panel";
 
 // Uma execução encadeia várias chamadas ao sistema externo, em série.
 export const maxDuration = 120;
@@ -63,16 +70,25 @@ export default async function FormularioPage({
   }
 
   const options = await loadWorkflowOptions(supabase, orgId, schema.definition);
+  // Só a PRESENÇA da configuração atravessa (nunca a chave — loadOrgAiConfig
+  // fica no servidor): sem IA na org o gatilho de preenchimento não aparece.
+  const ai = await loadOrgAiConfigPublic(orgId);
 
+  // Duas colunas a partir de `lg`: formulário à esquerda, lançamentos recentes
+  // à direita. No telefone empilha (o formulário primeiro — é o que a pessoa
+  // veio fazer). O painel se esconde sozinho quando o esquema não grava
+  // registro local.
   return (
-    <div className="flex flex-col gap-6">
+    <div className="grid gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
       <WorkflowRunner
         schemaKey={schema.key}
         schemaLabel={schema.label}
         description={schema.description}
         fields={visibleFields(schema.definition)}
         options={options}
+        aiEnabled={Boolean(ai?.hasKey)}
       />
+      <WorkflowRecentPanel schemaKey={schema.key} />
     </div>
   );
 }

@@ -47,6 +47,11 @@ import { loadStatusCodes, runWorkflowCore } from "@/lib/workflow/run";
 import { BitrixClient } from "@/lib/sync/bitrix/client";
 import { resolveWorkflowConnection } from "@/lib/workflow/connections";
 import {
+  formTargetSource,
+  loadRecentFormRecords,
+  type RecentRecordsResult,
+} from "@/lib/workflow/recent-records";
+import {
   loadWorkflowSchemaByKey,
   loadWorkflowSchemas,
   uniqueWorkflowKey,
@@ -213,22 +218,13 @@ export async function runWorkflow(
   if (resp.error) return { ok: false, message: resp.error };
 
   // Base de destino do passo de registro local, resolvida e validada AQUI (o
-  // núcleo não consulta catálogo).
-  const recordStep = def.steps.find(
-    (s) => s.type === "record.create" && s.enabled
-  );
-  let recordSource;
-  if (recordStep && recordStep.type === "record.create") {
-    const sources = await loadSources(supabase, orgId);
-    const found = sources.find((s) => s.key === recordStep.params.sourceKey);
-    if (found?.manualEntry) {
-      recordSource = {
-        key: found.key,
-        recordType: found.recordType,
-        manualEntry: true,
-      };
-    }
-  }
+  // núcleo não consulta catálogo). O resolvedor é compartilhado com o painel de
+  // lançamentos recentes (`formTargetSource`) — duas cópias da mesma pergunta
+  // divergiriam no primeiro gate novo.
+  const target = formTargetSource(def, await loadSources(supabase, orgId));
+  const recordSource = target
+    ? { key: target.key, recordType: target.recordType, manualEntry: true }
+    : undefined;
 
   // Catálogo de campos: só quando o esquema ALTERA registro (o passo precisa
   // dele para decidir alvo válido e coerção). Esquema que só cria não paga.
@@ -517,3 +513,68 @@ interface RawBitrixField {
 }
 
 const BITRIX_ENTITIES: string[] = ["company", "contact", "lead", "deal"];
+
+/** Resultado do painel de lançamentos recentes (ao lado do formulário). */
+export interface RecentFormRecordsState {
+  ok: boolean;
+  message?: string;
+  data?: RecentRecordsResult;
+}
+
+/**
+ * Os lançamentos recentes da Base de destino de um formulário.
+ *
+ * Ação CURTA de leitura, então Server Action é o lugar certo (a regra de "turno
+ * de IA nunca é action" é sobre turno LONGO — ver AGENTS.md). O gate é o mesmo
+ * do `runWorkflow`, e a muralha de visibilidade é a RLS de `records`: vendedor
+ * sem `view_all_records` recebe só os próprios.
+ *
+ * Portal não configurado (sem `BITRIX_WEBHOOK_URL`) não é erro — a lista sai sem
+ * os links.
+ */
+export async function loadFormRecentRecords(
+  schemaKey: string
+): Promise<RecentFormRecordsState> {
+  const session = await getSessionInfo();
+  if (!session) return { ok: false, message: "Sessão expirada." };
+  if (!(await checkSettingsArea("workflow"))) {
+    return { ok: false, message: "Você não tem acesso a esta área." };
+  }
+  const orgId = await getActiveOrgId();
+  if (!orgId) {
+    return { ok: false, message: "Organização ativa não identificada." };
+  }
+  const supabase = await createClient();
+  const schema = await loadWorkflowSchemaByKey(supabase, orgId, schemaKey);
+  if (!schema?.definition || schema.triggerKind !== "form") {
+    return { ok: false, message: "Esquema não encontrado." };
+  }
+  const sources = await loadSources(supabase, orgId);
+  const target = formTargetSource(schema.definition, sources);
+  if (!target) {
+    // Formulário que não grava registro local não tem o que listar.
+    return { ok: true };
+  }
+  let webhookUrl = "";
+  try {
+    webhookUrl = resolveWorkflowConnection("bitrix_webhook");
+  } catch {
+    webhookUrl = "";
+  }
+  try {
+    const data = await loadRecentFormRecords(
+      supabase,
+      target,
+      sources,
+      webhookUrl,
+      { orgId }
+    );
+    return { ok: true, data };
+  } catch (e) {
+    return {
+      ok: false,
+      message:
+        e instanceof Error ? e.message : "Falha ao carregar os lançamentos.",
+    };
+  }
+}

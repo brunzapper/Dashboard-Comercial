@@ -1,3 +1,12 @@
+<!-- Versão: 1.94 | Data: 12/09/2026 -->
+<!-- v1.94 (12/09/2026): §4.23 — a tela do formulário do Workflow ganha os
+     lançamentos recentes ao lado (com link do CRM) e o "Preencher com IA"
+     (contrato formulario-preencher v1, que NÃO escreve: preenche as caixas e
+     quem lança é a pessoa). -->
+<!-- v1.93 (12/09/2026): §4.15 — condição de automação sobre DATA compara por
+     DIA de Brasília (`brasiliaDayOf`), não por string. Invariante 40: o dia sai
+     da FORMA do valor, e a divergência com o SQL é deliberada porque estas
+     condições nunca descem ao RPC. -->
 <!-- Versão: 1.93 | Data: 12/09/2026 -->
 <!-- v1.93 (12/09/2026): §4.7 — exibição do hub virou estado de cliente
      (respondia só após recarregar), engrenagem admin-only, abas de
@@ -3058,6 +3067,61 @@ coluna Personalizar via `kanban_placements.updated_at`). Regras em ordem
 (`position`): a PRIMEIRA que casa vence por card; ações =
 `move_to_column` e `set_field` (31/07/2026 — união extensível).
 
+**Condição de campo sobre DATA compara por DIA de Brasília (12/09/2026).**
+"Antes/depois de uma data específica" era o caso que não funcionava. A avaliação
+de uma condição de campo é 100% LOCAL — o universo da rodada
+(`lib/kanban/automations/universe.ts`) carrega os registros com `filters: []`, e
+quem decide é `fieldFilterMatches` → `recordMatchesConds` → `evalCondition`, que
+para literal não-numérico termina em `localeCompare`. Comparação de string, e
+por isso:
+
+| valor gravado | condição | antes | agora |
+|---|---|---|---|
+| `2026-08-15T10:00:00-03:00` | `< 2026-09-01` | `true` (por acidente — ISO ordena lexicalmente) | `true` |
+| `15/08/2026` | `< 01/09/2026` | **`false`** | `true` |
+| `2026-09-01T14:00:00-03:00` | `<= 2026-09-01` | **`false`** — "até 1º de setembro" perdia o dia 1 | `true` |
+| `2026-09-13T01:00:00+00:00` (22h do dia 12 em Brasília) | `<= 2026-09-12` | **`false`** | `true` |
+
+O ramo de data de `fieldFilterMatches` resolve os DOIS lados a um dia e compara
+os `AAAA-MM-DD` (em ISO, lexical É a ordem certa). O dono da leitura é
+**`brasiliaDayOf`** (`lib/date/normalize.ts`), contraparte do
+`anchorNaiveToBrasilia` do write side: ele ramifica pela FORMA do valor, reusando
+as regexes que já moram naquele módulo —
+
+- valor com `Z`/`±HH:MM` é **instante** → hora de parede de America/Sao_Paulo
+  (`zonedParts`). É o caso das colunas `timestamptz` do núcleo, que o PostgREST
+  devolve em `+00:00`: ler o prefixo cru daria o dia UTC;
+- valor **naive** (date-only ou `AAAA-MM-DDTHH:mm[:ss]`) → prefixo literal,
+  verbatim. Converter fuso aqui recuaria um dia (é hora de parede de Brasília);
+- o resto → `null`, e aí decide o caminho de sempre.
+
+O formato BR (`dd/mm/aaaa`) entra pelo `coerceDate` (`lib/import/csv.ts`) nos
+DOIS lados — a UI passou a emitir `AAAA-MM-DD`, mas regra antiga digitada à mão
+tem o valor em BR, e campo de TEXTO pode guardar a data assim (só o tipo `data`
+passa pela coerção na gravação). Ops `_num` ficam fora do ramo (pedem número
+explicitamente) e, com qualquer lado não-data, o resultado é byte-idêntico ao
+anterior. Vale também para os filtros de registros CONECTADOS
+(`lib/kanban/related-count.ts`, o outro chamador).
+
+Isto **diverge** do SQL de propósito: o RPC compara instante (núcleo) e texto
+(custom), sem truncar dia. A divergência só é legítima porque estas condições
+nunca descem ao RPC — o universo vem sem filtro —, então os RPCs de widget ficam
+INTOCADOS e a invariante 1 não é acionada. Está escrito aqui e na invariante 40
+justamente para ninguém "uniformizar" depois.
+
+Na UI (`components/kanban/automation-rule-editor.tsx`, o editor ÚNICO que o
+sheet do quadro, a tela do Workflow e o sheet de série da Tree renderizam):
+campo de data recebe `<input type="date">` e os comparadores viram "antes de" /
+"até" / "depois de" / "a partir de" / "no dia" / "fora do dia". É override de
+RÓTULO sobre `FILTER_OPS` (`DATE_OP_LABELS`), nunca uma lista paralela de
+operadores; nenhum op sai da oferta (regra gravada com `contém` tem de seguir
+exibível); e trocar o campo para um de data descarta valor que não seja um dia
+válido — senão a caixa ficaria em branco na tela com o valor velho no rascunho, e
+seria ele que o save gravaria. Quais refs são data sai de
+`AutomationFieldCatalog.dateFields` (= `available.filter(f => f.isDate)`), no
+molde dos `booleanFields`/`numericFields`. A ação `set_field` fica de fora:
+campo de data não é alvo válido dela (`setFieldTargetError`).
+
 **Ação `set_field` (31/07/2026):** grava um valor FIXO num campo do registro
 ("toda reunião com fonte X recebe SDR Y" como regra contínua, valendo p/
 registros futuros). Parse fail-closed valida SÓ a estrutura (`field`/`value`
@@ -4593,6 +4657,87 @@ acontece só dentro do Workflow. O hub nunca destrói nada. Card de formulário
 herda a área `workflow`, então feature-off some com os dois de uma vez; a key
 ganha o namespace `form:` para nunca colidir com a de um módulo, e a consulta
 só roda quando a área já passou.
+
+**A tela do formulário tem duas colunas (12/09/2026).** À esquerda o
+formulário; à direita os registros que a Base de destino recebeu nos últimos 7
+dias, com link para a entidade no portal. Quem lança em série não tinha como
+saber se o de agora já foi lançado, nem conferir o que acabou de mandar, sem sair
+da tela e ir a `/registros`.
+
+O painel é **genérico**, não "a lista de leads": a Base sai do passo
+`record.create` habilitado do esquema, por `formTargetSource`
+(`lib/workflow/recent-records.ts`) — o MESMO resolvedor que a action de execução
+passou a usar, com o mesmo gate `manualEntry`. Formulário que só fala com o CRM
+não tem painel, e nada é dito: não há nada de errado a comunicar.
+
+Três decisões:
+
+- **Só STRING atravessa para o cliente.** A consulta é `runRecordList` sobre um
+  `WidgetConfig` sintético (precedente de `lib/agenda/data.ts`) com período em
+  `source_created_at`, e a formatação acontece no servidor
+  (`recordCellValue`/`coreCellValue`). O que viaja é
+  `{ id, title, when, responsible, url }` — nenhum `RecordRow` cruza o boundary,
+  então nenhum valor de campo restrito (`visible_to_roles`) pode vazar no payload
+  RSC. A peneira do `redactRestrictedFields` deixa de ser algo de que alguém
+  precise lembrar (ver `docs/seguranca.md`).
+- **O link é montado no servidor.** Reusa `bitrixEntityUrl`
+  (`lib/workflow/steps/bitrix.ts`), que já existia para o retorno do lançamento
+  e deriva o portal da credencial do webhook — credencial que NUNCA atravessa
+  para o cliente. A entidade sai de `bitrixEntityOfSource` (`lib/sources.ts`):
+  `data_sources.bitrix_activity_owner` quando declarado, senão os dois builtins
+  do CRM respondem por si (`lead`→lead, `negocio`→deal). Sem par no CRM ou sem
+  portal configurado não há link — nunca um href chutado.
+- **A atualização vem do event bus.** O runner já emitia `emitDataChanged` no
+  sucesso, então o painel assina `useDataChanged` e re-busca por uma action
+  curta. É **silenciosa** por regra (§4.10): o sync roda a cada minuto e também
+  alimenta o bus, então piscar a lista a cada tick leria como defeito. Só a
+  primeira carga e o botão "Atualizar" mostram feedback.
+
+Visibilidade é a RLS de `records` — vendedor sem `view_all_records` vê só os
+próprios lançamentos. Nada de service role.
+
+**Preencher com IA (contrato `formulario-preencher` v1, 12/09/2026).** A pessoa
+descreve o lead em uma ou duas frases e a IA aloca cada informação nos campos.
+Ela **não lança**: o resultado vai para as CAIXAS e quem cria é o clique em
+Lançar, pelo `runWorkflow` intocado. É a forma mais forte da invariante 25 — não
+existe um "apply" irmão para auditar, porque não existe caminho de escrita novo.
+
+- Contrato em `lib/import/workflow-form/` (`types`/`validate`/`instructions`),
+  no molde de `lib/import/records/`: SPEC DERIVADO de `WORKFLOW_FIELD_TYPES`
+  (`satisfies` — tipo de campo novo sem regra não compila) e o EXEMPLO do
+  enunciado rodando pelo validador REAL nos testes.
+- Campo de **seleção** valida ESTRITO contra `loadWorkflowOptions` — o mesmo
+  catálogo vivo que a tela usa — e a grafia devolvida é a DELE. Sem isso a IA
+  inventaria uma Fonte plausível, o formulário aceitaria e o CRM recusaria o lead
+  no fim da fila, longe da causa. Campo de seleção cuja lista está VAZIA (o sync
+  não rodou) é OMITIDO do catálogo: oferecê-lo garantiria um valor inventado.
+- Campo que a IA não preencheu é AUSÊNCIA, não erro — **mesmo sendo
+  obrigatório**. Barrar no validador esconderia o resto do preenchimento, que
+  estava certo; quem cobra obrigatório é o envio, que é onde a decisão de lançar
+  acontece.
+- O turno entra por **rota** (`app/api/operacao/workflow/ai-fill/route.ts`), não
+  por Server Action, pelo motivo de sempre (o Next serializa actions por
+  cliente): as vítimas aqui seriam justamente o envio do formulário e o refetch
+  do painel de recentes. Mesmo esqueleto NDJSON das outras três (anti-CSRF
+  `origin === host`, `{"type":"state"}` por último, `x-accel-buffering: no`) e o
+  mesmo leitor `readNdjsonTurn`. Diferente delas, este turno é SEM ESTADO: não há
+  tabela, a conversa vive no cliente.
+- Como o preenchimento chega à tela: o runner guarda `filled` e bumpa o
+  `formKey`, que é o mecanismo que já remontava os campos depois de um
+  lançamento. Os inputs seguem NÃO-controlados — a IA escolhe com que valor a
+  caixa nasce, não o que ela é. Sem IA configurada na org o gatilho não aparece
+  (precedente do `RecordsAiInsertSheet`).
+
+**E-mail padrão do formulário de leads (12/09/2026).** Lead sem e-mail vai com
+`sememail@sememail.com` em vez de deixar o campo vazio no CRM. É só DADO — o
+`defaultValue` do campo no esquema —, e o motor já fazia as duas metades sem
+mudança: `FieldInput` inicializa a caixa com ele, e `readForm` cai nele quando o
+campo chega VAZIO (vale para quem apaga o conteúdo antes de enviar). Atenção ao
+alcance: `ensureDefaultWorkflowSchemas` semeia UMA vez por org (marcador
+`workflow_seeded`) e de propósito não faz ensure-if-absent depois —
+ressuscitaria esquema excluído. Então a org que já existe só pega isto pelo
+runbook `supabase/apply/backfill-lead-form-email.sql`, que é idempotente e não
+sobrescreve endereço escolhido à mão.
 
 ---
 
@@ -6207,6 +6352,21 @@ principalmente — para mantenedores humanos.
     toda tela nova — foi assim que uma palavra que esta organização não usa
     chegou a 37 arquivos. `lib/series/noun.test.ts` guarda isso estaticamente;
     a allowlist só aceita DADO real de negócio.
+40. **Data em condição de automação é DIA de Brasília, e o dia sai da FORMA do
+    valor (12/09/2026, §4.15).** `brasiliaDayOf` (`lib/date/normalize.ts`) é o
+    dono da leitura: valor com `Z`/`±HH:MM` é INSTANTE e vira hora de parede de
+    America/Sao_Paulo; valor NAIVE é prefixo literal, verbatim. Nunca leia o
+    prefixo `YYYY-MM-DD` cru de uma coluna `timestamptz` — o PostgREST a devolve
+    em `+00:00` e um registro das 22h de Brasília cairia no dia SEGUINTE; nunca
+    aplique conversão de fuso a valor naive — ele já É hora de parede daqui, e
+    converter recuaria um dia. A comparação por DIA divergir do SQL (que compara
+    instante no núcleo e texto no custom) é DELIBERADO e só se sustenta porque
+    estas condições nunca descem ao RPC: o universo da rodada vem sem filtro
+    (`lib/kanban/automations/universe.ts`), os RPCs de widget ficam INTOCADOS e a
+    invariante 1 não é acionada. Não uniformize os dois lados. O ramo só age
+    quando OS DOIS lados são data (ops `_num` fora): sem isso, byte-idêntico ao
+    que havia antes — que para data estava errado em silêncio (`<= "2026-09-01"`
+    perdia os registros do dia 1, e o formato BR nunca casava).
 
 ## 6. Convenções do projeto
 

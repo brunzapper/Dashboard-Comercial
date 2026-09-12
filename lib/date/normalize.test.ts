@@ -1,4 +1,7 @@
-// Versão: 1.0 | Data: 24/07/2026
+// Versão: 1.1 | Data: 12/09/2026
+// v1.1 (12/09/2026): brasiliaDayOf — o dia de Brasília de um valor JÁ GRAVADO.
+//   O caso que a função existe para acertar: 22h de Brasília é outro dia em UTC,
+//   e é em UTC que o PostgREST devolve as colunas timestamptz.
 // Testes da normalização de fuso na ENTRADA (0079/0080). A invariante mais
 // dura é o formato de saída: "YYYY-MM-DDTHH:mm:ss±HH:MM" BYTE A BYTE igual ao
 // to_char(...) || '-03:00' do backfill 0080 — o reconcile compara strings e
@@ -9,6 +12,7 @@ import { describe, expect, it } from "vitest";
 import {
   BRASILIA_TZ,
   anchorNaiveToBrasilia,
+  brasiliaDayOf,
   normalizeDateString,
   offsetSuffix,
   wallTimeToEpoch,
@@ -109,6 +113,41 @@ describe("anchorNaiveToBrasilia", () => {
     );
     expect(anchorNaiveToBrasilia("abc")).toBe("abc");
     expect(anchorNaiveToBrasilia("")).toBe("");
+  });
+});
+
+describe("brasiliaDayOf (leitura — v1.2, 12/09/2026)", () => {
+  it("valor com offset/Z é INSTANTE: o dia é o de Brasília, não o do prefixo", () => {
+    // O caso que motiva a função: 22h de Brasília já é o dia seguinte em UTC, e
+    // é em UTC ("+00:00") que o PostgREST devolve as colunas timestamptz.
+    expect(brasiliaDayOf("2026-09-12T23:00:00-03:00")).toBe("2026-09-12");
+    expect(brasiliaDayOf("2026-09-13T02:00:00+00:00")).toBe("2026-09-12");
+    expect(brasiliaDayOf("2026-09-13T02:00:00Z")).toBe("2026-09-12");
+    // Meia-noite de Brasília não escorrega para o dia anterior.
+    expect(brasiliaDayOf("2026-09-12T00:00:00-03:00")).toBe("2026-09-12");
+  });
+
+  it("naive é VERBATIM (é hora de parede de Brasília; converter recuaria um dia)", () => {
+    expect(brasiliaDayOf("2026-09-12")).toBe("2026-09-12");
+    expect(brasiliaDayOf("2026-09-12T23:00:00")).toBe("2026-09-12");
+    expect(brasiliaDayOf("2026-09-12 23:00")).toBe("2026-09-12");
+    expect(brasiliaDayOf("2026-09-12T00:00:00")).toBe("2026-09-12");
+  });
+
+  it("o que não é data vira null — nunca um dia chutado", () => {
+    expect(brasiliaDayOf(null)).toBeNull();
+    expect(brasiliaDayOf(undefined)).toBeNull();
+    expect(brasiliaDayOf("")).toBeNull();
+    expect(brasiliaDayOf("   ")).toBeNull();
+    expect(brasiliaDayOf("abc")).toBeNull();
+    expect(brasiliaDayOf(1250.5)).toBeNull();
+    expect(brasiliaDayOf("15/08/2026")).toBeNull(); // formato BR não é deste módulo
+    expect(brasiliaDayOf("0000-00-00")).toBeNull(); // sentinela do Bitrix
+    expect(brasiliaDayOf("0000-00-00 00:00:00")).toBeNull();
+  });
+
+  it("espaço nas pontas não atrapalha (valor de planilha)", () => {
+    expect(brasiliaDayOf("  2026-09-12  ")).toBe("2026-09-12");
   });
 });
 

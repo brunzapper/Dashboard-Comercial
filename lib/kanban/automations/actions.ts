@@ -1,3 +1,7 @@
+// Versão: 1.5 | Data: 12/09/2026
+// v1.5 (12/09/2026): `dateFields` no catálogo — o editor precisa saber quais
+//   refs são data para oferecer um seletor de data e falar "antes de"/"depois
+//   de". Molde dos `booleanFields`/`numericFields` que já estavam aqui.
 // Versão: 1.2 | Data: 08/09/2026
 // v1.2 (08/09/2026): dono de tipo `source` (0127). O gate ramifica: quadro
 //   segue em `ensureKanbanConfigGate` (admin || dono || acesso 'edit'); BASE
@@ -365,6 +369,10 @@ export interface AutomationFieldCatalog {
   // Tipo booleano do alvo (o editor de valor vira Sim/Não): refs booleanos.
   booleanFields: string[];
   numericFields: string[];
+  // Campos de DATA (AvailableField.isDate): o editor troca o input de valor por
+  // um seletor de data e fala em "antes de"/"depois de" (12/09/2026). É OFERTA,
+  // não autorização: a semântica de dia vive em fieldFilterMatches.
+  dateFields: string[];
   // Esquemas do Workflow executáveis por regra (ligados + gatilho `automacao`
   // + definição válida) — a MESMA régua que o avaliador usa. Lista vazia é
   // informação: a opção aparece desabilitada com motivo, nunca escondida.
@@ -462,6 +470,10 @@ export async function getAutomationFieldOptions(
   );
   const booleanFields: string[] = [];
   const numericFields: string[] = [];
+  // Datas saem do catálogo já montado (buildAvailableFields resolve core,
+  // custom, unificado e registro casado) — nunca de uma varredura paralela de
+  // field_definitions, que não conhece `unified:`/`match:`.
+  const dateFields = available.filter((f) => f.isDate).map((f) => f.field);
   for (const [col, dt] of Object.entries(EDITABLE_CORE_COLUMNS)) {
     if (dt === "booleano") booleanFields.push(col);
     else if (dt === "numero" || dt === "moeda") numericFields.push(col);
@@ -497,6 +509,7 @@ export async function getAutomationFieldOptions(
       settableFields: toFieldOptions(settable, labels),
       booleanFields,
       numericFields,
+      dateFields,
       schemas,
     },
   };

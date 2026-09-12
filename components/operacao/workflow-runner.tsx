@@ -1,3 +1,8 @@
+// Versão: 1.1 | Data: 12/09/2026
+// v1.1 (12/09/2026): "Preencher com IA" — as respostas propostas entram pelo
+//   `filled` e o bloco de campos REMONTA pelo formKey (o mesmo mecanismo que já
+//   limpava o formulário depois de lançar). Os inputs seguem não-controlados: a
+//   IA escolhe com que valor a caixa nasce, não o que ela é.
 // Versão: 1.0 | Data: 08/09/2026
 // Formulário de execução de um esquema de Workflow (0125).
 //
@@ -21,6 +26,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { emitDataChanged } from "@/lib/tasks/events";
+import { WorkflowFormAiSheet } from "./workflow-form-ai-sheet";
 import type { WorkflowFormField } from "@/lib/workflow/types";
 import {
   runWorkflow,
@@ -32,12 +38,15 @@ const initial: WorkflowRunState = {};
 function FieldInput({
   field,
   options,
+  initialValue,
 }: {
   field: WorkflowFormField;
   options: string[];
+  /** Valor com que a caixa NASCE (padrão do esquema, ou o que a IA propôs). */
+  initialValue: string;
 }) {
   const name = `wf__${field.key}`;
-  const [value, setValue] = useState(field.defaultValue ?? "");
+  const [value, setValue] = useState(initialValue);
 
   if (field.type === "selecao") {
     return (
@@ -63,7 +72,7 @@ function FieldInput({
         id={name}
         name={name}
         rows={3}
-        defaultValue={field.defaultValue ?? ""}
+        defaultValue={initialValue}
         placeholder={field.placeholder}
       />
     );
@@ -83,7 +92,7 @@ function FieldInput({
       id={name}
       type={inputType}
       name={name}
-      defaultValue={field.defaultValue ?? ""}
+      defaultValue={initialValue}
       placeholder={field.placeholder}
     />
   );
@@ -95,6 +104,7 @@ export function WorkflowRunner({
   description,
   fields,
   options,
+  aiEnabled = false,
 }: {
   schemaKey: string;
   schemaLabel: string;
@@ -103,18 +113,31 @@ export function WorkflowRunner({
   fields: WorkflowFormField[];
   /** Opções por chave de campo — vindas do que o sistema já computou. */
   options: Record<string, string[]>;
+  /** A org tem IA configurada? Sem isso o gatilho não aparece. */
+  aiEnabled?: boolean;
 }) {
   const [state, formAction, pending] = useActionState(runWorkflow, initial);
   const [formKey, setFormKey] = useState(0);
+  // Respostas propostas pela IA (12/09/2026). Preencher REMONTA o bloco de
+  // campos pelo `formKey` — o mesmo mecanismo que já limpava o formulário
+  // depois de um lançamento. Nada de tornar os inputs controlados: eles
+  // continuam nascendo com um valor e livres para editar.
+  const [filled, setFilled] = useState<Record<string, string> | null>(null);
 
   useEffect(() => {
     if (state.ok) {
       // Limpa o formulário para o próximo lançamento e avisa quem exibe dados.
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setFormKey((k) => k + 1);
+      setFilled(null);
       emitDataChanged({ kind: "record", recordId: null });
     }
   }, [state.ok, state.status]);
+
+  function applyAiValues(values: Record<string, string>) {
+    setFilled(values);
+    setFormKey((k) => k + 1);
+  }
 
   return (
     <form action={formAction} className="flex max-w-2xl flex-col gap-4">
@@ -136,7 +159,13 @@ export function WorkflowRunner({
                 <span className="text-destructive ml-0.5">*</span>
               ) : null}
             </Label>
-            <FieldInput field={field} options={options[field.key] ?? []} />
+            <FieldInput
+              field={field}
+              options={options[field.key] ?? []}
+              initialValue={
+                filled?.[field.key] ?? field.defaultValue ?? ""
+              }
+            />
             {field.help ? (
               <p className="text-muted-foreground text-xs">{field.help}</p>
             ) : null}
@@ -144,11 +173,14 @@ export function WorkflowRunner({
         ))}
       </div>
 
-      <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-center gap-3">
         <Button type="submit" disabled={pending}>
           <Send className="size-4" />
           {pending ? "Lançando…" : "Lançar"}
         </Button>
+        {aiEnabled ? (
+          <WorkflowFormAiSheet schemaKey={schemaKey} onFilled={applyAiValues} />
+        ) : null}
         {state.url ? (
           <a
             href={state.url}
