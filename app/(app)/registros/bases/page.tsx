@@ -184,7 +184,7 @@ export default async function FontesPage() {
             de CSV em Registros.
           </p>
         </div>
-        <BackLink href="/registros" label="Registros" />
+        <BackLink fallback="/registros" fallbackLabel="Registros" />
       </div>
       <SourceFoldersManager folders={folders} sources={sources} />
       <SourcesManager

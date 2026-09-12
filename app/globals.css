@@ -1,4 +1,8 @@
 /* Versão: 1.4 | Data: 12/09/2026 */
+/* v1.5 (12/09/2026): a superfície externa do dashboard deixou de pintar `color`
+   no <main> — a herança descia até os widgets e quebrava as cores de gráficos,
+   textos e tabelas. Só o cromo (cabeçalho/abas/barra de período) recebe cor, e
+   o marcador [data-board-chrome] passou a excluir o grid. */
 /* v1.4 (12/09/2026): main[data-app-main] (superfície externa do dashboard, via
    --app-surface/--app-surface-text), [data-hub-grid] (colunas configuráveis do hub, via
    --hub-cols) e os tokens de tema personalizáveis — o runtime passa a poder
@@ -157,19 +161,24 @@
 }
 
 /* Janela do app (o <main> do AppShell): o tema EXTERNO de um dashboard pinta
-   o entorno inteiro — cabeçalho, abas, barra de período e as margens — pintando
-   estas variáveis no <html>. Sem elas definidas, a janela segue transparente
-   sobre o fundo do tema. Quem as define LIMPA ao desmontar. */
+   o entorno — as margens ao redor do conteúdo — por esta variável, definida no
+   <html> por quem está na tela (e LIMPA no desmonte). Sem ela, a janela segue
+   transparente sobre o fundo do tema.
+   SÓ o fundo: pintar `color` aqui faz a cor descer por herança para dentro dos
+   widgets, dos gráficos e das tabelas — era o que quebrava as cores do
+   dashboard inteiro ao escolher uma cor externa. Quem recebe cor de texto é o
+   CROMO, marcado explicitamente. */
 main[data-app-main] {
   background: var(--app-surface, transparent);
-  color: var(--app-surface-text, inherit);
 }
 
-/* Cromo do board (cabeçalho, abas e barra de período) sobre a superfície
-   externa. O `color` herdaria sozinho, mas o texto secundário não: ele traz
-   `text-muted-foreground`, uma cor fixa do tema que ficaria cinza-escuro sobre
-   um fundo escuro escolhido à mão. --app-surface-muted só existe quando há
-   superfície externa; sem ela a regra cai no token do tema e nada muda. */
+/* Cromo do board = cabeçalho, abas e barra de período. NUNCA o grid: o
+   marcador fica em wrappers que excluem os widgets, porque a regra do texto
+   secundário abaixo alcança descendentes e recoloriria todo rótulo de gráfico,
+   eixo e tabela. O texto secundário precisa da regra própria porque
+   `text-muted-foreground` é cor FIXA do tema e ficaria cinza-escuro sobre um
+   fundo escuro escolhido à mão; --app-surface-muted só existe quando há
+   superfície externa, então sem ela a regra cai no token do tema e nada muda. */
 [data-board-chrome] {
   color: var(--app-surface-text, inherit);
 }
@@ -187,6 +196,12 @@ main[data-app-main] {
   [data-hub-grid] {
     grid-template-columns: repeat(var(--hub-cols, 3), minmax(0, 1fr));
   }
+}
+
+/* Altura mínima do card do hub (--hub-card-h, definida pela grade/lista).
+   Ausente = altura natural, que é como todo card sempre se comportou. */
+[data-hub-card] {
+  min-height: var(--hub-card-h, auto);
 }
 
 /* Pulso de destaque de um widget focado por atalho/link (lib/widgets/focus.ts):

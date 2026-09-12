@@ -107,7 +107,7 @@ export default async function LixeiraPage() {
             depois são excluídos definitivamente.
           </p>
         </div>
-        <BackLink href="/registros" label="Registros" />
+        <BackLink fallback="/registros" fallbackLabel="Registros" />
       </div>
       <TrashTable items={items} />
     </div>

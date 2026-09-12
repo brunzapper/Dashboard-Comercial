@@ -30,5 +30,11 @@ export function FocusedAreaHeader({
   if (atIndex) {
     return <h1 className="text-2xl font-semibold">{title}</h1>;
   }
-  return <BackLink href={indexHref} label={title} className="-ml-2 self-start" />;
+  return (
+    <BackLink
+      fallback={indexHref}
+      fallbackLabel={title}
+      className="-ml-2 self-start"
+    />
+  );
 }

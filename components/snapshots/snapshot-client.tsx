@@ -174,24 +174,28 @@ export function SnapshotClient({
       <DashboardHistoryProvider dashboardId={dashboardId} seed={historySeed}>
         {/* Largura total (sem max-width): o snapshot não tem sidebar e deve
             ocupar a tela inteira, como o <main> do app autenticado (p-6). */}
+        {/* A superfície externa pinta só o FUNDO aqui. A cor de texto vai no
+            cabeçalho (data-board-chrome), NUNCA neste wrapper: ele contém o
+            grid, e a regra de texto secundário de globals.css alcança
+            descendentes — recoloriria rótulo de gráfico, eixo e tabela. */}
         <div
-          data-board-chrome
           className="flex w-full flex-col gap-4 p-4 md:p-6"
           style={
-            outerCss
-              ? ({
-                  background: outerCss,
-                  color: outerText ?? undefined,
-                  ...(outerText
-                    ? {
-                        "--app-surface-muted": `color-mix(in oklch, ${outerText} 72%, transparent)`,
-                      }
-                    : {}),
-                } as CSSProperties)
-              : undefined
+            outerCss ? ({ background: outerCss } as CSSProperties) : undefined
           }
         >
-          <div className="flex flex-wrap items-baseline justify-between gap-2">
+          <div
+            data-board-chrome
+            className="flex flex-wrap items-baseline justify-between gap-2"
+            style={
+              outerText
+                ? ({
+                    color: outerText,
+                    "--app-surface-muted": `color-mix(in oklch, ${outerText} 72%, transparent)`,
+                  } as CSSProperties)
+                : undefined
+            }
+          >
             <div className="flex min-w-0 flex-col">
               <h1 className="truncate text-2xl font-semibold">{snapshotName}</h1>
               <p className="text-muted-foreground truncate text-sm">

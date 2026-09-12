@@ -1,4 +1,10 @@
-// Versão: 4.0 | Data: 12/09/2026
+// Versão: 4.1 | Data: 12/09/2026
+// v4.1 (12/09/2026): a exibição dos cards virou estado de CLIENTE
+//   (HubDisplayProvider). Como RSC, mudar um controle só aparecia depois de
+//   recarregar — e o refresh de reconciliação reentregava o valor antigo,
+//   desmarcando a caixa recém-marcada. Os controles também mudaram de forma:
+//   cartão↔lista para todo mundo, e uma ENGRENAGEM (só admin) com colunas,
+//   altura do card, descrição e nível de acesso.
 // v4.0 (12/09/2026): DISPOSIÇÃO CONFIGURÁVEL (0141). Os cards saíram daqui para
 //   components/home/hub-cards.tsx (a mesma régua serve o painel de /operacao) e
 //   as três cópias da grade viraram <CardGrid>, que aceita grade↔lista e número
@@ -52,8 +58,8 @@ import { CreateMenu } from "@/components/dashboards/create-menu";
 import { ImportDashboardSheet } from "@/components/dashboards/import-dashboard-sheet";
 import { loadOrgAiConfigPublic } from "@/lib/ai/config";
 import { allowedOperacaoCards, applyCardDescriptions } from "@/lib/operacao/cards";
+import { areaAccessLabel } from "@/lib/auth/access";
 import { cn } from "@/lib/utils";
-import { CardGrid } from "@/components/ui/card-grid";
 import {
   resolveUiPrefs,
   userSidebarPins,
@@ -61,12 +67,14 @@ import {
 } from "@/lib/config/ui-prefs";
 import {
   BoardCard,
+  HubGrid,
   OperacaoCardItem,
   WidgetKanbanCard,
   withinTrashTtl,
   type DashboardRow,
-  type HubCardDisplay,
+  type OperacaoCardView,
 } from "@/components/home/hub-cards";
+import { HubDisplayProvider } from "@/components/home/hub-display-context";
 import { HubLayoutControls } from "@/components/home/hub-layout-controls";
 
 // A geração direta por IA (ImportDashboardSheet → generateDashboardWithAi) roda
@@ -184,16 +192,6 @@ export default async function HomePage({
   const isPinned = (kind: string, id: string) =>
     pins.some((p) => p.kind === kind && p.id === id);
 
-  const boardDisplay: HubCardDisplay = {
-    layout: prefs.values.hubLayout,
-    showDescription: prefs.values.hubShowDescription,
-    showAccess: prefs.values.hubShowAccess,
-  };
-  const operacaoDisplay: HubCardDisplay = {
-    layout: prefs.values.operacaoLayout,
-    showDescription: prefs.values.operacaoShowDescription,
-    showAccess: prefs.values.operacaoShowAccess,
-  };
 
   // Insumos do diálogo "Criar kanban" (fontes + campos p/ o agrupamento).
   // Boards elegíveis aos modos "Criar a partir de"/"Editar" da IA: dashboards
@@ -213,12 +211,21 @@ export default async function HomePage({
   // Cards de Operação (aba "Operação"): catálogo em código recortado por
   // área (checkSettingsArea é cache()d — o layout de /operacao reusa), com a
   // descrição eventualmente sobrescrita pela organização.
-  const operacaoCards =
+  // O `accessLabel` é derivado AQUI (areaAccessLabel é server-only) e desce
+  // pronto: o card virou Client Component para responder aos controles na hora.
+  const operacaoCards: OperacaoCardView[] =
     aba === "operacao"
       ? applyCardDescriptions(
           await allowedOperacaoCards(),
           org?.uiPrefs.operacaoDescriptions
-        )
+        ).map((c) => ({
+          key: c.key,
+          label: c.label,
+          description: c.description,
+          href: c.href,
+          kind: c.kind,
+          accessLabel: areaAccessLabel(c.area),
+        }))
       : [];
 
   let sources: Awaited<ReturnType<typeof loadSources>> = [];
@@ -240,18 +247,17 @@ export default async function HomePage({
   }
 
   const cardGrid = (list: DashboardRow[]) => (
-    <CardGrid layout={boardDisplay.layout} columns={prefs.values.hubColumns}>
+    <HubGrid>
       {list.map((r) => (
         <BoardCard
           key={r.id}
           row={r}
           canManage={canManageRow(r)}
           canDuplicate={canCreate}
-          display={boardDisplay}
           pinned={isPinned(r.kind === "kanban" ? "kanban" : "dashboard", r.id)}
         />
       ))}
-    </CardGrid>
+    </HubGrid>
   );
 
   return (
@@ -304,50 +310,56 @@ export default async function HomePage({
       </nav>
 
       {aba === "operacao" ? (
-        <>
-          <HubLayoutControls
-            keys={{
-              layout: "operacaoLayout",
-              columns: "operacaoColumns",
-              showDescription: "operacaoShowDescription",
-              showAccess: "operacaoShowAccess",
-            }}
-            layout={operacaoDisplay.layout}
-            columns={prefs.values.operacaoColumns}
-            showDescription={operacaoDisplay.showDescription}
-            showAccess={operacaoDisplay.showAccess}
-            locked={lockedKeys}
-            accessLabel="Quem acessa"
-          />
-          <CardGrid
-            layout={operacaoDisplay.layout}
-            columns={prefs.values.operacaoColumns}
-          >
-            {operacaoCards.map((c) => (
-              <OperacaoCardItem
-                key={c.key}
-                card={c}
-                display={operacaoDisplay}
-                pinned={isPinned("operacao", c.key)}
-              />
-            ))}
-          </CardGrid>
-        </>
+        <HubDisplayProvider
+          keys={{
+            layout: "operacaoLayout",
+            columns: "operacaoColumns",
+            cardHeight: "operacaoCardHeight",
+            showDescription: "operacaoShowDescription",
+            showAccess: "operacaoShowAccess",
+          }}
+          initial={{
+            layout: prefs.values.operacaoLayout,
+            columns: prefs.values.operacaoColumns,
+            cardHeight: prefs.values.operacaoCardHeight,
+            showDescription: prefs.values.operacaoShowDescription,
+            showAccess: prefs.values.operacaoShowAccess,
+          }}
+          locked={lockedKeys}
+        >
+          <div className="flex flex-col gap-6">
+            <HubLayoutControls isAdmin={isAdmin} accessLabel="Quem acessa" />
+            <HubGrid>
+              {operacaoCards.map((c) => (
+                <OperacaoCardItem
+                  key={c.key}
+                  card={c}
+                  pinned={isPinned("operacao", c.key)}
+                />
+              ))}
+            </HubGrid>
+          </div>
+        </HubDisplayProvider>
       ) : (
-        <>
-          <HubLayoutControls
-            keys={{
-              layout: "hubLayout",
-              columns: "hubColumns",
-              showDescription: "hubShowDescription",
-              showAccess: "hubShowAccess",
-            }}
-            layout={boardDisplay.layout}
-            columns={prefs.values.hubColumns}
-            showDescription={boardDisplay.showDescription}
-            showAccess={boardDisplay.showAccess}
-            locked={lockedKeys}
-          />
+        <HubDisplayProvider
+          keys={{
+            layout: "hubLayout",
+            columns: "hubColumns",
+            cardHeight: "hubCardHeight",
+            showDescription: "hubShowDescription",
+            showAccess: "hubShowAccess",
+          }}
+          initial={{
+            layout: prefs.values.hubLayout,
+            columns: prefs.values.hubColumns,
+            cardHeight: prefs.values.hubCardHeight,
+            showDescription: prefs.values.hubShowDescription,
+            showAccess: prefs.values.hubShowAccess,
+          }}
+          locked={lockedKeys}
+        >
+          <div className="flex flex-col gap-6">
+          <HubLayoutControls isAdmin={isAdmin} />
 
           {dashboards.length === 0 ? (
             <p className="text-muted-foreground text-sm">
@@ -369,19 +381,15 @@ export default async function HomePage({
               </div>
               {kanbans.length > 0 ? cardGrid(kanbans) : null}
               {widgetKanbans.length > 0 ? (
-                <CardGrid
-                  layout={boardDisplay.layout}
-                  columns={prefs.values.hubColumns}
-                >
+                <HubGrid>
                   {widgetKanbans.map((w) => (
                     <WidgetKanbanCard
                       key={w.widgetId}
                       item={w}
-                      display={boardDisplay}
                       pinned={isPinned("widget-kanban", w.widgetId)}
                     />
                   ))}
-                </CardGrid>
+                </HubGrid>
               ) : null}
             </>
           ) : null}
@@ -412,7 +420,8 @@ export default async function HomePage({
               {cardGrid(trashed)}
             </details>
           ) : null}
-        </>
+          </div>
+        </HubDisplayProvider>
       )}
     </div>
   );

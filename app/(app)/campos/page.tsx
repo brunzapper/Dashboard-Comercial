@@ -145,7 +145,7 @@ export default async function CamposPage() {
     <div className="flex flex-col gap-6">
       {/* Caminho de volta ao Workspace (12/09/2026): as abas desta tela são
           internas (useState) e não levam a lugar nenhum fora dela. */}
-      <BackLink href="/" label="Workspace" className="-ml-2 self-start" />
+      <BackLink fallback="/" fallbackLabel="Workspace" className="-ml-2 self-start" />
       <h1 className="text-2xl font-semibold">Campos</h1>
       <CamposTabs
         campos={
