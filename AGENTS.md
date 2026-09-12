@@ -1801,6 +1801,44 @@ This version has breaking changes — APIs, conventions, and file structure may 
   server-only, o manager é client, e a 1ª versão quebrou o build por importar
   de lá (precedente literal de `lib/ai/operacao/scopes.ts`); teste pina a
   ausência de importações. Ver `docs/arquitetura.md` §4.23 e invariante 31.
+- **A tela do formulário mostra os RECENTES, e a IA dela PREENCHE (nunca lança)
+  (12/09/2026):** `/operacao/f/<chave>` virou duas colunas — formulário +
+  registros que a Base de destino recebeu nos últimos 7 dias, com link do portal.
+  O painel é GENÉRICO: a Base sai do passo `record.create` habilitado, por
+  `formTargetSource` (`lib/workflow/recent-records.ts`), o MESMO resolvedor que a
+  action de execução passou a usar (gate `manualEntry` incluso) — não recrie a
+  resolução num segundo lugar. Só STRING atravessa ao cliente
+  (`{id,title,when,responsible,url}`, formatado no servidor por
+  `recordCellValue`/`coreCellValue`): nenhum `RecordRow` cruza o boundary, então
+  nenhum valor restrito por `visible_to_roles` pode vazar no payload — NÃO passe
+  a devolver linhas cruas. O link reusa `bitrixEntityUrl` e roda no SERVIDOR (a
+  credencial do webhook nunca atravessa); a entidade sai de
+  `bitrixEntityOfSource` (`lib/sources.ts` — `bitrix_activity_owner` quando
+  declarado, senão `lead`→lead / `negocio`→deal) e, sem par no CRM ou sem portal,
+  simplesmente não há link. A recarga vem do event bus que o runner já emitia e é
+  SILENCIOSA (§4.10 — o sync alimenta o bus a cada minuto; piscar leria como
+  defeito). **Contrato `formulario-preencher` v1** (`lib/import/workflow-form/`,
+  core `lib/ai/fill-workflow-form.ts`, rota
+  `app/api/operacao/workflow/ai-fill/route.ts`): a IA devolve as RESPOSTAS e
+  ELAS VÃO PARA AS CAIXAS — não existe apply, quem lança é o clique em Lançar
+  pelo `runWorkflow` INTOCADO (invariante 25 na forma mais forte: nenhum caminho
+  de escrita novo). Seleção valida ESTRITO contra `loadWorkflowOptions` (o
+  catálogo vivo da tela) e devolve a grafia DELE — senão a IA inventa uma Fonte e
+  o CRM recusa o lead longe da causa; lista vazia ⇒ campo FORA do catálogo.
+  Campo não preenchido é AUSÊNCIA, mesmo obrigatório (quem cobra é o envio).
+  Turno por ROTA, não action — as vítimas da fila seriam o envio do formulário e
+  o refetch do painel; NDJSON + `readNdjsonTurn` como as outras três, mas SEM
+  ESTADO (nada em tabela). O preenchimento chega à tela por `filled` + bump do
+  `formKey` (o mecanismo que já limpava o form): os inputs seguem
+  NÃO-controlados. SPEC derivado de `WORKFLOW_FIELD_TYPES` com `satisfies` e
+  fiscalizado por `lib/import/workflow-form/{validate,instructions}.test.ts`.
+  **E-mail padrão** (`sememail@sememail.com`) é `defaultValue` do campo no
+  esquema — DADO, nunca constante no código; o motor já o aplicava nas duas
+  pontas (`FieldInput` + `readForm` com campo vazio). Como
+  `ensureDefaultWorkflowSchemas` semeia UMA vez por org, org existente só pega
+  mudança de seed pelo runbook (`supabase/apply/backfill-lead-form-email.sql`) —
+  não transforme o seed em ensure-if-absent (ressuscitaria esquema excluído).
+  Ver `docs/arquitetura.md` §4.23.
 - **Workflow (0125): esquema é DADO fail-closed e segredo só entra por CHAVE DE
   REGISTRY (08/09/2026):** um esquema (`workflow_schemas.definition`, jsonb
   versionado) é um FORMULÁRIO PLANO + PASSOS que consomem as respostas por
