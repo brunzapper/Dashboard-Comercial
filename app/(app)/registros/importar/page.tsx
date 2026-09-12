@@ -63,7 +63,7 @@ export default async function ImportarPage() {
             vez de duplicar, e edições feitas no app são preservadas.
           </p>
         </div>
-        <BackLink href="/registros" label="Registros" />
+        <BackLink fallback="/registros" fallbackLabel="Registros" />
       </div>
       <ImportWizard sources={sources} fields={fields} ai={ai} />
     </div>

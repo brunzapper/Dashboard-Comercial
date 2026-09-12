@@ -1,8 +1,9 @@
-// Versão: 1.6 | Data: 12/09/2026
-// v1.6 (12/09/2026): NAVEGAÇÃO FOCADA (espelho de /operacao). Dentro de uma
-//   área, a fileira de sub-abas sumiu e no lugar entra o botão de VOLTAR ao
-//   painel (/configuracoes, que deixou de redirecionar e virou a tela com as
-//   áreas). O <h1> de cada área vem da própria página dela.
+// Versão: 1.7 | Data: 12/09/2026
+// v1.7 (12/09/2026): as sub-abas VOLTARAM. A navegação focada da v1.6 (só o
+//   item ativo + voltar, no molde de /operacao) foi revertida a pedido: aqui
+//   as áreas são poucas, relacionadas e visitadas em sequência — trocar de
+//   Responsáveis para Metas é um clique, não uma volta ao painel. O botão de
+//   voltar ao Workspace fica, porque a barra lateral pode estar oculta.
 // Seção "Configurações": agrupa as telas admin (Operações, Responsáveis, Metas,
 // Usuários) como sub-abas. Cada sub-aba mantém o mesmo
 // v1.5 (05/08/2026): Remuneração moveu p/ /operacao/remuneracao (sub-aba da
@@ -39,8 +40,11 @@ import {
   type OverrideEffect,
 } from "@/lib/auth/access";
 import { loadOrgFeatures } from "@/lib/config/org-features";
-import { type SettingsTab } from "@/components/configuracoes/settings-tabs";
-import { FocusedAreaHeader } from "@/components/configuracoes/focused-area-header";
+import {
+  SettingsTabs,
+  type SettingsTab,
+} from "@/components/configuracoes/settings-tabs";
+import { BackLink } from "@/components/ui/back-link";
 
 // Tema (preferências visuais) e Conta (senha própria) não têm gating: valem
 // para qualquer autenticado. As demais seguem restritas por papel/permissão;
@@ -120,7 +124,9 @@ export default async function ConfiguracoesLayout({
 
   return (
     <div className="flex flex-col gap-4">
-      <FocusedAreaHeader indexHref="/configuracoes" title="Configurações" />
+      <BackLink fallback="/" fallbackLabel="Workspace" className="-ml-2 self-start" />
+      <h1 className="text-2xl font-semibold">Configurações</h1>
+      <SettingsTabs tabs={tabs} />
       <div>{children}</div>
     </div>
   );

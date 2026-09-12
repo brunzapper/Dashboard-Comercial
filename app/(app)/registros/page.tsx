@@ -436,7 +436,7 @@ export default async function RegistrosPage({
       {/* Caminho de volta ao Workspace (12/09/2026): a seção tem navegação
           própria de pastas/bases e nenhuma saída além da barra lateral, que
           pode estar oculta. */}
-      <BackLink href="/" label="Workspace" className="-ml-2 self-start" />
+      <BackLink fallback="/" fallbackLabel="Workspace" className="-ml-2 self-start" />
       {/* pr-8: afasta o cluster de botões do sino fixo (TaskBell, topo-direito) */}
       <div className="flex items-start justify-between gap-4 pr-8">
         <div>

@@ -1,4 +1,7 @@
-// Versão: 1.9 | Data: 12/09/2026
+// Versão: 1.10 | Data: 12/09/2026
+// v1.10 (12/09/2026): <RouteTracker /> — registra a rota atual para o botão
+//   "voltar" levar à tela ANTERIOR. Antes ele apontava para um destino fixo e
+//   mandava ao Workspace quem tinha chegado de outro lugar.
 // v1.9 (12/09/2026): a barra lateral virou PERSONALIZÁVEL (0141) — seção
 //   "Fixados" com os dashboards, kanbans e módulos de Operação que o usuário
 //   alfinetou no hub, resolvidos aqui (resolveSidebarPins) porque só o servidor
@@ -63,6 +66,7 @@ import { SourcesProvider } from "@/components/sources-context";
 import { GoalMetricsProvider } from "@/components/goal-metrics-context";
 import { SourceFoldersProvider } from "@/components/source-folders-context";
 import { RealtimeRefresher } from "@/components/realtime-refresher";
+import { RouteTracker } from "@/components/layout/route-tracker";
 import { Toaster } from "@/components/ui/sonner";
 
 // Cada item pode exigir uma `permission`, um `role` ou qualquer papel em `roles`;
@@ -212,6 +216,9 @@ export default async function AppLayout({
         {/* Sinal realtime (records/tasks/comments) → event bus + refresh
             coalescido; só no app autenticado (o viewer /s/ fica fora). */}
         <RealtimeRefresher />
+        {/* Rastro de navegação: alimenta o destino do botão "voltar" (ele leva
+            à tela anterior, não a um lugar fixo). */}
+        <RouteTracker />
         {/* Feedback global de falha para ações fora de form (lib/feedback/
             notify.ts); só no app autenticado — o viewer /s/ fica sem toasts. */}
         <Toaster />

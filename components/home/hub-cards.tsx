@@ -1,20 +1,26 @@
-// Versão: 1.0 | Data: 12/09/2026
-// Cards do hub Workspace e do painel de Operação — extraídos de app/(app)/page.tsx
-// para servirem às DUAS telas (a Home e /operacao) sem uma segunda régua.
+// Versão: 2.0 | Data: 12/09/2026
+// Cards do hub Workspace e do painel de Operação — servem às duas telas sem
+// uma segunda régua.
+//
+// v2.0 (12/09/2026): CLIENT, lendo o que exibir do contexto de exibição
+// (hub-display-context). Antes eram RSC com as decisões em props, e por isso
+// marcar "exibir descrição" só aparecia depois de recarregar a página. O
+// `accessLabel` dos cards de Operação passa a chegar PRONTO do servidor:
+// derivá-lo aqui exigiria importar lib/auth/access.ts, que é server-only.
 //
 // Três decisões que valem para as três famílias de card:
-//  - DESCRIÇÃO é opcional e nasce DESLIGADA (lib/config/ui-prefs.ts). O botão
-//    existe para entrar no lugar; a descrição é ajuda de quem está aprendendo,
-//    e ocupava a linha toda para sempre.
-//  - NÍVEL DE ACESSO é opcional e agora existe nas três: dashboards/kanbans
-//    derivam de visible_to_roles (como já faziam), e os cards de Operação de
-//    areaAccessLabel (AREA_GATES) — o pedido era "configurar exibir nível de
-//    acesso como dashboards e Kanbans já tem".
+//  - DESCRIÇÃO é opcional e nasce DESLIGADA. O botão existe para entrar no
+//    lugar; a descrição é ajuda de quem está aprendendo, e ocupava a linha toda
+//    para sempre.
+//  - NÍVEL DE ACESSO é opcional e existe nas três: dashboards/kanbans derivam
+//    de visible_to_roles (como já faziam) e os de Operação de areaAccessLabel.
 //  - O rótulo da LIXEIRA ("Expira em N dias") NÃO é opcional: é ciclo de vida,
 //    não acesso, e esconder isso perderia o prazo de recuperação.
-// Em modo LISTA o card vira uma linha só (título, descrição e acesso em linha),
-// mantendo os mesmos controles.
+// Em modo LISTA o card vira uma linha só, com altura mínima configurável.
+"use client";
+
 import Link from "next/link";
+import type { ReactNode } from "react";
 import {
   CalendarDays,
   HandCoins,
@@ -35,15 +41,15 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { ROLE_LABELS, type RoleKey } from "@/lib/auth/roles";
-import { areaAccessLabel } from "@/lib/auth/access";
-import type { OperacaoCard } from "@/lib/operacao/cards";
 import type { WidgetKanbanHubItem } from "@/lib/kanban/hub";
 import type { HubLayout } from "@/lib/config/ui-prefs";
 import {
   BoardCardMenu,
   type BoardStatus,
 } from "@/components/dashboards/board-card-menu";
+import { CardGrid } from "@/components/ui/card-grid";
 import { PinButton } from "./pin-button";
+import { useHubDisplay } from "./hub-display-context";
 
 export const TRASH_TTL_MS = 14 * 86_400_000; // purga em 14 dias (0087)
 
@@ -82,17 +88,14 @@ export function boardAccessLabel(row: DashboardRow): string {
     : "Pessoal";
 }
 
-/** Como o card se comporta na tela — resolvido uma vez e descido por props. */
-export interface HubCardDisplay {
-  layout: HubLayout;
-  showDescription: boolean;
-  showAccess: boolean;
-}
-
-// Em lista o card perde o padding vertical generoso e o conteúdo vai para uma
-// linha só; em grade, tudo como antes.
+// Em lista o conteúdo vai para uma linha só; em grade, tudo como antes. A
+// altura mínima vem de --hub-card-h (data-hub-card + regra em globals.css).
 function shellClass(layout: HubLayout, extra?: string): string {
-  return cn("relative", layout === "list" && "gap-0 py-3", extra);
+  return cn(
+    "relative justify-center",
+    layout === "list" && "gap-0 py-4",
+    extra
+  );
 }
 
 function headerClass(layout: HubLayout): string {
@@ -105,15 +108,14 @@ export function BoardCard({
   row,
   canManage,
   canDuplicate,
-  display,
   pinned,
 }: {
   row: DashboardRow;
   canManage: boolean;
   canDuplicate: boolean;
-  display: HubCardDisplay;
   pinned: boolean;
 }) {
+  const { display } = useHubDisplay();
   const kanban = row.kind === "kanban";
   const trashed = row.status === "trashed";
   const href = kanban ? `/kanbans/${row.id}` : `/dashboards/${row.id}`;
@@ -126,7 +128,10 @@ export function BoardCard({
       : null;
 
   return (
-    <Card className={shellClass(display.layout, trashed ? "opacity-70" : undefined)}>
+    <Card
+      data-hub-card
+      className={shellClass(display.layout, trashed ? "opacity-70" : undefined)}
+    >
       <CardHeader className={headerClass(display.layout)}>
         <CardTitle className="flex items-center gap-2">
           {kanban ? (
@@ -182,19 +187,29 @@ const OPERACAO_KIND_ICONS: Record<string, LucideIcon> = {
   formulario: FileInput,
 };
 
+/** Card de Operação já serializado pelo servidor (o catálogo é server-only). */
+export interface OperacaoCardView {
+  key: string;
+  label: string;
+  description: string;
+  href: string;
+  kind?: string;
+  /** Quem alcança a área — derivado de AREA_GATES no SERVIDOR. */
+  accessLabel: string;
+}
+
 // Card de OPERAÇÃO: módulo do catálogo em código ou formulário do Workflow —
 // sem menu "⋮" e sem UI de exclusão POR CONSTRUÇÃO (não é linha de dashboards;
 // criar/excluir formulário é dentro do Workflow). O alfinete não é exclusão:
 // mexe só na barra de quem clicou.
 export function OperacaoCardItem({
   card,
-  display,
   pinned,
 }: {
-  card: OperacaoCard;
-  display: HubCardDisplay;
+  card: OperacaoCardView;
   pinned: boolean;
 }) {
+  const { display } = useHubDisplay();
   // Lookup INLINE (e não um helper que devolve componente): a regra
   // react-hooks "Cannot create components during render" trata uma chamada de
   // função que devolve componente como criação em render.
@@ -203,7 +218,7 @@ export function OperacaoCardItem({
     (card.kind ? OPERACAO_KIND_ICONS[card.kind] : undefined) ??
     LayoutGrid;
   return (
-    <Card className={shellClass(display.layout)}>
+    <Card data-hub-card className={shellClass(display.layout)}>
       <CardHeader className={headerClass(display.layout)}>
         <CardTitle className="flex items-center gap-2">
           <Icon className="text-muted-foreground size-4 shrink-0" />
@@ -215,7 +230,7 @@ export function OperacaoCardItem({
           <CardDescription>{card.description}</CardDescription>
         ) : null}
         {display.showAccess ? (
-          <CardDescription>{areaAccessLabel(card.area)}</CardDescription>
+          <CardDescription>{card.accessLabel}</CardDescription>
         ) : null}
       </CardHeader>
       <PinButton
@@ -235,15 +250,14 @@ export function OperacaoCardItem({
 // exatamente o texto secundário que o usuário pediu para poder esconder.
 export function WidgetKanbanCard({
   item,
-  display,
   pinned,
 }: {
   item: WidgetKanbanHubItem;
-  display: HubCardDisplay;
   pinned: boolean;
 }) {
+  const { display } = useHubDisplay();
   return (
-    <Card className={shellClass(display.layout)}>
+    <Card data-hub-card className={shellClass(display.layout)}>
       <CardHeader className={headerClass(display.layout)}>
         <CardTitle className="flex items-center gap-2">
           <SquareKanban className="text-muted-foreground size-4 shrink-0" />
@@ -271,5 +285,19 @@ export function WidgetKanbanCard({
         className="absolute top-3 right-3"
       />
     </Card>
+  );
+}
+
+/** Grade/lista do hub ligada ao contexto de exibição. */
+export function HubGrid({ children }: { children: ReactNode }) {
+  const { display } = useHubDisplay();
+  return (
+    <CardGrid
+      layout={display.layout}
+      columns={display.columns}
+      cardHeight={display.cardHeight}
+    >
+      {children}
+    </CardGrid>
   );
 }

@@ -7,6 +7,11 @@
      DIA de Brasília (`brasiliaDayOf`), não por string. Invariante 40: o dia sai
      da FORMA do valor, e a divergência com o SQL é deliberada porque estas
      condições nunca descem ao RPC. -->
+<!-- Versão: 1.93 | Data: 12/09/2026 -->
+<!-- v1.93 (12/09/2026): §4.7 — exibição do hub virou estado de cliente
+     (respondia só após recarregar), engrenagem admin-only, abas de
+     Configurações revertidas, "voltar" passou a levar à tela anterior e a cor
+     externa do dashboard deixou de vazar para dentro dos widgets. -->
 <!-- v1.92 (12/09/2026): §4.7 — preferências de INTERFACE em três camadas
      (padrão do app → org, com trava por chave → usuário; 0141), tokens de tema
      configuráveis (conjunto curado, por modo) e a superfície EXTERNA do
@@ -1301,6 +1306,21 @@ RLS ligado com **zero políticas de escrita** — escrita só via service role.
   fora de `settings` (que `updateDashboardSettings` sobrescreve inteiro) e
   fora do contrato da IA; a dos módulos de Operação é override por org
   (`applyCardDescriptions`, puro), já que o catálogo é código.
+  A EXIBIÇÃO dos cards é estado de CLIENTE (`HubDisplayProvider`,
+  `components/home/hub-display-context.tsx`): os cards são RSC e, com as
+  decisões em props, mudar um controle só aparecia depois de recarregar — e o
+  `router.refresh()` de reconciliação reentregava o valor antigo por cima da
+  escolha recém-feita. O provider é semeado do servidor e persiste com
+  `reconcile: false`; os cards viraram Client Components e o `accessLabel` dos
+  cards de Operação desce PRONTO (o derivador é server-only). Na tela, só o
+  alternador cartão↔lista é de todo mundo: colunas, altura do card, descrição e
+  nível de acesso ficam atrás de uma ENGRENAGEM visível apenas ao admin.
+  As sub-abas de **Configurações** seguem sendo ABAS (a navegação focada de
+  `/operacao` foi tentada ali e revertida: são poucas áreas, relacionadas e
+  visitadas em sequência). O botão de voltar leva à tela ANTERIOR, não a um
+  destino fixo — o rastro vive em `lib/nav/history.ts` (sessionStorage,
+  alimentado pelo `RouteTracker` do layout) e o `fallback` do `BackLink` só
+  vale quando não há rastro (link colado, primeira tela da aba).
 - **Tema visual (27/07/2026):** modo claro/escuro/sistema + cor de destaque
   (`--brand*`, default `#7431B3`), configurados em Configurações → Tema.
   Precedência: preferência do USUÁRIO (`user_settings.settings.theme/
@@ -1349,6 +1369,12 @@ RLS ligado com **zero políticas de escrita** — escrita só via service role.
   cromo, que traz uma cor fixa do tema. Quem publica LIMPA no desmonte — sair
   do dashboard devolve a janela ao tema do sistema. O viewer de snapshot
   espelha inline (não tem `AppShell`). RPCs de widget INTOCADAS.
+  A cor de TEXTO fica restrita ao cromo: o `<main>` pinta só o fundo e
+  `[data-board-chrome]` marca exclusivamente cabeçalho, abas e barra de
+  período. A primeira versão marcava a raiz do painel, e como a regra do texto
+  secundário alcança descendentes, escolher uma cor externa recolorizava
+  rótulo de gráfico, eixo e célula de tabela — marcador novo vai sempre em
+  wrapper que exclui o grid.
 - **Metas** (`goals`): escopo global/operação/responsável; comunicam-se por
   **roll-up na leitura** (`lib/metas/`); operações aninham via
   `parent_operation_id` + `operation_subtree`. Métricas de meta são chaves do
