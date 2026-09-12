@@ -1,3 +1,5 @@
+// Versão: 1.2 | Data: 12/09/2026
+// v1.2 (12/09/2026): o endereço padrão do e-mail é dado do esquema.
 // Versão: 1.1 | Data: 09/09/2026
 // v1.1 (09/09/2026): a base do passo de registro passa a ser conferida
 //   contra o CATÁLOGO (BUILTIN_SOURCES) em vez de contra o literal que o
@@ -143,5 +145,15 @@ describe("esquema de fábrica bitrix_lead_form", () => {
     if (lead.type !== "bitrix.entity.add") throw new Error("passo ausente");
     expect(lead.params.fields.EMAIL.shape).toBe("comm");
     expect(lead.params.fields.PHONE.shape).toBe("comm");
+  });
+
+  // v1.2 (12/09/2026): lead sem e-mail não vai com o campo vazio ao CRM. O
+  // endereço é DADO do esquema, e é o `defaultValue` — não um `required`, que
+  // barraria o lançamento, nem uma constante no código.
+  it("o e-mail tem endereço padrão, e ele é opcional (não bloqueia o lançamento)", () => {
+    const email = def.form.fields.find((f) => f.key === "email")!;
+    expect(email.defaultValue).toBe("sememail@sememail.com");
+    expect(email.required).toBe(false);
+    expect(email.visible).toBe(true);
   });
 });

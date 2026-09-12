@@ -1,3 +1,7 @@
+// Versão: 1.1 | Data: 12/09/2026
+// v1.1 (12/09/2026): duas colunas — o formulário e, ao lado, os lançamentos
+//   dos últimos 7 dias na Base de destino (com link do CRM). Quem lança em
+//   série precisava sair da tela para conferir o que acabou de mandar.
 // Versão: 1.0 | Data: 08/09/2026
 // Página de UM formulário do Workflow (0126) — a superfície que o esquema
 // produz, fora da fábrica que o criou.
@@ -19,6 +23,7 @@ import { loadWorkflowOptions } from "@/lib/workflow/options";
 import { loadWorkflowSchemaByKey } from "@/lib/workflow/schemas";
 import { visibleFields } from "@/lib/workflow/types";
 import { WorkflowRunner } from "@/components/operacao/workflow-runner";
+import { WorkflowRecentPanel } from "@/components/operacao/workflow-recent-panel";
 
 // Uma execução encadeia várias chamadas ao sistema externo, em série.
 export const maxDuration = 120;
@@ -64,8 +69,12 @@ export default async function FormularioPage({
 
   const options = await loadWorkflowOptions(supabase, orgId, schema.definition);
 
+  // Duas colunas a partir de `lg`: formulário à esquerda, lançamentos recentes
+  // à direita. No telefone empilha (o formulário primeiro — é o que a pessoa
+  // veio fazer). O painel se esconde sozinho quando o esquema não grava
+  // registro local.
   return (
-    <div className="flex flex-col gap-6">
+    <div className="grid gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
       <WorkflowRunner
         schemaKey={schema.key}
         schemaLabel={schema.label}
@@ -73,6 +82,7 @@ export default async function FormularioPage({
         fields={visibleFields(schema.definition)}
         options={options}
       />
+      <WorkflowRecentPanel schemaKey={schema.key} />
     </div>
   );
 }
