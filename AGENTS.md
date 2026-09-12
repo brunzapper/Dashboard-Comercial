@@ -1114,6 +1114,39 @@ This version has breaking changes — APIs, conventions, and file structure may 
   fila em voo (dado mid-flight é stale e descartado) — não remova a guarda
   nem re-introduza `await` no drop. Ver `docs/arquitetura.md` §4.15 e
   invariante 23.
+- **Condição de automação sobre DATA compara por DIA de Brasília, e o dono da
+  leitura é `brasiliaDayOf` (12/09/2026):** "antes/depois de uma data
+  específica" não funcionava — o caminho local (`fieldFilterMatches` →
+  `recordMatchesConds` → `evalCondition`) termina em `localeCompare`, então
+  `"15/08/2026" < "01/09/2026"` (formato BR, o que se digita) dava FALSO e
+  `<= "2026-09-01"` perdia os registros DO dia 1 (`"2026-09-01T14:…"` é
+  lexicalmente maior). O ramo de data de `fieldFilterMatches` resolve os dois
+  lados por `brasiliaDayOf` (`lib/date/normalize.ts` — contraparte de LEITURA do
+  `anchorNaiveToBrasilia`, reusando as regexes de forma que já moram lá) e
+  compara os `AAAA-MM-DD`; o formato BR entra pelo `coerceDate`
+  (`lib/import/csv.ts`) nos DOIS lados, porque campo de TEXTO pode guardar a
+  data assim e assimetria ali seria armadilha muda. NUNCA leia o prefixo
+  `YYYY-MM-DD` cru de uma coluna `timestamptz`: o PostgREST a devolve em
+  `+00:00` e um registro das 22h de Brasília cairia no dia SEGUINTE — e nunca
+  aplique conversão de fuso a valor NAIVE (é hora de parede de Brasília;
+  recuaria um dia). A divergência com o SQL (que compara instante no núcleo e
+  texto no custom) é DELIBERADA e só é legítima porque estes filtros nunca
+  descem ao RPC — o universo da rodada vem sem filtro
+  (`lib/kanban/automations/universe.ts`), então a invariante 1 não é acionada e
+  os RPCs ficam INTOCADOS; não "conserte" a divergência. Ops `_num` ficam fora
+  do ramo (pedem número), e com qualquer lado não-data o resultado é
+  byte-idêntico ao anterior. Na UI, campo de data recebe `<input type="date">` e
+  os comparadores viram "antes de"/"até"/"depois de"/"a partir de" por override
+  de RÓTULO sobre `FILTER_OPS` (`DATE_OP_LABELS` em
+  `components/kanban/automation-rule-editor.tsx`) — nunca uma lista paralela de
+  operadores, nenhum op é retirado da oferta (regra gravada com `contém` tem de
+  seguir exibível) e trocar o campo para data limpa valor inválido no rascunho.
+  `AutomationFieldCatalog.dateFields` sai de `available.filter(f => f.isDate)`,
+  no molde dos `booleanFields`/`numericFields`. `set_field` fica de fora:
+  campo de data não é alvo válido dela (`setFieldTargetError`). Fiscalizado por
+  `lib/date/normalize.test.ts` + o bloco de datas de
+  `lib/kanban/automations/evaluate.test.ts`. Ver `docs/arquitetura.md` §4.15 e
+  invariante 40.
 - **Assistentes de IA de registros/campos/operações NUNCA escrevem direto
   (30/07/2026, §4.17):** os cores (`lib/ai/insert-records.ts` — até 10
   registros em base `manual_entry`; `lib/ai/update-records.ts` — atualização

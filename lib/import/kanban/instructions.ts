@@ -1,3 +1,7 @@
+// Versão: 1.1 | Data: 12/09/2026
+// v1.1 (12/09/2026): diz à IA como uma condição de DATA compara (por DIA de
+//   Brasília, valor em "AAAA-MM-DD"). Sem isso ela emitiria o valor em formato
+//   BR e explicaria "lte" como se excluísse o dia.
 // Versão: 1.0 | Data: 07/09/2026
 // SPEC do assistente de IA do QUADRO KANBAN — módulo PURO, DERIVADO das
 // constantes reais (mapas de rótulo de lib/kanban/types.ts, tetos do lote e do
@@ -109,6 +113,9 @@ a IDENTIDADE — repetir o nome de uma regra existente a ATUALIZA; nome novo cri
 Condições (todas em E; misture as famílias à vontade):
 - { "kind": "field", "filter": { "field": "<ref>", "op": "<op>", "value": ... } }
   — condição sobre um campo do registro. Ops: ${FILTER_OPS.map((o) => o.op).join(", ")}.
+  Em campo de DATA, escreva o valor como "AAAA-MM-DD" e a comparação é por DIA
+  (de Brasília): "lte" inclui o próprio dia, "lt" exclui o dia inteiro e "eq"
+  significa "no mesmo dia", independentemente da hora gravada.
 - { "kind": "related_count", "source": "<Base RAIZ>", "filters": [...], "op": "gte|lte|eq", "value": 3 }
   — quantos registros CONECTADOS daquela Base o card tem.
 - { "kind": "tasks", "metric": "open" | "overdue", "op": "gte|lte|eq", "value": 0 }

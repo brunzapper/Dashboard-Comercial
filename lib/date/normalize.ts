@@ -1,4 +1,10 @@
-// Versão: 1.1 | Data: 26/07/2026
+// Versão: 1.2 | Data: 12/09/2026
+// v1.2 (12/09/2026): brasiliaDayOf — a contraparte de LEITURA do
+//   anchorNaiveToBrasilia: "que DIA de Brasília é este valor gravado?". Existe
+//   porque ler o prefixo YYYY-MM-DD cru de uma coluna timestamptz dá o dia
+//   UTC (o PostgREST devolve em "+00:00"), e um registro das 22h de Brasília
+//   cairia no dia seguinte. Reusa as regexes de forma que já moram aqui, em vez
+//   de redeclarar a distinção instante × naive num segundo lugar.
 // v1.1 (26/07/2026): anchorNaiveToBrasilia — âncora "-03:00" para valor naive
 //   de fonte SEM fuso indo a coluna CORE timestamptz (Sheets/CSV; ver função).
 // Normalização de fuso para strings de data/hora vindas de fontes externas
@@ -124,6 +130,52 @@ export function anchorNaiveToBrasilia(value: string): string {
   if (!m) return value;
   const [, y, mo, d, hh, mi, ss] = m;
   return `${y}-${mo}-${d}T${hh}:${mi}:${ss ?? "00"}-03:00`;
+}
+
+// Sentinelas tipo "0000-00-00" casam as regexes de forma mas não são datas.
+function plausibleYmd(y: number, m: number, d: number): boolean {
+  return y >= 1 && m >= 1 && m <= 12 && d >= 1 && d <= 31;
+}
+
+/**
+ * Que DIA de Brasília é este valor JÁ GRAVADO? Contraparte de LEITURA do
+ * `anchorNaiveToBrasilia` — devolve "YYYY-MM-DD", ou null quando o valor não é
+ * uma data (nunca lança, nunca chuta um dia).
+ *
+ * A escolha do ramo é pela FORMA do valor, a mesma distinção que o resto do
+ * módulo faz, e é ela que mantém a invariante 11 de pé nos dois sentidos:
+ *   - com offset/Z = INSTANTE -> hora de parede de Brasília. É o caso das
+ *     colunas `timestamptz` do núcleo (o PostgREST as devolve em "+00:00", e
+ *     ler o prefixo cru daria o dia UTC: 22h de Brasília cairia no dia
+ *     seguinte) e dos campos custom do Bitrix, gravados com "-03:00" na
+ *     entrada desde a 0079/0080;
+ *   - naive (date-only ou "YYYY-MM-DDTHH:mm[:ss]") -> prefixo literal,
+ *     VERBATIM. Nunca converter fuso aqui: valor naive de CSV/planilha já É
+ *     hora de parede de Brasília, e `at time zone` recuaria um dia.
+ */
+export function brasiliaDayOf(value: unknown): string | null {
+  if (value == null) return null;
+  const s = String(value).trim();
+  if (s === "") return null;
+
+  if (DATE_ONLY_RE.test(s)) {
+    const [y, m, d] = s.split("-").map(Number);
+    return plausibleYmd(y, m, d) ? s : null;
+  }
+
+  if (OFFSET_RE.test(s)) {
+    const epoch = Date.parse(s.replace(" ", "T"));
+    if (Number.isNaN(epoch)) return null;
+    const p = zonedParts(epoch, BRASILIA_TZ);
+    if (!plausibleYmd(p.y, p.m, p.d)) return null;
+    const pad = (n: number) => String(n).padStart(2, "0");
+    return `${String(p.y).padStart(4, "0")}-${pad(p.m)}-${pad(p.d)}`;
+  }
+
+  const m = NAIVE_RE.exec(s);
+  if (!m) return null;
+  if (!plausibleYmd(Number(m[1]), Number(m[2]), Number(m[3]))) return null;
+  return `${m[1]}-${m[2]}-${m[3]}`;
 }
 
 /**

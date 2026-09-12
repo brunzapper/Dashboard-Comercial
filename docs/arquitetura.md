@@ -1,4 +1,8 @@
-<!-- Versão: 1.92 | Data: 12/09/2026 -->
+<!-- Versão: 1.93 | Data: 12/09/2026 -->
+<!-- v1.93 (12/09/2026): §4.15 — condição de automação sobre DATA compara por
+     DIA de Brasília (`brasiliaDayOf`), não por string. Invariante 40: o dia sai
+     da FORMA do valor, e a divergência com o SQL é deliberada porque estas
+     condições nunca descem ao RPC. -->
 <!-- v1.92 (12/09/2026): §4.7 — preferências de INTERFACE em três camadas
      (padrão do app → org, com trava por chave → usuário; 0141), tokens de tema
      configuráveis (conjunto curado, por modo) e a superfície EXTERNA do
@@ -3032,6 +3036,61 @@ criação / última alteração de campo via `field_modified_at` / entrada na
 coluna Personalizar via `kanban_placements.updated_at`). Regras em ordem
 (`position`): a PRIMEIRA que casa vence por card; ações =
 `move_to_column` e `set_field` (31/07/2026 — união extensível).
+
+**Condição de campo sobre DATA compara por DIA de Brasília (12/09/2026).**
+"Antes/depois de uma data específica" era o caso que não funcionava. A avaliação
+de uma condição de campo é 100% LOCAL — o universo da rodada
+(`lib/kanban/automations/universe.ts`) carrega os registros com `filters: []`, e
+quem decide é `fieldFilterMatches` → `recordMatchesConds` → `evalCondition`, que
+para literal não-numérico termina em `localeCompare`. Comparação de string, e
+por isso:
+
+| valor gravado | condição | antes | agora |
+|---|---|---|---|
+| `2026-08-15T10:00:00-03:00` | `< 2026-09-01` | `true` (por acidente — ISO ordena lexicalmente) | `true` |
+| `15/08/2026` | `< 01/09/2026` | **`false`** | `true` |
+| `2026-09-01T14:00:00-03:00` | `<= 2026-09-01` | **`false`** — "até 1º de setembro" perdia o dia 1 | `true` |
+| `2026-09-13T01:00:00+00:00` (22h do dia 12 em Brasília) | `<= 2026-09-12` | **`false`** | `true` |
+
+O ramo de data de `fieldFilterMatches` resolve os DOIS lados a um dia e compara
+os `AAAA-MM-DD` (em ISO, lexical É a ordem certa). O dono da leitura é
+**`brasiliaDayOf`** (`lib/date/normalize.ts`), contraparte do
+`anchorNaiveToBrasilia` do write side: ele ramifica pela FORMA do valor, reusando
+as regexes que já moram naquele módulo —
+
+- valor com `Z`/`±HH:MM` é **instante** → hora de parede de America/Sao_Paulo
+  (`zonedParts`). É o caso das colunas `timestamptz` do núcleo, que o PostgREST
+  devolve em `+00:00`: ler o prefixo cru daria o dia UTC;
+- valor **naive** (date-only ou `AAAA-MM-DDTHH:mm[:ss]`) → prefixo literal,
+  verbatim. Converter fuso aqui recuaria um dia (é hora de parede de Brasília);
+- o resto → `null`, e aí decide o caminho de sempre.
+
+O formato BR (`dd/mm/aaaa`) entra pelo `coerceDate` (`lib/import/csv.ts`) nos
+DOIS lados — a UI passou a emitir `AAAA-MM-DD`, mas regra antiga digitada à mão
+tem o valor em BR, e campo de TEXTO pode guardar a data assim (só o tipo `data`
+passa pela coerção na gravação). Ops `_num` ficam fora do ramo (pedem número
+explicitamente) e, com qualquer lado não-data, o resultado é byte-idêntico ao
+anterior. Vale também para os filtros de registros CONECTADOS
+(`lib/kanban/related-count.ts`, o outro chamador).
+
+Isto **diverge** do SQL de propósito: o RPC compara instante (núcleo) e texto
+(custom), sem truncar dia. A divergência só é legítima porque estas condições
+nunca descem ao RPC — o universo vem sem filtro —, então os RPCs de widget ficam
+INTOCADOS e a invariante 1 não é acionada. Está escrito aqui e na invariante 40
+justamente para ninguém "uniformizar" depois.
+
+Na UI (`components/kanban/automation-rule-editor.tsx`, o editor ÚNICO que o
+sheet do quadro, a tela do Workflow e o sheet de série da Tree renderizam):
+campo de data recebe `<input type="date">` e os comparadores viram "antes de" /
+"até" / "depois de" / "a partir de" / "no dia" / "fora do dia". É override de
+RÓTULO sobre `FILTER_OPS` (`DATE_OP_LABELS`), nunca uma lista paralela de
+operadores; nenhum op sai da oferta (regra gravada com `contém` tem de seguir
+exibível); e trocar o campo para um de data descarta valor que não seja um dia
+válido — senão a caixa ficaria em branco na tela com o valor velho no rascunho, e
+seria ele que o save gravaria. Quais refs são data sai de
+`AutomationFieldCatalog.dateFields` (= `available.filter(f => f.isDate)`), no
+molde dos `booleanFields`/`numericFields`. A ação `set_field` fica de fora:
+campo de data não é alvo válido dela (`setFieldTargetError`).
 
 **Ação `set_field` (31/07/2026):** grava um valor FIXO num campo do registro
 ("toda reunião com fonte X recebe SDR Y" como regra contínua, valendo p/
@@ -6182,6 +6241,21 @@ principalmente — para mantenedores humanos.
     toda tela nova — foi assim que uma palavra que esta organização não usa
     chegou a 37 arquivos. `lib/series/noun.test.ts` guarda isso estaticamente;
     a allowlist só aceita DADO real de negócio.
+40. **Data em condição de automação é DIA de Brasília, e o dia sai da FORMA do
+    valor (12/09/2026, §4.15).** `brasiliaDayOf` (`lib/date/normalize.ts`) é o
+    dono da leitura: valor com `Z`/`±HH:MM` é INSTANTE e vira hora de parede de
+    America/Sao_Paulo; valor NAIVE é prefixo literal, verbatim. Nunca leia o
+    prefixo `YYYY-MM-DD` cru de uma coluna `timestamptz` — o PostgREST a devolve
+    em `+00:00` e um registro das 22h de Brasília cairia no dia SEGUINTE; nunca
+    aplique conversão de fuso a valor naive — ele já É hora de parede daqui, e
+    converter recuaria um dia. A comparação por DIA divergir do SQL (que compara
+    instante no núcleo e texto no custom) é DELIBERADO e só se sustenta porque
+    estas condições nunca descem ao RPC: o universo da rodada vem sem filtro
+    (`lib/kanban/automations/universe.ts`), os RPCs de widget ficam INTOCADOS e a
+    invariante 1 não é acionada. Não uniformize os dois lados. O ramo só age
+    quando OS DOIS lados são data (ops `_num` fora): sem isso, byte-idêntico ao
+    que havia antes — que para data estava errado em silêncio (`<= "2026-09-01"`
+    perdia os registros do dia 1, e o formato BR nunca casava).
 
 ## 6. Convenções do projeto
 

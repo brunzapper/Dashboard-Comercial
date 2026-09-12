@@ -21,6 +21,15 @@
 //   `from`/`description`/`maxOccurrences` não eram lidos de volta por
 //   `draftFromRule`: qualquer save pela UI apagava os três em silêncio.
 //   Entram também `lookahead` (ocorrências futuras) e `anchorFallback`.
+// Versão: 1.5 | Data: 12/09/2026
+// v1.5 (12/09/2026): campo de DATA numa condição ganha seletor de data e
+//   comparadores em português ("antes de", "até", "depois de", "a partir de").
+//   Os operadores seguem saindo de FILTER_OPS — DATE_OP_LABELS só troca o
+//   RÓTULO, e nenhum op é retirado da oferta (regra gravada com `contém` tem de
+//   continuar exibível). Vale nos dois blocos que o mesmo fieldFilterMatches
+//   avalia: a condição de campo e os filtros do registro conectado. A ação
+//   `set_field` fica de fora de propósito — campo de data não é alvo válido
+//   dela (setFieldTargetError).
 // O EDITOR de uma regra de automação — extraído do painel do quadro para que a
 // tela de construção do Workflow renderize exatamente ele.
 //
@@ -75,6 +84,59 @@ export const OP_OPTIONS: ComboboxOption[] = FILTER_OPS.map((o) => ({
   value: o.op,
   label: o.label,
 }));
+
+/**
+ * Rótulos dos comparadores QUANDO o campo é data (12/09/2026). Só override de
+ * apresentação sobre `FILTER_OPS` — a lista de operadores segue sendo a de lá
+ * (nunca uma paralela), e nenhum é retirado da oferta: tirar `contém` deixaria
+ * regra já gravada sem como ser exibida. "<" e "≥" não dizem a um humano qual
+ * lado do corte ele está escolhendo; "antes de" e "a partir de" dizem.
+ */
+const DATE_OP_LABELS: Partial<Record<FilterOp, string>> = {
+  eq: "no dia",
+  neq: "fora do dia",
+  lt: "antes de",
+  lte: "até",
+  gt: "depois de",
+  gte: "a partir de",
+};
+
+const DATE_OP_OPTIONS: ComboboxOption[] = FILTER_OPS.map((o) => ({
+  value: o.op,
+  label: DATE_OP_LABELS[o.op] ?? o.label,
+}));
+
+/** O campo é data? (catálogo do servidor — ver AutomationFieldCatalog.) */
+function isDateRef(
+  field: string,
+  catalog: AutomationFieldCatalog | null | undefined
+): boolean {
+  return Boolean(field) && Boolean(catalog?.dateFields?.includes(field));
+}
+
+/**
+ * Valor a manter ao TROCAR o campo de um filtro. Passar a data e um texto
+ * qualquer sobrou ali de antes ("Inbound" num `<input type="date">`) deixaria a
+ * caixa em branco na tela com o valor velho ainda no rascunho — e seria ele que
+ * o save gravaria. Mesmo cuidado que a DimensionRow tem ao trocar campo.
+ */
+function valueAfterFieldChange(
+  nextField: string,
+  catalog: AutomationFieldCatalog | null | undefined,
+  current: string | string[]
+): string | string[] {
+  if (!isDateRef(nextField, catalog)) return current;
+  const one = Array.isArray(current) ? (current[0] ?? "") : current;
+  return /^\d{4}-\d{2}-\d{2}$/.test(one) ? one : "";
+}
+
+/** Operadores a oferecer para um campo: rótulos de data quando for data. */
+function opOptionsFor(
+  field: string,
+  catalog: AutomationFieldCatalog | null | undefined
+): ComboboxOption[] {
+  return isDateRef(field, catalog) ? DATE_OP_OPTIONS : OP_OPTIONS;
+}
 
 export const NUM_OP_OPTIONS: ComboboxOption[] = [
   { value: "gte", label: "pelo menos (≥)" },
@@ -852,7 +914,12 @@ export function AutomationRuleEditor({
                       <Combobox
                         options={fieldOptions}
                         value={c.field}
-                        onValueChange={(v) => patchCond(i, { field: v })}
+                        onValueChange={(v) =>
+                          patchCond(i, {
+                            field: v,
+                            value: valueAfterFieldChange(v, catalog, c.value),
+                          })
+                        }
                         placeholder="Campo"
                         aria-label="Campo"
                       />
@@ -860,7 +927,7 @@ export function AutomationRuleEditor({
                     <div className="flex min-w-32 flex-col gap-1">
                       <Label className="text-xs">Operador</Label>
                       <Combobox
-                        options={OP_OPTIONS}
+                        options={opOptionsFor(c.field, catalog)}
                         value={c.op}
                         onValueChange={(v) => patchCond(i, { op: v })}
                         searchable={false}
@@ -886,6 +953,11 @@ export function AutomationRuleEditor({
                             />
                           ) : (
                             <Input
+                              type={
+                                isDateRef(c.field, catalog) && c.op !== "in"
+                                  ? "date"
+                                  : "text"
+                              }
                               value={
                                 Array.isArray(c.value)
                                   ? c.value.join(", ")
@@ -955,7 +1027,17 @@ export function AutomationRuleEditor({
                             onValueChange={(v) =>
                               patchCond(i, {
                                 relFilters: c.relFilters.map((x, y) =>
-                                  y === k ? { ...x, field: v } : x
+                                  y === k
+                                    ? {
+                                        ...x,
+                                        field: v,
+                                        value: valueAfterFieldChange(
+                                          v,
+                                          catalog,
+                                          x.value
+                                        ),
+                                      }
+                                    : x
                                 ),
                               })
                             }
@@ -966,7 +1048,7 @@ export function AutomationRuleEditor({
                         <div className="flex min-w-28 flex-col gap-1">
                           <Label className="text-xs">Operador</Label>
                           <Combobox
-                            options={OP_OPTIONS}
+                            options={opOptionsFor(f.field, catalog)}
                             value={f.op}
                             onValueChange={(v) =>
                               patchCond(i, {
@@ -1005,6 +1087,12 @@ export function AutomationRuleEditor({
                                 />
                               ) : (
                                 <Input
+                                  type={
+                                    isDateRef(f.field, catalog) &&
+                                    f.op !== "in"
+                                      ? "date"
+                                      : "text"
+                                  }
                                   value={
                                     Array.isArray(f.value)
                                       ? f.value.join(", ")

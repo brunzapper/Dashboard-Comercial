@@ -1,4 +1,7 @@
-// Versão: 1.1 | Data: 08/09/2026
+// Versão: 1.2 | Data: 12/09/2026
+// v1.2 (12/09/2026): condição de campo sobre DATA compara por DIA de Brasília.
+//   Cada caso novo aqui estava ERRADO na comparação lexical anterior: formato
+//   BR, "até <dia>" perdendo o próprio dia, e o dia UTC do PostgREST.
 // v1.1 (08/09/2026): helpers de dono (0127) — a coluna de cada tipo e o
 //   predicado "é quadro?", que decidem placements, moves e guardas.
 // Avaliador puro das automações do kanban: parse fail-closed, condições das 4
@@ -11,6 +14,7 @@ import { describe, expect, it } from "vitest";
 
 import type { RecordRow } from "@/lib/records/types";
 import type { AvailableField } from "@/lib/widgets/fields";
+import type { FilterOp } from "@/lib/widgets/types";
 import type { KanbanColumn } from "../types";
 import {
   daysSince,
@@ -202,6 +206,132 @@ describe("fieldFilterMatches", () => {
         rawOf(r)
       )
     ).toBe(false);
+  });
+
+  // v1.7 (12/09/2026): "antes/depois de uma data específica". Antes disso a
+  // comparação era lexical (localeCompare), e cada caso abaixo estava errado.
+  it("data compara por DIA: 'antes de' e 'depois de' funcionam", () => {
+    const r = record({ closed_at: "2026-08-15T10:00:00-03:00" });
+    expect(
+      fieldFilterMatches(
+        { field: "closed_at", op: "lt", value: "2026-09-01" },
+        rawOf(r)
+      )
+    ).toBe(true);
+    expect(
+      fieldFilterMatches(
+        { field: "closed_at", op: "gt", value: "2026-09-01" },
+        rawOf(r)
+      )
+    ).toBe(false);
+    expect(
+      fieldFilterMatches(
+        { field: "closed_at", op: "gte", value: "2026-08-01" },
+        rawOf(r)
+      )
+    ).toBe(true);
+  });
+
+  it("'até <dia>' INCLUI o próprio dia (lexicalmente não incluía)", () => {
+    const r = record({ closed_at: "2026-09-01T14:00:00-03:00" });
+    expect(
+      fieldFilterMatches(
+        { field: "closed_at", op: "lte", value: "2026-09-01" },
+        rawOf(r)
+      )
+    ).toBe(true);
+    // E 'eq' passa a significar "no mesmo dia", não "string igual".
+    expect(
+      fieldFilterMatches(
+        { field: "closed_at", op: "eq", value: "2026-09-01" },
+        rawOf(r)
+      )
+    ).toBe(true);
+    expect(
+      fieldFilterMatches(
+        { field: "closed_at", op: "neq", value: "2026-09-01" },
+        rawOf(r)
+      )
+    ).toBe(false);
+    // 'antes de' segue excluindo o dia inteiro.
+    expect(
+      fieldFilterMatches(
+        { field: "closed_at", op: "lt", value: "2026-09-01" },
+        rawOf(r)
+      )
+    ).toBe(false);
+  });
+
+  it("o dia é o de BRASÍLIA, não o prefixo UTC que o PostgREST devolve", () => {
+    // 22h de Brasília do dia 12 = 01h UTC do dia 13.
+    const r = record({ closed_at: "2026-09-13T01:00:00+00:00" });
+    expect(
+      fieldFilterMatches(
+        { field: "closed_at", op: "lte", value: "2026-09-12" },
+        rawOf(r)
+      )
+    ).toBe(true);
+    expect(
+      fieldFilterMatches(
+        { field: "closed_at", op: "gt", value: "2026-09-12" },
+        rawOf(r)
+      )
+    ).toBe(false);
+  });
+
+  it("regra legada em formato BR (dd/mm/aaaa) passa a casar", () => {
+    const r = record({ custom_fields: { data_x: "15/08/2026" } });
+    expect(
+      fieldFilterMatches(
+        { field: "custom:data_x", op: "lt", value: "01/09/2026" },
+        rawOf(r)
+      )
+    ).toBe(true);
+    expect(
+      fieldFilterMatches(
+        { field: "custom:data_x", op: "gt", value: "01/09/2026" },
+        rawOf(r)
+      )
+    ).toBe(false);
+  });
+
+  it("campo custom naive é VERBATIM (não reinterpreta fuso)", () => {
+    const r = record({ custom_fields: { data_x: "2026-09-12T23:00:00" } });
+    expect(
+      fieldFilterMatches(
+        { field: "custom:data_x", op: "lte", value: "2026-09-12" },
+        rawOf(r)
+      )
+    ).toBe(true);
+  });
+
+  it("só age quando os DOIS lados são data — o resto fica como era", () => {
+    const r = record({ title: "2026-09-01", value: 1500 });
+    // Campo de texto contra literal que não é data: caminho de sempre.
+    expect(
+      fieldFilterMatches({ field: "title", op: "eq", value: "abc" }, rawOf(r))
+    ).toBe(false);
+    // Número contra número: nada a ver com data.
+    expect(
+      fieldFilterMatches({ field: "value", op: "gt", value: 1000 }, rawOf(r))
+    ).toBe(true);
+    // Op `_num` fica FORA do ramo de data (pede número explicitamente).
+    expect(
+      fieldFilterMatches(
+        { field: "title", op: "lt_num" as FilterOp, value: "2026-09-02" },
+        rawOf(r)
+      )
+    ).toBe(false);
+    // Data no registro, literal que NÃO é data: cai no caminho de sempre, que
+    // compara string por string. O `true` aqui é lexical e não quer dizer nada
+    // ("2…" < "a…" em pt-BR) — está pinado de propósito, para deixar claro que
+    // o ramo de data não mudou o que já existia, nem para melhor nem para pior.
+    expect(
+      fieldFilterMatches(
+        { field: "closed_at", op: "lt", value: "amanhã" },
+        rawOf(record({ closed_at: "2026-08-15T10:00:00-03:00" }))
+      )
+    ).toBe(true);
   });
 
   it("fail-closed: op desconhecido ou valor não escalar → false", () => {
