@@ -5,7 +5,6 @@
 // as Server Actions de app/(app)/registros/importar/actions.ts.
 // v1.1 (30/07/2026): prop `ai` (config pública 0096) habilita o botão
 //   "Sugerir com IA" do passo de mapeamento; maxDuration 60→300 (turno da IA).
-import Link from "next/link";
 
 import { requireRole } from "@/lib/auth/session";
 import { getActiveOrgId } from "@/lib/auth/org";
@@ -13,7 +12,6 @@ import { loadOrgAiConfigPublic } from "@/lib/ai/config";
 import { createClient } from "@/lib/supabase/server";
 import { isCoreDef } from "@/lib/records/core-defs";
 import { loadSources } from "@/lib/config/sources";
-import { Button } from "@/components/ui/button";
 import {
   ImportWizard,
   type ImportFieldOption,

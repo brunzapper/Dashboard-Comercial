@@ -8,7 +8,6 @@
 // área nova — as chaves de Acessos são históricas e este gate é de papel,
 // como a records_delete). Registro fora da RLS do admin nunca aparece (a
 // consulta usa o client do usuário).
-import Link from "next/link";
 import { redirect } from "next/navigation";
 
 import { getSessionInfo } from "@/lib/auth/session";
@@ -19,7 +18,6 @@ import {
   RECORDS_TRASH_TTL_MS,
   recordsTrashExpiryLabel,
 } from "@/lib/records/trash";
-import { Button } from "@/components/ui/button";
 import {
   TrashTable,
   type TrashItem,

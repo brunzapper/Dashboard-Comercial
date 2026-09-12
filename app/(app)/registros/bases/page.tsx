@@ -18,11 +18,9 @@
 // v2.0 (16/07/2026): fontes DINÂMICAS — CRUD do catálogo (data_sources):
 //   criar/editar/excluir fontes, nome curto por fonte e campo de período;
 //   mantém o rótulo dos campos "gerais" (sync_config).
-import Link from "next/link";
 
 import { createClient } from "@/lib/supabase/server";
 import { requireSettingsArea } from "@/lib/auth/access";
-import { Button } from "@/components/ui/button";
 import { loadSources } from "@/lib/config/sources";
 import { loadSourceFolders } from "@/lib/config/source-folders";
 import { loadSourceLabels } from "@/lib/config/source-labels";

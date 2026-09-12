@@ -1,4 +1,15 @@
-// Versão: 3.1 | Data: 11/09/2026
+// Versão: 3.2 | Data: 12/09/2026
+// v3.2 (12/09/2026): o tema do dashboard passou a ter DUAS superfícies. A
+//   INTERNA é a de sempre (a caixa do grid, settings.background). A EXTERNA
+//   (settings.outerBackground) pinta o entorno — cabeçalho, abas, barra de
+//   período e a janela da página —, que antes ficava sempre no tema do
+//   sistema: escolher um fundo escuro deixava o board flutuando num
+//   retângulo claro. O modo "same" herda a interna, e é o que permite definir
+//   as duas em conjunto ou separadamente. A cor de texto é DERIVADA
+//   (readableTextColor): sem isso o título e a barra de período herdariam
+//   --foreground e sumiriam sobre uma cor escura. O <main> é pintado pelo
+//   AppChromeContext (o padding é dele), e a publicação é LIMPA no desmonte —
+//   sair do dashboard devolve a janela ao tema do sistema.
 // v3.1 (11/09/2026): o painel hospeda o dock das sugestões da IA
 // (AiSuggestionsProvider + AiSuggestionsDock). Ver o módulo do contexto: a
 // conversa precisa sobreviver ao widget Tree que a abriu.
@@ -119,7 +130,11 @@ import type { CurrencyRates } from "@/lib/widgets/currency";
 import type { WidgetQuickFilters } from "@/lib/widgets/quick-filters";
 import type { WidgetPeriodWindowState } from "./period-window-control";
 import type { EntityListRow } from "@/lib/widgets/entity-list";
-import { dashboardBackgroundCss } from "@/lib/widgets/appearance";
+import {
+  dashboardBackgroundCss,
+  outerBackgroundCss,
+  readableTextColor,
+} from "@/lib/widgets/appearance";
 import type { DashboardSnapshot } from "@/lib/widgets/history";
 import {
   createWidget,
@@ -444,6 +459,45 @@ export function DashboardClient({
   const router = useRouter();
 
   const backgroundCss = dashboardBackgroundCss(settings.background);
+  const outerCss = outerBackgroundCss(
+    settings.outerBackground,
+    settings.background
+  );
+  // Só há cor de texto derivável de um SÓLIDO — gradiente e ausência mantêm a
+  // cor do tema (chutar contraste sobre gradiente erraria numa das pontas).
+  const outerText = readableTextColor(outerCss);
+
+  // Publica a superfície EXTERNA na janela (<main> consome --app-surface, ver
+  // globals.css) e LIMPA ao desmontar: sair do dashboard devolve a janela ao
+  // tema do sistema. Escrita no DOM, não estado — é o que efeito serve.
+  useEffect(() => {
+    const el = document.documentElement;
+    if (!outerCss) {
+      el.style.removeProperty("--app-surface");
+      el.style.removeProperty("--app-surface-text");
+      el.style.removeProperty("--app-surface-muted");
+      return;
+    }
+    el.style.setProperty("--app-surface", outerCss);
+    if (outerText) {
+      el.style.setProperty("--app-surface-text", outerText);
+      // Texto secundário do cromo: uma versão esmaecida da cor legível. Sem
+      // isso o `text-muted-foreground` do tema ficaria cinza-escuro sobre um
+      // fundo escuro escolhido à mão.
+      el.style.setProperty(
+        "--app-surface-muted",
+        `color-mix(in oklch, ${outerText} 72%, transparent)`
+      );
+    } else {
+      el.style.removeProperty("--app-surface-text");
+      el.style.removeProperty("--app-surface-muted");
+    }
+    return () => {
+      el.style.removeProperty("--app-surface");
+      el.style.removeProperty("--app-surface-text");
+      el.style.removeProperty("--app-surface-muted");
+    };
+  }, [outerCss, outerText]);
 
   // Contexto do período p/ o painel de Snapshots capturar a seleção efetiva no
   // momento da criação (0059) — mesmos insumos entregues à barra de período.
@@ -1007,7 +1061,7 @@ export function DashboardClient({
         clique da tabela) e some ao trocar de aba — com o estado lá dentro, a
         análise em curso morria junto. */}
     <AiSuggestionsProvider>
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-4" data-board-chrome>
       {/* pr-8: afasta a toolbar do sino fixo (TaskBell, topo-direito) */}
       <div className="flex items-center justify-between pr-8">
         {renaming ? (

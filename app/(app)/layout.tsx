@@ -50,7 +50,7 @@ import {
 import { resolveSidebarPins } from "@/lib/config/sidebar-pins";
 import { allowedOperacaoCards } from "@/lib/operacao/cards";
 import { loadGoalMetrics } from "@/lib/config/goal-metrics";
-import { resolveTheme } from "@/lib/theme";
+import { resolveTheme, resolveThemeTokens } from "@/lib/theme";
 import { ROLE_LABELS, type RoleKey } from "@/lib/auth/roles";
 import { ThemeSync } from "@/components/layout/theme-sync";
 import { LogoutButton } from "@/components/layout/logout-button";
@@ -165,6 +165,11 @@ export default async function AppLayout({
     settings as { theme?: string | null; accentColor?: string | null },
     org?.theme ?? null
   );
+  // Tokens de tema (0141): mesma precedência, token a token.
+  const resolvedTokens = resolveThemeTokens(
+    (settings as { themeTokens?: unknown }).themeTokens,
+    org?.theme?.tokens
+  );
 
   // Conteúdo da barra montado no server (itens já filtrados por papel);
   // o AppShell (client) controla ocultar/fixar/tela cheia.
@@ -210,7 +215,7 @@ export default async function AppLayout({
         {/* Feedback global de falha para ações fora de form (lib/feedback/
             notify.ts); só no app autenticado — o viewer /s/ fica sem toasts. */}
         <Toaster />
-        <ThemeSync resolved={resolvedTheme} />
+        <ThemeSync resolved={resolvedTheme} tokens={resolvedTokens} />
         <AppShell
           initialPinned={uiPrefs.values.sidebarPinned}
           initialHoverEdge={uiPrefs.values.sidebarHoverEdge}

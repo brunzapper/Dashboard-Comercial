@@ -56,7 +56,7 @@ const ALL_TABS: SettingsTab[] = [
   { href: "/configuracoes/integracoes", label: "Integrações" },
   { href: "/configuracoes/acessos", label: "Acessos" },
   { href: "/configuracoes/usuarios", label: "Usuários" },
-  { href: "/configuracoes/tema", label: "Tema" },
+  { href: "/configuracoes/tema", label: "Tema e interface" },
   { href: "/configuracoes/conta", label: "Conta" },
 ];
 

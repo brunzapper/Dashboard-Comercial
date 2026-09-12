@@ -1,4 +1,12 @@
-// Versão: 1.5 | Data: 12/09/2026
+// Versão: 1.6 | Data: 12/09/2026
+// v1.6 (12/09/2026): o <main> ganhou `data-app-main` e passou a consumir
+//   --app-surface / --app-surface-text (regra em globals.css). É assim que o
+//   tema EXTERNO do dashboard pinta a JANELA: o padding é do <main>, e o
+//   DashboardClient não o alcança. Por variável CSS, e não por estado no
+//   contexto, porque quem publica é um efeito — escrever no DOM é o que efeito
+//   faz; um setState ali cairia na regra react-hooks/set-state-in-effect. As
+//   duas alternativas ruins ficaram de fora: margem negativa quebra no modo
+//   overlay (padding pl-12) e backdrop `fixed` quebra a rolagem.
 // v1.5 (12/09/2026): segundo interruptor ao lado do pin — "abrir ao aproximar
 //   da borda" (uiPrefs.sidebarHoverEdge, 0141). Três estados, e não dois:
 //     fixada                      → barra sempre visível; a faixa não existe.
@@ -288,6 +296,10 @@ export function AppShell({
         {!chromeHidden ? topRight : null}
 
         <main
+          // data-app-main: âncora da regra que consome --app-surface /
+          // --app-surface-text (globals.css). Sem as variáveis definidas, a
+          // janela segue no tema do sistema.
+          data-app-main
           className={cn(
             "flex-1 overflow-auto",
             // Em overlay o botão de menu (fixed, left-3, ~32px) divide o canto

@@ -1,4 +1,8 @@
-<!-- Versão: 1.35 | Data: 10/09/2026 -->
+<!-- Versão: 1.36 | Data: 12/09/2026 -->
+<!-- v1.36 (12/09/2026): §3.6 — o fundo do dashboard virou DUAS superfícies:
+     a interna (a caixa do grid, como sempre foi) e a externa (cabeçalho,
+     abas, barra de período e as margens), com a opção "Igual ao interno"
+     para tratá-las como uma só. -->
 <!-- v1.35 (10/09/2026): §5.14 — a Tree passa a CRIAR e EDITAR a automação
      da sequência (e a desenhar um tronco por série), pergunta o que fazer com
      as demais ao concluir/excluir uma ocorrência, troca a caixinha de concluir
@@ -603,8 +607,16 @@ colunas do grid. Colar preserva o desenho, transladado para a célula clicada.
 
 - **Modo tela cheia** — fullscreen do navegador.
 - **Aparência**:
-  - **Fundo**: Padrão (tema) / Cor sólida / Gradiente (com cores "De"/"Até" e
-    ângulo 0–360°, padrão 135°).
+  - **Fundo da área (interno)**: Padrão (tema) / Cor sólida / Gradiente (com
+    cores "De"/"Até" e ângulo 0–360°, padrão 135°). Pinta a caixa que envolve
+    o grid de widgets.
+  - **Fundo ao redor (externo)**: Padrão (tema) / **Igual ao interno** / Cor
+    sólida / Gradiente. Pinta o entorno — cabeçalho do dashboard, abas, barra
+    de período e as margens da página —, que antes ficava sempre no tema do
+    sistema. Use "Igual ao interno" para tratar o painel inteiro como uma
+    superfície só; escolha uma cor própria para emoldurar o grid. A cor do
+    texto do cabeçalho e da barra de período é ajustada sozinha para manter a
+    leitura sobre a cor escolhida.
   - **Formato de data padrão** do dashboard: `dd/mm/aaaa` (padrão) /
     `dd/mm/aa` / `mm/aa` — usado por toda data exibida que não tenha formato
     próprio.

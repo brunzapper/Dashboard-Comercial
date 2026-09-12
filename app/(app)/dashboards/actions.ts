@@ -78,6 +78,7 @@ import {
   type UiPrefs,
 } from "@/lib/config/ui-prefs";
 import { createClient } from "@/lib/supabase/server";
+import type { ThemeTokens } from "@/lib/theme";
 import {
   PRESETS,
   PRESET_FIELDS,
@@ -940,6 +941,8 @@ export interface UserAppSettings {
   // Cor do Ponteiro Laser (Configurações → Tema): null/ausente = vermelho
   // padrão (DEFAULT_LASER, lib/theme.ts). Pessoal — sem padrão de org.
   laserColor?: string | null;
+  // Tokens de tema por modo (0141): null/ausente herda o padrão da org.
+  themeTokens?: ThemeTokens | null;
   // Controles da Agenda do Workspace (/agenda): conteúdo ("todas" | "propria"
   // | "widget:<id>"), recortes e visão — a página reabre como ficou.
   agendaHub?: {

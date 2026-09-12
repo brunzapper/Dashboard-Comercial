@@ -1815,6 +1815,66 @@ This version has breaking changes — APIs, conventions, and file structure may 
   INTOCADOS. Fiscalizado por `lib/workflow/*.test.ts` +
   `lib/workflow/{steps,seeds}/*.test.ts`. Ver `docs/arquitetura.md` §4.23 e
   invariante 32.
+- **Preferência de INTERFACE se resolve em UM lugar, e "aplicar a todos" APAGA
+  (0141, 12/09/2026):** a personalização da interface tem TRÊS camadas —
+  padrão do app → padrão da ORG (`organizations.ui_prefs`: `values` + `locked`
+  + `operacaoDescriptions`) → escolha do USUÁRIO
+  (`user_settings.settings.uiPrefs`) — e a precedência vive SÓ em
+  `resolveUiPrefs` (`lib/config/ui-prefs.ts`, PURO e client-safe, como
+  `lib/theme.ts`: os controles são Client Components e uma segunda régua
+  divergiria no primeiro ajuste). TRAVAR uma chave faz o valor da org vencer
+  SEM apagar o override — destravar devolve cada um à sua escolha; é por isso
+  que a trava é reversível e "Aplicar a todos" não é. Este último APAGA o
+  override dos membros, e por isso roda com service role e escopo EXPLÍCITO
+  vindo de `organization_members` da org ativa: `user_settings` é own-row na
+  RLS e NÃO tem `organization_id` — nunca varra a tabela inteira. A chave
+  LEGADA `sidebarPinned` vive na RAIZ de `user_settings.settings`:
+  `normalizeUiPrefs` a PROMOVE na leitura e ninguém a reescreve às cegas (sem
+  migração de dado). Itens fixados na barra (`sidebarItems`) guardam
+  id/key, NUNCA rótulo, e o layout descarta o que a RLS não devolver — item
+  excluído some da barra em vez de virar link quebrado; a consulta só roda com
+  lista não vazia (o layout autenticado roda em TODA navegação). Descrição de
+  board é a COLUNA `dashboards.description` — não a ponha em `settings`
+  (`updateDashboardSettings` sobrescreve aquela coluna inteira e toda chave
+  nova de `DashboardSettings` exige entrada em `settings-docs.ts`); a dos
+  módulos de Operação é override por org (`applyCardDescriptions`, puro), já
+  que o catálogo é código. O número de colunas do hub entra por CSS var
+  (`--hub-cols` + a regra `[data-hub-grid]`), NUNCA por `grid-cols-${n}`:
+  Tailwind v4 varre classes LITERAIS e a classe dinâmica sairia sem regra.
+  Ver `docs/arquitetura.md` §4.7.
+- **Token de tema é WHITELIST, e a superfície externa do dashboard é variável
+  CSS (12/09/2026):** além de `--brand-base`, um conjunto CURADO
+  (`THEME_TOKENS` em `lib/theme.ts`) é sobreponível em runtime, com valores
+  INDEPENDENTES por modo (literais — o usuário informa claro e escuro; nada de
+  `color-mix`, que existe só porque o `--brand` é uma cor só). Nome fora de
+  `THEME_TOKENS` e valor fora de `normalizeHexColor` NUNCA chegam a um
+  `style`/script, venham de cookie, do banco ou do cliente — e
+  `themeTokenStyle` RE-VALIDA na saída, que é o último ponto antes do DOM.
+  Transporte: um cookie único `theme_tokens` (o root layout é não-autenticado
+  e não pode consultar o banco); o script pré-paint aplica o modo vigente e
+  REMOVE as variáveis do outro. `DashboardSettings.outerBackground` pinta o
+  ENTORNO (cabeçalho, abas, barra de período e a janela) — `background` segue
+  sendo a superfície INTERNA, e o modo `"same"` herda dela (é o que permite
+  "em conjunto ou separadamente" sem uma terceira config). O `<main>` recebe a
+  cor por `--app-surface` (regra `main[data-app-main]`), nunca por margem
+  negativa (quebra no overlay) nem backdrop `fixed` (quebra a rolagem); a cor
+  de texto é DERIVADA por `readableTextColor` (dona única da conta, extraída
+  de `dashboard-tabs.tsx`) e quem publica LIMPA no desmonte. Chave nova em
+  `DashboardSettings` exige entrada em `DASHBOARD_SETTINGS_DOC` — sem ela o
+  `npm run typecheck` quebra. RPCs de widget INTOCADAS.
+- **Painel de detalhe do registro tem UMA montagem (12/09/2026):** o painel do
+  dashboard (`loadRowPanel`) e o de `/registros` (`RecordEditForm`) derivam dos
+  MESMOS helpers — `lib/records/detail-fields.ts` (`coreDetailRows`,
+  `orphanCustomKeys`, `CORE_DISPLAY_REFS`) e `lib/export/record-cells.ts`
+  (formatação). O do dashboard filtrava `!isCoreDef(f)` e lia só
+  `custom_fields`: derrubava as 18 colunas do NÚCLEO, os campos de outras bases
+  com valor e as chaves órfãs, e ainda escondia os vazios — daí a "meia dúzia
+  de campos". A peneira de ACL (`restrictedFieldKeys` +
+  `redactRestrictedFields`) continua OBRIGATÓRIA nos dois, e `knownFieldKeys`
+  vai PRÉ-ACL de propósito (campo restrito TEM definição e não pode vazar como
+  órfão). O corte "só preenchidos × todos" é CLIENT-SIDE nas duas telas (o
+  interruptor não pode custar uma ida ao servidor) e nunca esconde INPUT — só
+  as seções de leitura.
 - **Identidade de fonte PUSH não deriva de conteúdo MUTÁVEL; reconciliação no
   ADAPTER, nunca no RPC (0140, 11/09/2026):** a chave natural da planilha
   "Estudo de Fechamentos" é `sha256(normalizeName(nome)|data)` — renomear a

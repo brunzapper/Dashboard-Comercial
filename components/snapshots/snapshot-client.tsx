@@ -11,7 +11,7 @@
 // de abas — o snapshot é UMA aba congelada.
 "use client";
 
-import { useCallback, useMemo } from "react";
+import { useCallback, useMemo, type CSSProperties } from "react";
 
 import type { FieldDefinition, RecordRow } from "@/lib/records/types";
 import type { AvailableField } from "@/lib/widgets/fields";
@@ -30,7 +30,11 @@ import type { WidgetQuickFilters } from "@/lib/widgets/quick-filters";
 import type { EntityListRow } from "@/lib/widgets/entity-list";
 import type { QuickTableResult } from "@/app/(app)/dashboards/quick-table-actions";
 import type { KanbanWidgetResult } from "@/app/(app)/dashboards/kanban-actions";
-import { dashboardBackgroundCss } from "@/lib/widgets/appearance";
+import {
+  dashboardBackgroundCss,
+  outerBackgroundCss,
+  readableTextColor,
+} from "@/lib/widgets/appearance";
 import { buildDashboardSnapshot } from "@/lib/widgets/history";
 import { focusWidgetWithRetry } from "@/lib/widgets/focus";
 import { posOf } from "@/lib/widgets/grid-placement";
@@ -118,6 +122,14 @@ export function SnapshotClient({
   quickFiltersById?: Record<string, WidgetQuickFilters>;
 }) {
   const backgroundCss = dashboardBackgroundCss(settings.background);
+  // Superfície EXTERNA (12/09/2026): aqui não há AppShell, então o wrapper da
+  // própria página recebe a cor — e a de texto derivada, senão o título e os
+  // selos herdariam --foreground e sumiriam sobre um fundo escuro.
+  const outerCss = outerBackgroundCss(
+    settings.outerBackground,
+    settings.background
+  );
+  const outerText = readableTextColor(outerCss);
 
   // Layout estático (nada é arrastável): posições base direto dos widgets.
   const layoutById = useMemo(() => {
@@ -162,7 +174,23 @@ export function SnapshotClient({
       <DashboardHistoryProvider dashboardId={dashboardId} seed={historySeed}>
         {/* Largura total (sem max-width): o snapshot não tem sidebar e deve
             ocupar a tela inteira, como o <main> do app autenticado (p-6). */}
-        <div className="flex w-full flex-col gap-4 p-4 md:p-6">
+        <div
+          data-board-chrome
+          className="flex w-full flex-col gap-4 p-4 md:p-6"
+          style={
+            outerCss
+              ? ({
+                  background: outerCss,
+                  color: outerText ?? undefined,
+                  ...(outerText
+                    ? {
+                        "--app-surface-muted": `color-mix(in oklch, ${outerText} 72%, transparent)`,
+                      }
+                    : {}),
+                } as CSSProperties)
+              : undefined
+          }
+        >
           <div className="flex flex-wrap items-baseline justify-between gap-2">
             <div className="flex min-w-0 flex-col">
               <h1 className="truncate text-2xl font-semibold">{snapshotName}</h1>

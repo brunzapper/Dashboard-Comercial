@@ -8,11 +8,9 @@
 // v2.1 (27/07/2026): página movida de /configuracoes/log para /registros/log.
 //   Guard vira requireSettingsArea("log") (gate {} = mesmo público de antes),
 //   para o deny de Acessos seguir barrando a page fora do hub de Configurações.
-import Link from "next/link";
 
 import { requireSettingsArea } from "@/lib/auth/access";
 import { createClient } from "@/lib/supabase/server";
-import { Button } from "@/components/ui/button";
 import {
   WritebackLog,
   type WritebackLogRow,
