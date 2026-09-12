@@ -1,4 +1,11 @@
-// Versão: 2.1 | Data: 07/08/2026
+// Versão: 2.2 | Data: 12/09/2026
+// v2.2 (12/09/2026): interruptor "mostrar campos vazios" (0141) — a ficha
+//   completa continua sendo o padrão de quem quer conferir, mas quem só quer
+//   LER o registro passa a poder enxugar as linhas sem valor. Vale só para as
+//   seções de LEITURA (núcleo read-only e campos não editáveis): esconder um
+//   INPUT seria esconder a edição, não o vazio. A escolha é a mesma do painel
+//   do dashboard (uiPrefs.recordPanelAllFields) — quem prefere a ficha
+//   completa a quer completa nas duas telas.
 // v2.1 (07/08/2026): modo CONTROLADO opcional (open/onOpenChange/hideTrigger) —
 //   a tabela de registros iça UMA instância (aberta por duplo clique/lápis) em
 //   vez de montar um Sheet por linha. Sem as props novas, o gatilho lápis
@@ -74,6 +81,7 @@ import {
 import { LeadCombobox } from "./lead-combobox";
 import { RecordMatchConnect } from "./record-match-connect";
 import { RecordTasksSection } from "@/components/tarefas/record-tasks-section";
+import { RecordFieldsToggle } from "@/components/registros/record-fields-toggle";
 
 const initial: EditActionState = {};
 
@@ -162,6 +170,10 @@ export interface RecordEditFormProps {
   userRoles: string[];
   canEditValues: boolean;
   canManageFields: boolean;
+  /** Preferência resolvida (0141): exibir também os campos sem valor. */
+  showAllFields?: boolean;
+  /** A organização travou a personalização dessa escolha. */
+  showAllFieldsLocked?: boolean;
 }
 
 // Grade read-only de colunas do núcleo (rótulo → valor formatado).
@@ -170,23 +182,33 @@ function CoreGrid({
   record,
   labels,
   title,
+  showEmpty,
 }: {
   rows: CoreDetailRow[];
   record: RecordRow;
   labels: RecordLabels;
   title?: string;
+  /** false = esconde as colunas sem valor (interruptor do painel). */
+  showEmpty: boolean;
 }) {
-  if (rows.length === 0) return null;
+  const cells = rows
+    .map(({ ref, label }) => ({
+      ref,
+      label,
+      value: coreCellValue(record, ref, labels),
+    }))
+    .filter((c) => showEmpty || c.value !== "—");
+  if (cells.length === 0) return null;
   return (
     <div className="flex flex-col gap-1.5">
       {title ? (
         <p className="text-muted-foreground text-xs font-medium">{title}</p>
       ) : null}
       <div className="bg-muted/40 grid grid-cols-2 gap-x-4 gap-y-1 rounded-md p-3 text-sm">
-        {rows.map(({ ref, label }) => (
+        {cells.map(({ ref, label, value }) => (
           <span key={ref} className="contents">
             <span className="text-muted-foreground">{label}</span>
-            <span>{coreCellValue(record, ref, labels)}</span>
+            <span>{value}</span>
           </span>
         ))}
       </div>
@@ -212,8 +234,14 @@ export function RecordEditForm({
   userRoles,
   canEditValues,
   canManageFields,
+  showAllFields = true,
+  showAllFieldsLocked = false,
   onSaved,
 }: RecordEditFormProps & { onSaved?: () => void }) {
+  // Padrão desta tela é a ficha COMPLETA: /registros é onde se confere o
+  // registro. A preferência do usuário pode enxugá-la, e vale também no painel
+  // do dashboard.
+  const [showEmpty, setShowEmpty] = useState(showAllFields);
   const [state, formAction, pending] = useActionState(updateRecord, initial);
   const [responsibleId, setResponsibleId] = useState(record.responsible_id ?? "");
   const [operationId, setOperationId] = useState(record.operation_id ?? "");
@@ -264,6 +292,27 @@ export function RecordEditForm({
   );
   const readOnlyFields = catalog.filter((f) => !editableFields.includes(f));
 
+  // Valores dos campos de leitura resolvidos ANTES do render: a contagem de
+  // vazios alimenta o interruptor, e o filtro precisa do valor já formatado.
+  // Traço só para vazio/nulo — zero exibe "0". Formata moeda, percentual
+  // (×100 + "%") e data como no restante do app.
+  const readOnlyValues = readOnlyFields.map((f) => {
+    const v = customValue(record, f.field_key);
+    if (v == null || v === "") {
+      return { id: f.id, label: f.label, value: "—", empty: true };
+    }
+    const money = resolveFieldMoneyFromRecord(f, record);
+    const value = money.isMoney
+      ? formatMoney(v, money.code)
+      : isPercentField(f)
+        ? formatPercent(v, true)
+        : f.data_type === "data"
+          ? formatDateValue(v, DEFAULT_DATE_FORMAT)
+          : v;
+    return { id: f.id, label: f.label, value, empty: false };
+  });
+  const readOnlyCells = readOnlyValues.filter((c) => showEmpty || !c.empty);
+
   // Grade núcleo COMPLETA: no modo edição pula o que já tem input próprio; no
   // read-only mostra tudo (fora título/tipo/base, que estão no cabeçalho).
   const coreSkip = useMemo(
@@ -274,6 +323,11 @@ export function RecordEditForm({
     [canEditValues]
   );
   const coreRows = coreDetailRows(record, coreDefs, coreSkip);
+  // Quantos campos de LEITURA estão sem valor — é o que o interruptor esconde
+  // (as seções editáveis nunca somem: esconder um input é perder a edição).
+  const emptyCount =
+    coreRows.filter((r) => coreCellValue(record, r.ref, labels) === "—").length +
+    readOnlyValues.filter((c) => c.empty).length;
 
   // Chaves de custom_fields sem definição alguma → "Outros dados" (read-only).
   const orphanKeys = knownFieldKeys
@@ -331,6 +385,16 @@ export function RecordEditForm({
             </div>
           ) : null}
 
+          {/* Só preenchidos × todos: vale para as seções de LEITURA. */}
+          <div className="flex justify-end">
+            <RecordFieldsToggle
+              value={showEmpty}
+              onChange={setShowEmpty}
+              locked={showAllFieldsLocked}
+              emptyCount={emptyCount}
+            />
+          </div>
+
           {/* Grade núcleo completa (100% dos campos): no modo edição são os
               "demais" (sem input próprio) — pipeline, situação, tipo de venda,
               fechado, datas…; no read-only é o núcleo INTEIRO, relações
@@ -340,6 +404,7 @@ export function RecordEditForm({
             record={record}
             labels={labels}
             title={canEditValues ? "Demais dados do registro" : undefined}
+            showEmpty={showEmpty}
           />
 
           {canEditValues ? (
@@ -412,26 +477,12 @@ export function RecordEditForm({
           ) : null}
 
           {/* Campos personalizados só de leitura */}
-          {readOnlyFields.length > 0 ? (
+          {readOnlyCells.length > 0 ? (
             <div className="text-muted-foreground grid grid-cols-2 gap-x-4 gap-y-1 border-t pt-4 text-sm">
-              {readOnlyFields.map((f) => (
-                <span key={f.id} className="contents">
-                  <span>{f.label}</span>
-                  {/* Traço só para vazio/nulo — zero exibe "0". Formata moeda,
-                      percentual (×100 + "%") e data como no restante do app. */}
-                  <span>
-                    {(() => {
-                      const v = customValue(record, f.field_key);
-                      if (v == null || v === "") return "—";
-                      const money = resolveFieldMoneyFromRecord(f, record);
-                      if (money.isMoney) return formatMoney(v, money.code);
-                      if (isPercentField(f)) return formatPercent(v, true);
-                      if (f.data_type === "data") {
-                        return formatDateValue(v, DEFAULT_DATE_FORMAT);
-                      }
-                      return v;
-                    })()}
-                  </span>
+              {readOnlyCells.map((c) => (
+                <span key={c.id} className="contents">
+                  <span>{c.label}</span>
+                  <span>{c.value}</span>
                 </span>
               ))}
             </div>

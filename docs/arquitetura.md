@@ -1,4 +1,8 @@
-<!-- Versão: 1.91 | Data: 11/09/2026 -->
+<!-- Versão: 1.92 | Data: 12/09/2026 -->
+<!-- v1.92 (12/09/2026): §4.7 — preferências de INTERFACE em três camadas
+     (padrão do app → org, com trava por chave → usuário; 0141), tokens de tema
+     configuráveis (conjunto curado, por modo) e a superfície EXTERNA do
+     dashboard, que passou a pintar o entorno além da caixa do grid. -->
 <!-- v1.91 (11/09/2026): §4.5 (Sheets) — a identidade da linha da planilha
      deixou de ser só o hash de nome+data: renomear a empresa criava registro
      novo e deixava o antigo órfão somando nos dashboards. Adoção por
@@ -1265,6 +1269,30 @@ RLS ligado com **zero políticas de escrita** — escrita só via service role.
 
 ### 4.7 Outros subsistemas
 
+- **Preferências de INTERFACE em três camadas (0141, 12/09/2026):** padrão do
+  app → padrão da ORGANIZAÇÃO (`organizations.ui_prefs`, com `locked` por
+  chave) → escolha do USUÁRIO (`user_settings.settings.uiPrefs`). A resolução
+  vive SÓ em `resolveUiPrefs` (`lib/config/ui-prefs.ts`, módulo PURO e
+  client-safe — os controles são Client Components e precisam do mesmo
+  resolver que o servidor usa). Cobre a disposição do hub e do painel de
+  Operação (grade↔lista, número de colunas, exibir descrição, exibir nível de
+  acesso), a barra lateral (fixada, abrir ao aproximar da borda) e o painel de
+  detalhe do registro (exibir campos vazios). Três operações distintas, que a
+  tela mantém distintas: DEFINIR o padrão vale para quem nunca escolheu;
+  TRAVAR faz o valor da org vencer sem apagar nada (destravar devolve cada um
+  à sua escolha); "APLICAR A TODOS" apaga o override dos membros — é a única
+  irreversível, e roda com service role e escopo EXPLÍCITO por
+  `organization_members`, porque `user_settings` é own-row na RLS e não tem
+  `organization_id`. A chave legada `sidebarPinned`, solta na raiz de
+  `user_settings.settings`, é PROMOVIDA na leitura e nunca reescrita às cegas.
+  Os itens FIXADOS na barra (`sidebarItems`) guardam id/key e nunca rótulo; o
+  layout autenticado resolve os nomes pelo que a RLS devolve, então item
+  excluído ou sem acesso some da barra em vez de virar link quebrado — e a
+  consulta só acontece quando a lista não está vazia (o layout roda em toda
+  navegação). A descrição de um board é a COLUNA `dashboards.description`,
+  fora de `settings` (que `updateDashboardSettings` sobrescreve inteiro) e
+  fora do contrato da IA; a dos módulos de Operação é override por org
+  (`applyCardDescriptions`, puro), já que o catálogo é código.
 - **Tema visual (27/07/2026):** modo claro/escuro/sistema + cor de destaque
   (`--brand*`, default `#7431B3`), configurados em Configurações → Tema.
   Precedência: preferência do USUÁRIO (`user_settings.settings.theme/
@@ -1284,6 +1312,35 @@ RLS ligado com **zero políticas de escrita** — escrita só via service role.
   affordances de edição do grid) — `--primary` (botões/badges) segue quase
   preto. Cores SALVAS pelo usuário em widgets (seriesColors, notas, paletas
   fixas) ficam literais — limitação documentada, não bug.
+  **Tokens de tema (0141, 12/09/2026):** além do accent, um conjunto CURADO de
+  superfícies (`THEME_TOKENS` — fundo, texto, cartão, silenciado, borda e as
+  três da barra lateral) é configurável, com valores INDEPENDENTES por modo
+  (literais: o usuário informa claro e escuro, então não há o `color-mix` que
+  o `--brand` faz no escuro). Mesma precedência campo a campo
+  (`resolveThemeTokens`), nos mesmos dois lugares (`user_settings.settings.
+  themeTokens` e `organizations.theme.tokens`) e pelo mesmo transporte: um
+  cookie único `theme_tokens` com o JSON — o root layout é não-autenticado e
+  não pode consultar o banco. A WHITELIST é a muralha: nome fora de
+  `THEME_TOKENS` e valor fora de `normalizeHexColor` nunca chegam a um
+  `style`/script, venham de cookie, do banco ou do cliente, e
+  `themeTokenStyle` RE-VALIDA na saída. Em modo claro/escuro explícito as
+  variáveis saem no HTML do servidor (sem FOUC); em "sistema" quem as aplica é
+  o mesmo script pré-paint que decide a classe `.dark`, e ele REMOVE as do
+  outro modo (uma cor definida só no claro não pode sobreviver à troca).
+  **Superfície externa do dashboard (12/09/2026):** `DashboardSettings.
+  outerBackground` pinta o ENTORNO (cabeçalho, abas, barra de período e a
+  janela), que antes ficava sempre no tema do sistema; `background` segue sendo
+  a superfície INTERNA (a caixa do grid). O modo `"same"` herda a interna — é
+  o que permite definir as duas em conjunto ou separadamente sem uma terceira
+  config. O `<main>` é pintado por variável CSS (`--app-surface`, regra
+  `main[data-app-main]` em `globals.css`), porque o padding é dele e o
+  `DashboardClient` não o alcança: margem negativa quebraria no modo overlay e
+  backdrop `fixed` quebraria a rolagem. A cor de texto é DERIVADA
+  (`readableTextColor`, dona única da conta desde que saiu de
+  `dashboard-tabs.tsx`) e `--app-surface-muted` cobre o texto secundário do
+  cromo, que traz uma cor fixa do tema. Quem publica LIMPA no desmonte — sair
+  do dashboard devolve a janela ao tema do sistema. O viewer de snapshot
+  espelha inline (não tem `AppShell`). RPCs de widget INTOCADAS.
 - **Metas** (`goals`): escopo global/operação/responsável; comunicam-se por
   **roll-up na leitura** (`lib/metas/`); operações aninham via
   `parent_operation_id` + `operation_subtree`. Métricas de meta são chaves do

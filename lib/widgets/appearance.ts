@@ -1,4 +1,9 @@
-// Versão: 1.3 | Data: 27/07/2026
+// Versão: 1.4 | Data: 12/09/2026
+// v1.4 (12/09/2026): readableTextColor (era `readableText`, privada em
+//   dashboard-tabs.tsx) e outerBackgroundCss — a superfície EXTERNA do
+//   dashboard (cabeçalho, abas, barra de período e o <main> ao redor). O modo
+//   "same" herda a cor interna: é o que permite definir as duas juntas ou
+//   separadamente sem duplicar config.
 // Fase 10: helpers puros de render de aparência, compartilhados entre o fundo do
 // dashboard, os charts e as tabelas. Sem estado/UI — só transforma config em CSS.
 // v1.3 (27/07/2026): defaults do gradiente de fundo viram tokens do tema
@@ -128,6 +133,40 @@ export function dashboardBackgroundCss(
     return `linear-gradient(${angle}deg, ${from}, ${to})`;
   }
   return undefined;
+}
+
+/**
+ * Cor de texto legível (quase-preto ou branco) sobre um fundo hex — contraste
+ * simples por luma. Dono ÚNICO desta conta: era uma cópia privada em
+ * dashboard-tabs.tsx e passou a servir também a superfície externa do
+ * dashboard, onde o título e a barra de período herdariam --foreground e
+ * sumiriam sobre uma cor escolhida pelo usuário.
+ *
+ * Só decide sobre hex de 6 dígitos: gradiente/var()/undefined devolvem
+ * undefined, e o chamador mantém a cor do tema (nunca chuta um contraste).
+ */
+export function readableTextColor(bg?: string): string | undefined {
+  if (!bg || !/^#([0-9a-f]{6})$/i.test(bg)) return undefined;
+  const r = parseInt(bg.slice(1, 3), 16);
+  const g = parseInt(bg.slice(3, 5), 16);
+  const b = parseInt(bg.slice(5, 7), 16);
+  const luma = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+  return luma > 0.6 ? "#111827" : "#ffffff";
+}
+
+/**
+ * CSS da superfície EXTERNA do dashboard (o entorno: cabeçalho, abas, barra de
+ * período e o <main>). `mode: "same"` herda a INTERNA — é assim que "em
+ * conjunto" e "separadamente" convivem sem uma terceira config. Ausente =
+ * tema do sistema (comportamento anterior à mudança, byte-idêntico).
+ */
+export function outerBackgroundCss(
+  outer: DashboardSettings["outerBackground"] | undefined,
+  inner: DashboardSettings["background"] | undefined
+): string | undefined {
+  if (!outer) return undefined;
+  if (outer.mode === "same") return dashboardBackgroundCss(inner);
+  return dashboardBackgroundCss(outer as DashboardSettings["background"]);
 }
 
 // Traduz o modo de linhas de grade em flags horizontal/vertical (CartesianGrid).

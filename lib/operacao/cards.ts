@@ -1,4 +1,10 @@
-// Versão: 1.2 | Data: 08/09/2026
+// Versão: 1.3 | Data: 12/09/2026
+// v1.3 (12/09/2026): applyCardDescriptions — override de descrição POR
+//   ORGANIZAÇÃO (organizations.ui_prefs.operacaoDescriptions, 0141). O
+//   catálogo de módulos é código e indeletável; o texto, não: cada organização
+//   chama as coisas pelo nome dela. Função PURA (o recorte por área continua
+//   sendo a I/O de allowedOperacaoCards) e por CHAVE — card sem override
+//   mantém o texto de fábrica, byte-idêntico.
 // v1.2 (08/09/2026): o catálogo passa a ter DUAS fontes. Os cards de MÓDULO
 //   seguem em código (Agenda, Tarefas, Remuneração, Mapeamentos, Workflow) —
 //   indeletáveis por construção, como sempre foram. Os cards de FORMULÁRIO
@@ -129,6 +135,23 @@ export function mergeOperacaoCards(
     ...filterOperacaoCards(modules, isAreaAllowed),
     ...filterOperacaoCards(formCards, isAreaAllowed),
   ];
+}
+
+/**
+ * Aplica os overrides de descrição da organização (por key de card). PURO.
+ * Texto vazio/ausente ⇒ mantém o de fábrica — apagar a descrição de um módulo
+ * é decisão da PREFERÊNCIA de exibição (não mostrar descrição), não um texto
+ * vazio guardado no banco.
+ */
+export function applyCardDescriptions(
+  cards: OperacaoCard[],
+  overrides: Record<string, string> | undefined
+): OperacaoCard[] {
+  if (!overrides || Object.keys(overrides).length === 0) return cards;
+  return cards.map((c) => {
+    const text = overrides[c.key];
+    return text ? { ...c, description: text } : c;
+  });
 }
 
 /** Cards visíveis ao usuário/org atuais. checkSettingsArea é cache()d por

@@ -8,11 +8,9 @@
 // v2.1 (27/07/2026): página movida de /configuracoes/log para /registros/log.
 //   Guard vira requireSettingsArea("log") (gate {} = mesmo público de antes),
 //   para o deny de Acessos seguir barrando a page fora do hub de Configurações.
-import Link from "next/link";
 
 import { requireSettingsArea } from "@/lib/auth/access";
 import { createClient } from "@/lib/supabase/server";
-import { Button } from "@/components/ui/button";
 import {
   WritebackLog,
   type WritebackLogRow,
@@ -22,6 +20,7 @@ import {
   type SyncJobLogRow,
 } from "@/components/configuracoes/sync-jobs-log";
 import type { SyncResult } from "@/lib/sync/shared";
+import { BackLink } from "@/components/ui/back-link";
 
 // Título da aba (template do layout completa "— {appName}").
 export const metadata = { title: "Log de sincronização" };
@@ -91,9 +90,7 @@ export default async function LogPage() {
             Sincronizações com o Bitrix e fila de write-back.
           </p>
         </div>
-        <Button asChild variant="outline">
-          <Link href="/registros">Voltar a Registros</Link>
-        </Button>
+        <BackLink href="/registros" label="Registros" />
       </div>
       <div className="flex flex-col gap-3">
         <div>

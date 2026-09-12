@@ -1,4 +1,11 @@
-/* Versão: 1.3 | Data: 02/08/2026 */
+/* Versão: 1.4 | Data: 12/09/2026 */
+/* v1.4 (12/09/2026): main[data-app-main] (superfície externa do dashboard, via
+   --app-surface/--app-surface-text), [data-hub-grid] (colunas configuráveis do hub, via
+   --hub-cols) e os tokens de tema personalizáveis — o runtime passa a poder
+   sobrepor um conjunto CURADO (lib/theme.ts THEME_TOKENS), não só
+   --brand-base. Cada token custom é aplicado no style do <html> pelo root
+   layout, já sanitizado; o valor é LITERAL por modo (o usuário informa claro e
+   escuro), sem o color-mix que o --brand usa no escuro. */
 /* v1.3 (02/08/2026): impressão de relatórios (Remuneração) — regras @media
    print no final: o portal [data-print-root] (comp-report-print.tsx) seta
    body[data-printing="comp"] enquanto montado e só ele aparece no papel. */
@@ -146,6 +153,39 @@
      funciona sobre qualquer foreground). Inputs têm par próprio (ui/input). */
   ::selection {
     background: color-mix(in oklch, var(--brand) 25%, transparent);
+  }
+}
+
+/* Janela do app (o <main> do AppShell): o tema EXTERNO de um dashboard pinta
+   o entorno inteiro — cabeçalho, abas, barra de período e as margens — pintando
+   estas variáveis no <html>. Sem elas definidas, a janela segue transparente
+   sobre o fundo do tema. Quem as define LIMPA ao desmontar. */
+main[data-app-main] {
+  background: var(--app-surface, transparent);
+  color: var(--app-surface-text, inherit);
+}
+
+/* Cromo do board (cabeçalho, abas e barra de período) sobre a superfície
+   externa. O `color` herdaria sozinho, mas o texto secundário não: ele traz
+   `text-muted-foreground`, uma cor fixa do tema que ficaria cinza-escuro sobre
+   um fundo escuro escolhido à mão. --app-surface-muted só existe quando há
+   superfície externa; sem ela a regra cai no token do tema e nada muda. */
+[data-board-chrome] {
+  color: var(--app-surface-text, inherit);
+}
+[data-board-chrome] .text-muted-foreground {
+  color: var(--app-surface-muted, var(--muted-foreground));
+}
+
+/* Grade de cards do hub / painel de Operação (components/ui/card-grid.tsx): o
+   número de colunas é PREFERÊNCIA (lib/config/ui-prefs.ts) e chega por
+   --hub-cols. Precisa ser regra de folha, e não classe utilitária: Tailwind v4
+   varre o fonte em busca de classes LITERAIS, então `grid-cols-${n}` sairia sem
+   regra. Só vale a partir de lg (64rem) — abaixo disso as classes do componente
+   mandam (1 e 2 colunas). */
+@media (min-width: 64rem) {
+  [data-hub-grid] {
+    grid-template-columns: repeat(var(--hub-cols, 3), minmax(0, 1fr));
   }
 }
 

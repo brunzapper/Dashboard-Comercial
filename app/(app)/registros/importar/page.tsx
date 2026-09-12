@@ -5,7 +5,6 @@
 // as Server Actions de app/(app)/registros/importar/actions.ts.
 // v1.1 (30/07/2026): prop `ai` (config pública 0096) habilita o botão
 //   "Sugerir com IA" do passo de mapeamento; maxDuration 60→300 (turno da IA).
-import Link from "next/link";
 
 import { requireRole } from "@/lib/auth/session";
 import { getActiveOrgId } from "@/lib/auth/org";
@@ -13,11 +12,11 @@ import { loadOrgAiConfigPublic } from "@/lib/ai/config";
 import { createClient } from "@/lib/supabase/server";
 import { isCoreDef } from "@/lib/records/core-defs";
 import { loadSources } from "@/lib/config/sources";
-import { Button } from "@/components/ui/button";
 import {
   ImportWizard,
   type ImportFieldOption,
 } from "@/components/importacao/import-wizard";
+import { BackLink } from "@/components/ui/back-link";
 
 // Rede de segurança p/ as Server Actions desta página. 300 cobre o turno da
 // sugestão de mapeamento por IA (laço com orçamento de 240s); no plano
@@ -64,9 +63,7 @@ export default async function ImportarPage() {
             vez de duplicar, e edições feitas no app são preservadas.
           </p>
         </div>
-        <Button asChild variant="outline">
-          <Link href="/registros">Voltar a Registros</Link>
-        </Button>
+        <BackLink href="/registros" label="Registros" />
       </div>
       <ImportWizard sources={sources} fields={fields} ai={ai} />
     </div>

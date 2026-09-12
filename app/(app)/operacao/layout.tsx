@@ -1,4 +1,11 @@
-// Versão: 1.1 | Data: 08/09/2026
+// Versão: 1.2 | Data: 12/09/2026
+// v1.2 (12/09/2026): NAVEGAÇÃO FOCADA. Dentro de um item, as sub-abas das
+//   demais opções sumiram e no lugar entra um botão de VOLTAR ao painel
+//   (/operacao, que deixou de ser um redirect e virou a tela com os cards).
+//   Antes, as outras opções ficavam visíveis e navegáveis o tempo todo,
+//   competindo com o conteúdo do item e sem caminho de volta. A decisão é do
+//   FocusedAreaHeader (client, por pathname); o <h1> do item vem da própria
+//   página dele — por isso o título da área só aparece no painel.
 // v1.1 (08/09/2026): monta a JANELA DE IA DA OPERAÇÃO — um painel lateral
 //   persistido, escopado pela sub-área aberta. Vive AQUI (e não nas pages)
 //   porque é isso que o torna "a janela da Operação": ele acompanha a troca
@@ -26,7 +33,7 @@ import { getActiveOrgId } from "@/lib/auth/org";
 import { loadOrgAiConfigPublic } from "@/lib/ai/config";
 import { OPERACAO_AI_SCOPES } from "@/lib/ai/operacao/scopes";
 import { allowedOperacaoCards } from "@/lib/operacao/cards";
-import { SettingsTabs } from "@/components/configuracoes/settings-tabs";
+import { FocusedAreaHeader } from "@/components/configuracoes/focused-area-header";
 import { OperacaoAiScopeProvider } from "@/components/operacao/ai-scope-context";
 import { OperacaoAiPanelMount } from "@/components/operacao/ai-panel-mount";
 
@@ -39,7 +46,9 @@ export default async function OperacaoLayout({
   if (!session) redirect("/login");
 
   const isAdmin = session.roles.includes("admin");
-  const [cards, ai, scopeVerdicts] = await Promise.all([
+  const [, ai, scopeVerdicts] = await Promise.all([
+    // O catálogo segue sendo resolvido aqui (cache() por request) para o
+    // painel e as pages reusarem sem nova consulta.
     allowedOperacaoCards(),
     loadOrgAiConfigPublic(await getActiveOrgId()),
     // Escopos de IA que ESTE usuário pode usar. A régua é a mesma dos cards
@@ -59,11 +68,10 @@ export default async function OperacaoLayout({
 
   return (
     <OperacaoAiScopeProvider>
-      <div className="flex h-full min-h-0 flex-col gap-6">
-        <h1 className="text-2xl font-semibold">Operação</h1>
-        <SettingsTabs
-          tabs={cards.map(({ href, label }) => ({ href, label }))}
-        />
+      {/* ATENÇÃO: a cadeia flex h-full min-h-0 até o wrapper dos children é
+          requisito do calendário da Agenda — não simplificar. */}
+      <div className="flex h-full min-h-0 flex-col gap-4">
+        <FocusedAreaHeader indexHref="/operacao" title="Operação" />
         <div className="min-h-0 flex-1">{children}</div>
       </div>
       {aiScopes.length > 0 ? (

@@ -1,4 +1,14 @@
-// Versão: 3.0 | Data: 08/09/2026
+// Versão: 4.0 | Data: 12/09/2026
+// v4.0 (12/09/2026): DISPOSIÇÃO CONFIGURÁVEL (0141). Os cards saíram daqui para
+//   components/home/hub-cards.tsx (a mesma régua serve o painel de /operacao) e
+//   as três cópias da grade viraram <CardGrid>, que aceita grade↔lista e número
+//   de colunas. O que cada card MOSTRA passa a ser preferência resolvida em
+//   três camadas (padrão do app → org, com trava → usuário):
+//   lib/config/ui-prefs.ts. Descrição nasce DESLIGADA nas duas famílias — o
+//   card é botão de entrada, não texto de ajuda — e o nível de acesso virou
+//   opcional e ganhou equivalente nos cards de Operação (areaAccessLabel).
+//   Cada card ganhou alfinete de "fixar na barra lateral" (fora do menu ⋮, que
+//   não existe para quem só lê).
 // v3.0 (08/09/2026): cards de FORMULÁRIO (Workflow 0126) entram no hub ao
 //   lado dos módulos. A key deles é dinâmica (form:<chave>), então o mapa
 //   de ícones ganha um fallback POR ORIGEM — sem isso todo formulário
@@ -14,91 +24,56 @@
 //   org-específicos como Remuneração (checkSettingsArea via
 //   allowedOperacaoCards). validateLastView migra o lastView legado "/agenda"
 //   p/ /operacao/agenda na leitura.
-// v2.7 (28/07/2026): card "Agenda" removido da Home (redundante com o item
-//   do nav lateral, que segue sendo o acesso à página /agenda).
-//   validateLastView continua aceitando o literal "/agenda".
-// v2.6 (28/07/2026): seção "Agenda" — card fixo abrindo a página /agenda
-//   (calendário do workspace: mistura das agendas dos dashboards + tarefas +
-//   anotações). validateLastView aceita o literal "/agenda".
 // v2.5 (26/07/2026): a seção Kanbans lista TAMBÉM os widgets kanban dos
 //   dashboards ativos (RLS de widgets = visibilidade do pai; sem linha espelho
 //   em dashboards) — card "No dashboard X" abrindo a página cheia
 //   /kanbans/w/[widgetId], que compartilha config/placements com o widget.
 // v2.4 (23/07/2026): botão "Importar" ao lado do "Criar" — modo de criação de
 //   dashboard via JSON gerado por IA (ImportDashboardSheet).
-// v2.3 (22/07/2026): ciclo de vida (0087) — menu "⋮" nos cards (Duplicar/
-//   Arquivar/Excluir via BoardCardMenu, no lugar do botão de lixeira) e
-//   seções recolhidas "Arquivados" (segue abrindo) e "Lixeira" (não abre;
-//   purga em 14 dias — o hub esconde vencidos mesmo sem o cron).
+// v2.3 (22/07/2026): ciclo de vida (0087) — menu "⋮" nos cards e seções
+//   recolhidas "Arquivados" e "Lixeira" (purga em 14 dias).
 // v2.2 (17/07/2026): <RestoreLastView /> — ao REABRIR o app (sessão nova do
-//   navegador), redireciona ao último board visitado (user_settings.lastView,
-//   gravado pelo TrackLastView); visita in-session à Home limpa o lastView.
-// v2.1 (16/07/2026): botão "Criar" (Dashboard | Kanban) no lugar do form fixo;
-//   seções separadas p/ dashboards e kanbans (mesma tabela, kinds distintos).
+//   navegador), redireciona ao último board visitado (user_settings.lastView).
+// v2.1 (16/07/2026): botão "Criar" (Dashboard | Kanban) no lugar do form fixo.
 import Link from "next/link";
-import {
-  CalendarDays,
-  HandCoins,
-  LayoutGrid,
-  ListChecks,
-  FileInput,
-  Shuffle,
-  SquareKanban,
-  Workflow,
-  type LucideIcon,
-} from "lucide-react";
 
 import { getSessionInfo } from "@/lib/auth/session";
-import { getActiveOrgId } from "@/lib/auth/org";
+import { getActiveOrg } from "@/lib/auth/org";
 import { createClient } from "@/lib/supabase/server";
 import { loadSources } from "@/lib/config/sources";
 import { loadUserSettings } from "@/lib/config/user-settings";
 import { RestoreLastView } from "@/components/layout/restore-last-view";
 import type { FieldDefinition } from "@/lib/records/types";
 import {
-  Card,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import { ROLE_LABELS, type RoleKey } from "@/lib/auth/roles";
-import {
   mapWidgetKanbanRows,
-  type WidgetKanbanHubItem,
   type WidgetKanbanHubRow,
 } from "@/lib/kanban/hub";
 import { CreateMenu } from "@/components/dashboards/create-menu";
 import { ImportDashboardSheet } from "@/components/dashboards/import-dashboard-sheet";
 import { loadOrgAiConfigPublic } from "@/lib/ai/config";
-import {
-  allowedOperacaoCards,
-  type OperacaoCard as OperacaoCardDef,
-} from "@/lib/operacao/cards";
+import { allowedOperacaoCards, applyCardDescriptions } from "@/lib/operacao/cards";
 import { cn } from "@/lib/utils";
+import { CardGrid } from "@/components/ui/card-grid";
 import {
-  BoardCardMenu,
-  type BoardStatus,
-} from "@/components/dashboards/board-card-menu";
-
-const TRASH_TTL_MS = 14 * 86_400_000; // purga em 14 dias (0087)
+  resolveUiPrefs,
+  userSidebarPins,
+  userUiPrefs,
+} from "@/lib/config/ui-prefs";
+import {
+  BoardCard,
+  OperacaoCardItem,
+  WidgetKanbanCard,
+  withinTrashTtl,
+  type DashboardRow,
+  type HubCardDisplay,
+} from "@/components/home/hub-cards";
+import { HubLayoutControls } from "@/components/home/hub-layout-controls";
 
 // A geração direta por IA (ImportDashboardSheet → generateDashboardWithAi) roda
 // como server action DESTA rota; o laço de autocorreção pode levar alguns
 // segundos. maxDuration amplia o teto da função serverless (clampado ao teto do
 // plano da Vercel).
 export const maxDuration = 300;
-
-interface DashboardRow {
-  id: string;
-  name: string;
-  owner_user_id: string | null;
-  visible_to_roles: string[];
-  kind: "dashboard" | "kanban";
-  status: BoardStatus;
-  trashed_at: string | null;
-  // Só para o picker da IA (preset de fábrica ≠ import) — não exibido no card.
-  settings: { preset?: { key?: string } } | null;
-}
 
 // Valida o lastView gravado (user_settings): só /dashboards/<uuid>,
 // /kanbans/<uuid> (+ ?tab= opcional) ou /kanbans/w/<uuid> (página cheia de
@@ -127,135 +102,6 @@ function validateLastView(
   return view;
 }
 
-// Item da Lixeira ainda dentro da janela de 14 dias? (Vencidos somem do hub
-// mesmo antes de o cron de purga removê-los fisicamente.)
-function withinTrashTtl(trashedAt: string | null): boolean {
-  return Date.now() - new Date(trashedAt ?? 0).getTime() < TRASH_TTL_MS;
-}
-
-// "Expira em N dias" do card na Lixeira (teto: recém-excluído = 14 dias).
-function trashExpiryLabel(trashedAt: string | null): string {
-  const at = trashedAt ? new Date(trashedAt).getTime() : Date.now();
-  const days = Math.ceil((at + TRASH_TTL_MS - Date.now()) / 86_400_000);
-  if (days <= 0) return "Expira hoje";
-  return days === 1 ? "Expira em 1 dia" : `Expira em ${days} dias`;
-}
-
-function BoardCard({
-  row,
-  canManage,
-  canDuplicate,
-}: {
-  row: DashboardRow;
-  canManage: boolean;
-  canDuplicate: boolean;
-}) {
-  const kanban = row.kind === "kanban";
-  const trashed = row.status === "trashed";
-  const href = kanban ? `/kanbans/${row.id}` : `/dashboards/${row.id}`;
-  return (
-    <Card className={`relative${trashed ? " opacity-70" : ""}`}>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          {kanban ? (
-            <SquareKanban className="text-muted-foreground size-4 shrink-0" />
-          ) : null}
-          {trashed ? (
-            // Na Lixeira o board NÃO abre: título sem link (rotas dão 404).
-            <span className="text-muted-foreground">{row.name}</span>
-          ) : (
-            <Link href={href} className="hover:underline">
-              {row.name}
-            </Link>
-          )}
-        </CardTitle>
-        <CardDescription>
-          {trashed
-            ? trashExpiryLabel(row.trashed_at)
-            : row.visible_to_roles.length > 0
-              ? `Compartilhado: ${row.visible_to_roles
-                  .map((r) => ROLE_LABELS[r as RoleKey] ?? r)
-                  .join(", ")}`
-              : "Pessoal"}
-        </CardDescription>
-      </CardHeader>
-      <BoardCardMenu
-        id={row.id}
-        kanban={kanban}
-        status={row.status}
-        canManage={canManage}
-        canDuplicate={canDuplicate}
-      />
-    </Card>
-  );
-}
-
-// Ícone por key de card de Operação — mapeado AQUI (o catálogo de
-// lib/operacao/cards.ts fica dados puros); key nova cai no fallback.
-const OPERACAO_ICONS: Record<string, LucideIcon> = {
-  agenda: CalendarDays,
-  tarefas: ListChecks,
-  remuneracao: HandCoins,
-  mapeamentos: Shuffle,
-  workflow: Workflow, // v2.9 (08/09/2026)
-};
-
-// Ícone por ORIGEM — vale para os cards cuja key é dinâmica (formulários
-// criados no Workflow). v3.0 (08/09/2026).
-const OPERACAO_KIND_ICONS: Record<string, LucideIcon> = {
-  formulario: FileInput,
-};
-
-// Card de OPERAÇÃO (aba "Operação" do hub): módulo do catálogo em código —
-// sem menu "⋮" e sem UI de exclusão POR CONSTRUÇÃO (não é linha de
-// dashboards; org-específico liga/desliga só via org_features no /owner).
-function OperacaoCardItem({ card }: { card: OperacaoCardDef }) {
-  const Icon =
-    OPERACAO_ICONS[card.key] ??
-    (card.kind ? OPERACAO_KIND_ICONS[card.kind] : undefined) ??
-    LayoutGrid;
-  return (
-    <Card className="relative">
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <Icon className="text-muted-foreground size-4 shrink-0" />
-          <Link href={card.href} className="hover:underline">
-            {card.label}
-          </Link>
-        </CardTitle>
-        <CardDescription>{card.description}</CardDescription>
-      </CardHeader>
-    </Card>
-  );
-}
-
-// Card de um kanban de WIDGET na seção Kanbans: sem menu "⋮" (ciclo de vida é
-// do dashboard pai; renomear é o título do widget no builder) — só o link da
-// página cheia + o link "No dashboard X".
-function WidgetKanbanCard({ item }: { item: WidgetKanbanHubItem }) {
-  return (
-    <Card className="relative">
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <SquareKanban className="text-muted-foreground size-4 shrink-0" />
-          <Link href={item.href} className="hover:underline">
-            {item.label}
-          </Link>
-        </CardTitle>
-        <CardDescription>
-          No dashboard{" "}
-          <Link
-            href={`/dashboards/${item.dashboardId}`}
-            className="hover:text-foreground hover:underline"
-          >
-            {item.dashboardName}
-          </Link>
-        </CardDescription>
-      </CardHeader>
-    </Card>
-  );
-}
-
 export default async function HomePage({
   searchParams,
 }: {
@@ -270,13 +116,14 @@ export default async function HomePage({
   const isAdmin = session?.roles.includes("admin") ?? false;
   // Org ativa (multi-org): a RLS já escopa às orgs do usuário; o .eq resolve a
   // visão de quem pertence a 2+ orgs (Owner). null pré-migração = sem filtro.
-  const orgId = await getActiveOrgId();
+  const org = await getActiveOrg();
+  const orgId = org?.id ?? null;
 
   const supabase = await createClient();
   let boardsQuery = supabase
     .from("dashboards")
     .select(
-      "id, name, owner_user_id, visible_to_roles, kind, status, trashed_at, settings"
+      "id, name, description, owner_user_id, visible_to_roles, kind, status, trashed_at, settings"
     )
     .order("created_at", { ascending: false });
   if (orgId) boardsQuery = boardsQuery.eq("organization_id", orgId);
@@ -330,6 +177,24 @@ export default async function HomePage({
     new Set(widgetKanbans.map((w) => w.widgetId))
   );
 
+  // Preferências de INTERFACE (0141): padrão do app → org (com trava) → usuário.
+  const prefs = resolveUiPrefs(userUiPrefs(settings), org?.uiPrefs);
+  const lockedKeys = [...prefs.locked];
+  const pins = userSidebarPins(settings);
+  const isPinned = (kind: string, id: string) =>
+    pins.some((p) => p.kind === kind && p.id === id);
+
+  const boardDisplay: HubCardDisplay = {
+    layout: prefs.values.hubLayout,
+    showDescription: prefs.values.hubShowDescription,
+    showAccess: prefs.values.hubShowAccess,
+  };
+  const operacaoDisplay: HubCardDisplay = {
+    layout: prefs.values.operacaoLayout,
+    showDescription: prefs.values.operacaoShowDescription,
+    showAccess: prefs.values.operacaoShowAccess,
+  };
+
   // Insumos do diálogo "Criar kanban" (fontes + campos p/ o agrupamento).
   // Boards elegíveis aos modos "Criar a partir de"/"Editar" da IA: dashboards
   // ativos que o usuário pode gerir (owner/admin — espelha o motor de apply e
@@ -346,8 +211,15 @@ export default async function HomePage({
     });
 
   // Cards de Operação (aba "Operação"): catálogo em código recortado por
-  // área (checkSettingsArea é cache()d — o layout de /operacao reusa).
-  const operacaoCards = aba === "operacao" ? await allowedOperacaoCards() : [];
+  // área (checkSettingsArea é cache()d — o layout de /operacao reusa), com a
+  // descrição eventualmente sobrescrita pela organização.
+  const operacaoCards =
+    aba === "operacao"
+      ? applyCardDescriptions(
+          await allowedOperacaoCards(),
+          org?.uiPrefs.operacaoDescriptions
+        )
+      : [];
 
   let sources: Awaited<ReturnType<typeof loadSources>> = [];
   let fields: FieldDefinition[] = [];
@@ -368,16 +240,18 @@ export default async function HomePage({
   }
 
   const cardGrid = (list: DashboardRow[]) => (
-    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+    <CardGrid layout={boardDisplay.layout} columns={prefs.values.hubColumns}>
       {list.map((r) => (
         <BoardCard
           key={r.id}
           row={r}
           canManage={canManageRow(r)}
           canDuplicate={canCreate}
+          display={boardDisplay}
+          pinned={isPinned(r.kind === "kanban" ? "kanban" : "dashboard", r.id)}
         />
       ))}
-    </div>
+    </CardGrid>
   );
 
   return (
@@ -430,13 +304,51 @@ export default async function HomePage({
       </nav>
 
       {aba === "operacao" ? (
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {operacaoCards.map((c) => (
-            <OperacaoCardItem key={c.key} card={c} />
-          ))}
-        </div>
+        <>
+          <HubLayoutControls
+            keys={{
+              layout: "operacaoLayout",
+              columns: "operacaoColumns",
+              showDescription: "operacaoShowDescription",
+              showAccess: "operacaoShowAccess",
+            }}
+            layout={operacaoDisplay.layout}
+            columns={prefs.values.operacaoColumns}
+            showDescription={operacaoDisplay.showDescription}
+            showAccess={operacaoDisplay.showAccess}
+            locked={lockedKeys}
+            accessLabel="Quem acessa"
+          />
+          <CardGrid
+            layout={operacaoDisplay.layout}
+            columns={prefs.values.operacaoColumns}
+          >
+            {operacaoCards.map((c) => (
+              <OperacaoCardItem
+                key={c.key}
+                card={c}
+                display={operacaoDisplay}
+                pinned={isPinned("operacao", c.key)}
+              />
+            ))}
+          </CardGrid>
+        </>
       ) : (
         <>
+          <HubLayoutControls
+            keys={{
+              layout: "hubLayout",
+              columns: "hubColumns",
+              showDescription: "hubShowDescription",
+              showAccess: "hubShowAccess",
+            }}
+            layout={boardDisplay.layout}
+            columns={prefs.values.hubColumns}
+            showDescription={boardDisplay.showDescription}
+            showAccess={boardDisplay.showAccess}
+            locked={lockedKeys}
+          />
+
           {dashboards.length === 0 ? (
             <p className="text-muted-foreground text-sm">
               Nenhum dashboard no workspace ainda.
@@ -457,11 +369,19 @@ export default async function HomePage({
               </div>
               {kanbans.length > 0 ? cardGrid(kanbans) : null}
               {widgetKanbans.length > 0 ? (
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                <CardGrid
+                  layout={boardDisplay.layout}
+                  columns={prefs.values.hubColumns}
+                >
                   {widgetKanbans.map((w) => (
-                    <WidgetKanbanCard key={w.widgetId} item={w} />
+                    <WidgetKanbanCard
+                      key={w.widgetId}
+                      item={w}
+                      display={boardDisplay}
+                      pinned={isPinned("widget-kanban", w.widgetId)}
+                    />
                   ))}
-                </div>
+                </CardGrid>
               ) : null}
             </>
           ) : null}

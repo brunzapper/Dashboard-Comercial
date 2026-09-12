@@ -1,4 +1,22 @@
-// Versão: 1.4 | Data: 30/07/2026
+// Versão: 1.6 | Data: 12/09/2026
+// v1.6 (12/09/2026): o <main> ganhou `data-app-main` e passou a consumir
+//   --app-surface / --app-surface-text (regra em globals.css). É assim que o
+//   tema EXTERNO do dashboard pinta a JANELA: o padding é do <main>, e o
+//   DashboardClient não o alcança. Por variável CSS, e não por estado no
+//   contexto, porque quem publica é um efeito — escrever no DOM é o que efeito
+//   faz; um setState ali cairia na regra react-hooks/set-state-in-effect. As
+//   duas alternativas ruins ficaram de fora: margem negativa quebra no modo
+//   overlay (padding pl-12) e backdrop `fixed` quebra a rolagem.
+// v1.5 (12/09/2026): segundo interruptor ao lado do pin — "abrir ao aproximar
+//   da borda" (uiPrefs.sidebarHoverEdge, 0141). Três estados, e não dois:
+//     fixada                      → barra sempre visível; a faixa não existe.
+//     solta + borda ligada        → comportamento histórico (faixa de 8px + ⋮).
+//     solta + borda DESLIGADA     → a faixa NÃO é renderizada; só o botão ⋮
+//                                   abre (o caminho que já existia para toque
+//                                   e teclado). Sem isso, quem trabalha com a
+//                                   barra solta esbarrava nela o tempo todo.
+//   Chave travada pela organização chega em `hoverEdgeLocked` e desabilita o
+//   botão com o motivo — esconder faria parecer defeito.
 // Fase 10: shell do app (client). Envolve a barra lateral + conteúdo e controla:
 //  - barra OCULTA por padrão (revelada por hover numa faixa fina à esquerda),
 //    FIXÁVEL por um pin discreto no topo direito da barra (pref. por usuário,
@@ -30,12 +48,12 @@ import {
   useTransition,
   type ReactNode,
 } from "react";
-import { MoreVertical, Pin, PinOff, X } from "lucide-react";
+import { MoreVertical, PanelLeftClose, PanelLeftOpen, Pin, PinOff, X } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { markAppSessionActive } from "@/lib/app-session";
 import { notifyOnError } from "@/lib/feedback/notify";
-import { updateUserSettings } from "@/app/(app)/dashboards/actions";
+import { saveUiPrefs } from "@/app/(app)/dashboards/actions";
 
 interface AppChrome {
   chromeHidden: boolean;
@@ -53,17 +71,26 @@ export function useAppChrome(): AppChrome {
 
 export function AppShell({
   initialPinned,
+  initialHoverEdge,
+  pinnedLocked = false,
+  hoverEdgeLocked = false,
   sidebar,
   topRight,
   children,
 }: {
   initialPinned: boolean;
+  /** Revelar a barra ao aproximar do canto esquerdo (uiPrefs, 0141). */
+  initialHoverEdge: boolean;
+  /** A organização travou a personalização destas chaves. */
+  pinnedLocked?: boolean;
+  hoverEdgeLocked?: boolean;
   sidebar: ReactNode;
   // Controle flutuante no topo-direito (ex.: sino de alertas).
   topRight?: ReactNode;
   children: ReactNode;
 }) {
   const [pinned, setPinned] = useState(initialPinned);
+  const [hoverEdge, setHoverEdge] = useState(initialHoverEdge);
   const [hovering, setHovering] = useState(false);
   // Abertura EXPLÍCITA (botão de menu): torna a barra alcançável por toque e
   // teclado — o hover da faixa lateral não existe nesses meios. Independente
@@ -85,7 +112,20 @@ export function AppShell({
       const next = !prev;
       startTransition(() =>
         void notifyOnError(
-          updateUserSettings({ sidebarPinned: next }),
+          saveUiPrefs({ sidebarPinned: next }),
+          "Não foi possível salvar a preferência da barra"
+        )
+      );
+      return next;
+    });
+  }, []);
+
+  const toggleHoverEdge = useCallback(() => {
+    setHoverEdge((prev) => {
+      const next = !prev;
+      startTransition(() =>
+        void notifyOnError(
+          saveUiPrefs({ sidebarHoverEdge: next }),
           "Não foi possível salvar a preferência da barra"
         )
       );
@@ -115,6 +155,8 @@ export function AppShell({
   // overlay = barra flutuante (não empurra o conteúdo) quando não fixada.
   const overlay = !pinned && !chromeHidden;
   const sidebarVisible = !overlay || hovering || openedByButton;
+  // A faixa de hover só existe no overlay E com a preferência ligada.
+  const edgeStripEnabled = overlay && hoverEdge;
 
   // Escape fecha a barra aberta pelo botão e devolve o foco a ele.
   useEffect(() => {
@@ -157,25 +199,60 @@ export function AppShell({
                   (sidebarVisible ? "translate-x-0" : "-translate-x-full")
             )}
           >
-            <button
-              type="button"
-              onClick={togglePin}
-              aria-label={pinned ? "Desafixar barra lateral" : "Fixar barra lateral"}
-              aria-pressed={pinned}
-              className="text-muted-foreground hover:text-foreground hover:bg-sidebar-accent absolute top-2 right-2 rounded-md p-1.5 transition-colors"
-            >
-              {pinned ? (
-                <PinOff className="size-4" />
-              ) : (
-                <Pin className="size-4" />
-              )}
-            </button>
+            <div className="absolute top-2 right-2 flex flex-col items-end gap-0.5">
+              {/* Acima do pin, como pedido: abrir (ou não) ao aproximar da
+                  borda. Irrelevante com a barra fixada — some para não
+                  oferecer um controle sem efeito. */}
+              {!pinned ? (
+                <button
+                  type="button"
+                  onClick={toggleHoverEdge}
+                  disabled={hoverEdgeLocked}
+                  aria-label={
+                    hoverEdge
+                      ? "Não abrir ao aproximar da borda"
+                      : "Abrir ao aproximar da borda"
+                  }
+                  aria-pressed={hoverEdge}
+                  title={
+                    hoverEdgeLocked
+                      ? "Definido pela organização"
+                      : hoverEdge
+                        ? "Abrindo ao aproximar da borda"
+                        : "Só abre pelo botão de menu"
+                  }
+                  className="text-muted-foreground hover:text-foreground hover:bg-sidebar-accent rounded-md p-1.5 transition-colors disabled:opacity-50"
+                >
+                  {hoverEdge ? (
+                    <PanelLeftOpen className="size-4" />
+                  ) : (
+                    <PanelLeftClose className="size-4" />
+                  )}
+                </button>
+              ) : null}
+              <button
+                type="button"
+                onClick={togglePin}
+                disabled={pinnedLocked}
+                aria-label={pinned ? "Desafixar barra lateral" : "Fixar barra lateral"}
+                aria-pressed={pinned}
+                title={pinnedLocked ? "Definido pela organização" : undefined}
+                className="text-muted-foreground hover:text-foreground hover:bg-sidebar-accent rounded-md p-1.5 transition-colors disabled:opacity-50"
+              >
+                {pinned ? (
+                  <PinOff className="size-4" />
+                ) : (
+                  <Pin className="size-4" />
+                )}
+              </button>
+            </div>
             {sidebar}
           </aside>
         ) : null}
 
-        {/* Faixa fina de hover: revela a barra flutuante quando não fixada. */}
-        {overlay ? (
+        {/* Faixa fina de hover: revela a barra flutuante quando não fixada E
+            a preferência "abrir ao aproximar da borda" está ligada. */}
+        {edgeStripEnabled ? (
           <div
             aria-hidden
             onMouseEnter={() => setHovering(true)}
@@ -219,6 +296,10 @@ export function AppShell({
         {!chromeHidden ? topRight : null}
 
         <main
+          // data-app-main: âncora da regra que consome --app-surface /
+          // --app-surface-text (globals.css). Sem as variáveis definidas, a
+          // janela segue no tema do sistema.
+          data-app-main
           className={cn(
             "flex-1 overflow-auto",
             // Em overlay o botão de menu (fixed, left-3, ~32px) divide o canto

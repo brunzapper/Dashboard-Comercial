@@ -18,11 +18,9 @@
 // v2.0 (16/07/2026): fontes DINÂMICAS — CRUD do catálogo (data_sources):
 //   criar/editar/excluir fontes, nome curto por fonte e campo de período;
 //   mantém o rótulo dos campos "gerais" (sync_config).
-import Link from "next/link";
 
 import { createClient } from "@/lib/supabase/server";
 import { requireSettingsArea } from "@/lib/auth/access";
-import { Button } from "@/components/ui/button";
 import { loadSources } from "@/lib/config/sources";
 import { loadSourceFolders } from "@/lib/config/source-folders";
 import { loadSourceLabels } from "@/lib/config/source-labels";
@@ -45,6 +43,7 @@ import {
   AutoOperationsManager,
   type AutoOperationsConfigRow,
 } from "@/components/configuracoes/auto-operations-manager";
+import { BackLink } from "@/components/ui/back-link";
 
 // Título da aba (template do layout completa "— {appName}").
 export const metadata = { title: "Bases" };
@@ -185,9 +184,7 @@ export default async function FontesPage() {
             de CSV em Registros.
           </p>
         </div>
-        <Button asChild variant="outline">
-          <Link href="/registros">Voltar a Registros</Link>
-        </Button>
+        <BackLink href="/registros" label="Registros" />
       </div>
       <SourceFoldersManager folders={folders} sources={sources} />
       <SourcesManager

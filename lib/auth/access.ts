@@ -1,4 +1,8 @@
-// Versão: 1.6 | Data: 08/09/2026
+// Versão: 1.7 | Data: 12/09/2026
+// v1.7 (12/09/2026): areaAccessLabel — rótulo pt-BR de QUEM alcança uma área,
+//   derivado de AREA_GATES. É o "nível de acesso" dos cards de Operação no hub
+//   (o que dashboards/kanbans já exibiam a partir de visible_to_roles). PURO:
+//   descreve a régua da área, não o veredito de quem está olhando.
 // v1.6 (08/09/2026): área `workflow` (0125) — SEM gate de papel, como
 //   `remuneracao`: a page ramifica (admin configura os esquemas; os demais
 //   só EXECUTAM o formulário). A escrita dos esquemas segue admin nas
@@ -32,6 +36,11 @@ import { redirect } from "next/navigation";
 import { getSessionInfo, type SessionInfo } from "@/lib/auth/session";
 import { getActiveOrg } from "@/lib/auth/org";
 import { createClient } from "@/lib/supabase/server";
+import {
+  ROLE_LABELS,
+  SPECIAL_ROLE_LABELS,
+  type RoleKey,
+} from "@/lib/auth/roles";
 import {
   loadOrgFeatures,
   type OrgFeatureKey,
@@ -95,6 +104,29 @@ export const AREA_LABELS: Record<string, string> = {
   usuarios: "Usuários",
   log: "Log (Registros)",
 };
+
+/** Rótulos de acesso por permissão (só as usadas como gate de área). */
+const PERMISSION_ACCESS_LABELS: Record<string, string> = {
+  manage_users_roles: "Quem gerencia usuários",
+  manage_field_definitions: "Quem gerencia campos",
+  create_dashboards: "Quem cria dashboards",
+};
+
+/**
+ * Rótulo pt-BR de QUEM alcança uma área — o "nível de acesso" exibido nos cards
+ * de Operação do hub, espelho do que dashboards/kanbans já mostravam. PURO
+ * (deriva de AREA_GATES; nada de consulta): descreve a régua, não o veredito de
+ * quem está olhando — quem não alcança a área nem vê o card.
+ * Área sem gate de papel e card sem área ⇒ "Todos os usuários".
+ */
+export function areaAccessLabel(areaKey?: string): string {
+  const gate = areaKey ? AREA_GATES[areaKey] : undefined;
+  if (!gate) return "Todos os usuários";
+  if (gate.orgAdmin) return SPECIAL_ROLE_LABELS.org_admin;
+  if (gate.role) return `${ROLE_LABELS[gate.role as RoleKey] ?? gate.role}es`;
+  if (gate.permission) return PERMISSION_ACCESS_LABELS[gate.permission] ?? "Restrito";
+  return "Todos os usuários";
+}
 
 // Áreas que só existem com o recurso SOB DEMANDA da org ligado (org_features,
 // 0114). Feature-off vence TUDO — inclusive override allow — e barra page,

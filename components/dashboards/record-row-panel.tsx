@@ -1,4 +1,10 @@
-// Versão: 1.4 | Data: 10/09/2026
+// Versão: 1.5 | Data: 12/09/2026
+// v1.5 (12/09/2026): o DETALHE virou a ficha inteira do registro — núcleo,
+//   campos da base, campos de outras bases com valor e "Outros dados" — com as
+//   mesmas seções e a mesma formatação de /registros (a montagem é a MESMA, em
+//   loadRowPanel). E ganhou o interruptor "mostrar campos vazios": o recorte é
+//   client-side, para alternar não custar uma ida ao servidor, e a escolha fica
+//   gravada na preferência do usuário, valendo nas duas telas.
 // v1.4 (10/09/2026): seleção múltipla das tarefas. O `onDone` REBUSCA
 //   (`loadRowTasks`) em vez de confiar no bus: este painel não escuta
 //   `useDataChanged`, então sem o refetch a lista ficaria com o que já
@@ -47,6 +53,8 @@ import type { RowActionSettings } from "@/lib/widgets/types";
 
 import { TreeWidget } from "./charts/tree-widget";
 import { TaskList } from "@/components/tarefas/task-list";
+import { RecordFieldsToggle } from "@/components/registros/record-fields-toggle";
+import type { RowDetailField } from "@/app/(app)/dashboards/row-panel-actions";
 import { TasksBulkBar } from "@/components/tarefas/tasks-bulk-bar";
 import { useBulkSelection } from "@/lib/feedback/use-bulk-selection";
 import type { TaskFormContext } from "@/components/tarefas/task-sheet";
@@ -134,6 +142,17 @@ export function RecordRowPanel({
       )
       .finally(() => setLoadingMore(false));
   };
+
+  // Semeado pelo payload (a preferência vem resolvida do servidor) e depois
+  // controlado localmente. Padrão seedKey: ajuste durante o render, não em
+  // efeito — e re-semeia a cada registro novo, nunca a cada render.
+  const seedKey = data ? `${recordId}:${String(data.showAllFields)}` : null;
+  const [seededFor, setSeededFor] = useState<string | null>(null);
+  const [showAll, setShowAll] = useState(false);
+  if (seedKey !== null && seedKey !== seededFor) {
+    setSeededFor(seedKey);
+    setShowAll(data!.showAllFields);
+  }
 
   const isTree = action.kind === "atributo" && action.attributeKey === "tree";
 
@@ -251,26 +270,87 @@ export function RecordRowPanel({
             )}
           </div>
         ) : (
-          <div className="flex flex-col gap-1.5 overflow-auto px-4 pb-6">
-            {data.fields.length === 0 ? (
-              <p className="text-muted-foreground text-sm">
-                Sem campos preenchidos neste registro.
-              </p>
-            ) : (
-              data.fields.map((f) => (
+          <RecordDetail
+            fields={data.fields}
+            showAll={showAll}
+            onShowAllChange={setShowAll}
+            locked={data.showAllFieldsLocked}
+          />
+        )}
+      </SheetContent>
+    </Sheet>
+  );
+}
+
+// Seções da ficha, na ordem em que se lê um registro: o núcleo, os campos da
+// base, os de outras bases que este registro por acaso tem preenchidos e, por
+// último, as chaves sem definição alguma.
+const DETAIL_GROUPS: { key: RowDetailField["group"]; label: string | null }[] = [
+  { key: "core", label: null },
+  { key: "base", label: "Campos da base" },
+  { key: "outras", label: "Campos de outras bases" },
+  { key: "orfao", label: "Outros dados" },
+];
+
+function RecordDetail({
+  fields,
+  showAll,
+  onShowAllChange,
+  locked,
+}: {
+  fields: RowDetailField[];
+  showAll: boolean;
+  onShowAllChange: (v: boolean) => void;
+  locked: boolean;
+}) {
+  const emptyCount = fields.filter((f) => f.empty).length;
+  const shown = showAll ? fields : fields.filter((f) => !f.empty);
+
+  return (
+    <div className="flex min-h-0 flex-col gap-2 overflow-auto px-4 pb-6">
+      <div className="flex justify-end">
+        <RecordFieldsToggle
+          value={showAll}
+          onChange={onShowAllChange}
+          locked={locked}
+          emptyCount={emptyCount}
+        />
+      </div>
+      {shown.length === 0 ? (
+        <p className="text-muted-foreground text-sm">
+          Sem campos preenchidos neste registro.
+        </p>
+      ) : (
+        DETAIL_GROUPS.map(({ key, label }) => {
+          const rows = shown.filter((f) => f.group === key);
+          if (rows.length === 0) return null;
+          return (
+            <div key={key} className="flex flex-col gap-1.5">
+              {label ? (
+                <p className="text-muted-foreground mt-2 text-xs font-medium">
+                  {label}
+                </p>
+              ) : null}
+              {rows.map((f) => (
                 <div key={f.key} className="flex flex-wrap gap-2 border-b py-1.5">
                   <span className="text-muted-foreground w-48 shrink-0 text-xs">
                     {f.label}
                   </span>
-                  <span className="min-w-0 flex-1 text-sm break-words">
+                  <span
+                    className={
+                      f.empty
+                        ? "text-muted-foreground min-w-0 flex-1 text-sm"
+                        : "min-w-0 flex-1 text-sm break-words"
+                    }
+                  >
                     {f.value}
                   </span>
                 </div>
-              ))
-            )}
-          </div>
-        )}
-      </SheetContent>
-    </Sheet>
+              ))}
+            </div>
+          );
+        })
+      )}
+    </div>
   );
 }

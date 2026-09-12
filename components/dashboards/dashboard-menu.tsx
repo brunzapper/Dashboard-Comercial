@@ -1,4 +1,9 @@
-// Versão: 1.3 | Data: 26/07/2026
+// Versão: 1.4 | Data: 12/09/2026
+// v1.4 (12/09/2026): o sheet Aparência ganhou a superfície EXTERNA
+//   (settings.outerBackground) ao lado da interna. "Igual ao interno" é a
+//   quarta opção do seletor do entorno e é o que resolve "em conjunto ou
+//   separadamente" com um clique — sem ela, escolher a mesma cor duas vezes
+//   ficaria dessincronizado na primeira troca.
 // Fase 10: menu "⋮" ao lado de "Adicionar widget". Hoje: modo tela cheia
 // (Fullscreen API + esconde o chrome, via AppChromeContext) e "Aparência do
 // dashboard" (cor de fundo sólida/gradiente). Estruturado p/ novas opções.
@@ -69,6 +74,9 @@ import { BoardSourcesDialog } from "./board-sources-dialog";
 import { BoardAccessDialog } from "./board-access-dialog";
 
 type BgMode = "none" | "solid" | "gradient";
+// O entorno tem uma opção a mais: herdar a cor INTERNA. É ela que faz "definir
+// as duas em conjunto" ser um clique, sem duplicar a config.
+type OuterMode = "none" | "same" | "solid" | "gradient";
 
 // Degraus do controle "Largura da coluna" (canvas.baseCols): mais colunas na
 // mesma largura = coluna mais fina. 120 é o default (100%).
@@ -144,6 +152,14 @@ export function DashboardMenu({
   const [from, setFrom] = useState(bg?.from ?? "#0b1220");
   const [to, setTo] = useState(bg?.to ?? "#1e293b");
   const [angle, setAngle] = useState(bg?.angle ?? 135);
+  // Superfície EXTERNA (12/09/2026): cabeçalho, abas, barra de período e a
+  // janela ao redor — o que antes ficava sempre no tema do sistema.
+  const outer = settings.outerBackground;
+  const [outerMode, setOuterMode] = useState<OuterMode>(outer?.mode ?? "none");
+  const [outerSolid, setOuterSolid] = useState(outer?.color ?? "#0b1220");
+  const [outerFrom, setOuterFrom] = useState(outer?.from ?? "#0b1220");
+  const [outerTo, setOuterTo] = useState(outer?.to ?? "#1e293b");
+  const [outerAngle, setOuterAngle] = useState(outer?.angle ?? 135);
   const [dateFmt, setDateFmt] = useState<DateFormat>(
     settings.dateFormat ?? DEFAULT_DATE_FORMAT
   );
@@ -167,11 +183,25 @@ export function DashboardMenu({
         : mode === "solid"
           ? { mode: "solid", color: solid }
           : { mode: "gradient", from, to, angle };
+    const nextOuter: DashboardSettings["outerBackground"] =
+      outerMode === "none"
+        ? undefined
+        : outerMode === "same"
+          ? { mode: "same" }
+          : outerMode === "solid"
+            ? { mode: "solid", color: outerSolid }
+            : {
+                mode: "gradient",
+                from: outerFrom,
+                to: outerTo,
+                angle: outerAngle,
+              };
     const nextScale = Number(fontScale);
     startTransition(async () => {
       await updateDashboardSettings(dashboardId, {
         ...settings,
         background: nextBg,
+        outerBackground: nextOuter,
         dateFormat: dateFmt,
         fontScale:
           Number.isFinite(nextScale) && nextScale !== 1 ? nextScale : undefined,
@@ -190,6 +220,17 @@ export function DashboardMenu({
             ? { mode: "solid", color: solid }
             : { mode: "gradient", from, to, angle }
         );
+
+  const outerPreview =
+    outerMode === "none"
+      ? undefined
+      : outerMode === "same"
+        ? preview
+        : dashboardBackgroundCss(
+            outerMode === "solid"
+              ? { mode: "solid", color: outerSolid }
+              : { mode: "gradient", from: outerFrom, to: outerTo, angle: outerAngle }
+          );
 
   return (
     <>
@@ -258,11 +299,13 @@ export function DashboardMenu({
         >
           <SheetHeader>
             <SheetTitle>Aparência do dashboard</SheetTitle>
-            <SheetDescription>Fundo da área do dashboard.</SheetDescription>
+            <SheetDescription>
+              Fundo da área do dashboard e do entorno.
+            </SheetDescription>
           </SheetHeader>
           <div className="flex flex-col gap-3 px-4 pb-8">
             <div className="flex flex-col gap-1">
-              <Label className="text-xs">Fundo</Label>
+              <Label className="text-xs">Fundo da área (interno)</Label>
               <Select value={mode} onValueChange={(v) => setMode(v as BgMode)}>
                 <SelectTrigger className="h-8">
                   <SelectValue />
@@ -300,6 +343,69 @@ export function DashboardMenu({
               <div
                 className="h-10 rounded-md border"
                 style={{ background: preview }}
+              />
+            ) : null}
+
+            {/* Entorno: cabeçalho, abas, barra de período e a janela. */}
+            <div className="flex flex-col gap-1 border-t pt-3">
+              <Label className="text-xs">Fundo ao redor (externo)</Label>
+              <p className="text-muted-foreground text-xs">
+                Cabeçalho, abas, barra de período e as margens da página. A cor
+                do texto é ajustada sozinha para manter a leitura.
+              </p>
+              <Select
+                value={outerMode}
+                onValueChange={(v) => setOuterMode(v as OuterMode)}
+              >
+                <SelectTrigger className="h-8">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">Padrão (tema)</SelectItem>
+                  <SelectItem value="same">Igual ao interno</SelectItem>
+                  <SelectItem value="solid">Cor sólida</SelectItem>
+                  <SelectItem value="gradient">Gradiente</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            {outerMode === "solid" ? (
+              <ColorField
+                label="Cor do entorno"
+                value={outerSolid}
+                onChange={setOuterSolid}
+              />
+            ) : null}
+
+            {outerMode === "gradient" ? (
+              <>
+                <ColorField
+                  label="De (entorno)"
+                  value={outerFrom}
+                  onChange={setOuterFrom}
+                />
+                <ColorField
+                  label="Até (entorno)"
+                  value={outerTo}
+                  onChange={setOuterTo}
+                />
+                <div className="flex flex-col gap-1">
+                  <Label className="text-xs">Ângulo: {outerAngle}°</Label>
+                  <input
+                    type="range"
+                    min={0}
+                    max={360}
+                    value={outerAngle}
+                    onChange={(e) => setOuterAngle(Number(e.target.value))}
+                  />
+                </div>
+              </>
+            ) : null}
+
+            {outerPreview ? (
+              <div
+                className="h-10 rounded-md border"
+                style={{ background: outerPreview }}
               />
             ) : null}
 

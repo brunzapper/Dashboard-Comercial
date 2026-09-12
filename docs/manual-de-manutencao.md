@@ -1,4 +1,7 @@
-<!-- Versão: 1.42 | Data: 11/09/2026 -->
+<!-- Versão: 1.43 | Data: 12/09/2026 -->
+<!-- v1.43 (12/09/2026): §4.17 — runbook da personalização da interface:
+     padrão da organização, a diferença entre TRAVAR (reversível) e
+     "Aplicar a todos" (apaga a escolha de cada um), e os tokens de tema. -->
 <!-- v1.42 (11/09/2026): §setup 7 — Apps Script v1.2 (enquadramento do push) e
      o runbook da varredura: como ler o ensaio, quando ligar e o que fazer
      quando o teto recusa. -->
@@ -1367,6 +1370,45 @@ de propósito.
 - Excluir a regra não apaga o atributo nem a árvore
   (`granted_by_rule_id on delete set null`): o histórico do lead sobrevive à
   regra que o produziu.
+
+### 4.17 Interface: padrão da organização, travas e tema (0141, 12/09/2026)
+
+Tudo em **Configurações → Tema e interface**.
+
+**Definir o padrão da organização** (org_admin): na seção "Interface padrão da
+organização", escolha o valor de cada preferência. Vale para quem nunca mexeu
+naquela preferência. "Sem padrão" devolve a chave ao padrão do app.
+
+**Travar uma preferência**: marque "Travar" na linha dela e salve. Enquanto
+travada, o valor da organização vence a escolha de todo mundo — e o controle
+correspondente na tela aparece desabilitado, com "Definido pela organização" no
+title. A escolha pessoal de cada um continua GUARDADA: destravar a devolve. Use
+a trava quando quiser padronizar sem apagar nada.
+
+**"Aplicar a todos"**: apaga o override dos membros nas preferências que a
+organização define. Depois disso todo mundo passa a ver o padrão da org e pode
+escolher de novo — mas o que estava escolhido **não volta**. Por isso tem
+confirmação. Se o objetivo é só padronizar a visão atual, prefira a trava.
+
+Para ajustar apenas a **própria** visão, o admin usa os mesmos controles que
+todo mundo, na barra acima dos cards do Workspace ou da Operação — nada ali
+toca a visão de outra pessoa.
+
+**Cores do sistema**: os dez tokens (fundo, texto, cartões, silenciado, bordas
+e as três da barra lateral) têm colunas separadas para claro e escuro, porque
+são cores diferentes para o mesmo papel. A preferência pessoal aplica ao vivo;
+o padrão da organização tem botão de salvar. O ✕ ao lado de cada campo devolve
+aquele token ao padrão. Se uma combinação ficar ilegível, "Restaurar padrão"
+limpa modo, destaque, laser e todos os tokens de uma vez.
+
+**Se uma cor não pegar depois de salvar**: o valor efetivo viaja em cookie
+(`theme_tokens`). Um cookie defasado é reconciliado pelo `ThemeSync` no próximo
+carregamento do app autenticado; forçar um F5 resolve. Valor que não é
+`#RRGGBB` é descartado em silêncio pela whitelist — é proposital.
+
+**Fixados na barra lateral**: o alfinete nos cards do Workspace e da Operação.
+Item excluído, arquivado ou que a pessoa perdeu acesso simplesmente some da
+barra — não há o que limpar à mão.
 
 ## 5. Troubleshooting
 

@@ -1254,13 +1254,28 @@ export interface DashboardSettings {
   // Oculta o selo "Nº dia útil" de todos os widgets (override por widget em
   // AppearanceSettings.hideBusinessDayBadge).
   hideBusinessDayBadges?: boolean;
-  // Fundo da área do dashboard (Fase 10): sólido ou gradiente sutil.
+  // Fundo da área do dashboard (Fase 10): sólido ou gradiente sutil. É a
+  // superfície INTERNA — a caixa que envolve o grid de widgets.
   background?: {
     mode: "solid" | "gradient";
     color?: string; // modo sólido
     from?: string; // modo gradiente
     to?: string;
     angle?: number; // graus (default 135)
+  };
+  // Superfície EXTERNA (12/09/2026): o entorno do grid — cabeçalho do board,
+  // abas, barra de período e o <main> da página. AUSENTE = tema do sistema
+  // (comportamento histórico). "same" herda a interna, e é o que permite
+  // definir as duas em conjunto ou separadamente sem uma terceira config.
+  // O CSS sai de outerBackgroundCss (lib/widgets/appearance.ts) e a cor de
+  // texto legível de readableTextColor — sem ela o título e a barra de período
+  // herdariam --foreground e sumiriam sobre uma cor escura escolhida à mão.
+  outerBackground?: {
+    mode: "same" | "solid" | "gradient";
+    color?: string;
+    from?: string;
+    to?: string;
+    angle?: number;
   };
   // Área de trabalho (grid): tamanho da área em unidades do grid (colunas/linhas)
   // e altura da linha. A alça de canto (modo edição) aumenta cols/rows; o canvas
