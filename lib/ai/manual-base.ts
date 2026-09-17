@@ -1,3 +1,10 @@
+// Versão: 1.1 | Data: 17/09/2026
+// v1.1 (17/09/2026): a serialização dos lançamentos do catálogo saiu daqui para
+//   `lib/manual-base/model.ts` — o dump do modelo do construtor de dashboards
+//   passou a precisar dos MESMOS lançamentos, e duas grafias para o mesmo fato
+//   (o `periodo` daqui × um `inicio`/`fim` lá) fariam a IA aprender uma palavra
+//   num prompt e outra no seguinte. Saída byte-idêntica: `includeSpread` fica
+//   falso e o teto segue 200.
 // Versão: 1.0 | Data: 17/09/2026
 // NÚCLEO do assistente da BASE MANUAL (0142) — padrão §4.17.
 //
@@ -26,6 +33,7 @@ import { loadOrgAiConfig } from "@/lib/ai/config";
 import { aiSection, runJsonGenerationLoop } from "@/lib/ai/json-loop";
 import { loadManualBase } from "@/lib/manual-base/load";
 import { manualPeriodLabelOf } from "@/lib/manual-base/label";
+import { manualBaseModelBlock } from "@/lib/manual-base/model";
 import { buildManualBasePromptText } from "@/lib/import/manual-base/instructions";
 import {
   serializeManualBaseEdit,
@@ -50,6 +58,9 @@ import {
   type ManualBaseChatEntry,
   type ManualBaseSessionState,
 } from "@/lib/ai/manual-base-session";
+
+/** Teto do catálogo DESTE assistente (o do dashboard tem o dele, maior). */
+const MAX_MANUAL_ENTRIES_IN_CATALOG = 200;
 
 /** O estado que o turno devolve — a sessão, mais o veredito DESTE turno. */
 export type ManualBaseTurnState = ManualBaseSessionState;
@@ -144,24 +155,24 @@ async function loadManualBaseEditContext(): Promise<LoadedContext> {
   // O catálogo mostra os lançamentos que JÁ existem, resumidos: sem eles a IA
   // não tem como saber que o mês já foi lançado, e proporia números novos onde
   // o certo é atualizar.
-  const seriesById = new Map(base.series.map((s) => [s.id, s]));
+  // A serialização vive em lib/manual-base/model.ts desde 17/09/2026 — o dump
+  // do modelo do construtor de dashboards passou a precisar dos MESMOS
+  // lançamentos, e duas grafias para o mesmo fato seriam régua paralela.
+  // `includeSpread` fica FALSO aqui: este prompt funciona como está.
   const opById = new Map(ctx.operations.map((o) => [o.id, o.name]));
   const respById = new Map(ctx.responsibles.map((r) => [r.id, r.name]));
+  const block = manualBaseModelBlock(base, {
+    respById,
+    opById,
+    limit: MAX_MANUAL_ENTRIES_IN_CATALOG,
+  });
   const catalogJson = JSON.stringify(
     {
       hoje: ctx.today,
       dados: base.series.map((s) => ({ rotulo: s.label, chave: s.key })),
       operacoes: ctx.operations.map((o) => o.name),
       responsaveis: ctx.responsibles.map((r) => r.name),
-      lancamentos_existentes: base.entries.slice(0, 200).map((e) => ({
-        dado: seriesById.get(e.series_id)?.label ?? null,
-        periodo: `${e.period_start} a ${e.period_end}`,
-        valor: e.value,
-        operacao: e.operation_id ? (opById.get(e.operation_id) ?? null) : null,
-        responsavel: e.responsible_id
-          ? (respById.get(e.responsible_id) ?? null)
-          : null,
-      })),
+      lancamentos_existentes: block.lancamentos,
     },
     null,
     2

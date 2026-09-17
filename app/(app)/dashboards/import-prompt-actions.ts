@@ -1,3 +1,10 @@
+// Versão: 1.4 | Data: 17/09/2026
+// v1.4 (17/09/2026): o modelo leva a Base manual INTEIRA — os lançamentos, não
+//   só os nomes dos dados. Sem os números a IA não tinha como propor o
+//   cruzamento que motivou o recurso ("fechados ÷ e-mails respondidos"): ela
+//   sabia que o dado existe e nada mais. Serialização pelo dono único
+//   (lib/manual-base/model.ts), com a forma de contagem, que é o que permite
+//   prever como o número cai num gráfico. Org sem lançamento não ganha seção.
 // Versão: 1.3 | Data: 17/09/2026
 // v1.3 (17/09/2026): o modelo passa a levar `manual_series` (Base manual,
 //   0142) ao lado de `goal_metrics`. Sem isso a IA não tinha como saber que
@@ -31,7 +38,8 @@ import { getSessionInfo } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
 import { loadSources } from "@/lib/config/sources";
 import { loadGoalMetrics } from "@/lib/config/goal-metrics";
-import { loadManualSeries } from "@/lib/manual-base/load";
+import { loadManualBase } from "@/lib/manual-base/load";
+import { manualBaseModelBlock } from "@/lib/manual-base/model";
 import { fieldAppliesToSource, recordTypeOf, type SourceDef } from "@/lib/sources";
 import { CORE_FIELDS } from "@/lib/widgets/fields";
 import { isCoreDef } from "@/lib/records/core-defs";
@@ -125,7 +133,7 @@ export async function buildImportPrompt(
     { data: opData },
     { data: matchData },
     goalMetrics,
-    manualSeries,
+    manualBase,
   ] = await Promise.all([
     supabase
       .from("field_definitions")
@@ -143,7 +151,7 @@ export async function buildImportPrompt(
       .select("label, source_a, source_b, field_a_1, field_b_1, field_a_2, field_b_2")
       .eq("enabled", true),
     loadGoalMetrics(supabase),
-    loadManualSeries(supabase),
+    loadManualBase(supabase),
   ]);
   const defs = (defsData ?? []) as FieldDefRow[];
   const respLabels = new Map(
@@ -267,6 +275,24 @@ export async function buildImportPrompt(
     };
   }
 
+  const manualBaseBlock = (() => {
+    const b = manualBaseModelBlock(manualBase, {
+      respById: respLabels,
+      opById: opLabels,
+      includeSpread: true,
+    });
+    if (b.dados.length === 0) return {}; // org sem Base manual: nenhuma seção
+    return {
+      manual_series: b.dados,
+      manual_lancamentos: b.lancamentos,
+      ...(b.truncado
+        ? {
+            manual_observacao: `Mostrando os ${b.lancamentos.length} lançamentos mais recentes; outros ${b.truncado} ficaram de fora.`,
+          }
+        : {}),
+    };
+  })();
+
   const model = {
     bases: baseModels,
     outras_bases: sources
@@ -296,9 +322,14 @@ export async function buildImportPrompt(
     operacoes: [...opLabels.values()].sort(),
     // Chaves válidas do operando de fórmula [meta:<chave>] (31/07/2026).
     goal_metrics: goalMetrics.map((m) => ({ chave: m.key, rotulo: m.label })),
-    // Base manual (v1.3): chaves de [manual:<chave>] — operando de fórmula E
-    // campo de métrica direta. Números DIGITADOS, fora de `records`.
-    manual_series: manualSeries.map((m) => ({ chave: m.key, rotulo: m.label })),
+    // Base manual (v1.4): os dados E os LANÇAMENTOS. Só as chaves (v1.3) diziam
+    // à IA que o dado existe, não quanto ele vale — ela escrevia a fórmula de
+    // cruzamento no escuro. `distribuicao` vem junto porque é ela que decide se
+    // o número repete em cada bucket tocado ou se divide por dia.
+    // A Base manual NÃO é uma Base: sem record_type, sem campo de data, fora de
+    // `bases`/`sources`; ela casa com o INTERVALO do período, qualquer que seja
+    // a coluna de data de cada Base — ver o SPEC.
+    ...manualBaseBlock,
   };
 
   const sampleNote = [
