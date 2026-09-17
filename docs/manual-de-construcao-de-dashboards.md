@@ -180,7 +180,7 @@
 2. [Cadastros de apoio (pré-requisitos do construtor)](#2-cadastros-de-apoio-pré-requisitos-do-construtor)
 3. [Anatomia de um dashboard](#3-anatomia-de-um-dashboard)
 4. [Período e filtros no nível do dashboard](#4-período-e-filtros-no-nível-do-dashboard)
-5. [Referência completa dos 19 tipos de widget](#5-referência-completa-dos-19-tipos-de-widget)
+5. [Referência completa dos 20 tipos de widget](#5-referência-completa-dos-20-tipos-de-widget)
 6. [O editor de widget, seção por seção](#6-o-editor-de-widget-seção-por-seção)
 7. [Como os números são calculados (semântica)](#7-como-os-números-são-calculados-semântica)
 8. [Fórmulas — referência completa](#8-fórmulas--referência-completa)
@@ -444,6 +444,124 @@ de um número errado. A semântica completa de conversão está no §7.6.
 - **Integrações**: chaves de API de entrada e webhooks de saída (fora do
   escopo deste manual).
 - **Usuários**: contas, papéis, mapeamento com o Bitrix.
+
+### 2.7 Registros → Base manual (números digitados)
+
+Nem toda métrica vale o custo de virar registro. "5.261 contas alcançadas por
+e-mail em agosto" é **um número**, não 5.261 linhas — e sem lugar para ele, o
+dashboard simplesmente não fala de mensageria. A **Base manual** é esse lugar:
+números que você digita e que entram nas fórmulas dos widgets como qualquer
+outro agregado.
+
+O que ela resolve de verdade é o cruzamento: **dividir registros que vêm do
+Sync por um número lançado à mão** — "conversão = negócios fechados ÷ e-mails
+respondidos".
+
+**Onde fica.** Nos três lugares, é a **mesma base** e a mesma tela:
+
+- **Registros → Base manual** — a tela cheia;
+- **⋮ do dashboard → Base manual** — o painel lateral, sem sair do painel;
+- o widget **Base do Dashboard** (§5.15) — a grade dentro do próprio painel.
+
+Os números são da **organização inteira**, não de um dashboard: o mesmo dado
+alimenta qualquer painel. Ele só não aparece na tela de Bases, porque não é uma
+Base — não tem registros, não entra em "Fonte de dados" do widget e não pode
+ser dimensão.
+
+**Duas coisas, e a diferença importa:**
+
+- O **dado** é a coluna: "# Emails replied", "Mensagens", "Investimento em
+  mídia". Criar um dado é dar um nome. O nome pode ser editado depois; a
+  referência interna que as fórmulas usam (`manual:emails_replied`), não — é
+  ela que mantém as fórmulas já salvas funcionando.
+- O **lançamento** é o número: um valor, um período e, se quiser, uma operação
+  ou um responsável. Vários lançamentos do mesmo dado **somam**.
+
+**Como lançar.** Escolha o mês (ou um intervalo), a atribuição opcional, e
+clique em **Nova linha**. A tabela tem uma linha por período × atribuição e uma
+coluna por dado — exatamente o formato em que esses números costumam chegar.
+Digite na célula e pronto: salva sozinho e os widgets recalculam.
+
+Relançar o **mesmo** dado, no **mesmo** período, com a **mesma** atribuição
+**atualiza** o número em vez de criar outro. É o que permite acompanhar um mês
+em andamento: você relança a tabela toda semana e os valores sobem, sem
+duplicar nada.
+
+#### Como o número conta no período (as quatro formas)
+
+Um lançamento tem período próprio, e o dashboard tem o dele. Quando os dois não
+coincidem, é esta escolha — feita **por linha** — que decide o que acontece.
+Tome "3520 mensagens em agosto":
+
+| Forma | O que faz | Agosto | 01–10/08 | 11–20/08 | Por dia |
+|---|---|---|---|---|---|
+| **Valor cheio na data de início** (padrão) | conta inteiro onde o início cai | 3520 | 3520 | 0 | tudo no dia 1 |
+| **Valor cheio em todo período que encostar** | conta inteiro em cada período que tocar | 3520 | 3520 | 3520 | 3520 **em todo dia** |
+| **Valor cheio só se couber inteiro** | conta só quando o lançamento cabe | 3520 | 0 | 0 | 0 |
+| **Distribuir por igual entre os dias** | valor ÷ dias, e só os dias de dentro contam | 3520 | 1135,5 | 1135,5 | ~113,5/dia |
+
+⚠️ **"Em todo período que encostar" repete de propósito.** Num gráfico por mês
+ele aparece uma vez por mês tocado, e somar as colunas dá mais que o
+lançamento. Use quando a pergunta for "este número vale para este recorte?", e
+não quando você for somar.
+
+Para transformar um total mensal em série diária, a forma é **"Distribuir por
+igual entre os dias"** — é a única em que a soma dos dias devolve o total.
+
+#### Usar o número num widget
+
+- **Como métrica**: no editor do widget, escolha o dado na lista de campos (ele
+  aparece com o nome que você deu). Um gráfico de barras por mês desenha os
+  meses lançados — inclusive meses **sem registro nenhum**, porque o número não
+  depende de registros para existir.
+- **Numa fórmula**: o dado aparece no seletor de operandos, no grupo **Base
+  manual**. A conversão do exemplo é
+  `CONTAGEM(registros) / [# Emails replied]` — e ela funciona por mês, por
+  trimestre e no Total geral, porque o número manual soma como qualquer
+  quantidade.
+
+#### O que ele não faz (e por quê)
+
+- **Dimensão que não seja data, responsável ou operação exibe "—".** Um
+  lançamento de mensageria não tem como se repartir por "fase do funil": ele
+  não é feito de registros. Preferimos dizer "não sei" a inventar um rateio.
+- **Widget em modo registros (lista) e "Agrupar período" não resolvem o
+  operando.** Esses modos montam a conta a partir de cada registro, e o número
+  digitado não tem registro a que se prender.
+- **A Remuneração variável não oferece o operando.** Ali o resultado vira
+  dinheiro na folha, e um número que aquele caminho não resolvesse viraria um
+  pagamento a menos sem erro nenhum.
+- **Lançamento manual é número puro** — sem moeda. Ele funciona numa fórmula
+  junto de um campo monetário, mas o resultado sai em Real.
+
+#### Quem pode
+
+Ver: qualquer pessoa da organização. Lançar e editar: quem já pode editar
+valores de registros. **Excluir um dado** (a coluna inteira, com os lançamentos
+dela): só administrador — as fórmulas que citavam o dado passam a exibir "—".
+
+#### Lançar com IA
+
+O botão **Lançar com IA** aceita a tabela colada como ela vem:
+
+```
+Dados mensais
+Operação	# Accounts emailed	# Contacts emailed	# Emails opened	# Emails replied
+Outbound	5261	6590	604	35
+```
+
+Ela devolve uma **prévia** com os dados a criar e os lançamentos a gravar, para
+você conferir antes de aplicar — a IA nunca grava sozinha. Operações e
+responsáveis são casados pelo **nome** do cadastro: nome que não existe vira
+erro na prévia, com a lista dos que existem, em vez de um número atribuído ao
+vazio.
+
+Sem IA configurada na organização, **Copiar prompt** monta as instruções para
+colar em qualquer IA externa, e **Colar JSON** traz a resposta dela pela mesma
+conferência.
+
+Não existe exclusão por IA: o que existe é a atualização (relançar o mês). Para
+apagar, use a lixeira da linha.
 
 ---
 
@@ -940,7 +1058,7 @@ filtros rápidos etc. não afetam widgets Agenda).
 
 ---
 
-## 5. Referência completa dos 19 tipos de widget
+## 5. Referência completa dos 20 tipos de widget
 
 O campo **"Visual"** do editor define o tipo. Lista completa (rótulo na UI /
 chave interna):
@@ -950,7 +1068,8 @@ chave interna):
 | Dados (consultam registros) | "Tabela" `tabela`, "Barra vertical" `barra` (padrão de widget novo), "Barra horizontal" `barra_horizontal`, "Linha" `linha`, "Pizza" `pizza`, "Funil" `funil`, "Card" `kpi`, "Métrica calculada" `calculado` |
 | Utilitários | "Calculadora" `calculadora`, "Nota (post-it)" `nota`, "Forma" `forma`, "Linha divisória" `linha_divisoria`, "Imagem" `imagem`, "Tabela Livre" `tabela_editavel` |
 | Filtros | "Filtro de período" `filtro`, "Filtro por campo" `filtro_campo` |
-| Operacionais | "Kanban" `kanban`, "Agenda" `agenda` |
+| Operacionais | "Kanban" `kanban`, "Agenda" `agenda`, "Tree" `tree` |
+| Lançamento manual | "Base do Dashboard" `base_manual` |
 
 Os tipos de dados compartilham o **bloco de dados** do editor (Bases,
 Dimensões, Métricas, Filtros… — capítulo 6). Abaixo, o que cada tipo tem de
@@ -1324,6 +1443,35 @@ fatos.
 A árvore se atualiza sozinha quando um dado muda, **sem piscar**: o sync roda a
 cada minuto, e uma tela que reconstrói sozinha na frente de quem está
 apresentando lê como defeito.
+
+### 5.15 Base do Dashboard (`base_manual`)
+
+A grade dos **números digitados** (§2.7), editável dentro do próprio painel.
+
+Ele é o único widget que **não consulta registro nenhum**: não tem fonte de
+dados, nem métrica, nem dimensão. O que ele mostra é a Base manual da
+organização — as mesmas linhas da tela Registros → Base manual e do painel do
+⋮ —, e o que ele serve é não precisar sair do dashboard para corrigir um
+número durante a análise.
+
+**Para que serve na prática:** deixar a tabela de lançamento **ao lado** dos
+gráficos que dependem dela. Você ajusta 35 para 40 numa célula e o gráfico de
+conversão ao lado recalcula sozinho, mostrando "Atualizando…" enquanto busca —
+sem recarregar a página.
+
+**Onde se configura:** seção **Base do Dashboard** do editor do widget:
+
+- **Dados exibidos** — quais colunas aparecem. Nada escolhido = todas. É o que
+  permite um widget só com as métricas de mensageria enquanto outro mostra as
+  de mídia.
+- **Mês padrão** e **como contar** — a semente do formulário de "Nova linha"
+  deste widget, para não reescolher a cada lançamento.
+
+**Quem edita:** quem já pode editar valores de registros. Para os demais a
+grade aparece em leitura, com os números que alimentam os gráficos.
+
+Criar e excluir **dados** (as colunas) fica na tela cheia e no painel do ⋮ — o
+widget é para lançar e corrigir números, que é o gesto do dia a dia.
 
 ---
 
@@ -1874,7 +2022,7 @@ são os MESMOS em todos esses lugares — muda apenas o **contexto**.
 | Contexto | Onde | O que os operandos são | O que é proibido |
 |---|---|---|---|
 | **Por registro** | campo "Calculado (por registro)" | campos DO PRÓPRIO registro (e do registro casado `↪`), "Data atual" | agregações (Σ/Média/Contagem) e SOMASE/CONT.SE/MÉDIASE — a fórmula enxerga UM registro; para condição use `SE(...)`. ANTERIOR/VARPCT/VARABS avaliam para vazio |
-| **Agregado** | todos os demais | AGREGADOS do recorte atual: "Contagem de registros", "Contagem de <Campo>", "Σ <Campo>", "Média <Campo>" — com escopo de Base opcional — e o VALOR DA META cadastrada (`[Meta: <métrica>]`, grupo "Metas") | "Data atual" (o agregado roda no banco, que não conhece "hoje") — a opção aparece desabilitada com o motivo; `[Meta: …]` dentro de SOMASE/CONT.SE/MÉDIASE |
+| **Agregado** | todos os demais | AGREGADOS do recorte atual: "Contagem de registros", "Contagem de <Campo>", "Σ <Campo>", "Média <Campo>" — com escopo de Base opcional — e o VALOR DA META cadastrada (`[Meta: <métrica>]`, grupo "Metas") + os NÚMEROS DIGITADOS da Base manual (grupo "Base manual", §8.5c) | "Data atual" (o agregado roda no banco, que não conhece "hoje") — a opção aparece desabilitada com o motivo; `[Meta: …]` dentro de SOMASE/CONT.SE/MÉDIASE |
 
 No contexto agregado, a fórmula é reavaliada para CADA célula/grupo/subtotal/
 total do widget, sempre sobre os agregados daquele recorte (§7.8).
@@ -2011,6 +2159,36 @@ Configurações → Metas). Semântica:
   (ANTERIOR/VARPCT) e do alinhamento por dia útil usam a meta do período
   PRINCIPAL da consulta. No modo "lista de registros" o operando exibe "—"
   (limitação documentada).
+
+### 8.5c Operandos da Base manual (contexto agregado)
+
+Os **números digitados** (§2.7) entram na fórmula como operando: no catálogo,
+grupo **"Base manual"**, com o nome que você deu ao dado (referência interna
+`manual:<chave>`). É o que torna possível a conta que motivou o recurso:
+
+```
+CONTAGEM de registros / [# Emails replied]
+```
+
+Semântica:
+
+- É a **soma dos lançamentos** daquele dado que caem no recorte — e o recorte é
+  o **do grupo**, não o da consulta inteira: numa tabela por mês, cada linha usa
+  o número do seu mês.
+- **Soma normalmente nos subtotais e no Total geral** (o total do trimestre é a
+  soma dos meses). Esta é a diferença para o operando de meta, que é um valor
+  único por consulta: uma quantidade pode somar, uma meta não.
+- Quanto de cada lançamento entra no grupo é a escolha feita na linha dele — as
+  quatro formas da tabela do §2.7.
+- Grupo **sem lançamento** vale 0, não "—": um mês sem mensagem enviada é zero
+  mensagem. (O que dá "—" é a divisão por zero, como em qualquer fórmula.)
+- Um widget cujas métricas são **todas** manuais desenha os períodos lançados
+  mesmo sem registro algum — o número não depende de registros para existir.
+- **Limitações**: dimensão que não seja data, responsável ou operação faz o
+  operando exibir "—" (§2.7); o modo "lista de registros" e "Agrupar período"
+  também exibem "—"; e ele não é oferecido nas fórmulas da Remuneração
+  variável. Como no operando de meta, não entra em SOMASE/CONT.SE/MÉDIASE nem
+  no contexto por-registro.
 
 ### 8.6 Erros e degradações que o editor explica
 

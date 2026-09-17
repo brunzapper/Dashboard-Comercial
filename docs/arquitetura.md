@@ -5712,6 +5712,194 @@ seleção (é fato do `audit_log`), e a seleção mista é repartida por tipo pa
 action dona de cada um: `deleteTasksBulk`, `deleteCommentsBulk` (novo) e
 `deleteTreeNodesBulk` (novo).
 
+### 4.26 Base manual: números digitados que se misturam aos registros (0142, 17/09/2026)
+
+**O problema.** Todo número que um widget calcula vem de `records`, via
+`run_widget_query`. Há métricas que não valem o custo de virar registro: 5.261
+contas alcançadas por e-mail em agosto é **um número**, não 5.261 linhas. Quem
+analisava mensageria ficava com duas saídas ruins — cadastrar o que não quer
+cadastrar, ou não falar do assunto no dashboard. O pedido concreto era mais
+forte que "anotar em algum lugar": dividir registros vindos do Sync por um
+número digitado à mão ("conversão = negócios fechados ÷ e-mails respondidos"),
+o que obriga o número manual a ser um **operando de primeira classe**.
+
+**A forma.** Dois objetos, e a distinção é load-bearing:
+
+- **`manual_series`** — o DADO nomeado. A `key` é o `<chave>` do ref
+  `manual:<chave>` que as fórmulas citam; o rótulo é editável, a chave não.
+  Mudá-la orfanaria em silêncio toda fórmula gravada (mesma razão do
+  `presetKey`).
+- **`manual_entries`** — o LANÇAMENTO: valor, período próprio e, opcionalmente,
+  responsável/operação. Vários lançamentos do mesmo dado SOMAM.
+
+A base é **GLOBAL por organização, porém OCULTA**: não é linha de
+`data_sources`, não tem `record_type` e nunca entra em `widgets.sources`. Por
+isso não aciona `planSourceLegs` nem o par `run_widget_query`/`_snapshot`, que
+ficam **INTOCADOS** (invariante 1) — toda a resolução é no ENGINE.
+
+O índice único `(organization_id, series_id, period_start, period_end,
+responsible_id, operation_id) nulls not distinct` é o que faz "ir atualizando
+conforme o mês avança" ser um UPSERT em vez de uma segunda linha, na mão e pela
+IA. `nulls not distinct` porque "sem operação" é UMA atribuição, não infinitas.
+
+#### As quatro formas de contar (`lib/manual-base/spread.ts`)
+
+"3520 mensagens em agosto" responde a perguntas diferentes conforme o recorte,
+e a escolha é de quem lança — por isso vive na LINHA:
+
+| modo | o que faz |
+|---|---|
+| `ancora` | vale INTEIRO na janela que contém o início do lançamento |
+| `intersecao` | vale INTEIRO em toda janela que TOCA o lançamento (repete por bucket, de propósito — o rótulo da UI diz isso) |
+| `contido` | vale só quando o lançamento cabe INTEIRO na janela |
+| `diario` | valor ÷ dias do lançamento; só os dias dentro da janela contam |
+
+"Janela" é a MESMA coisa em dois papéis: o período do dashboard e o bucket de
+uma dimensão de data. Existe UMA função (`manualValueForWindow`) — duas
+divergiriam no primeiro caso de borda. Tudo em strings `YYYY-MM-DD` de
+Brasília; `Date` só aparece como aritmética sobre `Date.UTC` (invariante 11).
+
+#### Como um lançamento casa com uma linha do RPC
+
+`lib/manual-base/buckets.ts` caminha os **dias** do lançamento (recortados pelo
+período) e agrupa por tupla. Caminhar dias, em vez de montar uma janela por
+bucket, é o que faz `weekday` funcionar: as segundas-feiras de agosto não
+formam um intervalo contíguo.
+
+As chaves de bucket saem de `bucketCanonicalValue` (`lib/widgets/bucket-merge.ts`)
+— o MESMO helper que espelha o `date_trunc`/`extract` das RPCs (invariante 7);
+nunca monte um formato de bucket ali. E os DOIS lados são normalizados antes de
+comparar: o PostgREST serializa um bucket mensal como `2026-08-01T00:00:00` e o
+merge client-side como `2026-08-01`. Normalizar, em vez de adivinhar a
+serialização, torna a costura imune a isso.
+
+**Dimensões projetáveis:** qualquer DATA com transform, `responsible_id` e
+`operation_id`. Qualquer outra (fase, campo personalizado, Base) faz a métrica
+manual degradar para `"—"`. Um lançamento de mensageria não tem como se
+repartir por `stage`, e um rateio inventado é pior que dizer "não sei".
+`transform: "none"` também fica fora: o RPC agrupa por INSTANTE, e um
+lançamento só tem dia.
+
+#### No engine: basis, não const
+
+`manual:<chave>` entra como **chave de basis** (`basisKeysFor`/`buildCtx`, molde
+do `aggif:`), não como const abaixado igual ao `meta:`. A diferença decide o
+subtotal: `foldBasis` é aditivo, e aditivo é o que uma QUANTIDADE quer — o
+total do trimestre é a soma dos meses. Uma meta não pode somar; e-mails
+enviados podem.
+
+`basisMetric(key)` JAMAIS pode receber uma chave manual (viraria coluna
+inexistente no RPC), então todo laço que a chama ramifica por
+`isManualBasisKey` antes — os mesmos pontos em que já ramificava por
+`isCondBasisKey`: `engine.ts` (5 sítios) e `formula-metric.ts` (2).
+
+**Onde a aplicação roda é correção, não detalhe.** `applyManualBase`
+(`lib/manual-base/resolve.ts`) é chamada no FIM de `computeRows`, DEPOIS de
+`contractCaseRows` e `mergeRowsByBucket`. Uma dimensão `custom:` com transform
+chega do RPC agrupada pelo valor CRU e só vira bucket no merge client-side;
+aplicar antes faria duas linhas do mesmo mês receberem o mesmo valor manual, e
+a fusão somaria as duas.
+
+**Linhas sintéticas.** Um widget de mensageria tem métricas TODAS manuais: o RPC
+devolve zero linhas e não haveria barra para desenhar. As tuplas que só existem
+na Base manual viram linhas, com as métricas de registro em 0 (contagem) ou
+`null`. É um desvio consciente da regra do `Metric.sources` ("grupo que só
+existe na perna não vira linha"), e só liga quando há ref manual — widget
+existente fica byte-idêntico. Como a rotulagem de FK e a ordenação acontecem
+depois, em `runWidget`, a linha sintética sai rotulada e ordenada de graça.
+
+**Caminho escalar.** `runCalculatedWidget` não tem dimensão: a janela é o
+período DA INVOCAÇÃO (e o período de COMPARAÇÃO tem a dele — sem isso `VARPCT()`
+compararia o número manual com ele mesmo e daria sempre 0%). Fórmula só de
+operandos manuais resolve com **ZERO RPCs**, como a de meta.
+
+**Onde degrada:** os caminhos por REGISTRO — modo lista
+(`record-list-table.tsx`), "Agrupar período" (`runWidgetByPeriod`) e o
+detalhamento da Remuneração (`lib/comp/detail.ts`) — pulam a chave: não há
+registro a que atribuir o número. Operando ausente ⇒ `"—"`, a mesma degradação
+documentada dos operandos com escopo nesses mesmos caminhos.
+
+**A Remuneração não oferta o operando** (`plan-editor`/`plan-validate`/
+`ai/comp-plan` passam `[]`): ali o resultado vira dinheiro na folha, e um
+operando que o caminho de apuração não resolve viraria "—" (ou um total menor)
+sem erro nenhum.
+
+#### O catálogo obrigatório
+
+`AggCatalogInput.manualSeries` é campo **OBRIGATÓRIO**, pela mesma razão do
+`goalMetrics`: sítio esquecido tem de ser erro de compilação, nunca um save
+rejeitando fórmula que o editor aceitou. Foram 14 sítios na introdução.
+`buildManualFields` não existe como lista paralela — os refs saem de
+`manualOperandRefs` (calc-metrics), e só de lá.
+
+#### Três superfícies, um gestor
+
+`components/manual-base/manual-base-manager.tsx` serve as três:
+**Registros → Base manual** (página, área `base_manual` sem gate de papel — a
+page ramifica por `edit_record_values`), o **⋮ do dashboard** (`ManualBaseSheet`,
+carga lazy na abertura) e o **widget "Base do Dashboard"**
+(`visual_type: 'base_manual'`, modo `compact`). Três editores seriam a régua
+paralela da invariante 25.
+
+Toda escrita passa pelos choke points de
+`app/(app)/registros/base-manual/actions.ts`, com o client RLS do usuário — o
+gate da action dá a mensagem, a policy da 0142 dá a garantia. A org é carimbada
+explicitamente e a action falha ALTO sem org ativa.
+
+O widget sai da lista de widgets de DADOS nos cinco sítios que a montam (page,
+kanban-actions, viewer de snapshot, refresh, widget-scope): sem métrica, o RPC
+recusaria o SELECT vazio.
+
+#### O recálculo sem F5
+
+`loadManualBaseStamp` (max(`updated_at`) **mais a contagem** — excluir não move
+timestamp nenhum) entra na chave `m` do `deferredScopeById`. Editar um
+lançamento não muda período, filtro nem config; sem o carimbo, o gráfico que
+divide registros por um número digitado ficaria com o valor velho até um F5.
+Com ele, o `router.refresh()` do save em background troca a chave e os widgets
+re-buscam mostrando "Atualizando…" — que é o feedback certo, porque quem agiu
+foi o usuário (regra do `useRefetchOrigin`; o caminho SILENCIOSO é o do event
+bus). O próprio widget re-busca pelo mesmo carimbo.
+
+#### Snapshot: congelado na captura
+
+Decisão de produto: o link compartilhado é um RETRATO. `snapshot_manual_series`
+e `snapshot_manual_entries` são espelhos preenchidos por `snapshot_refresh_copy`
+(recriado inteiro — ele não é RPC de widget, não aciona a invariante 1), e o
+`db-adapter` redireciona as duas tabelas. **Não** são passthrough, ao contrário
+de metas e feriados, que são lidos ao vivo de propósito. O congelamento copia a
+base da org do dashboard SEM aplicar as restrições do snapshot:
+`allowed_responsible_ids` recortaria para fora todo lançamento não atribuído, e
+ninguém pediu isso — o recorte que vale é o do período, na consulta.
+
+#### O assistente (contrato `base-manual-edit` v1)
+
+Padrão §4.17. Duas decisões moldam o contrato:
+
+1. **Ids nunca atravessam o JSON** — dado por rótulo (ou chave), responsável e
+   operação por NOME. Diferença deliberada em relação ao runtime: lá um nome
+   desconhecido vira `FK_NO_MATCH` e some em silêncio (o widget não pode
+   quebrar); aqui é ERRO amigável, porque quem acabou de colar a tabela pode
+   corrigir a grafia, e um lançamento atribuído ao vazio é pior que uma recusa.
+2. **Não existe verbo de exclusão** (precedente de operações e de
+   /operacao/tarefas). O que existe é o UPSERT do choke point: reenviar a tabela
+   do mês ATUALIZA os números. O validador também recusa duas linhas para a
+   MESMA célula — no upsert, a segunda apagaria a primeira sem que ninguém
+   visse.
+
+O TURNO entra pela rota NDJSON `app/api/registros/base-manual/ai-turn`, nunca
+por action: uma action de dois minutos seguraria a fila do cliente inteira, e
+aqui a vítima seria a própria grade que a pessoa edita ao lado. Abrir, aplicar,
+colar e descartar seguem actions (curtas, mutações). O servidor é dono da
+conversa (`manual_base_ai_sessions`, org na PK como na 0124) e o apply lê o JSON
+da LINHA, RE-VALIDANDO com catálogo fresco. Falha parcial mantém a prévia
+aberta. "Copiar prompt" e "Colar JSON" usam o MESMO SPEC e o MESMO validador —
+a Base manual funciona numa organização sem IA configurada.
+
+**Fora do v1:** moeda (lançamento manual é número puro — uma fórmula que mistura
+manual com operando monetário funciona, porque o monetário converte para BRL,
+mas o resultado não carrega moeda do lado manual) e a Remuneração variável.
+
 ## 5. Invariantes críticas (NÃO QUEBRAR)
 
 Estas regras já causaram ou causariam bugs graves e silenciosos. Elas também estão
@@ -6367,6 +6555,32 @@ principalmente — para mantenedores humanos.
     quando OS DOIS lados são data (ops `_num` fora): sem isso, byte-idêntico ao
     que havia antes — que para data estava errado em silêncio (`<= "2026-09-01"`
     perdia os registros do dia 1, e o formato BR nunca casava).
+
+41. **A Base manual se resolve no ENGINE, nunca no RPC, e o ref é BASIS, não
+    const (0142, §4.26).** `manual:<chave>` é um número DIGITADO que entra nas
+    fórmulas como operando de primeira classe. A base é global por organização
+    porém OCULTA — não é linha de `data_sources`, não tem `record_type`, nunca
+    entra em `widgets.sources` —, então `run_widget_query`/`_snapshot` ficam
+    INTOCADOS. O ref vira CHAVE DE BASIS (lida direto do ctx, molde do
+    `aggif:`), e não const abaixado como o `meta:`, porque `foldBasis` é aditivo
+    e aditivo é o que uma QUANTIDADE quer: o total do trimestre é a soma dos
+    meses. Consequência obrigatória: `basisMetric(key)` JAMAIS pode receber uma
+    chave manual (viraria coluna inexistente), então todo laço que a chama
+    ramifica por `isManualBasisKey` antes — os mesmos pontos do
+    `isCondBasisKey`. `applyManualBase` roda no FIM de `computeRows`, DEPOIS do
+    `mergeRowsByBucket`: antes dele, duas linhas do mesmo mês receberiam o mesmo
+    valor e a fusão somaria as duas. As chaves de bucket saem de
+    `bucketCanonicalValue` (nunca um formato próprio — invariante 7) e os DOIS
+    lados são normalizados antes de comparar, porque o PostgREST serializa
+    `2026-08-01T00:00:00` onde o merge grava `2026-08-01`. Dimensão que não é
+    data/responsável/operação degrada para "—" (rateio inventado é pior que
+    "não sei"), e os caminhos por REGISTRO pulam a chave. Snapshot é
+    CONGELADO na captura (`snapshot_manual_*` + `snapshot_refresh_copy`
+    recriado), não passthrough. A escrita tem choke point único
+    (`app/(app)/registros/base-manual/actions.ts`) para as três superfícies, e o
+    assistente nunca grava direto (invariante 25). O carimbo da base entra no
+    `deferredScopeById`: sem ele, editar um lançamento deixa o gráfico com o
+    valor velho até um F5.
 
 ## 6. Convenções do projeto
 

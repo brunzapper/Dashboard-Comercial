@@ -2004,6 +2004,56 @@ This version has breaking changes — APIs, conventions, and file structure may 
   ficam INTOCADOS (a lixeira já entra neles desde a 0121). Fiscalizado por
   `lib/sync/sheets/{adoptions,sweep,adapter}.test.ts` +
   `tests/apps-script-estudo-push.test.ts`. Ver `docs/arquitetura.md` §4.5.
+- **Base manual: números DIGITADOS se resolvem no ENGINE, e o ref é BASIS, não
+  const (0142, 17/09/2026):** `manual:<chave>` é um número lançado à mão
+  (`manual_series` = o dado nomeado; `manual_entries` = os lançamentos, com
+  período próprio e responsável/operação opcionais) que entra nas fórmulas como
+  operando de primeira classe — é o que permite dividir registros do Sync por um
+  número digitado ("conversão = fechados ÷ e-mails respondidos"). A base é
+  GLOBAL por organização porém OCULTA: não é linha de `data_sources`, não tem
+  `record_type` e NUNCA entra em `widgets.sources`, então `run_widget_query`/
+  `_snapshot` ficam INTOCADOS. O ref vira CHAVE DE BASIS (lida direto do ctx,
+  molde do `aggif:`) e NÃO const abaixado como o `meta:`: `foldBasis` é aditivo,
+  e aditivo é o que uma QUANTIDADE quer (o total do trimestre é a soma dos
+  meses). Consequência OBRIGATÓRIA: `basisMetric(key)` jamais pode receber chave
+  manual — todo laço que a chama ramifica por `isManualBasisKey` antes, nos
+  mesmos pontos do `isCondBasisKey` (`engine.ts` ×5, `formula-metric.ts` ×2).
+  `applyManualBase` (`lib/manual-base/resolve.ts`) roda no FIM de `computeRows`,
+  DEPOIS de `mergeRowsByBucket` — antes dele, duas linhas do mesmo mês
+  receberiam o mesmo valor e a fusão somaria as duas. As chaves de bucket saem
+  de `bucketCanonicalValue` (nunca formato próprio — invariante 7) e os DOIS
+  lados são normalizados antes de comparar (o PostgREST serializa
+  `2026-08-01T00:00:00` onde o merge grava `2026-08-01`). A projeção caminha os
+  DIAS do lançamento (`lib/manual-base/buckets.ts`) — é o que faz `weekday`
+  funcionar, já que as segundas de um mês não formam intervalo contíguo. Os 4
+  modos de contagem (`ancora`/`intersecao`/`contido`/`diario`) vivem na LINHA e
+  têm dono único da frase (`MANUAL_SPREAD_LABELS`/`_HINTS`). Dimensão que não é
+  data-com-transform/responsável/operação degrada para "—" (rateio inventado é
+  pior que "não sei"), e os caminhos por REGISTRO (modo lista, `dateAgg`,
+  `lib/comp/detail.ts`) pulam a chave. A Remuneração NÃO oferta o operando
+  (`[]` em plan-editor/plan-validate/ai-comp-plan): ali vira dinheiro na folha,
+  e "—" silencioso seria erro de pagamento. `AggCatalogInput.manualSeries` é
+  OBRIGATÓRIO (molde do `goalMetrics`): sítio esquecido é erro de compilação,
+  nunca save rejeitando fórmula que o editor aceitou. Escrita por choke point
+  ÚNICO (`app/(app)/registros/base-manual/actions.ts`) para as TRÊS superfícies
+  — página de Registros, ⋮ do dashboard e o widget `base_manual` —, sempre com
+  o client RLS do usuário e org carimbada (falha ALTO sem org ativa); o widget
+  fica FORA da lista de widgets de dados nos 5 sítios que a montam (sem métrica
+  o RPC recusa o SELECT vazio). O carimbo da base (`loadManualBaseStamp` —
+  max(`updated_at`) MAIS a contagem, porque excluir não move timestamp) entra na
+  chave `m` do `deferredScopeById`: sem ele, editar um lançamento deixa o
+  gráfico com o valor velho até um F5. Snapshot é CONGELADO na captura
+  (`snapshot_manual_*` + `snapshot_refresh_copy` recriado; o `db-adapter`
+  redireciona), NÃO passthrough — e o congelamento não aplica as restrições do
+  snapshot, que recortariam para fora todo lançamento não atribuído. Contrato
+  de IA `base-manual-edit` (`lib/import/manual-base/*`, core
+  `lib/ai/manual-base.ts`): ids NUNCA no JSON (dado por rótulo, atribuição por
+  NOME — e aqui nome desconhecido é ERRO amigável, não o uuid-zero silencioso do
+  runtime), SEM verbo de exclusão (o que existe é o UPSERT do choke point), e
+  duas linhas para a MESMA célula são recusadas porque a segunda apagaria a
+  primeira. O TURNO entra por rota NDJSON, nunca por action (uma action de dois
+  minutos congelaria a fila do cliente, e a vítima seria a grade ao lado). Fora
+  do v1: moeda e a Remuneração. Ver `docs/arquitetura.md` §4.26 e invariante 41.
 - **Lixeira de registros (0121): `deleted_at` só muda por ADMIN e toda leitura
   nova de `records` decide EXPLICITAMENTE sobre a lixeira (07/08/2026):**
   soft delete de 30 dias — enviar/restaurar/purgar SÓ pelas actions de
