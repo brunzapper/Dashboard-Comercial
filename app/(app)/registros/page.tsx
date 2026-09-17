@@ -132,9 +132,10 @@ export default async function RegistrosPage({
   if (!canViewRegistros) redirect("/");
 
   // Links p/ as páginas de config do ambiente (Bases/Log) — papel × overrides.
-  const [canSeeBases, canSeeLog] = await Promise.all([
+  const [canSeeBases, canSeeLog, canSeeManualBase] = await Promise.all([
     checkSettingsArea("fontes"),
     checkSettingsArea("log"),
+    checkSettingsArea("base_manual"),
   ]);
 
   const supabase = await createClient();
@@ -496,6 +497,11 @@ export default async function RegistrosPage({
           {canSeeBases ? (
             <Button asChild variant="outline">
               <Link href="/registros/bases">Bases</Link>
+            </Button>
+          ) : null}
+          {canSeeManualBase ? (
+            <Button asChild variant="outline">
+              <Link href="/registros/base-manual">Base manual</Link>
             </Button>
           ) : null}
           {canSeeLog ? (

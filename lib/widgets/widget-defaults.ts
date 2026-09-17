@@ -63,6 +63,8 @@ export const DEFAULT_WIDGET_SIZE: Record<VisualType, { w: number; h: number }> =
     imagem: { w: 39, h: 23 },
     // Árvore cresce para baixo: nasce alta.
     tree: { w: 59, h: 43 },
+    // Grade de lançamentos: larga (uma coluna por dado) e de altura média.
+    base_manual: { w: 79, h: 31 },
   };
 
 // Tipos que exigem configuração para mostrar algo útil: a criação rápida abre
@@ -90,6 +92,9 @@ export const WIDGET_NEEDS_CONFIG: Record<VisualType, boolean> = {
   imagem: true,
   // Precisa dizer de onde saem os nós (um registro, ou um mapa livre).
   tree: true,
+  // Auto-suficiente: a grade já nasce útil com todos os dados da Base manual,
+  // e é editada dentro do próprio card (molde da Nota/Tabela Livre).
+  base_manual: false,
 };
 
 // Tipos consultados pelo engine (run_widget_query): precisam de ≥1 métrica —

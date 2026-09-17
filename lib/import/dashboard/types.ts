@@ -135,6 +135,9 @@ export interface DashboardImportContext {
   // Registry de métricas de meta — operandos `meta:<chave>` das fórmulas
   // (31/07/2026); obrigatório para o validador aceitar o que o editor aceita.
   goalMetrics: import("@/lib/metas/metrics").GoalMetricDef[];
+  // Dados da Base manual — operandos `manual:<chave>` (0142, 17/09/2026).
+  // Mesmo papel: sem eles o validador recusaria fórmula que o editor aceita.
+  manualSeries: import("@/lib/manual-base/types").ManualSeries[];
 }
 
 export interface DashboardImportValidation {

@@ -54,6 +54,7 @@ import {
   type FormulaFuncGroup,
 } from "@/lib/records/formula-funcs";
 import { PERIOD_ALL, PERIOD_PRESETS } from "@/lib/widgets/period";
+import { MANUAL_SPREAD_LABELS } from "@/lib/manual-base/types";
 import {
   DEFAULT_CUSTOM_COLUMNS,
   DEFAULT_TASK_PHASES,
@@ -328,6 +329,16 @@ export const WIDGET_SETTINGS_DOC = {
   // Widget Tree: a árvore de acompanhamento. Fora do escopo da IA — a árvore
   // depende de uma série configurada à mão e de um registro concreto.
   tree: null,
+  // Widget "Base do Dashboard" (0142): a grade editável dos números digitados.
+  // A IA de dashboards pode CRIAR o widget e escolher as colunas — as chaves
+  // dos dados ela vê no catálogo de operandos (`manual:<chave>`). O que ela
+  // NÃO faz aqui é lançar número: quem escreve na Base manual é o assistente
+  // dela (contrato `base-manual-edit`), com prévia e apply próprios.
+  baseManual: `"baseManual": {
+  "series": ["emails_replied"],           // chaves dos dados exibidos como coluna; [] ou ausente = todos
+  "defaultMonth": "2026-08",              // mês semeado no formulário (ausente = mês atual)
+  "defaultSpread": "ancora"               // ${enumKeys(MANUAL_SPREAD_LABELS)} — como o lançamento conta no período
+}`,
   appearance: `"appearance": {                            // aparência (tudo opcional; TUDO NO NÍVEL RAIZ — NÃO existe sub-objeto "chart")
 ${renderDocBlock(APPEARANCE_DOC, "  ")}
 }`,

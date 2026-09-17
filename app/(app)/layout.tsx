@@ -53,6 +53,7 @@ import {
 import { resolveSidebarPins } from "@/lib/config/sidebar-pins";
 import { allowedOperacaoCards } from "@/lib/operacao/cards";
 import { loadGoalMetrics } from "@/lib/config/goal-metrics";
+import { loadManualSeries } from "@/lib/manual-base/load";
 import { resolveTheme, resolveThemeTokens } from "@/lib/theme";
 import { ROLE_LABELS, type RoleKey } from "@/lib/auth/roles";
 import { ThemeSync } from "@/components/layout/theme-sync";
@@ -64,6 +65,7 @@ import { countTaskAlerts } from "@/lib/tasks/actions";
 import { SourceLabelsProvider } from "@/components/source-labels-context";
 import { SourcesProvider } from "@/components/sources-context";
 import { GoalMetricsProvider } from "@/components/goal-metrics-context";
+import { ManualSeriesProvider } from "@/components/manual-series-context";
 import { SourceFoldersProvider } from "@/components/source-folders-context";
 import { RealtimeRefresher } from "@/components/realtime-refresher";
 import { RouteTracker } from "@/components/layout/route-tracker";
@@ -138,15 +140,25 @@ export default async function AppLayout({
   // seriais. O merge dos rótulos depende de `sources`, mas o FETCH não.
   // Sino: erro (ex.: migrações 0063/0066 pendentes) cai em 0 sem quebrar.
   const supabase = await createClient();
-  const [settings, sources, sourceFolders, labelsValue, dueCount, goalMetrics] =
-    await Promise.all([
-      loadUserSettings(user.id),
-      loadSources(supabase, org?.id),
-      loadSourceFolders(supabase, org?.id),
-      loadSourceLabelsValue(supabase, org?.id),
-      countTaskAlerts().catch(() => 0),
-      loadGoalMetrics(supabase),
-    ]);
+  const [
+    settings,
+    sources,
+    sourceFolders,
+    labelsValue,
+    dueCount,
+    goalMetrics,
+    manualSeries,
+  ] = await Promise.all([
+    loadUserSettings(user.id),
+    loadSources(supabase, org?.id),
+    loadSourceFolders(supabase, org?.id),
+    loadSourceLabelsValue(supabase, org?.id),
+    countTaskAlerts().catch(() => 0),
+    loadGoalMetrics(supabase),
+    // Base manual (0142): os DADOS (não os lançamentos) alimentam os
+    // operandos `manual:<chave>` dos editores de fórmula.
+    loadManualSeries(supabase, org?.id),
+  ]);
   const sourceLabels = mergeSourceLabels(labelsValue, sources);
   // Preferências de interface: padrão do app → org (com trava) → usuário.
   const uiPrefs = resolveUiPrefs(userUiPrefs(settings), org?.uiPrefs);
@@ -211,6 +223,7 @@ export default async function AppLayout({
   return (
     <SourcesProvider sources={sources}>
       <GoalMetricsProvider metrics={goalMetrics}>
+      <ManualSeriesProvider series={manualSeries}>
       <SourceFoldersProvider folders={sourceFolders}>
       <SourceLabelsProvider labels={sourceLabels}>
         {/* Sinal realtime (records/tasks/comments) → event bus + refresh
@@ -235,6 +248,7 @@ export default async function AppLayout({
         </AppShell>
       </SourceLabelsProvider>
       </SourceFoldersProvider>
+      </ManualSeriesProvider>
       </GoalMetricsProvider>
     </SourcesProvider>
   );

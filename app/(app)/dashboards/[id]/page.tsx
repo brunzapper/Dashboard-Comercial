@@ -142,6 +142,7 @@ import {
   type SourceKey,
 } from "@/lib/sources";
 import { loadSources } from "@/lib/config/sources";
+import { loadManualBaseStamp } from "@/lib/manual-base/load";
 import { loadUserSettings } from "@/lib/config/user-settings";
 import { resolveLaserColor } from "@/lib/theme";
 import {
@@ -149,6 +150,7 @@ import {
   collectBoardSourceKeys,
 } from "@/lib/config/source-scope";
 import { SourcesProvider } from "@/components/sources-context";
+import { ManualBaseStampProvider } from "@/components/manual-base/manual-base-stamp-context";
 import {
   collectOperationFilterIds,
   loadOperationScopes,
@@ -289,6 +291,7 @@ export default async function DashboardPage({
     currencyRates,
     allSources,
     userSettings,
+    manualStamp,
   ] = await timing.measure("base", () => Promise.all([
     supabase
       .from("widgets")
@@ -325,6 +328,10 @@ export default async function DashboardPage({
     session
       ? loadUserSettings(session.user.id)
       : Promise.resolve({} as Record<string, unknown>),
+    // Carimbo da BASE MANUAL (0142): entra no fingerprint dos widgets
+    // deferidos e no contexto do widget "Base do Dashboard". É o que faz um
+    // número digitado recalcular os gráficos sem F5.
+    loadManualBaseStamp(supabase, (dash.organization_id as string | null) ?? null),
   ]));
   const currencyOptions = currencyOptionsFrom(enabledCurrencies);
   // Cor do Ponteiro Laser (Configurações → Tema; default vermelho).
@@ -415,7 +422,10 @@ export default async function DashboardPage({
       w.visual_type !== "filtro_campo" &&
       w.visual_type !== "forma" &&
       w.visual_type !== "linha_divisoria" &&
-      w.visual_type !== "imagem"
+      w.visual_type !== "imagem" &&
+      // "Base do Dashboard" (0142) é uma GRADE DE EDIÇÃO da Base manual, não
+      // um recorte de registros: sem métrica, o RPC recusaria o SELECT vazio.
+      w.visual_type !== "base_manual"
   );
   const filterWidgets = widgets.filter((w) => w.visual_type === "filtro");
   const fieldFilterWidgets = widgets.filter(
@@ -992,6 +1002,10 @@ export default async function DashboardPage({
       f: viewFiltersByWidget[w.id] ?? [],
       pw: pwChoiceById.get(w.id) ?? null,
       c: widgetConfigFingerprint(w),
+      // Base manual (0142): editar um lançamento não muda período, filtro nem
+      // config — sem o carimbo, o widget que divide registros por um número
+      // digitado ficaria com o valor velho na tela até um F5.
+      m: manualStamp,
     });
   }
   const deferredEngineIds = dataWidgets
@@ -1526,6 +1540,10 @@ export default async function DashboardPage({
     // pickers de base/sub-base deste dashboard (useSources) ofertam só o
     // escopo do board (⋮ → "Bases") + fontes já referenciadas.
     <SourcesProvider sources={sources}>
+      {/* Carimbo da Base manual (0142): o widget "Base do Dashboard" re-busca
+          quando ele muda — inclusive por edição feita no ⋮, pelo assistente de
+          IA ou por outra pessoa. */}
+      <ManualBaseStampProvider stamp={manualStamp}>
       {/* Grava a view (com ?tab=) p/ restauração ao reabrir o app. */}
       <TrackLastView />
       <DashboardClient
@@ -1576,6 +1594,7 @@ export default async function DashboardPage({
         focusWidgetId={focusWidget ? focusId : undefined}
         laserColor={laserColor}
       />
+      </ManualBaseStampProvider>
     </SourcesProvider>
   );
 }

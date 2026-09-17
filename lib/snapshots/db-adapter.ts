@@ -1,3 +1,9 @@
+// Versão: 1.2 | Data: 17/09/2026
+// v1.2 (17/09/2026): BASE MANUAL (0142) — `manual_series`/`manual_entries`
+//   redirecionam para os ESPELHOS congelados, como `records`. Não são
+//   passthrough: a decisão de produto é que o link compartilhado é um RETRATO
+//   (editar a base depois não mexe no que já foi enviado), ao contrário de
+//   metas e feriados, que são lidos ao vivo de propósito.
 // Versão: 1.1 | Data: 23/07/2026
 // v1.1 (23/07/2026): multi-org (0090) — orgId opcional escopa as passthroughs
 //   consultadas por PERÍODO/CHAVE (goals, non_working_days): o service role
@@ -83,6 +89,17 @@ export function snapshotClient(
               .from("snapshot_record_matches")
               .select(cols)
               .eq("snapshot_id", snapshotId),
+        };
+      }
+      // Base manual congelada na captura (0142).
+      if (table === "manual_series" || table === "manual_entries") {
+        const frozen =
+          table === "manual_series"
+            ? "snapshot_manual_series"
+            : "snapshot_manual_entries";
+        return {
+          select: (cols: string) =>
+            service.from(frozen).select(cols).eq("snapshot_id", snapshotId),
         };
       }
       if (PASSTHROUGH_TABLES.has(table)) {

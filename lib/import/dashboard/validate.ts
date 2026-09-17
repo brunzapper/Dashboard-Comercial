@@ -81,6 +81,7 @@ import {
 import { sanitizeImageSettings } from "@/lib/widgets/image-url";
 import {
   sanitizeAgendaSettings,
+  sanitizeBaseManualSettings,
   sanitizeKanbanSettings,
 } from "@/lib/import/dashboard/kanban-settings";
 import { slugify } from "@/lib/records/slug";
@@ -368,6 +369,7 @@ export function validateDashboardImport(
         workingDefs,
         workingSources,
         ctx.goalMetrics,
+        ctx.manualSeries,
         excludeKey ? new Set([excludeKey]) : new Set()
       )
     );
@@ -1197,6 +1199,18 @@ export function validateDashboardImport(
       const agenda = sanitizeAgendaSettings(wSettings.agenda, sanitizeDeps);
       if (agenda) wSettings.agenda = agenda;
       else delete (wSettings as Record<string, unknown>).agenda;
+    }
+    // "Base do Dashboard" (0142): a IA escolhe quais DADOS viram coluna, mas
+    // nunca lança número por aqui — quem escreve na Base manual é o assistente
+    // dela, com prévia e apply próprios.
+    if ((wSettings as Record<string, unknown>).baseManual !== undefined) {
+      const bm = sanitizeBaseManualSettings(wSettings.baseManual, {
+        knownSeriesKeys: new Set(ctx.manualSeries.map((m) => m.key)),
+        where,
+        warnings,
+      });
+      if (bm) wSettings.baseManual = bm;
+      else delete (wSettings as Record<string, unknown>).baseManual;
     }
 
     // Coerência kanban/agenda × `sources`: é de `widgets.sources` que a page

@@ -56,6 +56,7 @@
 //   usadas; vazio = todas) e `splitBySource` (quebrar por fonte).
 // Tipos do construtor de dashboards (Fase 6A).
 import type { TreeFilterableKind } from "@/lib/tree/model";
+import type { ManualSpread } from "@/lib/manual-base/types";
 import type { SourceKey } from "@/lib/sources";
 import type { RoleKey } from "@/lib/auth/roles";
 import type { Formula } from "@/lib/records/formulas";
@@ -89,7 +90,8 @@ export type VisualType =
   | "kanban"
   | "agenda"
   | "imagem"
-  | "tree";
+  | "tree"
+  | "base_manual";
 
 export const VISUAL_TYPE_LABELS: Record<VisualType, string> = {
   kpi: "Card",
@@ -115,6 +117,7 @@ export const VISUAL_TYPE_LABELS: Record<VisualType, string> = {
   kanban: "Kanban",
   agenda: "Agenda",
   tree: "Tree",
+  base_manual: "Base do Dashboard",
 };
 
 export type Aggregation = "sum" | "count" | "avg" | "min" | "max";
@@ -435,6 +438,22 @@ export type RowSource = "records" | "responsibles" | "operations";
  * existente segue byte-idêntica. `atributo` abre a superfície de uma
  * funcionalidade pendurada no registro (lib/attributes/registry.ts).
  */
+/**
+ * Configuração do widget "Base do Dashboard" (0142): a grade editável dos
+ * números DIGITADOS, dentro do próprio painel. Ele não consulta registro
+ * nenhum — edita `manual_series`/`manual_entries` pelos mesmos choke points da
+ * página Registros → Base manual, e é o refresh pós-save que faz os demais
+ * widgets recalcularem.
+ */
+export interface BaseManualSettings {
+  /** Chaves dos dados exibidos como COLUNA. Vazio/ausente = todos. */
+  series?: string[];
+  /** Mês semeado no formulário de "Nova linha" (vazio = o mês corrente). */
+  defaultMonth?: string;
+  /** Como os lançamentos criados por este widget contam no período. */
+  defaultSpread?: ManualSpread;
+}
+
 /** Configuração do widget Tree (0134). */
 export interface TreeSettings {
   /**
@@ -1162,6 +1181,8 @@ export type WidgetSettings = KpiSettings &
     kanban?: KanbanSettings;
   /** Widget 'tree' — a árvore de acompanhamento ou o mapa mental. */
   tree?: TreeSettings;
+  /** Widget "Base do Dashboard" (0142). */
+  baseManual?: BaseManualSettings;
     // Config do widget agenda (visual_type 'agenda', 0064).
     agenda?: AgendaSettings;
     appearance?: AppearanceSettings;

@@ -1,4 +1,10 @@
-// Versão: 1.2 | Data: 31/07/2026
+// Versão: 1.3 | Data: 17/09/2026
+// v1.3 (17/09/2026): operandos da BASE MANUAL (`manual:<chave>`, 0142) — o
+//   registry `manualSeries` entra como campo OBRIGATÓRIO do input, pelo MESMO
+//   motivo do goalMetrics na v1.2: sítio esquecido tem de ser erro de
+//   compilação, nunca um save rejeitando fórmula que o editor aceitou. Sítio
+//   sem organização resolvida passa [] (o operando simplesmente não é
+//   ofertado); o valor é resolvido no engine, nunca no RPC.
 // v1.2 (31/07/2026): operandos de META (`meta:<chave>`, grupo "Metas") — o
 //   registry goal_metrics entra como campo OBRIGATÓRIO do input (typecheck
 //   força TODOS os sítios a fornecê-lo: um sítio de validação sem o registry
@@ -35,11 +41,13 @@ import { NUMERIC_DATA_TYPES, type DataType } from "@/lib/records/types";
 import { isCoreDef } from "@/lib/records/core-defs";
 import type { GoalMetricDef } from "@/lib/metas/metrics";
 import type { SourceDef } from "@/lib/sources";
+import type { ManualSeries } from "@/lib/manual-base/types";
 import {
   aggNestedOperandRefs,
   aggOperandRefs,
   condAggOperandRefs,
   goalOperandRefs,
+  manualOperandRefs,
   sourceScopedAggOperandRefs,
   type ScopedAggField,
 } from "./calc-metrics";
@@ -75,6 +83,9 @@ export interface AggCatalogInput {
   // `meta:<chave>`. OBRIGATÓRIO de propósito: sítio esquecido é erro de
   // compilação, nunca um save rejeitando fórmula que o editor aceitou.
   goalMetrics: GoalMetricDef[];
+  // Dados da BASE MANUAL (loadManualSeries/useManualSeries) — operandos
+  // `manual:<chave>`. OBRIGATÓRIO pela mesma razão do goalMetrics.
+  manualSeries: ManualSeries[];
 }
 
 /** Catálogo agregado completo: agg:* + variantes @fonte + aninhados + operandos
@@ -92,6 +103,7 @@ export function buildAggOperandCatalog(input: AggCatalogInput): OperandRef[] {
     ),
     ...aggNestedOperandRefs(input.nested ?? []),
     ...goalOperandRefs(input.goalMetrics),
+    ...manualOperandRefs(input.manualSeries),
     ...condAggOperandRefs(
       input.numeric,
       input.customCond,
@@ -126,6 +138,7 @@ export function availableAggCatalogInput(
   allDefs: AggCatalogDefRow[],
   sources: SourceDef[],
   goalMetrics: GoalMetricDef[],
+  manualSeries: ManualSeries[],
   opts?: { withNested?: boolean }
 ): AggCatalogInput {
   const defs = allDefs.filter((d) => !isCoreDef(d));
@@ -166,6 +179,7 @@ export function availableAggCatalogInput(
       .map((f) => ({ field: f.field, label: f.label })),
     sources,
     goalMetrics,
+    manualSeries,
   };
 }
 
@@ -178,6 +192,7 @@ export function defsAggCatalogInput(
   allDefs: AggCatalogDefRow[],
   sources: SourceDef[],
   goalMetrics: GoalMetricDef[],
+  manualSeries: ManualSeries[],
   forbidden: Set<string> = new Set()
 ): AggCatalogInput {
   const defs = allDefs.filter((d) => !isCoreDef(d));
@@ -240,5 +255,6 @@ export function defsAggCatalogInput(
       .map((d) => ({ field_key: d.field_key, label: d.label })),
     sources,
     goalMetrics,
+    manualSeries,
   };
 }

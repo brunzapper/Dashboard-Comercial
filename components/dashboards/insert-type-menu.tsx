@@ -18,6 +18,7 @@ import {
   LineChart,
   ListFilter,
   Minus,
+  PencilLine,
   PieChart,
   Funnel,
   GitBranch,
@@ -54,6 +55,7 @@ const TYPE_ICONS: Record<VisualType, LucideIcon> = {
   kanban: SquareKanban,
   agenda: CalendarDays,
   tree: GitBranch,
+  base_manual: PencilLine,
 };
 
 // Busca sem acento/caixa ("metrica" acha "Métrica calculada").

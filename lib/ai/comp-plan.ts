@@ -161,7 +161,12 @@ async function loadCompEditContext(
   const allFields = (fieldsData ?? []) as FieldDefinition[];
   const available = buildAvailableFields(allFields, correspondences, sources);
   const aggCatalog = buildAggOperandCatalog(
-    availableAggCatalogInput(available, allFields, sources, registry, {
+    availableAggCatalogInput(available, allFields, sources, registry,
+      // Base manual fora da Remuneração de propósito (ver plan-editor.tsx):
+      // operando não resolvido aqui viraria dinheiro a menos na folha, sem
+      // erro nenhum.
+      [],
+      {
       withNested: true,
     })
   );

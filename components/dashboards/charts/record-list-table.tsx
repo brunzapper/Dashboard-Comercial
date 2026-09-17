@@ -75,6 +75,7 @@ import { isCoreDef } from "@/lib/records/core-defs";
 import type { Formula } from "@/lib/records/formulas";
 import {
   basisKeysFor,
+  isManualBasisKey,
   basisMetric,
   evalCalcMoney,
   isCalcMetric,
@@ -460,6 +461,11 @@ export const RecordListTable = memo(function RecordListTable({
   const calcBasisFor = (formula: Formula, rs: RecordRow[]): BasisValues => {
     const out: BasisValues = {};
     for (const key of basisKeysFor(formula)) {
+      // Base manual (0142): este caminho monta a basis a partir dos REGISTROS
+      // do grupo, e um número digitado não tem registro a que se prender.
+      // Operando ausente ⇒ "—" — a mesma degradação documentada dos operandos
+      // com escopo aqui. (No modo agregado o valor entra normalmente.)
+      if (isManualBasisKey(key)) continue;
       // Chave condicional (SOMASE/CONT.SE/MÉDIASE): restringe os registros do
       // escopo às condições e reusa a mesma lógica de contagem/soma/moeda.
       const cond = parseCondBasisKey(key);

@@ -13,6 +13,8 @@ import type { createClient } from "@/lib/supabase/server";
 import { loadSources } from "@/lib/config/sources";
 import { loadGoalMetrics } from "@/lib/config/goal-metrics";
 import type { GoalMetricDef } from "@/lib/metas/metrics";
+import { loadManualSeries } from "@/lib/manual-base/load";
+import type { ManualSeries } from "@/lib/manual-base/types";
 import { formulaCondAggInfo, type Formula } from "@/lib/records/formulas";
 import {
   findFormulaCycle,
@@ -83,14 +85,18 @@ export function forbiddenOperandKeys(
 // catálogo por construção (rótulo é load-bearing no round-trip texto⇄tokens).
 // `forbidden` = self + dependentes transitivos (referenciá-los criaria ciclo).
 // `goalMetrics` = registry de metas (operandos `meta:<chave>`, 31/07/2026).
+// `manualSeries` = dados da Base manual (operandos `manual:<chave>`,
+// 17/09/2026). A Base é por ORGANIZAÇÃO, então um campo 'calculado_agg'
+// reutilizável pode citá-la — quem resolve o valor é o engine, em runtime.
 export function aggOperandCatalog(
   rows: DefRow[],
   forbidden: Set<string>,
   sources: Sources,
-  goalMetrics: GoalMetricDef[]
+  goalMetrics: GoalMetricDef[],
+  manualSeries: ManualSeries[]
 ): OperandRef[] {
   return buildAggOperandCatalog(
-    defsAggCatalogInput(rows, sources, goalMetrics, forbidden)
+    defsAggCatalogInput(rows, sources, goalMetrics, manualSeries, forbidden)
   );
 }
 
@@ -203,16 +209,17 @@ export async function resolveAndValidateFormula(
   fieldKey?: string
 ): Promise<{ ok: true; formula: Formula } | { ok: false; message: string }> {
   const isAgg = f.dataType === "calculado_agg";
-  const [rows, sources, goalMetrics] = await Promise.all([
+  const [rows, sources, goalMetrics, manualSeries] = await Promise.all([
     loadDefRows(supabase),
     loadSources(supabase),
     loadGoalMetrics(supabase),
+    loadManualSeries(supabase),
   ]);
   const forbidden = forbiddenOperandKeys(rows, fieldKey);
   // Catálogo do CONTEXTO (agregado ou por-registro) — builder único
   // compartilhado com os editores; tokenização e validação usam o mesmo.
   const catalog = isAgg
-    ? aggOperandCatalog(rows, forbidden, sources, goalMetrics)
+    ? aggOperandCatalog(rows, forbidden, sources, goalMetrics, manualSeries)
     : serverOperandCatalog(rows, forbidden, sources);
   let formula = f.formula;
   if (f.formulaMode === "text") {

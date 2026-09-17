@@ -1,3 +1,11 @@
+// Versão: 3.7 | Data: 17/09/2026
+// v3.7 (17/09/2026): operandos da BASE MANUAL (`manual:<chave>`, 0142) — soma
+//   dos lançamentos DIGITADOS que caem no período DESTA invocação, escrita
+//   direto na basis (a chave é o próprio ref). Aqui não há dimensão, então a
+//   janela é o período inteiro — a MESMA função de lib/manual-base/spread.ts
+//   que o engine usa por bucket. Fórmula só de operandos manuais resolve com
+//   ZERO RPCs, como a de meta. `manual:` nunca vira métrica de RPC: as chaves
+//   saem das listas que descem ao banco.
 // Versão: 3.6 | Data: 31/07/2026
 // v3.6 (31/07/2026): operando de META (`meta:<chave>`) — resolvido com o
 //   período DESTA invocação (goalPeriodScope + resolveGoalOperandValues,
@@ -76,11 +84,15 @@ import {
   type SourceDef,
   type SourceKey,
 } from "@/lib/sources";
+import { loadManualBase } from "@/lib/manual-base/load";
+import { sumManualEntries } from "@/lib/manual-base/spread";
+import { manualRef, parseManualRef } from "@/lib/manual-base/types";
 import {
   basisKeysFor,
   basisMetric,
   condFilters,
   evalCalcMoney,
+  isManualBasisKey,
   isCondBasisKey,
   isMoneyOperandField,
   goalOperandKeys,
@@ -265,7 +277,12 @@ export async function runCalculatedWidget(
   // consulta inteira, então cada conjunto de condições vira uma consulta extra
   // com os filtros da condição anexados aos do dashboard.
   const allKeys = basisKeysFor(formula);
-  const plainKeys = allKeys.filter((k) => !isCondBasisKey(k));
+  // Base manual (0142): resolvida SEM banco, fora das listas que viram
+  // consulta. `manual:` não é coluna de run_widget_query.
+  const manualKeys = allKeys.filter(isManualBasisKey);
+  const plainKeys = allKeys.filter(
+    (k) => !isCondBasisKey(k) && !isManualBasisKey(k)
+  );
   const condKeys = allKeys.filter(isCondBasisKey);
   const basis: BasisValues = {};
   // Basis numérica CRUA (antes da substituição por MoneyBreakdown): contexto
@@ -452,6 +469,39 @@ export async function runCalculatedWidget(
     enqueueBasis(jobs, target, rawTarget, f, cmpPeriodByBase[b], true);
   }
   await Promise.all(jobs);
+
+  // BASE MANUAL (0142): sem dimensão, a janela é o período DA INVOCAÇÃO —
+  // exatamente o que o KPI/card e a expressão de célula querem. O período de
+  // COMPARAÇÃO tem a janela dele: sem isto, VARPCT() compararia o número
+  // manual com ele mesmo e daria sempre 0%.
+  if (manualKeys.length > 0) {
+    const base = await loadManualBase(supabase);
+    const idByKey = new Map(base.series.map((x) => [x.key, x.id]));
+    const fill = (
+      target: BasisValues,
+      rawTarget: Record<string, number | null>,
+      p: DashboardPeriod | null | undefined
+    ) => {
+      for (const key of manualKeys) {
+        const chave = parseManualRef(key);
+        const id = chave ? idByKey.get(chave) : undefined;
+        const value = id
+          ? sumManualEntries(
+              base.entries.filter((e) => e.series_id === id),
+              { from: p?.from ?? null, to: p?.to ?? null }
+            )
+          : 0;
+        target[manualRef(chave ?? "")] = value;
+        rawTarget[manualRef(chave ?? "")] = value;
+      }
+    };
+    fill(basis, rawBasis, input.period);
+    for (const b of Object.keys(cmpBasis) as ComparisonFuncBase[]) {
+      const target = cmpBasis[b];
+      const rawTarget = cmpRawBasis[b];
+      if (target && rawTarget) fill(target, rawTarget, cmpPeriodByBase[b]);
+    }
+  }
 
   const meta: CalcMoneyMeta = {
     mode,

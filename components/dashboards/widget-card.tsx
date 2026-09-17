@@ -153,6 +153,7 @@ import {
 } from "@/lib/widgets/agg-catalog";
 import { useSources } from "@/components/sources-context";
 import { useGoalMetrics } from "@/components/goal-metrics-context";
+import { useManualSeries } from "@/components/manual-series-context";
 import type { OperandRef } from "@/lib/records/date-operands";
 import { deleteWidget } from "@/app/(app)/dashboards/actions";
 import { copyWidget } from "@/lib/widgets/clipboard";
@@ -212,6 +213,10 @@ const AgendaWidget = dynamic(
 );
 const TreeWidget = dynamic(
   () => import("./charts/tree-widget").then((m) => m.TreeWidget),
+  { ssr: false, loading: () => chunkFallback }
+);
+const ManualBaseWidget = dynamic(
+  () => import("./charts/manual-base-widget").then((m) => m.ManualBaseWidget),
   { ssr: false, loading: () => chunkFallback }
 );
 const CalculatorWidget = dynamic(
@@ -386,6 +391,7 @@ export const WidgetCard = memo(function WidgetCard({
   // Catálogo de fontes (contexto) p/ os operandos com escopo de fonte da nota.
   const sourcesCatalog = useSources();
   const goalMetrics = useGoalMetrics();
+  const manualSeries = useManualSeries();
   // Save do builder em andamento (painel já fechado): exibe o overlay de
   // processamento sobre o card até a revalidação entregar os dados novos.
   const [saving, setSaving] = useState(false);
@@ -456,6 +462,8 @@ export const WidgetCard = memo(function WidgetCard({
   const isKanban = widget.visual_type === "kanban";
   const isAgenda = widget.visual_type === "agenda";
   const isTree = widget.visual_type === "tree";
+  // "Base do Dashboard" (0142): grade dos números digitados, editada no card.
+  const isManualBase = widget.visual_type === "base_manual";
   const isCalc = widget.visual_type === "calculado";
   const isKpi = widget.visual_type === "kpi";
   const isCalculator = widget.visual_type === "calculadora";
@@ -681,10 +689,18 @@ export const WidgetCard = memo(function WidgetCard({
         availableForBuilder,
         fields,
         sourcesCatalog,
-        goalMetrics
+        goalMetrics,
+        manualSeries
       )
     );
-  }, [isNote, availableForBuilder, fields, sourcesCatalog, goalMetrics]);
+  }, [
+    isNote,
+    availableForBuilder,
+    fields,
+    sourcesCatalog,
+    goalMetrics,
+    manualSeries,
+  ]);
 
   // Dimensões dinâmicas: mede o tamanho natural do conteúdo e reporta ao grid,
   // que renderiza max(mínimo, medido). Altura das tabelas vem da medição real do
@@ -797,6 +813,9 @@ export const WidgetCard = memo(function WidgetCard({
     !isQuickTable &&
     !isKanban &&
     !isAgenda &&
+    // A Base do Dashboard é uma GRADE DE EDIÇÃO, não um recorte de registros:
+    // "Exportar CSV" ali sairia vazio.
+    !isManualBase &&
     !isCalc &&
     !isCalculator &&
     !isNote &&
@@ -1348,6 +1367,8 @@ export const WidgetCard = memo(function WidgetCard({
               // "Clique na linha → Tree" (record-focus-context).
               recordId={widget.settings?.tree?.recordId ?? null}
             />
+          ) : isManualBase ? (
+            <ManualBaseWidget settings={widget.settings?.baseManual} />
           ) : isKanban ? (
             <KanbanWidget
               widget={widget}
