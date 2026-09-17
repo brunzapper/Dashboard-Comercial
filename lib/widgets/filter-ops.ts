@@ -1,3 +1,8 @@
+// Versão: 1.3 | Data: 17/09/2026
+// v1.3 (17/09/2026): `sourceChips` aceita o chip OPT-IN da Base manual
+//   (MANUAL_CHIP_KEY). Opt-in porque a função também alimenta dimensões,
+//   filtros e colunas, onde a Base manual não é alvo válido — chip vazio ali
+//   seria armadilha. O rótulo sai de MANUAL_GROUP, dono único da palavra.
 // Versão: 1.2 | Data: 15/07/2026
 // v1.1 (15/07/2026): cleanFilters preserva `sources` (fontes-alvo do filtro,
 //   pass-through) validado/deduplicado; `record_types` (formato de fio) nunca
@@ -14,6 +19,7 @@ import {
   DEFAULT_SOURCE_DISPLAY_LABELS,
   type SourceDisplayLabels,
 } from "@/lib/sources";
+import { MANUAL_GROUP } from "@/lib/manual-base/types";
 import type { AvailableField } from "./fields";
 import type { FilterOp, WidgetFilter } from "./types";
 
@@ -54,14 +60,25 @@ function sourceKeysOf(labels: SourceDisplayLabels): string[] {
   return Object.keys(labels).filter((k) => k !== "geral");
 }
 
+/** Chave do chip da Base manual. Não é source-key nenhuma — a Base manual não
+ *  é linha de `data_sources` —, e por isso não pode colidir com uma. */
+export const MANUAL_CHIP_KEY = "__manual__";
+
 // Chips de fonte dos dropdowns de campo (prop `chips` do Combobox; o chip
 // "Todas" é implícito no componente). NAVEGAÇÃO apenas — não altera a consulta.
+//
+// `manual` é OPT-IN (17/09/2026): esta função alimenta também dimensões,
+// filtros, colunas e filtros rápidos, e a Base manual não é alvo válido em
+// nenhum deles — um chip sempre vazio ali seria armadilha. Só o dropdown de
+// MÉTRICA o pede, e só quando a organização tem algum dado lançado.
 export function sourceChips(
-  labels: SourceDisplayLabels
+  labels: SourceDisplayLabels,
+  opts?: { manual?: boolean }
 ): { key: string; label: string }[] {
   return [
     ...sourceKeysOf(labels).map((k) => ({ key: k, label: labels[k] })),
     { key: "geral", label: labels.geral },
+    ...(opts?.manual ? [{ key: MANUAL_CHIP_KEY, label: MANUAL_GROUP }] : []),
   ];
 }
 
