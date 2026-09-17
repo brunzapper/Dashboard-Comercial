@@ -1,4 +1,6 @@
-// Versão: 1.0 | Data: 17/09/2026
+// Versão: 1.1 | Data: 17/09/2026
+// v1.1 (17/09/2026): o RÓTULO da métrica manual vem do DADO (manualSeriesLabel)
+//   — a série não está em `available`, e o fieldLabel devolveria o ref cru.
 // A Base manual DENTRO do engine, com cliente fake (tests/helpers/fake-supabase).
 //
 // O que estes testes protegem, em ordem de gravidade:
@@ -89,6 +91,9 @@ describe("o ref manual: nunca desce ao RPC (invariante 1)", () => {
     // E as colunas voltaram na ordem da CONFIG, não na do RPC.
     expect(data.rows[0].metric_1).toBe(35);
     expect(data.rows[0].metric_2).toBe(12);
+    // v1.1: o RÓTULO sai do DADO. A série não é AvailableField — sem
+    // manualSeriesLabel o eixo exibiria "Soma · manual:emails_replied".
+    expect(data.metrics[0].label).toBe("# Emails replied");
   });
 
   it("operando manual dentro de fórmula também não desce", async () => {

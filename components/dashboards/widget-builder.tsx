@@ -1,3 +1,12 @@
+// Versão: 1.26 | Data: 17/09/2026
+// v1.26 (17/09/2026): a BASE MANUAL (0142) entra no dropdown "Campo da
+//   métrica", grupo "Base manual" — antes o número digitado só era alcançável
+//   depois de escolher "ƒ Métrica calculada" e caçá-lo no editor de fórmula,
+//   e era essa a queixa ("tentei adicionar como Métrica e não achei"). O
+//   ENGINE já resolvia `field: "manual:<chave>"` (parseManualRef em
+//   engine.ts, com testes) — faltava só a oferta. Métrica manual não tem
+//   agregação (o valor É a soma dos lançamentos), nem menu de campo, nem
+//   Bases: os três controles somem na linha.
 // Versão: 1.25 | Data: 07/09/2026
 // v1.25 (07/09/2026): (a) as opções de "Período de cada coluna" saem de
 //   KANBAN_DATE_BUCKET_LABELS (lib/kanban/types.ts) — rótulo com dono único,
@@ -175,6 +184,12 @@ import {
 import { useSources } from "@/components/sources-context";
 import { useGoalMetrics } from "@/components/goal-metrics-context";
 import { useManualSeries } from "@/components/manual-series-context";
+import {
+  MANUAL_GROUP,
+  manualRef,
+  manualSeriesLabel,
+  parseManualRef,
+} from "@/lib/manual-base/types";
 import { useSourceFolders } from "@/components/source-folders-context";
 import {
   Sheet,
@@ -1175,6 +1190,15 @@ export function WidgetBuilder({
     { value: "*", label: "Contagem de registros" },
     ...toFieldOptions(numericFields, sourceLabels),
     ...toFieldOptions(aggCalcFields, sourceLabels),
+    // BASE MANUAL (v1.26): os números DIGITADOS também são métrica direta — a
+    // Base manual é global da org e OCULTA (não é linha de data_sources), por
+    // isso vai sem `chips`, como os sentinelas acima: aparece em qualquer chip
+    // de fonte porque não pertence a nenhuma.
+    ...manualSeries.map((ms) => ({
+      value: manualRef(ms.key),
+      label: ms.label,
+      group: MANUAL_GROUP,
+    })),
     { value: CALC_METRIC_FIELD, label: "ƒ Métrica calculada (fórmula própria)…" },
   ];
   // Modos do Card (settings.card): campos ranqueáveis (números e datas) e
@@ -3632,6 +3656,7 @@ export function WidgetBuilder({
                 isMoney={isMoneyField(m.field)}
                 isAggCalc={isAggCalcField(m.field)}
                 isCalcSentinel={m.field === CALC_METRIC_FIELD}
+                isManual={parseManualRef(m.field) != null}
                 calcRefs={calcRefs}
                 sourceDefs={catalog}
                 previewAdapter={aggPreview(
@@ -3670,7 +3695,10 @@ export function WidgetBuilder({
                       : fieldLabel(m.field, available)
                     : m.field === "*"
                       ? "Contagem de registros"
-                      : `${AGG_LABELS[m.agg]} · ${fieldLabel(m.field, available)}`
+                      : // Base manual (v1.26): a série não é AvailableField —
+                        // o fieldLabel devolveria o ref cru.
+                        (manualSeriesLabel(m.field, manualSeries) ??
+                        `${AGG_LABELS[m.agg]} · ${fieldLabel(m.field, available)}`)
                 }
                 fieldMenu={renderFieldMenu(m.field)}
                 sourceOptions={metricSourceOptions(m)}
@@ -3698,15 +3726,21 @@ export function WidgetBuilder({
                           : {}),
                       };
                     } else {
+                      // Base manual (v1.26): `agg` é ignorada pelo engine (o
+                      // valor da linha É a soma dos lançamentos que caem no
+                      // recorte — applyManualBase) e `sources` não significa
+                      // nada, porque a Base manual não tem record_type.
+                      const manual = parseManualRef(field) != null;
                       const cleaned: Metric = {
                         ...cur,
                         field,
-                        agg: field === "*" ? "count" : cur.agg,
+                        agg: field === "*" ? "count" : manual ? "sum" : cur.agg,
                       };
                       delete cleaned.calc;
                       delete cleaned.formula;
                       delete cleaned.resultCurrency;
                       delete cleaned.resultPercent;
+                      if (manual) delete cleaned.sources;
                       next[i] = cleaned;
                     }
                     return next;

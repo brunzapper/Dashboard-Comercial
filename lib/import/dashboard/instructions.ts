@@ -1,3 +1,10 @@
+// Versão: 1.11 | Data: 17/09/2026
+// v1.11 (17/09/2026): BASE MANUAL (0142) no SPEC — o operando de fórmula
+//   [manual:<chave>] (com a semântica que o distingue da meta: soma no
+//   subtotal, recorte DO GRUPO, onde degrada) e a métrica DIRETA
+//   "field": "manual:<chave>". As chaves chegam no modelo (`manual_series`,
+//   import-prompt-actions v1.3). Prosa nova, sem enum novo: as contagens
+//   `**Label (N)**` do §16.2 não mudam.
 // Versão: 1.10 | Data: 12/08/2026
 // v1.10 (12/08/2026): Semana Fechada — regra do snap trocada da maioria
 //   (4+ dias) pela EXPANSÃO: o período cobre toda semana que ele toca,
@@ -237,6 +244,13 @@ Base filtrar pela SUA coluna de data (ex.: negócios por "closed_at", leads por
   da consulta (mensal quando o período cabe num mês; senão anual do ano
   inicial; "todo período" = mês corrente); meta não cadastrada exibe "—".
   Ex.: [agg:sum:value] / [meta:mrr] = fração da meta atingida.
+  E os NÚMEROS DIGITADOS da Base manual: [manual:<chave>] (chaves em
+  manual_series do modelo) — soma dos lançamentos que caem no recorte DO
+  GRUPO (numa tabela por mês, cada linha usa o número do seu mês) e que SOMA
+  em subtotais e no Total geral, ao contrário da meta. Grupo sem lançamento
+  vale 0. Exibe "—" quando a dimensão não é data/responsável/operação, no modo
+  "lista de registros" e em "Agrupar período"; como a meta, não entra em
+  SOMASE/CONT.SE/MÉDIASE. Ex.: [agg:count:*] / [manual:emails_replied].
 - Sintaxe: operandos entre colchetes [Rótulo] ou [ref] (ex.: [custom:forecast],
   [agg:sum:value], [agg:count:*@leads]); argumentos separados por ";" (vírgula
   é decimal: 1,5); texto "entre aspas"; comparadores = <> < > <= >=.
@@ -312,6 +326,9 @@ promovida a tipo próprio).
 ### Métricas
 - "agg": ${enumKeys(AGG_LABELS)}. "field": "*" = contagem de registros
   (agg count). count de um campo = registros com o campo PREENCHIDO.
+- Métrica da BASE MANUAL: "field": "manual:<chave>" (chaves em manual_series do
+  modelo), SEM "agg" — o valor já é a soma dos lançamentos do recorte. Só como
+  MÉTRICA: "manual:" nunca vale como dimensão, filtro ou coluna.
 - Métrica de FÓRMULA própria: use "formula_text" (contexto de totais — mesmas
   regras do calculado_agg) + opcionais "resultPercent": true (exibe ×100 + "%")
   ou "resultCurrency": "BRL". Ex.: taxa de conversão entre Bases:

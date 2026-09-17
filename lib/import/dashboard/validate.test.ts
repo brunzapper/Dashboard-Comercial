@@ -1,3 +1,7 @@
+// Versão: 1.2 | Data: 17/09/2026
+// v1.2 (17/09/2026): bloco da métrica da BASE MANUAL — `manual:<chave>` aceita
+//   como métrica (agg forçada a sum), chave desconhecida como ERRO e o prefixo
+//   ainda RECUSADO como dimensão (a régua do checkRef não foi afrouxada).
 // Versão: 1.1 | Data: 07/09/2026
 // v1.1 (07/09/2026): bloco do saneamento de settings.kanban/settings.agenda
 //   (antes PASSTHROUGH) — STRIP dos vínculos locais do quadro, alinhamento
@@ -519,5 +523,98 @@ describe("settings.kanban / settings.agenda — saneamento no import", () => {
       dateField: "closed_at",
       defaultView: "week",
     });
+  });
+});
+
+// Base manual (0142) como MÉTRICA direta — v1.7 do validador. O prefixo é
+// aceito SÓ em métrica: como a série não é coluna de `records`, dimensão e
+// filtro seguem recusados pelo checkRef (é por isso que o prefixo não entrou
+// lá).
+describe("métrica da Base manual (manual:<chave>)", () => {
+  const manualCtx: DashboardImportContext = {
+    ...ctx,
+    manualSeries: [
+      {
+        id: "s1",
+        key: "emails_replied",
+        label: "# Emails replied",
+      } as never,
+    ],
+  };
+  const doc = (metrics: unknown[], extra?: Record<string, unknown>): string =>
+    JSON.stringify({
+      formato: "dashboard-import",
+      versao: 1,
+      chave: "teste_manual",
+      bases: ["deals"],
+      dashboard: { name: "Teste", visible_to_roles: [], settings: {} },
+      widgets: [
+        {
+          key: "w",
+          title: "W",
+          visual_type: "barra",
+          sources: ["deals"],
+          dimensions: [{ field: "closed_at", transform: "month_year" }],
+          metrics,
+          filters: [],
+          grid_position: { x: 0, y: 0, w: 4, h: 4 },
+          ...extra,
+        },
+      ],
+    });
+
+  it("chave existente vira métrica com agg sum", () => {
+    const res = validateDashboardImport(
+      doc([{ field: "manual:emails_replied" }]),
+      manualCtx
+    );
+    expect(res.errors).toEqual([]);
+    expect(res.preset?.widgets[0].metrics).toEqual([
+      { field: "manual:emails_replied", agg: "sum", label: undefined },
+    ]);
+  });
+
+  it("chave desconhecida é ERRO (não aviso silencioso)", () => {
+    const res = validateDashboardImport(
+      doc([{ field: "manual:nao_existe" }]),
+      manualCtx
+    );
+    expect(res.errors.join(" ")).toContain("manual:nao_existe");
+  });
+
+  it('"agg" diferente de sum avisa e é ignorada', () => {
+    const res = validateDashboardImport(
+      doc([{ field: "manual:emails_replied", agg: "avg" }]),
+      manualCtx
+    );
+    expect(res.errors).toEqual([]);
+    expect(res.warnings.join(" ")).toContain("agg");
+    expect(res.preset?.widgets[0].metrics[0].agg).toBe("sum");
+  });
+
+  it("como DIMENSÃO segue recusado (checkRef não conhece o prefixo)", () => {
+    const res = validateDashboardImport(
+      JSON.stringify({
+        formato: "dashboard-import",
+        versao: 1,
+        chave: "teste_manual_dim",
+        bases: ["deals"],
+        dashboard: { name: "Teste", visible_to_roles: [], settings: {} },
+        widgets: [
+          {
+            key: "w",
+            title: "W",
+            visual_type: "barra",
+            sources: ["deals"],
+            dimensions: [{ field: "manual:emails_replied" }],
+            metrics: [{ field: "*", agg: "count" }],
+            filters: [],
+            grid_position: { x: 0, y: 0, w: 4, h: 4 },
+          },
+        ],
+      }),
+      manualCtx
+    );
+    expect(res.errors.join(" ")).toContain("manual:emails_replied");
   });
 });

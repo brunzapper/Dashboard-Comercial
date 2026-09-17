@@ -1,3 +1,6 @@
+// Versão: 1.2 | Data: 17/09/2026
+// v1.2 (17/09/2026): guarda de que o SPEC ensina as DUAS superfícies da Base
+//   manual — o operando [manual:<chave>] e a métrica "field": "manual:<chave>".
 // Versão: 1.1 | Data: 07/09/2026
 // v1.1 (07/09/2026): paridade dos mapas de rótulo de kanban/agenda (o SPEC
 //   passou a documentar settings.kanban/settings.agenda) e guarda de que os
@@ -167,11 +170,20 @@ describe("prompt de importação por IA — paridade com o código", () => {
       responsibleNames: [],
       operationNames: [],
       goalMetrics: BUILTIN_GOAL_METRICS,
-  manualSeries: [],
+      manualSeries: [],
     };
     const res = validateDashboardImport(SPEC_EXAMPLE, ctx);
     expect(res.errors).toEqual([]);
     expect(res.ok).toBe(true);
+  });
+
+  // Base manual (0142): a IA só usa o que o SPEC ensina. As CHAVES chegam pelo
+  // modelo (`manual_series`, import-prompt-actions v1.3); aqui conferimos que
+  // as duas superfícies — operando de fórmula e métrica direta — estão ditas.
+  it("ensina o operando e a métrica da Base manual", () => {
+    expect(prompt).toContain("[manual:<chave>]");
+    expect(prompt).toContain('"field": "manual:<chave>"');
+    expect(prompt).toContain("manual_series");
   });
 });
 

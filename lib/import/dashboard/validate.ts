@@ -1,3 +1,11 @@
+// Versão: 1.7 | Data: 17/09/2026
+// v1.7 (17/09/2026): métrica da BASE MANUAL — `"field": "manual:<chave>"`
+//   passa a ser aceita no ramo de métrica NÃO-calculada. O prefixo NÃO entra
+//   no `checkRef`, que também valida dimensão/filtro/coluna: a Base manual não
+//   é projetável como dimensão nem filtrável (§4.26), e afrouxar ali abriria
+//   as três. Chave desconhecida é ERRO, não aviso — mesmo critério do contrato
+//   `base-manual-edit`, onde nome que não existe é recusa e não o FK_NO_MATCH
+//   silencioso do runtime.
 // Versão: 1.6 | Data: 07/09/2026
 // v1.6 (07/09/2026): `settings.kanban`/`settings.agenda` deixam de ser
 //   PASSTHROUGH — passam por sanitizeKanbanSettings/sanitizeAgendaSettings
@@ -68,6 +76,7 @@ import {
 import { PERIOD_PRESETS, PERIOD_ALL } from "@/lib/widgets/period";
 import { FILTER_OPS } from "@/lib/widgets/filter-ops";
 import { CORE_FIELDS } from "@/lib/widgets/fields";
+import { parseManualRef } from "@/lib/manual-base/types";
 import { CALC_METRIC_FIELD } from "@/lib/widgets/calc-metrics";
 import { isClosedWeekTransform } from "@/lib/widgets/closed-week";
 import { DEFAULT_WIDGET_SIZE } from "@/lib/widgets/widget-defaults";
@@ -253,6 +262,10 @@ export function validateDashboardImport(
   const workingCorrKeys = new Set(ctx.correspondenceKeys);
   const workingSources: SourceDef[] = [...ctx.sources];
   const sourceKeySet = () => new Set(workingSources.map((s) => s.key));
+  // Chaves válidas de `manual:<chave>` (v1.7). A Base manual é da ORG e não é
+  // declarável no JSON — quem a alimenta é o assistente dela, com prévia e
+  // apply próprios; aqui só se confere se a chave existe.
+  const manualKeys = new Set(ctx.manualSeries.map((m) => m.key));
   // Refs `match:` só aceitam Bases RAIZ: sub-base compartilha o record_type da
   // pai e nunca casa (buildMatchFields/helpers 0104 seguem a mesma regra).
   const rootSourceKeySet = () =>
@@ -1098,6 +1111,32 @@ export function validateDashboardImport(
             typeof m.resultCurrency === "string" ? m.resultCurrency : undefined,
           percent: m.percent === true || undefined,
           sources: mSources.length > 0 ? mSources : undefined,
+        });
+        return;
+      }
+      // BASE MANUAL (v1.7): métrica DIRETA de um número digitado. Não passa
+      // pelo checkRef (que vale para dimensão/filtro/coluna também) nem aceita
+      // "agg": o valor da linha É a soma dos lançamentos que caem no recorte
+      // — quem resolve é o engine (applyManualBase), nunca o RPC.
+      const manualKey = parseManualRef(field);
+      if (manualKey) {
+        if (!manualKeys.has(manualKey)) {
+          errors.push(
+            `${mw}: o dado da Base manual "${field}" não existe. Chaves válidas: ${
+              manualKeys.size > 0 ? [...manualKeys].join(", ") : "(nenhuma cadastrada)"
+            }.`
+          );
+          return;
+        }
+        if (asString(m.agg) && asString(m.agg) !== "sum") {
+          warnings.push(
+            `${mw}: "agg" é ignorada numa métrica da Base manual (o valor já é a soma dos lançamentos do recorte).`
+          );
+        }
+        metrics.push({
+          field,
+          agg: "sum",
+          label: asString(m.label) || undefined,
         });
         return;
       }

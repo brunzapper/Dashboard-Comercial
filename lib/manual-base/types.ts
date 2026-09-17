@@ -1,4 +1,9 @@
-// Versão: 1.0 | Data: 17/09/2026
+// Versão: 1.1 | Data: 17/09/2026
+// v1.1 (17/09/2026): `manualSeriesLabel` — o rótulo de exibição de um ref
+//   `manual:<chave>`. Existe porque a série NÃO é um AvailableField: o
+//   `fieldLabel` do engine/builder devolveria o ref cru, e a métrica sairia
+//   rotulada "Soma · manual:emails_replied" no gráfico. Dono ÚNICO da
+//   resolução — builder, engine e validador do import leem daqui.
 // A Base manual: números DIGITADOS que se misturam aos registros nas fórmulas
 // dos widgets. Existe porque nem toda métrica vale o custo de virar registro —
 // "5.261 contas alcançadas por e-mail em agosto" é UM número, não 5.261 linhas.
@@ -123,6 +128,21 @@ export function parseManualRef(ref: string): string | null {
 
 export function manualRef(key: string): string {
   return `${MANUAL_OPERAND_PREFIX}${key}`;
+}
+
+/**
+ * Rótulo de exibição de um ref `manual:<chave>`, ou null quando o ref não é
+ * manual. Dado inexistente devolve a CHAVE (nunca o ref cru com prefixo): a
+ * série pode ter sido excluída depois que o widget foi salvo, e "emails_replied"
+ * lê melhor que "manual:emails_replied" num eixo. (v1.1, 17/09/2026)
+ */
+export function manualSeriesLabel(
+  field: string,
+  series: ManualSeries[]
+): string | null {
+  const key = parseManualRef(field);
+  if (!key) return null;
+  return series.find((s) => s.key === key)?.label ?? key;
 }
 
 /**

@@ -510,9 +510,11 @@ igual entre os dias"** — é a única em que a soma dos dias devolve o total.
 
 #### Usar o número num widget
 
-- **Como métrica**: no editor do widget, escolha o dado na lista de campos (ele
-  aparece com o nome que você deu). Um gráfico de barras por mês desenha os
-  meses lançados — inclusive meses **sem registro nenhum**, porque o número não
+- **Como métrica**: no editor do widget, seção Métricas, abra "Campo da
+  métrica" e escolha o dado no grupo **"Base manual"** (ele aparece com o nome
+  que você deu). Não há agregação a escolher — o valor já é a soma dos
+  lançamentos do recorte. Um gráfico de barras por mês desenha os meses
+  lançados — inclusive meses **sem registro nenhum**, porque o número não
   depende de registros para existir.
 - **Numa fórmula**: o dado aparece no seletor de operandos, no grupo **Base
   manual**. A conversão do exemplo é
@@ -1612,13 +1614,23 @@ Cada métrica vira uma coluna (tabela) ou série (gráficos). Por linha:
 
 - **Campo da métrica** — opções: **"Contagem de registros"** (conta linhas;
   chave `*`), qualquer campo numérico/moeda/calculado-por-registro, um campo
-  salvo "Calculado (totais)" ou **"ƒ Métrica calculada (fórmula própria)…"**
-  (escreve uma fórmula só deste widget — capítulo 8).
+  salvo "Calculado (totais)", um **número digitado da Base manual** (grupo
+  "Base manual" no dropdown — §2.7) ou **"ƒ Métrica calculada (fórmula
+  própria)…"** (escreve uma fórmula só deste widget — capítulo 8).
 - **Agregação** — lista completa: "Soma" (`sum`), "Contagem" (`count`),
   "Média" (`avg`), "Mínimo" (`min`), "Máximo" (`max`). Com "Contagem de
   registros" a agregação é travada em Contagem. Notas: "Contagem" de um CAMPO
   conta registros com o campo **preenchido**; métrica de fórmula não tem
   agregação (mostra o chip "Fórmula").
+- **Métrica da Base manual** — escolher um dado do grupo "Base manual" põe o
+  número digitado direto como coluna/série, sem escrever fórmula nenhuma. O
+  valor exibido é a **soma dos lançamentos que caem no recorte da linha**, então
+  a linha não tem agregação (o seletor fica travado), nem menu de campo, nem
+  "Bases da métrica" — a Base manual é da organização inteira e não pertence a
+  Base alguma. Vale o resto da semântica do §8.5c: soma nos subtotais, grupo sem
+  lançamento vale 0, e "—" quando a dimensão não é data, responsável ou
+  operação. Para combinar o número com registros (ex.: dividir um pelo outro),
+  use a fórmula do §8.5c.
 - **"Nome exibido"** — rótulo da métrica (padrão: "Agregação · campo").
 - **"Exibir com '%'"** — anexa o símbolo % **sem multiplicar por 100** (para
   valores que já são percentuais). Não confundir com o formato "Percentual"
@@ -2161,6 +2173,10 @@ Configurações → Metas). Semântica:
   (limitação documentada).
 
 ### 8.5c Operandos da Base manual (contexto agregado)
+
+> Se o que você quer é só **mostrar o número digitado**, não precisa de fórmula:
+> escolha o dado direto em "Campo da métrica", grupo "Base manual" (§6.3). Esta
+> seção é para **combinar** o número com os registros.
 
 Os **números digitados** (§2.7) entram na fórmula como operando: no catálogo,
 grupo **"Base manual"**, com o nome que você deu ao dado (referência interna
