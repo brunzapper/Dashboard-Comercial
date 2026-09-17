@@ -210,7 +210,10 @@ async function doRefresh(
       w.visual_type !== "filtro_campo" &&
       w.visual_type !== "forma" &&
       w.visual_type !== "linha_divisoria" &&
-      w.visual_type !== "imagem"
+      w.visual_type !== "imagem" &&
+      // "Base do Dashboard" (0142) é uma GRADE DE EDIÇÃO da Base manual, não
+      // um recorte de registros: sem métrica, o RPC recusaria o SELECT vazio.
+      w.visual_type !== "base_manual"
   );
   const fieldFilterWidgets = tabWidgets.filter(
     (w) => w.visual_type === "filtro_campo"

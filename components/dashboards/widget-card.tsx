@@ -215,6 +215,10 @@ const TreeWidget = dynamic(
   () => import("./charts/tree-widget").then((m) => m.TreeWidget),
   { ssr: false, loading: () => chunkFallback }
 );
+const ManualBaseWidget = dynamic(
+  () => import("./charts/manual-base-widget").then((m) => m.ManualBaseWidget),
+  { ssr: false, loading: () => chunkFallback }
+);
 const CalculatorWidget = dynamic(
   () => import("./calculator-widget").then((m) => m.CalculatorWidget),
   { ssr: false, loading: () => chunkFallback }
@@ -458,6 +462,8 @@ export const WidgetCard = memo(function WidgetCard({
   const isKanban = widget.visual_type === "kanban";
   const isAgenda = widget.visual_type === "agenda";
   const isTree = widget.visual_type === "tree";
+  // "Base do Dashboard" (0142): grade dos números digitados, editada no card.
+  const isManualBase = widget.visual_type === "base_manual";
   const isCalc = widget.visual_type === "calculado";
   const isKpi = widget.visual_type === "kpi";
   const isCalculator = widget.visual_type === "calculadora";
@@ -807,6 +813,9 @@ export const WidgetCard = memo(function WidgetCard({
     !isQuickTable &&
     !isKanban &&
     !isAgenda &&
+    // A Base do Dashboard é uma GRADE DE EDIÇÃO, não um recorte de registros:
+    // "Exportar CSV" ali sairia vazio.
+    !isManualBase &&
     !isCalc &&
     !isCalculator &&
     !isNote &&
@@ -1358,6 +1367,8 @@ export const WidgetCard = memo(function WidgetCard({
               // "Clique na linha → Tree" (record-focus-context).
               recordId={widget.settings?.tree?.recordId ?? null}
             />
+          ) : isManualBase ? (
+            <ManualBaseWidget settings={widget.settings?.baseManual} />
           ) : isKanban ? (
             <KanbanWidget
               widget={widget}

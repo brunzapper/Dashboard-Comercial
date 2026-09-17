@@ -25,6 +25,7 @@ import { useState, useTransition } from "react";
 import {
   Camera,
   Database,
+  PencilLine,
   LayoutGrid,
   Maximize,
   MoreVertical,
@@ -71,6 +72,7 @@ import { updateDashboardSettings } from "@/app/(app)/dashboards/actions";
 import { BASE_COLS, GRID_MAX_COLS } from "@/lib/widgets/grid-space";
 import { SnapshotsPanel, type SnapshotPeriodCapture } from "./snapshots-panel";
 import { BoardSourcesDialog } from "./board-sources-dialog";
+import { ManualBaseSheet } from "@/components/manual-base/manual-base-sheet";
 import { BoardAccessDialog } from "./board-access-dialog";
 
 type BgMode = "none" | "solid" | "gradient";
@@ -99,6 +101,8 @@ export function DashboardMenu({
   const [canvasOpen, setCanvasOpen] = useState(false);
   const [snapshotsOpen, setSnapshotsOpen] = useState(false);
   const [sourcesOpen, setSourcesOpen] = useState(false);
+  // Base manual (0142): números digitados que entram nas fórmulas.
+  const [manualBaseOpen, setManualBaseOpen] = useState(false);
   const [pending, startTransition] = useTransition();
 
   // Área de trabalho (grid fino): largura da coluna (densidade baseCols),
@@ -268,6 +272,14 @@ export function DashboardMenu({
             }}
           >
             <Database className="size-4" /> Bases
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            onSelect={(e) => {
+              e.preventDefault();
+              setManualBaseOpen(true);
+            }}
+          >
+            <PencilLine className="size-4" /> Base manual
           </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem
@@ -483,6 +495,7 @@ export function DashboardMenu({
       </Sheet>
 
       {/* Bases: escopo de bases do board (settings.sourceScope). */}
+      <ManualBaseSheet open={manualBaseOpen} onOpenChange={setManualBaseOpen} />
       <BoardSourcesDialog
         boardId={dashboardId}
         kanban={false}

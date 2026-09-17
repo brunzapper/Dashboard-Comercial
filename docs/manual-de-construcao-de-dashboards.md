@@ -2726,10 +2726,10 @@ referência.
 
 ### 16.2 Enumerações completas (uma linha por lista)
 
-- **Tipos de widget (19)**: Card, Métrica calculada, Calculadora, Nota
+- **Tipos de widget (20)**: Card, Métrica calculada, Calculadora, Nota
   (post-it), Forma, Linha divisória, Imagem, Tabela, Tabela Livre, Barra
   vertical, Barra horizontal, Linha, Pizza, Funil, Filtro de período, Filtro
-  por campo, Kanban, Agenda, Tree.
+  por campo, Kanban, Agenda, Tree, Base do Dashboard.
 - **Agregações de métrica (5)**: Soma, Contagem, Média, Mínimo, Máximo.
 - **Agregações de "Agrupar período" (6)**: Individual (por registro), Soma,
   Contagem, Média, Mediana, Moda.

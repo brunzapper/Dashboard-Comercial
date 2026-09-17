@@ -27,6 +27,8 @@ import {
   type KanbanSettings,
 } from "@/lib/kanban/types";
 import { AGENDA_VIEW_LABELS, type AgendaSettings } from "@/lib/agenda/types";
+import { MANUAL_SPREADS, isManualSpread } from "@/lib/manual-base/types";
+import type { BaseManualSettings } from "@/lib/widgets/types";
 
 /** Teto de refs no corpo do card (espelha o `.slice(0, 4)` do widget-builder). */
 export const KANBAN_MAX_EXTRA_FIELDS = 4;
@@ -426,4 +428,65 @@ export function sanitizeAgendaSettings(
   }
 
   return a as unknown as AgendaSettings;
+}
+
+// ===================== Base do Dashboard (0142) =====================
+// A IA de dashboards pode CRIAR o widget "Base do Dashboard" e escolher as
+// colunas — mas nunca lançar número por aqui: quem escreve na Base manual é o
+// assistente dela (contrato `base-manual-edit`), com prévia e apply próprios.
+// Por isso a régua aceita só o que é ESCOLHA DE EXIBIÇÃO.
+//
+// Chave inválida = AVISO + descarte, nunca erro duro (a regra de 07/09/2026).
+
+/** As chaves de dado precisam existir; o catálogo vem do contexto de import. */
+export function sanitizeBaseManualSettings(
+  raw: unknown,
+  deps: {
+    knownSeriesKeys: Set<string>;
+    where: string;
+    warnings: string[];
+  }
+): BaseManualSettings | null {
+  if (raw == null) return null;
+  if (typeof raw !== "object" || Array.isArray(raw)) {
+    deps.warnings.push(`${deps.where}: "baseManual" deve ser um objeto — ignorado.`);
+    return null;
+  }
+  const src = raw as Record<string, unknown>;
+  const out: BaseManualSettings = {};
+
+  if (src.series !== undefined) {
+    const list = Array.isArray(src.series) ? src.series : [];
+    const keys: string[] = [];
+    for (const v of list) {
+      const key = typeof v === "string" ? v.trim() : "";
+      if (!key) continue;
+      if (!deps.knownSeriesKeys.has(key)) {
+        deps.warnings.push(
+          `${deps.where}: o dado "${key}" não existe na Base manual — coluna ignorada.`
+        );
+        continue;
+      }
+      if (!keys.includes(key)) keys.push(key);
+    }
+    if (keys.length > 0) out.series = keys;
+  }
+
+  if (typeof src.defaultMonth === "string" && /^\d{4}-\d{2}$/.test(src.defaultMonth)) {
+    out.defaultMonth = src.defaultMonth;
+  } else if (src.defaultMonth !== undefined) {
+    deps.warnings.push(
+      `${deps.where}: "defaultMonth" deve ser AAAA-MM — ignorado.`
+    );
+  }
+
+  if (isManualSpread(src.defaultSpread)) {
+    out.defaultSpread = src.defaultSpread;
+  } else if (src.defaultSpread !== undefined) {
+    deps.warnings.push(
+      `${deps.where}: "defaultSpread" fora das opções (${MANUAL_SPREADS.join(", ")}) — ignorado.`
+    );
+  }
+
+  return Object.keys(out).length > 0 ? out : {};
 }
