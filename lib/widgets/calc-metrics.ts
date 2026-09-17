@@ -1,4 +1,12 @@
-// Versão: 2.7 | Data: 17/09/2026
+// Versão: 2.8 | Data: 17/09/2026
+// v2.8 (17/09/2026): CORREÇÃO — validateCondAggRefs nunca recolheu o
+//   MANUAL_GROUP no allowlist de topo, embora a v2.7 abaixo afirme que sim.
+//   Toda fórmula que citasse um número digitado (o `CONTAGEM / [# Emails
+//   replied]` que motivou o recurso) era recusada no SAVE com a mensagem
+//   "só pode aparecer dentro de SOMASE/CONT.SE/MÉDIASE" — em todos os call
+//   sites: widget calculado, métrica ad-hoc, Nota e o validador do servidor.
+//   O set passou a chamar-se `perQueryValues` porque é isso que ele guarda:
+//   meta e Base manual, os dois VALORES por consulta.
 // v2.7 (17/09/2026): operandos da BASE MANUAL — ref `manual:<chave>` (0142)
 //   vira a soma dos lançamentos DIGITADOS que caem no recorte. Ao contrário do
 //   `meta:` (v2.5), ele NÃO é abaixado para const: entra como CHAVE DE BASIS,
@@ -1111,7 +1119,13 @@ export function validateCondAggRefs(
   const targets = new Set<string>();
   const conds = new Set<string>();
   const nested = new Set<string>();
-  const goals = new Set<string>();
+  // v2.8 (17/09/2026): VALORES por consulta — meta (GOAL_GROUP) e número
+  // digitado da Base manual (MANUAL_GROUP). O nome antigo era `goals`, e foi
+  // ele que escondeu o furo: o comentário abaixo e o cabeçalho da v2.7 já
+  // diziam que o operando manual valia fora de SOMASE, mas só o grupo de META
+  // era recolhido aqui — toda fórmula que citasse a Base manual era REJEITADA
+  // no save, com a mensagem de "só dentro de SOMASE".
+  const perQueryValues = new Set<string>();
   for (const o of catalog) {
     // Campos numéricos (grupo alvo) também valem como coluna de CONDIÇÃO
     // (ex.: CONT.SE([Valor] > 1000)) — o SE() permite comparação numérica e a
@@ -1121,7 +1135,8 @@ export function validateCondAggRefs(
       conds.add(o.ref);
     } else if (o.group === COND_AGG_COND_GROUP) conds.add(o.ref);
     else if (o.group === AGG_NESTED_GROUP) nested.add(o.ref);
-    else if (o.group === GOAL_GROUP) goals.add(o.ref);
+    else if (o.group === GOAL_GROUP || o.group === MANUAL_GROUP)
+      perQueryValues.add(o.ref);
   }
   const labelOf = (ref: string) =>
     catalog.find((o) => o.ref === ref)?.label ?? ref;
@@ -1139,7 +1154,7 @@ export function validateCondAggRefs(
       !ref.startsWith("agg:") &&
       !ref.startsWith("aggif:") &&
       !nested.has(ref) &&
-      !goals.has(ref)
+      !perQueryValues.has(ref)
     ) {
       return {
         ok: false,

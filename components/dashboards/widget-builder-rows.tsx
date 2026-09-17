@@ -1,3 +1,10 @@
+// Versão: 2.5 | Data: 17/09/2026
+// v2.5 (17/09/2026): MetricRow ganha `isManual` (métrica da Base manual,
+//   0142). O valor da linha É a soma dos lançamentos que caem no recorte
+//   (applyManualBase), então a AGREGAÇÃO não tem efeito — fica desabilitada,
+//   como já acontece na contagem de registros. Somem também o menu
+//   "Configurar campo" (não há field_definitions para uma série) e o bloco de
+//   Bases da métrica (a Base manual não tem record_type).
 // Versão: 2.4 | Data: 07/08/2026
 // v2.4 (07/08/2026): DimensionRow ganha a seção recolhível "Expressão
 //   condicional" (Dimension.caseFormula) — FormulaEditor (contexto record,
@@ -528,6 +535,7 @@ export function MetricRow({
   isMoney,
   isAggCalc,
   isCalcSentinel,
+  isManual,
   calcRefs,
   sourceDefs,
   previewAdapter,
@@ -547,6 +555,9 @@ export function MetricRow({
   isMoney: boolean;
   isAggCalc: boolean;
   isCalcSentinel: boolean;
+  // Métrica da Base manual (`manual:<chave>`): sem agregação, sem menu de
+  // campo e sem Bases — v2.5.
+  isManual: boolean;
   calcRefs: RefOption[];
   // Catálogo de fontes vivo — warnings de escopo @fonte do FormulaEditor.
   sourceDefs?: SourceDef[];
@@ -614,12 +625,12 @@ export function MetricRow({
             searchable={false}
             options={aggOptions}
             value={metric.agg}
-            disabled={metric.field === "*"}
+            disabled={metric.field === "*" || isManual}
             onValueChange={(a) => onChange({ agg: a as Aggregation })}
             aria-label="Agregação"
           />
         )}
-        {metric.field && metric.field !== "*" && !isCalcSentinel
+        {metric.field && metric.field !== "*" && !isCalcSentinel && !isManual
           ? fieldMenu
           : null}
         <Button type="button" variant="ghost" size="icon" onClick={onRemove}>
@@ -811,7 +822,7 @@ export function MetricRow({
           ) : null}
         </div>
       ) : null}
-      {metric.field && sourceOptions && sourceOptions.length > 1 ? (
+      {metric.field && !isManual && sourceOptions && sourceOptions.length > 1 ? (
         <div className="flex flex-col gap-2 rounded-md border p-2">
           <div className="flex items-center gap-1.5 self-start">
             <button

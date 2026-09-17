@@ -1,3 +1,11 @@
+// Versão: 1.13 | Data: 17/09/2026
+// v1.13 (17/09/2026): RÓTULO da métrica da Base manual. Uma métrica
+// `manual:<chave>` (que o engine já resolvia desde a 0142, e que agora o
+// construtor oferta) não é um AvailableField — o `fieldLabel` devolvia o ref
+// cru e o eixo saía "Soma · manual:emails_replied". runWidget resolve pelo
+// `manualBase.series` que já carregou; runWidgetByPeriod, que degrada a
+// métrica para "—" por design, lê só os DADOS (loadManualSeries, cache()d)
+// para não exibir o ref no cabeçalho.
 // Versão: 1.12 | Data: 31/07/2026
 // v1.12 (31/07/2026): operando de META (`meta:<chave>`) — após montar
 // calcResolved (runWidget/runWidgetByPeriod), as chaves de meta das fórmulas
@@ -131,10 +139,11 @@ import {
   hasManualRefs,
 } from "@/lib/manual-base/resolve";
 import { manualDimPlans } from "@/lib/manual-base/buckets";
-import { loadManualBase } from "@/lib/manual-base/load";
+import { loadManualBase, loadManualSeries } from "@/lib/manual-base/load";
 import {
   EMPTY_MANUAL_BASE,
   isManualBasisKey,
+  manualSeriesLabel,
   parseManualRef,
   type ManualBaseData,
 } from "@/lib/manual-base/types";
@@ -1563,6 +1572,14 @@ async function runWidgetByPeriod(
         : "";
     return { key: `dim_${i + 1}`, label: d.label?.trim() || `${base}${suffix}` };
   });
+  // Base manual (v1.13): este caminho DEGRADA a métrica manual para "—" (não há
+  // registro a que atribuir o número — §4.26), mas o cabeçalho ainda precisa do
+  // rótulo do dado; sem isto sairia o ref cru. Só os DADOS, não os lançamentos,
+  // e só quando alguma métrica os cita (loadManualSeries é cache()d por
+  // request).
+  const periodManualSeries = config.metrics.some((m) => parseManualRef(m.field))
+    ? await loadManualSeries(supabase)
+    : [];
   const metrics = config.metrics.map((m, i) => {
     const rc = calcResolved.get(i);
     if (rc) {
@@ -1588,6 +1605,7 @@ async function runWidgetByPeriod(
       key: `metric_${i + 1}`,
       label:
         m.label?.trim() ||
+        manualSeriesLabel(m.field, periodManualSeries) ||
         (fn === "individual"
           ? fieldLabel(m.field, available)
           : `${DATE_AGG_LABELS[fn]} · ${fieldLabel(m.field, available)}`),
@@ -3250,7 +3268,13 @@ export async function runWidget(
     }
     return {
       key: `metric_${i + 1}`,
-      label: m.label?.trim() || `${AGG_LABELS[m.agg]} · ${fieldLabel(m.field, available)}`,
+      // Base manual (v1.13): a série não está em `available` — sem isto o
+      // rótulo sairia "Soma · manual:<chave>". `manualBase` já foi carregado
+      // bem antes, no gate de `usesManual`.
+      label:
+        m.label?.trim() ||
+        manualSeriesLabel(m.field, manualBase.series) ||
+        `${AGG_LABELS[m.agg]} · ${fieldLabel(m.field, available)}`,
       isMoney: isMoneyMetric(m, available),
       // Percentual: soma/média de campo percentual exibem ×100 + "%"; contagem
       // nunca (contagem é contagem).

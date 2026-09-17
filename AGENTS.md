@@ -2060,7 +2060,18 @@ This version has breaking changes — APIs, conventions, and file structure may 
   (`[]` em plan-editor/plan-validate/ai-comp-plan): ali vira dinheiro na folha,
   e "—" silencioso seria erro de pagamento. `AggCatalogInput.manualSeries` é
   OBRIGATÓRIO (molde do `goalMetrics`): sítio esquecido é erro de compilação,
-  nunca save rejeitando fórmula que o editor aceitou. Escrita por choke point
+  nunca save rejeitando fórmula que o editor aceitou — **mas o catálogo é só
+  METADE (17/09/2026)**: grupo novo tem oferta E validação, e só a oferta tem
+  guarda de tipo. O `MANUAL_GROUP` era ofertado e RECUSADO no save porque
+  `validateCondAggRefs` só recolhia `GOAL_GROUP` no allowlist de topo (hoje
+  `perQueryValues`, os dois VALORES por consulta; pinado em
+  `calc-metrics.test.ts`). `manual:<chave>` é também campo de MÉTRICA direta
+  (`field`, sem `agg` — o valor já é a soma do recorte), NUNCA dimensão, filtro
+  ou coluna: por isso o prefixo fica FORA do `checkRef` do import (que vale para
+  os três) e entra num ramo próprio da métrica, com chave desconhecida como ERRO.
+  Rótulo SÓ por `manualSeriesLabel` (a série não é `AvailableField` — o
+  `fieldLabel` devolveria o ref cru), nos dois sítios de rótulo do engine.
+  Escrita por choke point
   ÚNICO (`app/(app)/registros/base-manual/actions.ts`) para as TRÊS superfícies
   — página de Registros, ⋮ do dashboard e o widget `base_manual` —, sempre com
   o client RLS do usuário e org carimbada (falha ALTO sem org ativa); o widget

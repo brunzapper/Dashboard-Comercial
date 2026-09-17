@@ -5888,6 +5888,57 @@ rejeitando fórmula que o editor aceitou. Foram 14 sítios na introdução.
 `buildManualFields` não existe como lista paralela — os refs saem de
 `manualOperandRefs` (calc-metrics), e só de lá.
 
+E o catálogo obrigatório **não bastou** (17/09/2026). O operando era ofertado
+corretamente e **recusado no save**: `validateCondAggRefs` monta o allowlist dos
+refs válidos FORA de SOMASE percorrendo o catálogo, e só recolhia `GOAL_GROUP` —
+embora o comentário ao lado e o cabeçalho da v2.7 afirmassem que o
+`MANUAL_GROUP` compartilhava o allowlist. Toda fórmula que citasse um número
+digitado — inclusive a conta que motivou o recurso — morria com a mensagem
+"só pode aparecer dentro de SOMASE/CONT.SE/MÉDIASE", nos seis call sites
+(widget calculado, métrica ad-hoc, Nota, e o validador do servidor que cobre
+/campos e o save de widget). A lição não é o `else if` esquecido: é que **um
+grupo novo no catálogo tem DOIS lados** — a oferta e a validação — e só o
+primeiro tem teste de tipo. O set passou a chamar-se `perQueryValues` (o que ele
+de fato guarda: meta e Base manual, os dois VALORES por consulta) e
+`calc-metrics.test.ts` ganhou o caso que faltava, espelho do que já existia
+para o `meta:`.
+
+#### A métrica DIRETA (17/09/2026)
+
+`field: "manual:<chave>"` — uma métrica que é o número digitado, sem fórmula
+nenhuma. O ENGINE sempre soube resolvê-la (`parseManualRef` em `runWidget`,
+`applyManualBase` gravando `row[metric_N]`, com testes em
+`lib/manual-base/engine.test.ts`); o que não existia era como **criar** uma:
+nem o construtor a ofertava, nem o importador a aceitava. Era uma capacidade
+testada que nenhum caminho de escrita alcançava — e a queixa que a revelou foi
+exatamente essa ("tentei adicionar como Métrica e não achei"), com o manual de
+construção §2.7 já prometendo o dropdown.
+
+- **Construtor**: as séries entram em `metricOptions` (widget-builder) com
+  `group: MANUAL_GROUP` e **sem `chips`**, como os sentinelas `*` e
+  `calc:formula` — a Base manual não pertence a Base alguma, então aparece em
+  qualquer chip de fonte. Na linha, `isManual` desliga três controles que não
+  significam nada ali: a AGREGAÇÃO (o valor já é a soma dos lançamentos do
+  recorte — `agg` é ignorada pelo engine), o menu "Configurar campo" (não há
+  `field_definitions` para uma série) e "Bases da métrica" (sem `record_type`).
+- **Rótulo**: a série não é `AvailableField`, então `fieldLabel` devolvia o ref
+  cru e o eixo sairia "Soma · manual:emails_replied". Dono único da resolução é
+  `manualSeriesLabel` (`lib/manual-base/types.ts`), consumido pelo construtor e
+  pelos dois sítios de rótulo do engine — `runWidget` (que já tem
+  `manualBase.series` carregado) e `runWidgetByPeriod`, que **degrada a métrica
+  para "—" por design** mas ainda precisa do cabeçalho certo, e por isso lê só
+  os DADOS via `loadManualSeries` (`cache()`d).
+- **Importador**: o prefixo **NÃO** entrou no `checkRef`, que também valida
+  dimensão, filtro e coluna — afrouxar ali abriria as três, e a Base manual não
+  é projetável como dimensão nem filtrável. O ramo vive na métrica
+  NÃO-calculada; chave desconhecida é **erro**, não aviso (mesmo critério do
+  contrato `base-manual-edit`: quem acabou de colar pode corrigir a grafia, e
+  não o `FK_NO_MATCH` silencioso do runtime). `agg` diferente de `sum` avisa e
+  é ignorada.
+- **SPEC/modelo**: o dump enviado à IA (`import-prompt-actions`, único sítio que
+  o monta) passou a levar `manual_series` ao lado de `goal_metrics` — sem as
+  chaves, documentar o operando não adiantaria nada.
+
 #### Três superfícies, um gestor
 
 `components/manual-base/manual-base-manager.tsx` serve as três:

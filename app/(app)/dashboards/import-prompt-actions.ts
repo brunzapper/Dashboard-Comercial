@@ -1,3 +1,9 @@
+// Versão: 1.3 | Data: 17/09/2026
+// v1.3 (17/09/2026): o modelo passa a levar `manual_series` (Base manual,
+//   0142) ao lado de `goal_metrics`. Sem isso a IA não tinha como saber que
+//   chaves de `manual:<chave>` existem — nem para o operando de fórmula, nem
+//   para a métrica direta. Este é o ÚNICO sítio que monta o dump do modelo
+//   (o painel "Editar com IA" reusa).
 // Versão: 1.2 | Data: 30/07/2026
 // v1.2 (30/07/2026): sampleForBase/truncate extraídos p/ lib/import/sample-db.ts
 //   (compartilhados com o prompt de inserção de registros por IA) — sem mudança
@@ -25,6 +31,7 @@ import { getSessionInfo } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
 import { loadSources } from "@/lib/config/sources";
 import { loadGoalMetrics } from "@/lib/config/goal-metrics";
+import { loadManualSeries } from "@/lib/manual-base/load";
 import { fieldAppliesToSource, recordTypeOf, type SourceDef } from "@/lib/sources";
 import { CORE_FIELDS } from "@/lib/widgets/fields";
 import { isCoreDef } from "@/lib/records/core-defs";
@@ -118,6 +125,7 @@ export async function buildImportPrompt(
     { data: opData },
     { data: matchData },
     goalMetrics,
+    manualSeries,
   ] = await Promise.all([
     supabase
       .from("field_definitions")
@@ -135,6 +143,7 @@ export async function buildImportPrompt(
       .select("label, source_a, source_b, field_a_1, field_b_1, field_a_2, field_b_2")
       .eq("enabled", true),
     loadGoalMetrics(supabase),
+    loadManualSeries(supabase),
   ]);
   const defs = (defsData ?? []) as FieldDefRow[];
   const respLabels = new Map(
@@ -287,6 +296,9 @@ export async function buildImportPrompt(
     operacoes: [...opLabels.values()].sort(),
     // Chaves válidas do operando de fórmula [meta:<chave>] (31/07/2026).
     goal_metrics: goalMetrics.map((m) => ({ chave: m.key, rotulo: m.label })),
+    // Base manual (v1.3): chaves de [manual:<chave>] — operando de fórmula E
+    // campo de métrica direta. Números DIGITADOS, fora de `records`.
+    manual_series: manualSeries.map((m) => ({ chave: m.key, rotulo: m.label })),
   };
 
   const sampleNote = [

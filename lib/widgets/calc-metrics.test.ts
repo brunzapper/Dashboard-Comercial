@@ -1,3 +1,6 @@
+// Versão: 1.3 | Data: 17/09/2026 (v1.3: operandos da BASE MANUAL no allowlist
+// de topo de validateCondAggRefs — o caso que faltava e deixou o furo da v2.7
+// passar: o grupo era ofertado no catálogo e recusado no save)
 // Versão: 1.2 | Data: 01/08/2026 (v1.2: recorte monetário VAZIO vale 0 —
 // identidade aditiva; null fica só p/ chave AUSENTE)
 // Versão: 1.1 | Data: 31/07/2026 (v1.1: operandos de META — parse/coleta/
@@ -11,6 +14,7 @@
 import { describe, expect, it } from "vitest";
 
 import { condAggKey, type Formula, type FormulaToken } from "@/lib/records/formulas";
+import { MANUAL_GROUP } from "@/lib/manual-base/types";
 import { BUILTIN_SOURCES, type SourceDef } from "@/lib/sources";
 import {
   basisKeysFor,
@@ -21,6 +25,7 @@ import {
   goalOperandKeys,
   goalOperandRefs,
   lowerGoalOperands,
+  manualOperandRefs,
   lowerSourceScopedOperands,
   parseAggRef,
   parseCondBasisKey,
@@ -641,6 +646,51 @@ describe("operandos de META (meta:<chave>)", () => {
         { kind: "func", name: "SOMASE" },
         { kind: "lparen" },
         ref("meta:mrr"),
+        { kind: "argsep" },
+        ref("pipeline"),
+        { kind: "cmp", op: "=" },
+        { kind: "const", value: 1 },
+        { kind: "rparen" }
+      ),
+      catalog
+    );
+    expect(alvo.ok).toBe(false);
+    expect(alvo.error).toContain("1º argumento");
+  });
+
+  it("manualOperandRefs emite grupo Base manual com o rótulo do dado", () => {
+    expect(
+      manualOperandRefs([
+        { id: "a", key: "emails_replied", label: "# Emails replied" },
+        { id: "b", key: "msgs", label: "Mensagens enviadas" },
+      ] as never)
+    ).toEqual([
+      { ref: "manual:emails_replied", label: "# Emails replied", group: MANUAL_GROUP },
+      { ref: "manual:msgs", label: "Mensagens enviadas", group: MANUAL_GROUP },
+    ]);
+  });
+
+  // O furo da v2.7: o operando manual era OFERTADO pelo catálogo e RECUSADO no
+  // save, porque só o GOAL_GROUP entrava no allowlist de topo. É a conta que
+  // motivou o recurso — contagem de registros dividida por um número digitado.
+  it("validateCondAggRefs: Base manual fora de SOMASE ok; alvo de SOMASE rejeitado", () => {
+    const catalog = [
+      { ref: "agg:count:*", label: "Contagem de registros" },
+      { ref: "manual:emails_replied", label: "# Emails replied", group: MANUAL_GROUP },
+      { ref: "value", label: "Valor", group: "Campos (SOMASE/MÉDIASE)" },
+      { ref: "pipeline", label: "Etapa", group: "Condições (SOMASE/CONT.SE)" },
+    ];
+    const ok = validateCondAggRefs(
+      f(ref("agg:count:*"), { kind: "op", op: "/" }, ref("manual:emails_replied")),
+      catalog
+    );
+    expect(ok.ok).toBe(true);
+    // Dentro de SOMASE segue rejeitado pela mensagem de campo numérico.
+    const alvo = validateCondAggRefs(
+      f(
+        { kind: "func", name: "SOMASE" },
+        { kind: "lparen" },
+        ref("manual:emails_replied"),
         { kind: "argsep" },
         ref("pipeline"),
         { kind: "cmp", op: "=" },
