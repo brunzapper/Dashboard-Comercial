@@ -1,4 +1,8 @@
-// Versão: 1.1 | Data: 10/09/2026
+// Versão: 1.2 | Data: 17/09/2026
+// v1.2 (17/09/2026): repassa `onNotice` — o aviso de que o Gemini rebaixou de
+//   modelo por sobrecarga (lib/ai/model-fallback.ts). É canal PRÓPRIO, não o
+//   `onThought`: a tela rotula aquele texto como "Raciocínio:", e trocar de
+//   degrau é decisão do sistema, não pensamento do modelo.
 // v1.1 (10/09/2026): a mensagem de falha de TRANSPORTE não repete o nome do
 //   provedor. O adaptador já se apresenta ("Gemini está sobrecarregado…"), e o
 //   prefixo daqui virava "Falha ao chamar a IA (gemini): Gemini está…". As
@@ -33,7 +37,7 @@ export function aiSection(title: string, body: string): string {
  * Como o adaptador do provedor se apresenta nas mensagens de erro ("Gemini",
  * "Claude", "OpenAI") — a config guarda a chave em minúsculas.
  */
-function providerLabel(provider: string): string {
+export function providerLabel(provider: string): string {
   return provider === "openai"
     ? "OpenAI"
     : provider.charAt(0).toUpperCase() + provider.slice(1);
@@ -58,6 +62,8 @@ export async function runJsonGenerationLoop<T>(opts: {
     | { ok: false; errors: string[] }
     | Promise<{ ok: true; value: T } | { ok: false; errors: string[] }>;
   onThought?: (chunk: string) => void;
+  /** Avisos do sistema sobre a chamada (hoje: rebaixamento de modelo). */
+  onNotice?: (text: string) => void;
 }): Promise<JsonLoopResult<T>> {
   const t0 = Date.now();
   const client = getAiClient(opts.config);
@@ -86,6 +92,7 @@ export async function runJsonGenerationLoop<T>(opts: {
         messages,
         signal: AbortSignal.timeout(AI_LOOP_CALL_TIMEOUT_MS),
         onThought: opts.onThought,
+        onNotice: opts.onNotice,
       });
     } catch (err) {
       if (err instanceof AiTruncatedError) {

@@ -106,6 +106,9 @@ export function AiEditPanel({
   // raciocínio ao vivo acumulado do stream (efêmero — zera ao concluir).
   const [turnBusy, setTurnBusy] = useState(false);
   const [liveThought, setLiveThought] = useState("");
+  // Aviso do sistema (rebaixamento de modelo): frase INTEIRA por evento, então
+  // substitui em vez de concatenar como o raciocínio.
+  const [liveNotice, setLiveNotice] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const aiReady = Boolean(ai?.hasKey);
@@ -170,6 +173,7 @@ export function AiEditPanel({
     setMessage("");
     setNotice(null);
     setLiveThought("");
+    setLiveNotice("");
     setTurnBusy(true);
     try {
       const res = await fetch(`/api/dashboards/${dashboardId}/ai-turn`, {
@@ -179,6 +183,7 @@ export function AiEditPanel({
       });
       const state = await readNdjsonTurn<AiEditSessionState>(res, {
         onThought: (chunk) => setLiveThought((t) => t + chunk),
+        onNotice: setLiveNotice,
       });
       absorb(state);
     } catch (err) {
@@ -189,6 +194,7 @@ export function AiEditPanel({
     } finally {
       setTurnBusy(false);
       setLiveThought("");
+      setLiveNotice("");
     }
   }
 
@@ -306,6 +312,7 @@ export function AiEditPanel({
                   : "Gerando com IA…"
               }
               busyDetail={turnBusy ? liveThought || undefined : undefined}
+              busyNotice={turnBusy ? liveNotice || undefined : undefined}
               className="min-h-0 flex-1"
             />
 

@@ -60,6 +60,8 @@ export interface GenerateManualBaseInput {
   /** Prévia pendente — a resposta SUBSTITUI a proposta inteira. */
   pendingJson?: string;
   onThought?: (chunk: string) => void;
+  /** Aviso do sistema (rebaixamento de modelo) — efêmero, como o raciocínio. */
+  onNotice?: (text: string) => void;
 }
 
 export interface ManualBaseGenerateState {
@@ -229,6 +231,7 @@ export async function generateManualBaseCore(
     priorTurns: input.priorTurns ?? [],
     description,
     onThought: input.onThought,
+    onNotice: input.onNotice,
     validate: (raw) => {
       const v = validateManualBaseEdit(raw, ctx);
       if (!v.ok) return { ok: false, errors: v.errors };
@@ -380,6 +383,7 @@ export async function applyManualBaseCore(
 export async function runManualBaseTurnCore(input: {
   description: string;
   onThought?: (chunk: string) => void;
+  onNotice?: (text: string) => void;
 }): Promise<ManualBaseTurnState> {
   const k = await manualBaseSessionKey();
   if (!k.ok) {
@@ -401,6 +405,7 @@ export async function runManualBaseTurnCore(input: {
     priorTurns: row.turns,
     pendingJson: row.pending?.json,
     onThought: input.onThought,
+    onNotice: input.onNotice,
   });
 
   // Turno que FALHOU entra no log (o usuário precisa ver o que deu errado) mas

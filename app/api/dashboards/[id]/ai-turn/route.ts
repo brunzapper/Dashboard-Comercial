@@ -6,6 +6,8 @@
 // NDJSON:
 //   {"type":"thought","text":"…"}   ← trechos do raciocínio (efêmeros; só onde
 //                                     o modelo já raciocina por padrão — Gemini)
+//   {"type":"notice","text":"…"}   ← aviso do SISTEMA (rebaixamento de modelo
+//                                    por sobrecarga) — efêmero também.
 //   {"type":"state", "state":{…}}   ← AiEditSessionState canônico, SEMPRE por
 //                                     último (inclusive erros de gate)
 // Auth pelos cookies do usuário (createClient/getSessionInfo dentro do gate);
@@ -61,8 +63,12 @@ export async function POST(
         }
       };
       try {
-        const state = await runAiEditTurnCore(id, message, autoApply, (chunk) =>
-          push({ type: "thought", text: chunk })
+        const state = await runAiEditTurnCore(
+          id,
+          message,
+          autoApply,
+          (chunk) => push({ type: "thought", text: chunk }),
+          (text) => push({ type: "notice", text })
         );
         push({ type: "state", state });
       } catch (err) {

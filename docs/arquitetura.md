@@ -1,3 +1,12 @@
+<!-- Versão: 1.95 | Data: 17/09/2026 -->
+<!-- v1.95 (17/09/2026): §4.17 — o Gemini REBAIXA de modelo quando o degrau
+     atual satura (escada cronológica em lib/ai/models.ts, até 3 modelos,
+     política única em lib/ai/model-fallback.ts pendurada no getAiClient). O
+     erro de transporte virou tipado (AiHttpError/AiOverloadError) — é ele que
+     distingue "o modelo está lotado" de "a chave está errada" sem ler a frase
+     de tela —, o aviso ganhou canal próprio (onNotice → evento NDJSON
+     `notice`) e o catálogo de modelos foi atualizado (o 2.0-flash foi
+     desligado pelo Google). -->
 <!-- Versão: 1.94 | Data: 12/09/2026 -->
 <!-- v1.94 (12/09/2026): §4.23 — a tela do formulário do Workflow ganha os
      lançamentos recentes ao lado (com link do CRM) e o "Preencher com IA"
@@ -2774,6 +2783,53 @@ EDITAR (alvo = o próprio board), com a sessão persistida em banco
   reinicia, senão o painel veria raciocínio duplicado. O corpo de erro cru do
   provedor deixou de ir para a tela: `overloadMessage` vira uma frase e
   aproveita o `error.message` de dentro do JSON.
+
+  **E, esgotado o transporte, o Gemini REBAIXA de modelo (17/09/2026).**
+  Repetir três vezes no mesmo modelo não resolve sobrecarga: ela é DO MODELO,
+  e o degrau anterior costuma responder no mesmo minuto. A escada é
+  `GEMINI_MODEL_LADDER` (`lib/ai/models.ts`) e é CRONOLÓGICA — "a próxima
+  inferior por ordem de lançamento", o que significa que um degrau pode ser
+  mais capaz que o anterior (`gemini-3.5-flash-lite` saiu depois de
+  `gemini-3.5-flash`); reordenar por preço ou tamanho mudaria em silêncio o
+  que o rebaixamento faz. A política vive em `lib/ai/model-fallback.ts`,
+  pendurada no `case "gemini"` do `getAiClient`: dono ÚNICO, nunca por
+  adaptador nem por superfície (mesma razão do `fetchProvider`), e as duas
+  call sites herdam sem saber. Teto `GEMINI_MODEL_ATTEMPTS = 3` modelos.
+
+  A LINHA de quando descer é o que o erro TIPADO destravou: só
+  `AiOverloadError` — a sobrecarga esgotada — COMEÇA a descida. 404 no modelo
+  CONFIGURADO não desce, porque é nome errado ou org sem acesso e a pessoa
+  precisa ler isso para arrumar o campo; 401/403/400, `AiTruncatedError`,
+  bloqueio de segurança, timeout e queda de rede propagam intactos (modelo
+  menor não conserta prompt grande, e chave errada vale para a conta inteira).
+  Num CANDIDATO, só `AiHttpError` continua descendo — é o "esta org não tem
+  acesso a esse degrau", e aquele degrau não foi escolha de ninguém. O erro
+  que sobra é o overload ORIGINAL com os modelos tentados anexados, e a frase
+  continua começando com "Gemini": é por `startsWith(providerLabel)` que o
+  `json-loop` decide repetir ou não o nome do provedor — e o
+  `generateDashboardCore` passou a usar o MESMO helper, em vez de prefixar
+  sempre (mostrava "Falha ao chamar a IA (gemini): Gemini está…").
+
+  Modelo FORA da escada NÃO rebaixa. Ele é texto livre
+  (`ai_provider_config.model` não tem check) e o casamento é por normalização
+  (`models/`, caixa) + o MAIOR prefixo com fronteira `-`, então uma variante
+  datada casa o degrau dela e tenta primeiro o estável do próprio degrau. Já
+  um nome que a escada não conhece é, quase sempre, um modelo lançado DEPOIS
+  dela — a lista envelhece sozinha —, e cair no topo promoveria em silêncio
+  para um modelo que ninguém escolheu, com outro preço. Sem casamento o
+  comportamento é idêntico ao anterior, e a tela de Integrações diz isso.
+
+  O aviso de que trocou de degrau tem canal PRÓPRIO: `onNotice` →
+  `{"type":"notice"}` no NDJSON → `busyNotice` do `AiChatLog`, exibido SEM o
+  rótulo "Raciocínio:" — passar pelo `onThought` teria sido mais barato e
+  atribuiria ao MODELO uma decisão da infraestrutura, além de ligar
+  `includeThoughts` onde ele vem desligado (a regra de custo acima). Chegam
+  nele os painéis com cano: Editar com IA, dock da Tree, Base manual e o
+  formulário do Workflow; as superfícies de Server Action ficam com o log do
+  servidor e a mensagem final. E a escada divide o
+  `AbortSignal.timeout(120_000)` do chamador com as tentativas de VALIDAÇÃO —
+  daí o corte próprio de 60 s, mais as travas de `signal.aborted` e de
+  já-emitiu (nada rebaixa depois que o stream falou com a tela).
 - **Desfazer/Recomeçar**: o snapshot pré-turno do último apply
   (`EditDashboardState.snapshot`) é persistido em `undo_snapshot` —
   `undoAiEditSession` restaura via `restoreDashboardSnapshot` e limpa (sempre a

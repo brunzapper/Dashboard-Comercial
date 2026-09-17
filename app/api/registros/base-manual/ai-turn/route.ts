@@ -11,6 +11,8 @@
 // A rota roda o MESMO `runManualBaseTurnCore`: gate, turnos e persistência
 // ficam no núcleo, nunca duplicados aqui. Devolve NDJSON:
 //   {"type":"thought","text":"…"}  ← raciocínio (efêmero, nunca persistido)
+//   {"type":"notice","text":"…"}   ← aviso do SISTEMA (rebaixamento de modelo
+//                                    por sobrecarga) — efêmero também.
 //   {"type":"state","state":{…}}   ← o resultado, SEMPRE por último
 //
 // Só o TURNO saiu das actions. Abrir o fio, aplicar, colar JSON e descartar
@@ -59,6 +61,7 @@ export async function POST(request: Request) {
         const state = await runManualBaseTurnCore({
           description,
           onThought: (text) => push({ type: "thought", text }),
+          onNotice: (text) => push({ type: "notice", text }),
         });
         push({ type: "state", state });
       } catch (err) {

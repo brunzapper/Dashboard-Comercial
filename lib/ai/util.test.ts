@@ -1,4 +1,8 @@
-// Versão: 1.0 | Data: 10/09/2026
+// Versão: 1.1 | Data: 17/09/2026
+// v1.1 (17/09/2026): as duas falhas agora são CLASSES, e é por elas que o
+//   rebaixamento de modelo decide se desce um degrau. O que se pina aqui é a
+//   linha entre os tipos — e que a FRASE não mudou um byte ao ganhar classe
+//   (ela é contrato do `startsWith(providerLabel)` da json-loop).
 // A RETENTATIVA de transporte da IA.
 //
 // O caso real que ela existe para resolver: o Gemini devolveu 503 ("high
@@ -20,6 +24,7 @@ import {
   retryAfterMs,
   streamProviderSse,
 } from "./util";
+import { AiHttpError, AiOverloadError } from "./types";
 
 /** Sem espera real: as retentativas seriam segundos de teste por caso. */
 beforeEach(() => {
@@ -196,5 +201,51 @@ describe("a frase que o usuário lê", () => {
     const msg = overloadMessage("Gemini", 503, "<html>502 Bad Gateway</html>");
     expect(msg).toContain("(503)");
     expect(msg).not.toContain("<html>");
+  });
+});
+
+describe("a falha vira classe, e a frase continua a mesma", () => {
+  it("sobrecarga esgotada é AiOverloadError com status, corpo e frase idêntica", async () => {
+    const body = JSON.stringify(OVERLOADED);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(body, { status: 503 }))
+    );
+
+    const err = await postProviderJson("Gemini", "u", {}).catch((e) => e);
+    expect(err).toBeInstanceOf(AiOverloadError);
+    expect((err as AiOverloadError).status).toBe(503);
+    expect((err as AiOverloadError).body).toBe(body);
+    expect((err as AiOverloadError).provider).toBe("Gemini");
+    // Byte-identidade: é esta frase que o json-loop reconhece pelo prefixo.
+    expect((err as AiOverloadError).message).toBe(
+      overloadMessage("Gemini", 503, body)
+    );
+  });
+
+  it("4xx de contrato é AiHttpError, e NÃO é sobrecarga", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response("chave inválida", { status: 403 }))
+    );
+
+    const err = await postProviderJson("Gemini", "u", {}).catch((e) => e);
+    expect(err).toBeInstanceOf(AiHttpError);
+    expect(err).not.toBeInstanceOf(AiOverloadError);
+    expect((err as AiHttpError).status).toBe(403);
+    expect((err as AiHttpError).message).toBe("Gemini respondeu 403: chave inválida");
+  });
+
+  it("timeout continua Error simples — abort nunca pode virar rebaixamento", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new DOMException("timed out", "TimeoutError");
+      })
+    );
+
+    const err = await postProviderJson("Gemini", "u", {}).catch((e) => e);
+    expect(err).toBeInstanceOf(Error);
+    expect(err).not.toBeInstanceOf(AiHttpError);
   });
 });

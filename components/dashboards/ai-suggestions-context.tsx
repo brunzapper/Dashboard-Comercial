@@ -54,6 +54,11 @@ interface AiSuggestions {
    * Efêmero: nada disto vai para a linha.
    */
   thoughts: Map<string, string>;
+  /**
+   * Avisos do SISTEMA por fio (hoje: o Gemini rebaixou de modelo). Também por
+   * fio, e pela mesma razão. Frase inteira por evento — substitui, não soma.
+   */
+  notices: Map<string, string>;
   /** Fio aberto no dock (null = nenhum). */
   openId: string | null;
   open: (id: string | null) => void;
@@ -83,6 +88,7 @@ export function AiSuggestionsProvider({
   const [openId, setOpenId] = useState<string | null>(null);
   const [minimized, setMinimized] = useState(false);
   const [thoughts, setThoughts] = useState<Map<string, string>>(new Map());
+  const [notices, setNotices] = useState<Map<string, string>>(new Map());
 
   // Uma carga só, na montagem: reencontra as conversas que ficaram esperando
   // confirmação de antes do F5. Não fica em polling — quem muda a linha é este
@@ -147,6 +153,8 @@ export function AiSuggestionsProvider({
             next.set(threadId, (next.get(threadId) ?? "") + chunk);
             return next;
           }),
+        onNotice: (text) =>
+          setNotices((prev) => new Map(prev).set(threadId, text)),
       });
       if (state.thread) return state.thread;
       notifyActionError("A análise falhou", state.message);
@@ -222,6 +230,7 @@ export function AiSuggestionsProvider({
       threads,
       busy,
       thoughts,
+      notices,
       openId,
       open: setOpenId,
       minimized,
@@ -230,7 +239,7 @@ export function AiSuggestionsProvider({
       reply,
       close,
     }),
-    [threads, busy, thoughts, openId, minimized, start, reply, close]
+    [threads, busy, thoughts, notices, openId, minimized, start, reply, close]
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
@@ -245,6 +254,7 @@ const INERT: AiSuggestions = {
   threads: [],
   busy: new Set(),
   thoughts: new Map(),
+  notices: new Map(),
   openId: null,
   open: () => {},
   minimized: false,

@@ -170,7 +170,8 @@ export async function runAiEditTurnCore(
   dashboardId: string,
   message: string,
   autoApply: boolean,
-  onThought?: (chunk: string) => void
+  onThought?: (chunk: string) => void,
+  onNotice?: (text: string) => void
 ): Promise<AiEditSessionState> {
   const gate = await gateAiEdit(dashboardId);
   if (!gate.ok) return gateError(gate.message);
@@ -190,7 +191,8 @@ export async function runAiEditTurnCore(
       // nova SUBSTITUI a prévia — sem isso, "ajusta o que você propôs" falharia).
       pendingJson: row.pending?.json,
     },
-    onThought
+    onThought,
+    onNotice
   );
 
   const next: SessionRow = {

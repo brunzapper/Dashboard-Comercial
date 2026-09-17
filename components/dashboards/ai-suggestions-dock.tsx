@@ -190,6 +190,7 @@ export function AiSuggestionsDock() {
         busy={busy}
         busyLabel="Analisando o comentário…"
         busyDetail={dock.thoughts.get(thread.id)}
+        busyNotice={dock.notices.get(thread.id)}
         className="max-h-[40vh] min-h-16"
       />
 

@@ -1,4 +1,10 @@
-// Versão: 1.1 | Data: 30/07/2026
+// Versão: 1.2 | Data: 17/09/2026
+// v1.2 (17/09/2026): repassa `onNotice` (aviso de rebaixamento de modelo do
+//   Gemini) e para de prefixar o provedor numa mensagem que já se apresenta —
+//   a mesma desduplicação que a json-loop v1.1 ganhou, reusando o
+//   `providerLabel` dela em vez de recriá-lo. Sem isso o painel mostrava
+//   "Falha ao chamar a IA (gemini): Gemini está sobrecarregado…".
+// v1.1 (30/07/2026)
 // v1.1 (30/07/2026): MESCLA no modo "Criar a partir de" — `extraReferenceIds`
 //   (até MAX_EXTRA_REFS além da base): cada extra é exportada e fundida por
 //   fuseExtraReferences (multi-ref.ts) — keys prefixadas rN_, união de bases,
@@ -21,6 +27,7 @@ import { createClient } from "@/lib/supabase/server";
 import { loadSources } from "@/lib/config/sources";
 import { loadOrgAiConfig } from "@/lib/ai/config";
 import { getAiClient, AiTruncatedError, type AiMessage } from "@/lib/ai";
+import { providerLabel } from "@/lib/ai/json-loop";
 import { buildImportPrompt } from "@/app/(app)/dashboards/import-prompt-actions";
 import { loadImportContext } from "@/lib/import/dashboard/context";
 import {
@@ -247,7 +254,8 @@ async function applyFromReference(
  */
 export async function generateDashboardCore(
   input: GenerateDashboardInput,
-  onThought?: (chunk: string) => void
+  onThought?: (chunk: string) => void,
+  onNotice?: (text: string) => void
 ): Promise<GenerateDashboardState> {
   const t0 = Date.now();
   const mode: AiDashboardMode = input.mode ?? "new";
@@ -445,6 +453,7 @@ export async function generateDashboardCore(
         messages,
         signal: AbortSignal.timeout(CALL_TIMEOUT_MS),
         onThought,
+        onNotice,
       });
     } catch (err) {
       if (err instanceof AiTruncatedError) {
@@ -457,9 +466,14 @@ export async function generateDashboardCore(
         };
       }
       const msg = err instanceof Error ? err.message : String(err);
+      // A mensagem do adaptador já nomeia o provedor ("Gemini está
+      // sobrecarregado…"); prefixar de novo daria "…(gemini): Gemini está…".
+      // Mesma regra da json-loop v1.1, com o MESMO helper.
       return {
         ok: false,
-        message: `Falha ao chamar a IA (${aiConfig.provider}): ${msg}`,
+        message: msg.startsWith(providerLabel(aiConfig.provider))
+          ? msg
+          : `Falha ao chamar a IA (${aiConfig.provider}): ${msg}`,
         mode,
         chave,
       };
