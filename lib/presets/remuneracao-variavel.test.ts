@@ -88,7 +88,7 @@ const DEFS: AggCatalogDefRow[] = [
   },
 ];
 
-const catalog = buildAggOperandCatalog(defsAggCatalogInput(DEFS, SOURCES, []));
+const catalog = buildAggOperandCatalog(defsAggCatalogInput(DEFS, SOURCES, [], []));
 
 describe("preset remuneracao_variavel — planos", () => {
   it("todo plano passa pelo parse fail-closed com a MESMA injeção do apply", () => {

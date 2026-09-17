@@ -1,3 +1,7 @@
+// Versão: 1.1 | Data: 17/09/2026
+// v1.1 (17/09/2026): `manualSeries` (Base manual, 0142) — sem ele o validador
+//   recusaria um operando `manual:<chave>` que o editor de fórmula do
+//   construtor oferece.
 // Versão: 1.0 | Data: 23/07/2026
 // Monta o DashboardImportContext (catálogos que a validação pura precisa) a
 // partir do banco. Compartilhado por importDashboardJson (colar JSON) e pela
@@ -7,6 +11,7 @@ import "server-only";
 
 import { loadSources } from "@/lib/config/sources";
 import { loadGoalMetrics } from "@/lib/config/goal-metrics";
+import { loadManualSeries } from "@/lib/manual-base/load";
 import type { createClient } from "@/lib/supabase/server";
 import type {
   DashboardImportContext,
@@ -18,7 +23,7 @@ type ServerClient = Awaited<ReturnType<typeof createClient>>;
 export async function loadImportContext(
   supabase: ServerClient
 ): Promise<DashboardImportContext> {
-  const [sources, defsRes, corrRes, respRes, opRes, goalMetrics] =
+  const [sources, defsRes, corrRes, respRes, opRes, goalMetrics, manualSeries] =
     await Promise.all([
       loadSources(supabase),
       supabase
@@ -28,9 +33,11 @@ export async function loadImportContext(
       supabase.from("responsibles").select("display_name"),
       supabase.from("operations").select("name"),
       loadGoalMetrics(supabase),
+      loadManualSeries(supabase),
     ]);
   return {
     sources,
+    manualSeries,
     defs: ((defsRes.data ?? []) as Record<string, unknown>[]).map((d) => ({
       id: String(d.id),
       field_key: String(d.field_key),

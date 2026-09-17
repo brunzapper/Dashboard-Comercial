@@ -104,20 +104,22 @@ export interface ManualProjectionInput {
   plans: readonly ManualDimPlan[];
   period: ManualWindow;
   /** Agrupamento de responsáveis (0101): apelido → principal. O lançamento
-   *  atribuído a um apelido entra na linha do principal, como os registros. */
-  canonicalById?: Record<string, string> | null;
+   *  atribuído a um apelido entra na linha do principal, como os registros.
+   *  É o MESMO `Map` que o engine usa no mergeRowsByBucket — nunca converta
+   *  para objeto no caminho, ou os dois lados param de concordar. */
+  canonicalById?: ReadonlyMap<string, string> | null;
 }
 
 const canonResp = (
   id: string | null,
-  map: Record<string, string> | null | undefined
-): string | null => (id == null ? null : (map?.[id] ?? id));
+  map: ReadonlyMap<string, string> | null | undefined
+): string | null => (id == null ? null : (map?.get(id) ?? id));
 
 /** Dimensões do lançamento que NÃO variam por dia. */
 function staticDims(
   entry: ManualEntry,
   plans: readonly ManualDimPlan[],
-  canonicalById: Record<string, string> | null | undefined
+  canonicalById: ReadonlyMap<string, string> | null | undefined
 ): (ManualDimValue | undefined)[] {
   return plans.map((p) => {
     if (p.kind === "responsible") return canonResp(entry.responsible_id, canonicalById);

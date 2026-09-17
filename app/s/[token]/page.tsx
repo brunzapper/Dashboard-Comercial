@@ -47,6 +47,7 @@ import type { Metadata } from "next";
 
 import { createServiceClient } from "@/lib/supabase/service";
 import { snapshotClient } from "@/lib/snapshots/db-adapter";
+import { loadManualSeries } from "@/lib/manual-base/load";
 import { mergeGoalMetrics } from "@/lib/metas/metrics";
 import { withRpcTtlCache } from "@/lib/widgets/rpc-cache";
 import { withRpcMemo } from "@/lib/widgets/rpc-memo";
@@ -893,10 +894,14 @@ async function SnapshotContent({
       .eq("organization_id", orgId)
       .maybeSingle();
     const goalMetrics = mergeGoalMetrics(gmRow?.value);
+    // Base manual CONGELADA (0142): sai do `db`, que redireciona para os
+    // espelhos do snapshot — os operandos `manual:<chave>` das expressões
+    // resolvem pelo retrato, não pela base viva.
+    const manualSeries = await loadManualSeries(db);
     // Catálogo de operandos das expressões {=…} — builder ÚNICO
     // (lib/widgets/agg-catalog.ts), mesma montagem da action do quick-table.
     const catalog: OperandRef[] = buildAggOperandCatalog(
-      availableAggCatalogInput(available, fields, sources, goalMetrics)
+      availableAggCatalogInput(available, fields, sources, goalMetrics, manualSeries)
     );
 
     quickTablePromise = Promise.all(

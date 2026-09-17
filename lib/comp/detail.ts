@@ -84,6 +84,7 @@ import type { FieldDefinition, RecordRow } from "@/lib/records/types";
 import type { SourceDef, SourceKey } from "@/lib/sources";
 import {
   basisKeysFor,
+  isManualBasisKey,
   basisMetric,
   lowerSourceScopedOperands,
   parseCondBasisKey,
@@ -520,6 +521,11 @@ export function factorOperands(
 
   const byRecorte = new Map<string, FactorOperand>();
   for (const key of basisKeysFor(lowered)) {
+    // Base manual (0142): o detalhamento lista os REGISTROS que compõem o
+    // realizado, e um número digitado não é composto por registro nenhum.
+    // (Hoje a Remuneração nem oferta o operando — ver plan-editor.tsx —, mas
+    // uma fórmula herdada poderia citá-lo.)
+    if (isManualBasisKey(key)) continue;
     const cond = parseCondBasisKey(key);
     const metric = basisMetric(key);
     const field = metric.field || "*";

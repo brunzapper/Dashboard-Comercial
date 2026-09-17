@@ -340,6 +340,12 @@ export function PlanEditor(props: PlanEditorProps) {
             props.allFields,
             props.sources,
             props.metrics,
+            // Base manual FORA da Remuneração de propósito: aqui o resultado
+            // vira dinheiro na folha, e um operando que o caminho de apuração
+            // não resolve viraria "—" (ou um total menor) sem erro nenhum.
+            // Quando a Remuneração souber ler a Base manual, esta lista deixa
+            // de ser vazia — e o save passa a aceitar o operando junto.
+            [],
             { withNested: true }
           )
         ),

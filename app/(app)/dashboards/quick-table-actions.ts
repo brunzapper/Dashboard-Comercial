@@ -17,6 +17,7 @@
 import { getSessionInfo } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
 import { loadGoalMetrics } from "@/lib/config/goal-metrics";
+import { loadManualSeries } from "@/lib/manual-base/load";
 import { tokenizeFormulaText } from "@/lib/records/formula-text";
 import type { OperandRef } from "@/lib/records/date-operands";
 import {
@@ -144,9 +145,18 @@ export async function runQuickTable(
     // Catálogo agregado — builder ÚNICO (lib/widgets/agg-catalog.ts), mesma
     // montagem do editor da Nota (widget-card) e do viewer de snapshot; sem
     // aninhados (comportamento vigente das expressões {=…}).
-    const goalMetrics = await loadGoalMetrics(supabase);
+    const [goalMetrics, manualSeries] = await Promise.all([
+      loadGoalMetrics(supabase),
+      loadManualSeries(supabase),
+    ]);
     const catalog: OperandRef[] = buildAggOperandCatalog(
-      availableAggCatalogInput(available, allFields, sources, goalMetrics)
+      availableAggCatalogInput(
+        available,
+        allFields,
+        sources,
+        goalMetrics,
+        manualSeries
+      )
     );
 
     await Promise.all(

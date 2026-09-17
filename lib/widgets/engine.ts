@@ -111,6 +111,7 @@ import {
   goalOperandKeys,
   isCalcMetric,
   isCondBasisKey,
+  manualOperandKeys,
   isMoneyOperandField,
   lowerGoalOperands,
   parseCondBasisKey,
@@ -125,6 +126,18 @@ import {
   type ResolvedCalcMetric,
 } from "./calc-metrics";
 import { applyFilterSourceTargets } from "./filter-sources";
+import {
+  applyManualBase,
+  hasManualRefs,
+} from "@/lib/manual-base/resolve";
+import { manualDimPlans } from "@/lib/manual-base/buckets";
+import { loadManualBase } from "@/lib/manual-base/load";
+import {
+  EMPTY_MANUAL_BASE,
+  isManualBasisKey,
+  parseManualRef,
+  type ManualBaseData,
+} from "@/lib/manual-base/types";
 import {
   contractCaseRows,
   foldRowGroup,
@@ -1401,6 +1414,10 @@ async function runWidgetByPeriod(
   const basisFromRecords = (rs: RecordRow[]): BasisValues => {
     const out: BasisValues = {};
     for (const key of calcBasisKeys) {
+      // Base manual (0142): não há registro a que atribuir o número — este
+      // caminho agrega POR REGISTRO ("Agrupar período"). Operando ausente ⇒
+      // "—", a mesma degradação documentada dos operandos com escopo aqui.
+      if (isManualBasisKey(key)) continue;
       // Chave condicional (SOMASE/CONT.SE/MÉDIASE): restringe os registros do
       // grupo às condições e reusa a mesma lógica de contagem/soma/moeda.
       const cond = parseCondBasisKey(key);
@@ -1757,6 +1774,27 @@ export async function runWidget(
   });
   await lowerCalcGoalOperands(supabase, calcResolved, period);
 
+  // BASE MANUAL (0142): quais métricas citam números DIGITADOS. `manual:` nunca
+  // desce ao RPC — o valor é somado no fim de cada rodada (applyManualBase).
+  // O gate é barato de propósito: sem nenhuma citação, nada abaixo carrega a
+  // base e o caminho segue byte-idêntico ao anterior.
+  const manualMetricKeys = new Map<number, string>();
+  const calcManualKeys = new Map<number, string[]>();
+  config.metrics.forEach((m, i) => {
+    const rc = calcResolved.get(i);
+    if (rc) {
+      const keys = rc.formula ? manualOperandKeys(rc.formula) : [];
+      if (keys.length > 0) calcManualKeys.set(i, keys);
+      return;
+    }
+    const key = parseManualRef(m.field);
+    if (key) manualMetricKeys.set(i, key);
+  });
+  const usesManual = hasManualRefs({ manualMetricKeys, calcManualKeys });
+  const manualBase: ManualBaseData = usesManual
+    ? await loadManualBase(supabase)
+    : EMPTY_MANUAL_BASE;
+
   // SUB-FONTES conviver (0078): pernas EXTRAS (sub convivendo com a pai, ou 2+
   // subs da mesma pai) não cabem na consulta única — cada FONTE de linha vira
   // uma perna independente (filtro + data + membro próprios). Evita a
@@ -2057,6 +2095,9 @@ export async function runWidget(
     const rpcIdxOfConfig = new Map<number, number>(); // idx config → idx rpc (normais)
     config.metrics.forEach((m, i) => {
       if (!defaultIdxSet.has(i) || calcResolved.has(i)) return;
+      // Base manual: `manual:<chave>` não é coluna — o RPC recusaria a
+      // métrica. O valor entra no fim da rodada (applyManualBase).
+      if (manualMetricKeys.has(i)) return;
       rpcIdxOfConfig.set(i, rpcMetrics.length);
       rpcMetrics.push(m);
     });
@@ -2070,6 +2111,9 @@ export async function runWidget(
       if (!defaultIdxSet.has(ci)) continue;
       if (!rc.formula) continue;
       for (const key of basisKeysFor(rc.formula)) {
+        // Base manual: resolvida no fim desta rodada (applyManualBase), nunca
+        // no RPC — `manual:<chave>` não é coluna de run_widget_query.
+        if (isManualBasisKey(key)) continue;
         if (isCondBasisKey(key)) {
           if (!condBasisKeys.includes(key)) condBasisKeys.push(key);
           continue;
@@ -2209,6 +2253,8 @@ export async function runWidget(
               ? basisKeysFor(rc.formula).filter(
                   (key) =>
                     !isCondBasisKey(key) &&
+                    // Lançamento manual é número puro (moeda fora do v1).
+                    !isManualBasisKey(key) &&
                     basisMetric(key).agg === "sum" &&
                     isMoneyOperandField(basisMetric(key).field, fieldByKey)
                 )
@@ -2284,6 +2330,7 @@ export async function runWidget(
         const rc = calcResolved.get(i);
         if (!rc?.formula) continue;
         for (const key of basisKeysFor(rc.formula)) {
+          if (isManualBasisKey(key)) continue; // ver a guarda da principal
           if (isCondBasisKey(key)) {
             if (!condKeys.includes(key)) condKeys.push(key);
             continue;
@@ -2469,7 +2516,10 @@ export async function runWidget(
     // métricas calculadas — ANTES de attachMoney/rotulagem, que mutam os dim_*
     // usados como chave de grupo. Com pernas, roda também sem calculadas (os
     // índices do RPC principal deixam de coincidir com config.metrics).
-    if (calcResolved.size > 0 || legRuns.length > 0) {
+    // Base manual: métrica manual SAI do p_metrics, então os índices do RPC
+    // deixam de coincidir com config.metrics — o remapeamento passa a ser
+    // obrigatório aqui também, mesmo sem calculada nem perna.
+    if (calcResolved.size > 0 || legRuns.length > 0 || manualMetricKeys.size > 0) {
       const legByIdx = new Map<number, LegRun>();
       for (const lr of legRuns) for (const i of lr.idx) legByIdx.set(i, lr);
       // Basis de uma calculada de PERNA p/ um grupo (tk): valores do grupo na
@@ -2482,6 +2532,8 @@ export async function runWidget(
         if (!lr.ok || !rc.formula) return legBasis;
         const legRow = lr.rowByTuple.get(tk);
         for (const key of basisKeysFor(rc.formula)) {
+          // Base manual: injetada no fim da rodada, sobre a basis da perna.
+          if (isManualBasisKey(key)) continue;
           if (isCondBasisKey(key)) {
             const byTuple = lr.condValueByKey.get(key);
             if (!byTuple) {
@@ -2590,6 +2642,10 @@ export async function runWidget(
                   calcMoneyMeta(rc, rates, conversionPeriod)
                 ).value
               : null;
+          } else if (manualMetricKeys.has(i)) {
+            // Placeholder: o valor real entra no applyManualBase, depois do
+            // merge por bucket. Sem isto o índice do RPC seria undefined.
+            row[`metric_${i + 1}`] = null;
           } else {
             row[`metric_${i + 1}`] = src[`metric_${rpcIdxOfConfig.get(i)! + 1}`];
           }
@@ -2667,7 +2723,37 @@ export async function runWidget(
         replotMoney(merged, lr.moneyEntries);
       }
     }
-    return merged;
+
+    // BASE MANUAL (0142), por ÚLTIMO e de propósito: aqui existe uma linha por
+    // bucket (o merge já rodou), então o número digitado entra uma vez só.
+    // Antes do merge, duas linhas do mesmo mês receberiam o mesmo valor e a
+    // fusão somaria as duas. Rotulagem de FK e ordenação vêm depois, em
+    // runWidget — por isso a linha sintética sai rotulada de graça.
+    if (!usesManual) return merged;
+    return applyManualBase({
+      rows: merged,
+      plans: manualDimPlans(
+        dims,
+        (field) => available.find((f) => f.field === field)?.isDate === true
+      ),
+      base: manualBase,
+      period: { from: runPeriod?.from ?? null, to: runPeriod?.to ?? null },
+      canonicalById: respCanon.canonicalById,
+      manualMetricKeys,
+      calcManualKeys,
+      metricCount: config.metrics.length,
+      metricIsCount: (i) => config.metrics[i]?.agg === "count",
+      evalCalc: (i, basis) => {
+        const rc = calcResolved.get(i);
+        return rc?.formula
+          ? evalCalcMoney(
+              rc.formula,
+              basis,
+              calcMoneyMeta(rc, rates, conversionPeriod)
+            ).value
+          : null;
+      },
+    });
   };
 
   // Rodada de comparação em paralelo com a principal. Qualquer falha aqui

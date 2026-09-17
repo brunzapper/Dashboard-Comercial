@@ -24,6 +24,7 @@ const ctx: DashboardImportContext = {
   responsibleNames: ["Maria Silva", "João Souza"],
   operationNames: ["Comercial", "Parcerias"],
   goalMetrics: BUILTIN_GOAL_METRICS,
+  manualSeries: [],
 };
 
 function docWith(over: {

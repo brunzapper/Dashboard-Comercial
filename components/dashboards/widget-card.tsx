@@ -153,6 +153,7 @@ import {
 } from "@/lib/widgets/agg-catalog";
 import { useSources } from "@/components/sources-context";
 import { useGoalMetrics } from "@/components/goal-metrics-context";
+import { useManualSeries } from "@/components/manual-series-context";
 import type { OperandRef } from "@/lib/records/date-operands";
 import { deleteWidget } from "@/app/(app)/dashboards/actions";
 import { copyWidget } from "@/lib/widgets/clipboard";
@@ -386,6 +387,7 @@ export const WidgetCard = memo(function WidgetCard({
   // Catálogo de fontes (contexto) p/ os operandos com escopo de fonte da nota.
   const sourcesCatalog = useSources();
   const goalMetrics = useGoalMetrics();
+  const manualSeries = useManualSeries();
   // Save do builder em andamento (painel já fechado): exibe o overlay de
   // processamento sobre o card até a revalidação entregar os dados novos.
   const [saving, setSaving] = useState(false);
@@ -681,10 +683,18 @@ export const WidgetCard = memo(function WidgetCard({
         availableForBuilder,
         fields,
         sourcesCatalog,
-        goalMetrics
+        goalMetrics,
+        manualSeries
       )
     );
-  }, [isNote, availableForBuilder, fields, sourcesCatalog, goalMetrics]);
+  }, [
+    isNote,
+    availableForBuilder,
+    fields,
+    sourcesCatalog,
+    goalMetrics,
+    manualSeries,
+  ]);
 
   // Dimensões dinâmicas: mede o tamanho natural do conteúdo e reporta ao grid,
   // que renderiza max(mínimo, medido). Altura das tabelas vem da medição real do

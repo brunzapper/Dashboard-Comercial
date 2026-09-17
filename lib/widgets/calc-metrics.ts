@@ -1,4 +1,15 @@
-// Versão: 2.6 | Data: 01/08/2026
+// Versão: 2.7 | Data: 17/09/2026
+// v2.7 (17/09/2026): operandos da BASE MANUAL — ref `manual:<chave>` (0142)
+//   vira a soma dos lançamentos DIGITADOS que caem no recorte. Ao contrário do
+//   `meta:` (v2.5), ele NÃO é abaixado para const: entra como CHAVE DE BASIS,
+//   lida direto do ctx como o `aggif:`. A diferença é deliberada — foldBasis é
+//   aditivo, e aditivo é exatamente o que uma QUANTIDADE quer (o total do
+//   trimestre é a soma dos meses); uma meta não pode somar, um número de
+//   e-mails enviados pode. Quem resolve o valor é o engine
+//   (lib/manual-base/*), nunca o RPC: `manual:` jamais vira métrica de
+//   run_widget_query, e por isso todo laço que chama basisMetric precisa
+//   ramificar por isManualBasisKey antes — do mesmo jeito que já ramifica por
+//   isCondBasisKey.
 // v2.6 (01/08/2026): operando monetário de recorte VAZIO vale 0, não null —
 //   rawTotal de MoneyBreakdown sem moedas devolve a identidade aditiva, como
 //   o `?? 0` do aggregate e o caminho convertido (.brl, que já dava 0). Antes,
@@ -14,7 +25,8 @@
 //   basis (foldBasis é aditivo: meta em basis somaria nos subtotais) e nunca
 //   RPC. Meta ausente ⇒ ref mantido (ctx null ⇒ "—", nunca 0 fabricado).
 //   GOAL_GROUP entra no allowlist de topo de validateCondAggRefs (fora de
-//   SOMASE ok; dentro segue rejeitado pelas mensagens existentes).
+//   SOMASE ok; dentro segue rejeitado pelas mensagens existentes) — desde a
+//   v2.7 o MANUAL_GROUP compartilha esse allowlist, pelo mesmo motivo.
 // v2.4 (24/07/2026): zeroing de operandos de fonte-IRMÃ p/ o branch multi-perna
 //   do engine (zeroSiblingScopedOperands/zeroSiblingScopesInFields/
 //   siblingScopedBasisKeys) — cada perna de sub-base exibe só a PRÓPRIA
@@ -95,6 +107,13 @@ import {
   type CustomDateField,
 } from "@/lib/records/date-operands";
 import { isPercentField, type FieldDefinition } from "@/lib/records/types";
+import {
+  MANUAL_GROUP,
+  isManualBasisKey,
+  manualRef,
+  parseManualRef,
+  type ManualSeries,
+} from "@/lib/manual-base/types";
 import type { RefOption } from "@/lib/records/date-operands";
 import {
   foldBreakdowns,
@@ -424,6 +443,38 @@ export function goalOperandRefs(
   }));
 }
 
+// ===== Operandos da BASE MANUAL (`manual:<chave>`, 17/09/2026) =====
+// Ver o cabeçalho do arquivo: ao contrário do `meta:`, estes NÃO são abaixados
+// para const — são chave de basis, porque somar é a semântica certa para uma
+// quantidade digitada. `isManualBasisKey`/`parseManualRef` vivem em
+// lib/manual-base/types.ts (módulo puro, sem dependência de widgets) e são
+// reexportados aqui porque os consumidores do engine já importam deste módulo
+// o par `isCondBasisKey`/`basisMetric` que precisam ramificar junto.
+export { isManualBasisKey, parseManualRef };
+
+/** Chaves `manual:` da fórmula (dedup) — rodar sobre a fórmula EXPANDIDA. */
+export function manualOperandKeys(formula: Formula): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const ref of formulaRefs(formula)) {
+    const key = parseManualRef(ref);
+    if (key && !seen.has(key)) {
+      seen.add(key);
+      out.push(key);
+    }
+  }
+  return out;
+}
+
+/** Operandos da Base manual no catálogo agregado — um por DADO cadastrado. */
+export function manualOperandRefs(series: ManualSeries[]): RefOption[] {
+  return series.map((s) => ({
+    ref: manualRef(s.key),
+    label: s.label,
+    group: MANUAL_GROUP,
+  }));
+}
+
 // Chave de basis: 'sum:<field>' | 'count:<field>' | 'count:*'. Operando
 // monetário carrega um MoneyBreakdown (soma por moeda + .brl convertido); os
 // demais (contagens, campos numéricos, payload antigo) são números.
@@ -468,6 +519,14 @@ export function basisKeysFor(formula: Formula): BasisKey[] {
   const keys = new Set<BasisKey>();
   for (const ref of formulaRefs(formula)) {
     if (ref.startsWith("aggif:")) {
+      keys.add(ref);
+      continue;
+    }
+    // Base manual (0142): a chave É o ref. Quem a preenche é o engine, com os
+    // lançamentos do recorte — nunca o RPC. `basisMetric` JAMAIS pode receber
+    // uma destas (viraria uma coluna inexistente em run_widget_query), por
+    // isso todo consumidor ramifica por isManualBasisKey.
+    if (parseManualRef(ref)) {
       keys.add(ref);
       continue;
     }
@@ -716,6 +775,11 @@ export function evalCalcMoney(
       if (ref.startsWith("aggif:")) {
         // Operando com escopo de fonte abaixado (v2.3): a chave condicional É o
         // ref do token — lê a basis diretamente.
+        ctx[ref] = operand(b[ref]);
+        continue;
+      }
+      if (parseManualRef(ref)) {
+        // A chave de basis é o próprio ref (molde do aggif: acima).
         ctx[ref] = operand(b[ref]);
         continue;
       }
@@ -1068,8 +1132,9 @@ export function validateCondAggRefs(
     // `aggif:` avulsa (operando com escopo JÁ abaixado) também é agregada —
     // a validação normal roda sobre a fórmula persistida (`agg:…@fonte`), mas
     // a forma abaixada deve permanecer válida por simetria. Operando de META
-    // (grupo GOAL_GROUP) é um VALOR por consulta — válido fora de SOMASE;
-    // dentro cai nas rejeições de alvo/condição abaixo.
+    // (GOAL_GROUP) e da BASE MANUAL (MANUAL_GROUP) são VALORES por consulta —
+    // válidos fora de SOMASE; dentro caem nas rejeições de alvo/condição
+    // abaixo.
     if (
       !ref.startsWith("agg:") &&
       !ref.startsWith("aggif:") &&

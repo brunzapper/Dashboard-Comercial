@@ -188,7 +188,12 @@ export async function validateCompPlanSave(
   // Fórmula do realizado: MESMO catálogo/validação do servidor de fórmulas
   // agregadas (nunca montar catálogo paralelo).
   const aggCatalog = buildAggOperandCatalog(
-    availableAggCatalogInput(available, allFields, sources, registry, {
+    availableAggCatalogInput(available, allFields, sources, registry,
+      // Base manual fora da Remuneração de propósito (ver plan-editor.tsx):
+      // operando não resolvido aqui viraria dinheiro a menos na folha, sem
+      // erro nenhum.
+      [],
+      {
       withNested: true,
     })
   );

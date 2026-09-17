@@ -57,7 +57,7 @@ const DEFS: AggCatalogDefRow[] = [
   { field_key: "dias_em_prospeccao", label: "Dias em prospecção", data_type: "numero", applies_to: ["meetime_outbound"] },
 ];
 
-const aggCatalog = buildAggOperandCatalog(defsAggCatalogInput(DEFS, SOURCES, []));
+const aggCatalog = buildAggOperandCatalog(defsAggCatalogInput(DEFS, SOURCES, [], []));
 
 describe("preset outbound — estrutura", () => {
   it("presetKeys únicos, prefixados e com tab declarada", () => {

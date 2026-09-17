@@ -57,6 +57,7 @@ import { decorateRefOptions, sourceChips } from "@/lib/widgets/filter-ops";
 import { useSourceLabels } from "@/components/source-labels-context";
 import { useSources } from "@/components/sources-context";
 import { useGoalMetrics } from "@/components/goal-metrics-context";
+import { useManualSeries } from "@/components/manual-series-context";
 import { useSourceFolders } from "@/components/source-folders-context";
 import { perRecordCalcOperands } from "@/lib/records/calc-operands";
 import {
@@ -252,6 +253,7 @@ export function FieldsManager({
   // labels, que fazem o round-trip texto⇄tokens e a validação do servidor).
   const sourceLabels = useSourceLabels();
   const goalMetrics = useGoalMetrics();
+  const manualSeries = useManualSeries();
   const fieldSourceChips = sourceChips(sourceLabels);
   const catalog = useSources();
   // Memoizado: a digitação na busca re-renderiza o manager inteiro.
@@ -279,7 +281,7 @@ export function FieldsManager({
   // pelo excludeKeys (o servidor filtra no save). A decoração (fonte/chips/
   // tooltip) é local e não toca nos labels (load-bearing).
   const aggRefs: RefOption[] = decorate(
-    buildAggOperandCatalog(defsAggCatalogInput(fields, catalog, goalMetrics))
+    buildAggOperandCatalog(defsAggCatalogInput(fields, catalog, goalMetrics, manualSeries))
   );
   // Operandos PROIBIDOS na fórmula do campo em edição: ele próprio + quem já
   // depende dele (referenciar criaria ciclo — mesma regra do servidor). Sai do

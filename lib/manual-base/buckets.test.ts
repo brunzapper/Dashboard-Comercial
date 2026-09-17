@@ -17,7 +17,7 @@ import {
   projectManualEntries,
   type ManualDimPlan,
 } from "./buckets";
-import type { ManualEntry, ManualSpread } from "./types";
+import type { ManualEntry } from "./types";
 
 const dateDim = (transform: Dimension["transform"]): ManualDimPlan => ({
   kind: "date",
@@ -179,7 +179,7 @@ describe("projectManualEntries — atribuição e dimensões combinadas", () => 
         entry({ responsible_id: "apelido", value: 10 }),
         entry({ id: "e2", responsible_id: "principal", value: 5 }),
       ],
-      { plans, period: agosto, canonicalById: { apelido: "principal" } }
+      { plans, period: agosto, canonicalById: new Map([["apelido", "principal"]]) }
     );
     expect(p.byTuple.size).toBe(1);
     expect(p.byTuple.get(manualTupleKey(["principal"]))!.bySeries.get("s1")).toBe(15);

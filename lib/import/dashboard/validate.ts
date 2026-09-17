@@ -368,6 +368,7 @@ export function validateDashboardImport(
         workingDefs,
         workingSources,
         ctx.goalMetrics,
+        ctx.manualSeries,
         excludeKey ? new Set([excludeKey]) : new Set()
       )
     );
