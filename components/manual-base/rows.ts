@@ -85,35 +85,11 @@ export function manualColumns(
   return series.filter((s) => wanted.has(s.key));
 }
 
-const MESES_PT = [
-  "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
-  "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro",
-];
-
-const br = (iso: string): string => {
-  const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})/);
-  return m ? `${m[3]}/${m[2]}/${m[1]}` : iso;
-};
-
-/** Último dia do mês de um `YYYY-MM`. */
-export function monthEnd(ym: string): string {
-  const m = ym.match(/^(\d{4})-(\d{2})/);
-  if (!m) return ym;
-  const y = Number(m[1]);
-  const mo = Number(m[2]);
-  const last = new Date(Date.UTC(y, mo, 0)).getUTCDate();
-  return `${m[1]}-${m[2]}-${String(last).padStart(2, "0")}`;
-}
-
-/**
- * Rótulo do período de uma linha. Um mês cheio vira "Agosto/2026" — que é como
- * quem lança pensa —, e só o que NÃO é mês cheio mostra as duas datas.
- */
-export function manualPeriodLabel(start: string, end: string): string {
-  if (start === end) return br(start);
-  const m = start.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  if (m && m[3] === "01" && end === monthEnd(start.slice(0, 7))) {
-    return `${MESES_PT[Number(m[2]) - 1]}/${m[1]}`;
-  }
-  return `${br(start)} – ${br(end)}`;
-}
+// O RÓTULO do período vive em lib/manual-base/label.ts, não aqui: o core do
+// assistente (server-only) monta a prévia com a MESMA frase, e duas cópias
+// fariam a prévia dizer "01/08/2026 – 31/08/2026" onde a grade diz
+// "Agosto/2026" — para a mesma linha.
+export {
+  manualPeriodLabelOf as manualPeriodLabel,
+  monthEndOf as monthEnd,
+} from "@/lib/manual-base/label";
