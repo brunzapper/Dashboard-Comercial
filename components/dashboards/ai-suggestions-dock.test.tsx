@@ -47,6 +47,7 @@ function mountDock(over: Record<string, unknown> = {}) {
     threads: [thread()],
     busy: new Set<string>(),
     thoughts: new Map<string, string>(),
+    notices: new Map<string, string>(),
     openId: "t1",
     open: vi.fn(),
     minimized: false,
@@ -216,6 +217,21 @@ describe("o raciocínio ao vivo (v1.1)", () => {
     const { AiSuggestionsDock: Dock } = await import("./ai-suggestions-dock");
     render(<Dock />);
     expect(screen.getByText("Lendo as tarefas abertas…")).toBeTruthy();
+  });
+
+  it("o aviso do SISTEMA não se apresenta como raciocínio do modelo", async () => {
+    // Rebaixar de modelo é decisão da infraestrutura. Exibi-la sob
+    // "Raciocínio:" atribuiria ao modelo uma frase que não é dele.
+    vi.resetModules();
+    mountDock({
+      busy: new Set(["t1"]),
+      thoughts: new Map([["t1", "pensando…"]]),
+      notices: new Map([["t1", "gemini-3.8-flash está sobrecarregado (503)."]]),
+    });
+    const { AiSuggestionsDock: Dock } = await import("./ai-suggestions-dock");
+    render(<Dock />);
+    const aviso = screen.getByText(/sobrecarregado \(503\)/);
+    expect(aviso.textContent).not.toContain("Raciocínio:");
   });
 
   it("é POR FIO — o da outra conversa não vaza para esta", async () => {

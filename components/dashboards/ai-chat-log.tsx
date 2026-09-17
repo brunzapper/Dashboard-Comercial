@@ -1,4 +1,9 @@
-// Versão: 1.1 | Data: 26/07/2026
+// Versão: 1.2 | Data: 17/09/2026
+// v1.2 (17/09/2026): `busyNotice` — aviso do SISTEMA (hoje: o Gemini rebaixou
+//   de modelo por sobrecarga), exibido SEM o rótulo "Raciocínio:". Passar esse
+//   texto pelo `busyDetail` teria sido mais barato e estaria errado: a linha do
+//   raciocínio atribui ao MODELO o que ele disse, e trocar de degrau é decisão
+//   do sistema.
 // Log de exibição da conversa com IA — bloco presentacional compartilhado entre
 // o sheet da Home (ImportDashboardSheet) e o painel "Editar com IA" do
 // dashboard (AiEditPanel). Puro: recebe as entradas prontas; quem persiste/
@@ -20,6 +25,7 @@ export function AiChatLog({
   busy = false,
   busyLabel = "Gerando com IA…",
   busyDetail,
+  busyNotice,
   className,
   ref,
 }: {
@@ -28,6 +34,8 @@ export function AiChatLog({
   busyLabel?: string;
   /** Raciocínio ao vivo do modelo (só exibido enquanto busy). */
   busyDetail?: string;
+  /** Aviso do sistema sobre a chamada em curso (só exibido enquanto busy). */
+  busyNotice?: string;
   className?: string;
   /** Ref do contêiner rolável (auto-scroll do painel). React 19: ref é prop. */
   ref?: React.Ref<HTMLDivElement>;
@@ -75,6 +83,11 @@ export function AiChatLog({
       {busy ? (
         <div className="text-muted-foreground text-xs">
           <p>{busyLabel}</p>
+          {busyNotice ? (
+            <p className="text-amber-700 mt-1 dark:text-amber-500">
+              {busyNotice}
+            </p>
+          ) : null}
           {busyDetail ? (
             <p className="mt-1 border-l-2 pl-2 whitespace-pre-wrap italic opacity-80">
               <span className="font-medium not-italic">Raciocínio:</span>{" "}

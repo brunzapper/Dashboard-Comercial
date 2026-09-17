@@ -1,4 +1,10 @@
-// Versão: 1.2 | Data: 10/09/2026
+// Versão: 1.3 | Data: 17/09/2026
+// v1.3 (17/09/2026): as duas falhas de resposta viram CLASSES
+//   (AiHttpError e, para o que significa "tente de novo", AiOverloadError).
+//   A frase não mudou um byte — o que mudou é que quem chama pode decidir pelo
+//   STATUS em vez de reconhecer a mensagem. Foi o que destravou o rebaixamento
+//   de modelo do Gemini (lib/ai/model-fallback.ts): só sobrecarga desce um
+//   degrau; chave errada e payload inválido continuam falhando na hora.
 // v1.2 (10/09/2026): RETENTATIVA para as falhas que o próprio provedor manda
 //   repetir (429/5xx) e uma frase legível no lugar do JSON de erro cru.
 //
@@ -24,6 +30,8 @@
 // tratamento de timeout/cancelamento (AbortSignal). Segue o estilo fetch
 // nativo do projeto (lib/webhooks/deliver.ts, lib/sync/bitrix/client.ts) —
 // sem SDK/axios.
+
+import { AiHttpError, AiOverloadError } from "./types";
 
 /**
  * Status em que repetir tem chance de dar certo.
@@ -173,14 +181,24 @@ async function fetchProvider(
     const body = await res.text().catch(() => "");
     if (!RETRYABLE_STATUS.has(res.status)) {
       // Contrato: a mensagem é a mesma de sempre, com o corpo para depurar.
-      throw new Error(`${provider} respondeu ${res.status}: ${body.slice(0, 300)}`);
+      throw new AiHttpError(
+        provider,
+        res.status,
+        body,
+        `${provider} respondeu ${res.status}: ${body.slice(0, 300)}`
+      );
     }
     lastStatus = res.status;
     lastBody = body;
     wait = retryAfterMs(res.headers.get("retry-after")) ?? backoffMs(attempt);
   }
 
-  throw new Error(overloadMessage(provider, lastStatus, lastBody));
+  throw new AiOverloadError(
+    provider,
+    lastStatus,
+    lastBody,
+    overloadMessage(provider, lastStatus, lastBody)
+  );
 }
 
 export async function postProviderJson<T>(

@@ -44,6 +44,7 @@ export function WorkflowFormAiSheet({
   const [chat, setChat] = useState<AiChatEntry[]>([]);
   const [busy, setBusy] = useState(false);
   const [liveThought, setLiveThought] = useState("");
+  const [liveNotice, setLiveNotice] = useState("");
   // Turnos anteriores e a última proposta: a conversa vive AQUI (não há tabela;
   // precedente do RecordsAiInsertSheet).
   const [turns, setTurns] = useState<string[]>([]);
@@ -55,6 +56,7 @@ export function WorkflowFormAiSheet({
     setChat((c) => [...c, { kind: "user", text: description }]);
     setText("");
     setLiveThought("");
+    setLiveNotice("");
     setBusy(true);
     try {
       const res = await fetch("/api/operacao/workflow/ai-fill", {
@@ -71,6 +73,7 @@ export function WorkflowFormAiSheet({
       });
       const state = await readNdjsonTurn<FillFormState>(res, {
         onThought: (chunk) => setLiveThought((t) => t + chunk),
+        onNotice: setLiveNotice,
       });
       if (state.ok && state.values) {
         pending.current = state.values;
@@ -102,6 +105,7 @@ export function WorkflowFormAiSheet({
     } finally {
       setBusy(false);
       setLiveThought("");
+      setLiveNotice("");
     }
   }
 
@@ -146,6 +150,7 @@ export function WorkflowFormAiSheet({
             busy={busy}
             busyLabel="Lendo o texto…"
             busyDetail={liveThought}
+            busyNotice={liveNotice}
             className="max-h-72"
           />
         </SheetContent>

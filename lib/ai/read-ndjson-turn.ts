@@ -1,4 +1,9 @@
-// Versão: 1.0 | Data: 11/09/2026
+// Versão: 1.1 | Data: 17/09/2026
+// v1.1 (17/09/2026): o evento `notice` — aviso do SISTEMA sobre a chamada (hoje
+//   só o rebaixamento de modelo do Gemini por sobrecarga). Canal separado do
+//   `thought` porque a tela rotula aquele texto como "Raciocínio:", e trocar de
+//   modelo é decisão do sistema. Leitor antigo diante de stream novo ignora a
+//   linha sem estourar (o `handleLine` já cai fora sem `else`).
 // Leitura do NDJSON de um turno de IA — o laço que estava DUPLICADO byte a byte
 // em `ai-edit-panel.tsx` e `ai-operacao-panel.tsx`, extraído quando o dock da
 // Tree virou o terceiro consumidor.
@@ -13,14 +18,20 @@
 //     por ociosidade. As linhas de `thought` mantêm o cano vivo, e o
 //     `x-accel-buffering: no` da rota impede o buffering.
 //
-// O protocolo: uma linha JSON por evento. `{"type":"thought"}` é efêmero (nunca
-// persistido) e `{"type":"state"}` vem SEMPRE por último — inclusive em erro de
-// gate, que é o que faz o chamador ter sempre um estado canônico para absorver.
+// O protocolo: uma linha JSON por evento. `{"type":"thought"}` e
+// `{"type":"notice"}` são efêmeros (nunca persistidos) e `{"type":"state"}` vem
+// SEMPRE por último — inclusive em erro de gate, que é o que faz o chamador ter
+// sempre um estado canônico para absorver.
 "use client";
 
 export interface NdjsonTurnOptions {
   /** Raciocínio ao vivo do modelo, em pedaços. Ignorado se omitido. */
   onThought?: (chunk: string) => void;
+  /**
+   * Aviso do SISTEMA sobre a chamada (rebaixamento de modelo por sobrecarga).
+   * Frase inteira por evento, não pedaço — não concatene como o raciocínio.
+   */
+  onNotice?: (text: string) => void;
 }
 
 /**
@@ -53,8 +64,10 @@ export async function readNdjsonTurn<TState>(
     if (!trimmed) return;
     const evt = JSON.parse(trimmed) as
       | { type: "thought"; text: string }
+      | { type: "notice"; text: string }
       | { type: "state"; state: TState };
     if (evt.type === "thought") opts.onThought?.(evt.text);
+    else if (evt.type === "notice") opts.onNotice?.(evt.text);
     else if (evt.type === "state") finalState = evt.state;
   };
 

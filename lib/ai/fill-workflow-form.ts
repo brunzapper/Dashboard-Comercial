@@ -45,6 +45,8 @@ export interface FillFormInput {
   pendingJson?: string;
   /** Raciocínio ao vivo, quando o provedor já o emite por padrão. */
   onThought?: (chunk: string) => void;
+  /** Aviso do sistema (rebaixamento de modelo) — efêmero, como o raciocínio. */
+  onNotice?: (text: string) => void;
 }
 
 export interface FillFormState {
@@ -185,6 +187,7 @@ export async function fillWorkflowFormCore(
     priorTurns: input.priorTurns ?? [],
     description,
     onThought: input.onThought,
+    onNotice: input.onNotice,
     validate: (raw) => {
       const v = validateFormFill(raw, ctx);
       return v.ok

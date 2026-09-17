@@ -52,6 +52,7 @@ export function ManualBaseAssistant() {
   const [showPaste, setShowPaste] = useState(false);
   const [busy, setBusy] = useState(false);
   const [thought, setThought] = useState("");
+  const [notice, setNotice] = useState("");
   const [, startTransition] = useTransition();
   const logRef = useRef<HTMLDivElement>(null);
 
@@ -88,6 +89,7 @@ export function ManualBaseAssistant() {
       });
       const next = await readNdjsonTurn<ManualBaseSessionState>(res, {
         onThought: (chunk) => setThought((t) => (t + chunk).slice(-1200)),
+        onNotice: setNotice,
       });
       setState(next);
       if (!next.ok && next.message) notifyActionError("Base manual", next.message);
@@ -192,6 +194,7 @@ export function ManualBaseAssistant() {
         busy={busy}
         busyLabel="Lendo os números…"
         busyDetail={thought}
+        busyNotice={notice}
         className="max-h-64"
         ref={logRef}
       />

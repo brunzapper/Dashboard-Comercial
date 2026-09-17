@@ -680,8 +680,9 @@ This version has breaking changes — APIs, conventions, and file structure may 
   /registros (um segundo editor seria a régua paralela da invariante 25). As
   RPCs de widget seguem INTOCADAS. Ver `docs/arquitetura.md` §4.24 e
   invariantes 33/34/35.
-- **O adaptador do Gemini TRANSMITE SEMPRE, e falha de transporte REPETE
-  (10/09/2026):** o `onThought` decide se os RESUMOS de pensamento são pedidos
+- **O adaptador do Gemini TRANSMITE SEMPRE, falha de transporte REPETE e
+  modelo saturado REBAIXA (10/09/2026; rebaixamento 17/09/2026):** o
+  `onThought` decide se os RESUMOS de pensamento são pedidos
   (`thinkingConfig.includeThoughts`) — NUNCA mais o endpoint. Ele escolhia
   entre `:streamGenerateContent` e `:generateContent`, e isso fazia o "Salvar e
   analisar" da Tree devolver 503 ("high demand") enquanto o painel do dashboard
@@ -705,6 +706,31 @@ This version has breaking changes — APIs, conventions, and file structure may 
   `AbortSignal` do chamador é o teto do turno). No SSE a repetição é ANTES do
   primeiro evento: stream começado nunca reinicia. Corpo de erro cru não vai
   para a tela — `overloadMessage` vira frase.
+  **Esgotado o transporte, desce um DEGRAU (17/09/2026):** repetir três vezes
+  no mesmo modelo não resolve sobrecarga — sobrecarga é DO MODELO, e o degrau
+  anterior costuma responder no mesmo minuto. A escada é
+  `GEMINI_MODEL_LADDER` (`lib/ai/models.ts`, CRONOLÓGICA — um degrau pode ser
+  mais capaz que o anterior; não reordene por preço/tamanho) e a política vive
+  em `lib/ai/model-fallback.ts`, pendurada no `case "gemini"` do
+  `getAiClient` — dono ÚNICO, nunca por adaptador nem por superfície, mesma
+  razão do `fetchProvider`; as duas call sites (`json-loop.ts` e
+  `generate-dashboard.ts`) herdam sem saber. Teto `GEMINI_MODEL_ATTEMPTS` = 3
+  modelos, e a descida só COMEÇA com `AiOverloadError` (0 outros: 404 no
+  modelo CONFIGURADO é nome errado e tem de aparecer; 401/403/400, truncado,
+  bloqueio, abort e queda de rede propagam intactos). Num CANDIDATO, só
+  `AiHttpError` continua descendo — é o "org sem acesso a esse degrau". O erro
+  que sobra é o overload ORIGINAL com os modelos tentados no fim, e a frase
+  continua começando com "Gemini": é o `startsWith(providerLabel)` do
+  json-loop que decide repetir ou não o nome do provedor (o
+  `generateDashboardCore` passou a usar o MESMO helper). Modelo FORA da escada
+  não rebaixa — a lista envelhece sozinha, e cair no topo promoveria em
+  silêncio para um modelo que ninguém escolheu. NUNCA crie um `onThought` só
+  para avisar (ligaria `includeThoughts` onde vem desligado): o aviso tem
+  canal próprio, `onNotice` → evento NDJSON `notice` → `busyNotice` do
+  `AiChatLog`, exibido SEM o rótulo "Raciocínio:", porque trocar de degrau é
+  decisão do sistema, não pensamento do modelo. A escada divide o
+  `AbortSignal.timeout(120_000)` do chamador com as tentativas de VALIDAÇÃO —
+  daí o corte próprio de 60 s e as travas de abort e de já-emitiu.
 - **A Tree CONDUZ a série, e a árvore aceita mais de um tronco (10/09/2026):**
   criar/editar a automação de uma sequência pela árvore é o MESMO
   `AutomationRuleEditor` do quadro e do Workflow — `tree-series-sheet.tsx` é só

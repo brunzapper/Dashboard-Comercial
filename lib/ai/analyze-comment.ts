@@ -472,6 +472,8 @@ export async function runCommentThreadCore(input: {
    * o dock o mostra sob o "Analisando…". Efêmero: nunca entra na linha.
    */
   onThought?: (chunk: string) => void;
+  /** Aviso do sistema (rebaixamento de modelo) — efêmero, como o raciocínio. */
+  onNotice?: (text: string) => void;
 }): Promise<{ ok: boolean; message?: string; thread?: CommentThread }> {
   const session = await getSessionInfo();
   if (!session) return { ok: false, message: "Sessão expirada." };
@@ -548,6 +550,7 @@ export async function runCommentThreadCore(input: {
       return { ok: true, value: { actions: n.actions, warnings: v.warnings } };
     },
     onThought: input.onThought,
+    onNotice: input.onNotice,
   });
 
   if (!result.ok) {

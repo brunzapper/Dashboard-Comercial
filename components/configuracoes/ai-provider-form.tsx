@@ -1,4 +1,8 @@
-// Versão: 1.0 | Data: 23/07/2026
+// Versão: 1.1 | Data: 17/09/2026
+// v1.1 (17/09/2026): o placeholder deriva do default do provedor (era um nome
+//   fixo, e ficou apontando para um modelo que o Google já desligou) e a tela
+//   explica o rebaixamento: modelo FORA da escada de lib/ai/models.ts continua
+//   sem substituto quando o Gemini satura.
 // Configurações → Integrações (admin): provedor + modelo + chave de API da
 // geração DIRETA de dashboards por IA. Provedor num Select; o modelo é um Input
 // com sugestões por provedor (datalist) mas aceita valor livre — não trava o
@@ -141,13 +145,21 @@ export function AiProviderForm({ config }: AiProviderFormProps) {
               list="ai-model-suggestions"
               value={model}
               onChange={(e) => setModel(e.target.value)}
-              placeholder="Ex.: gemini-2.5-flash"
+              placeholder={`Ex.: ${defaultModelFor(provider)}`}
             />
             <datalist id="ai-model-suggestions">
               {modelSuggestions.map((m) => (
                 <option key={m} value={m} />
               ))}
             </datalist>
+            {provider === "gemini" ? (
+              <p className="text-muted-foreground text-xs">
+                Se o modelo estiver sobrecarregado, o sistema tenta sozinho os
+                dois anteriores por ordem de lançamento. Vale para os modelos
+                conhecidos (as sugestões acima e as variantes deles); um nome
+                fora dessa lista não tem substituto.
+              </p>
+            ) : null}
           </div>
         </div>
 

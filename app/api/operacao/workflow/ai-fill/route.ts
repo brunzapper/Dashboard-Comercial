@@ -12,6 +12,8 @@
 // A rota roda o MESMO `fillWorkflowFormCore`: gate e validação seguem no
 // núcleo, nada de cópia paralela. Devolve NDJSON:
 //   {"type":"thought","text":"…"}  ← raciocínio (efêmero, nunca persistido)
+//   {"type":"notice","text":"…"}   ← aviso do SISTEMA (rebaixamento de modelo
+//                                    por sobrecarga) — efêmero também.
 //   {"type":"state","state":{…}}   ← o resultado, SEMPRE por último
 //
 // Diferente das três irmãs, este turno é SEM ESTADO: não há linha em tabela, a
@@ -77,6 +79,7 @@ export async function POST(request: Request) {
           priorTurns,
           pendingJson,
           onThought: (text) => push({ type: "thought", text }),
+          onNotice: (text) => push({ type: "notice", text }),
         });
         push({ type: "state", state });
       } catch (err) {
