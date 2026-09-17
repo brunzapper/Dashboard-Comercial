@@ -3,6 +3,10 @@
 //   derivado de AREA_GATES. É o "nível de acesso" dos cards de Operação no hub
 //   (o que dashboards/kanbans já exibiam a partir de visible_to_roles). PURO:
 //   descreve a régua da área, não o veredito de quem está olhando.
+// v1.7 (17/09/2026): área `base_manual` (0142) — SEM gate de papel, como
+//   `remuneracao`/`workflow`: a page ramifica (quem tem `edit_record_values`
+//   edita; os demais só leem). Chave HISTÓRICA a partir de hoje: nunca
+//   renomear, os overrides gravados a referenciam.
 // v1.6 (08/09/2026): área `workflow` (0125) — SEM gate de papel, como
 //   `remuneracao`: a page ramifica (admin configura os esquemas; os demais
 //   só EXECUTAM o formulário). A escrita dos esquemas segue admin nas
@@ -83,6 +87,12 @@ export const AREA_GATES: Record<
   moedas: {}, // chave histórica — aba Moedas de /campos
   usuarios: { permission: "manage_users_roles" },
   log: {}, // chave histórica — página em /registros/log
+  // Base manual (0142): página em /registros/base-manual, e o MESMO gestor
+  // aparece no ⋮ do dashboard e no widget "Base do Dashboard". SEM gate de
+  // papel — a page ramifica: quem tem `edit_record_values` edita, os demais
+  // só veem os números que já alimentam os dashboards. Deny esconde a área
+  // inteira E barra a escrita nas actions; a RLS da 0142 é a muralha.
+  base_manual: {},
   tema: {}, // preferências visuais próprias — qualquer autenticado
   conta: {},
 };
@@ -103,6 +113,7 @@ export const AREA_LABELS: Record<string, string> = {
   moedas: "Moedas (Campos)",
   usuarios: "Usuários",
   log: "Log (Registros)",
+  base_manual: "Base manual (Registros)",
 };
 
 /** Rótulos de acesso por permissão (só as usadas como gate de área). */
