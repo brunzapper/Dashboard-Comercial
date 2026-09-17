@@ -31,8 +31,8 @@ import {
   loadManualBaseSession,
   pasteManualBaseJson,
   resetManualBaseSession,
-  type ManualBaseSessionState,
 } from "@/app/(app)/registros/base-manual/ai-actions";
+import type { ManualBaseSessionState } from "@/lib/ai/manual-base-session";
 
 const TURN_URL = "/api/registros/base-manual/ai-turn";
 

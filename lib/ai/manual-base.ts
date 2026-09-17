@@ -41,35 +41,18 @@ import {
 } from "@/app/(app)/registros/base-manual/actions";
 import {
   EMPTY_MANUAL_BASE_SESSION,
+  MANUAL_BASE_MAX_CHAT,
+  MANUAL_BASE_MAX_TURNS,
+  manualBaseSessionKey,
   readManualBaseSessionRow,
+  toManualBaseSessionState,
   writeManualBaseSessionRow,
   type ManualBaseChatEntry,
   type ManualBaseSessionState,
-} from "@/app/(app)/registros/base-manual/ai-actions";
+} from "@/lib/ai/manual-base-session";
 
 /** O estado que o turno devolve — a sessão, mais o veredito DESTE turno. */
 export type ManualBaseTurnState = ManualBaseSessionState;
-
-/** Tetos do que fica guardado: o laço reinjeta os turnos, e o log é só
- *  exibição. Precedente dos demais painéis. */
-const MAX_TURNS = 10;
-const MAX_CHAT = 40;
-
-/** Projeção da linha para o estado exibido — o JSON da prévia NUNCA sai. */
-function toSessionState(row: {
-  turns: string[];
-  chat: ManualBaseChatEntry[];
-  pending: { json: string; summary: string[]; warnings: string[] } | null;
-}): ManualBaseSessionState {
-  return {
-    ok: true,
-    chat: row.chat,
-    turns: row.turns,
-    summary: row.pending?.summary ?? [],
-    warnings: row.pending?.warnings ?? [],
-    hasPending: row.pending != null,
-  };
-}
 
 export interface GenerateManualBaseInput {
   description: string;
@@ -398,13 +381,19 @@ export async function runManualBaseTurnCore(input: {
   description: string;
   onThought?: (chunk: string) => void;
 }): Promise<ManualBaseTurnState> {
-  const read = await readManualBaseSessionRow();
-  if (!read.ok) return { ...EMPTY_MANUAL_BASE_SESSION, ok: false, message: read.message };
-  const { row, supabase, orgId, userId } = read;
+  const k = await manualBaseSessionKey();
+  if (!k.ok) {
+    return { ...EMPTY_MANUAL_BASE_SESSION, ok: false, message: k.message };
+  }
+  const row = await readManualBaseSessionRow(k);
 
   const description = input.description.trim();
   if (!description) {
-    return { ...toSessionState(row), ok: false, message: "Cole a tabela ou descreva os números." };
+    return {
+      ...toManualBaseSessionState(row),
+      ok: false,
+      message: "Cole a tabela ou descreva os números.",
+    };
   }
 
   const res = await generateManualBaseCore({
@@ -423,8 +412,10 @@ export async function runManualBaseTurnCore(input: {
     { role: "assistant", text: res.message ?? (res.ok ? "Prévia pronta." : "Falhou.") },
   ];
   const next = {
-    turns: res.ok ? [...row.turns, description].slice(-MAX_TURNS) : row.turns,
-    chat: chat.slice(-MAX_CHAT),
+    turns: res.ok
+      ? [...row.turns, description].slice(-MANUAL_BASE_MAX_TURNS)
+      : row.turns,
+    chat: chat.slice(-MANUAL_BASE_MAX_CHAT),
     pending:
       res.ok && res.pendingJson
         ? {
@@ -434,9 +425,9 @@ export async function runManualBaseTurnCore(input: {
           }
         : row.pending,
   };
-  await writeManualBaseSessionRow(supabase, orgId, userId, next);
+  await writeManualBaseSessionRow(k, next);
   return {
-    ...toSessionState(next),
+    ...toManualBaseSessionState(next),
     ok: res.ok,
     message: res.message,
     errors: res.errors,
