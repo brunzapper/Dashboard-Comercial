@@ -1,4 +1,9 @@
-// Versão: 1.2 | Data: 17/09/2026
+// Versão: 1.3 | Data: 18/09/2026
+// v1.3 (18/09/2026): FAMÍLIAS (0143). O caso de resiliência POR METADE é o que
+//   pegou um defeito real: um `Promise.all` no loader fazia a ausência das
+//   tabelas de família (mais novas que as de número) rejeitar a rodada inteira,
+//   e a Base manual voltava VAZIA — os números sumiam do dashboard de quem
+//   ainda não aplicou a migração.
 // v1.2 (17/09/2026): regressão do card SÓ com métrica manual — o payload não
 //   pode ir vazio ao RPC (ele ergue 'Widget sem dimensões nem métricas'). O
 //   caso já existia aqui, mas asseverando só o VALOR: o fake não emula a
@@ -42,9 +47,18 @@ const entry = (over: Record<string, unknown> = {}) => ({
   ...over,
 });
 
-const manualTables = (entries: unknown[]): Record<string, TableHandler> => ({
+// O fake é fail-closed: tabela sem handler LANÇA. Declarar as de família aqui
+// é o que mantém honesto o "a base inteira foi consultada" — e o loader trata
+// cada metade em separado, então um teste pode omitir números sem perder eixos.
+const manualTables = (
+  entries: unknown[],
+  extra: Record<string, TableHandler> = {}
+): Record<string, TableHandler> => ({
   manual_series: SERIES,
   manual_entries: entries,
+  manual_families: [],
+  manual_family_members: [],
+  ...extra,
 });
 
 const config = (over: Partial<WidgetConfig>): WidgetConfig => ({
@@ -62,6 +76,46 @@ const MES = [{ field: "closed_at", transform: "month" as const }];
 // Tudo o que desceu ao banco numa chamada, como texto — para procurar "manual:".
 const payloadText = (args: Record<string, unknown>) =>
   JSON.stringify([args.p_dimensions, args.p_metrics, args.p_filters]);
+
+describe("resiliência por metade (0143)", () => {
+  it("falha nas tabelas de FAMÍLIA não derruba os NÚMEROS", async () => {
+    const boom = () => {
+      throw new Error("relation \"manual_families\" does not exist");
+    };
+    const { db } = fakeSupabase({
+      rpc: {
+        run_widget_query: () => ({
+          data: [{ dim_1: "2026-08-01T00:00:00", metric_1: 12 }],
+          error: null,
+        }),
+      },
+      tables: {
+        manual_series: SERIES,
+        manual_entries: [entry()],
+        manual_families: boom,
+        manual_family_members: boom,
+      },
+    });
+
+    const data = await runWidget(
+      db,
+      config({
+        dimensions: MES,
+        metrics: [
+          { field: "manual:emails_replied", agg: "sum" },
+          { field: "*", agg: "count" },
+        ],
+      }),
+      AVAILABLE,
+      AGOSTO
+    );
+
+    // O número digitado continua lá — sem eixo nenhum, a Base manual é
+    // exatamente o que era na 0142.
+    expect(data.rows[0].metric_1).toBe(35);
+    expect(data.rows[0].metric_2).toBe(12);
+  });
+});
 
 describe("o ref manual: nunca desce ao RPC (invariante 1)", () => {
   it("métrica manual sai do p_metrics, e o RPC só recebe as de registro", async () => {
@@ -444,5 +498,239 @@ describe("atribuição a operação", () => {
     const byOp = Object.fromEntries(data.rows.map((r) => [r.dim_1, r.metric_1]));
     expect(byOp["Outbound"]).toBe(35);
     expect(byOp["Inbound"]).toBe(4);
+  });
+});
+
+// ===================== FAMÍLIAS E NÍVEIS (0143) =====================
+// A fixture é o pedido literal do usuário: QUATRO leituras do MESMO 1000.
+const CANAL = { id: "f-canal", key: "canal", label: "Canal", sort_order: 0 };
+const FAM_RESP = { id: "f-resp", key: "vendedor", label: "Vendedor", sort_order: 1 };
+const MEMBERS = [
+  { id: "m-lig", family_id: "f-canal", key: "ligacao", label: "Ligação", sort_order: 0 },
+  { id: "m-mail", family_id: "f-canal", key: "email", label: "E-mail", sort_order: 1 },
+  { id: "m-paulo", family_id: "f-resp", key: "paulo", label: "Paulo", sort_order: 0 },
+  { id: "m-gabi", family_id: "f-resp", key: "gabriella", label: "Gabriella", sort_order: 1 },
+];
+const INTER = [
+  { id: "s-int", key: "interacoes", label: "Total de interações", default_spread: "ancora", sort_order: 0 },
+];
+const ent = (value: number, coords: Record<string, string | null>, id: string) => ({
+  ...entry({ id, series_id: "s-int", value }),
+  coords,
+});
+const NIVEIS = [
+  ent(1000, {}, "n0"),
+  ent(500, { canal: "ligacao" }, "c1"),
+  ent(500, { canal: "email" }, "c2"),
+  ent(600, { vendedor: "paulo" }, "v1"),
+  ent(350, { vendedor: "gabriella" }, "v2"),
+  ent(50, { vendedor: null }, "v3"),
+  ent(100, { canal: "ligacao", vendedor: "paulo" }, "x1"),
+  ent(250, { canal: "ligacao", vendedor: "gabriella" }, "x2"),
+];
+const famTables = (extra: Record<string, unknown> = {}) => ({
+  manual_series: INTER,
+  manual_entries: NIVEIS,
+  manual_families: [CANAL, FAM_RESP],
+  manual_family_members: MEMBERS,
+  manual_series_families: [],
+  ...extra,
+});
+const INT_METRIC = { field: "manual:interacoes", agg: "sum" as const };
+
+describe("eixo de família (0143)", () => {
+  it("manualdim: NUNCA chega ao RPC — e o RPC não é nem chamado", async () => {
+    const { db, rpcCalls, queries } = fakeSupabase({ rpc: {}, tables: famTables() });
+
+    const data = await runWidget(
+      db,
+      config({
+        dimensions: [{ field: "manualdim:canal" }],
+        metrics: [INT_METRIC],
+      }),
+      AVAILABLE,
+      AGOSTO
+    );
+
+    // Sem handler de rpc, o fake LANÇA se alguém chamar — então zero chamadas
+    // é o que prova o curto-circuito, e não só a ausência da string.
+    expect(rpcCalls).toHaveLength(0);
+    expect(queries.some((q) => q.table === "records")).toBe(false);
+    expect(data.rows).toHaveLength(2);
+  });
+
+  it("destrincha o dado pai pela família, no nível {canal} e não no cruzamento", async () => {
+    const { db } = fakeSupabase({ rpc: {}, tables: famTables() });
+    const data = await runWidget(
+      db,
+      config({ dimensions: [{ field: "manualdim:canal" }], metrics: [INT_METRIC] }),
+      AVAILABLE,
+      AGOSTO
+    );
+    // Ordem pelo sort_order do MEMBRO, não pela iteração do Map.
+    expect(data.rows.map((r) => r.dim_1)).toEqual(["Ligação", "E-mail"]);
+    expect(data.rows.map((r) => r.metric_1)).toEqual([500, 500]);
+    // O eixo sai rotulado pelo DADO, não pelo ref cru.
+    expect(data.dimensions[0].label).toBe("Canal");
+  });
+
+  it("o residual é um GRUPO nomeado, nunca '—'", async () => {
+    const { db } = fakeSupabase({ rpc: {}, tables: famTables() });
+    const data = await runWidget(
+      db,
+      config({ dimensions: [{ field: "manualdim:vendedor" }], metrics: [INT_METRIC] }),
+      AVAILABLE,
+      AGOSTO
+    );
+    const byLabel = Object.fromEntries(data.rows.map((r) => [r.dim_1, r.metric_1]));
+    expect(byLabel["Paulo"]).toBe(600);
+    expect(byLabel["Gabriella"]).toBe(350);
+    expect(byLabel["Sem Vendedor"]).toBe(50);
+    expect(byLabel["—"]).toBeUndefined();
+  });
+
+  it("tabela cruzada Canal × Vendedor usa o nível cruzado", async () => {
+    const { db } = fakeSupabase({ rpc: {}, tables: famTables() });
+    const data = await runWidget(
+      db,
+      config({
+        dimensions: [{ field: "manualdim:canal" }, { field: "manualdim:vendedor" }],
+        metrics: [INT_METRIC],
+      }),
+      AVAILABLE,
+      AGOSTO
+    );
+    expect(data.rows).toHaveLength(2);
+    const cells = data.rows.map((r) => [r.dim_1, r.dim_2, r.metric_1]);
+    expect(cells).toEqual([
+      ["Ligação", "Paulo", 100],
+      ["Ligação", "Gabriella", 250],
+    ]);
+  });
+
+  it("métrica de REGISTRO num eixo de família vale null, nunca 0", async () => {
+    const { db } = fakeSupabase({ rpc: {}, tables: famTables() });
+    const data = await runWidget(
+      db,
+      config({
+        dimensions: [{ field: "manualdim:canal" }],
+        metrics: [INT_METRIC, { field: "*", agg: "count" }],
+      }),
+      AVAILABLE,
+      AGOSTO
+    );
+    // 0 leria como "nenhum registro nesse canal", que é uma afirmação falsa:
+    // nenhum registro é atribuível a um canal.
+    expect(data.rows.every((r) => r.metric_2 === null)).toBe(true);
+  });
+
+  it("eixo de família DESCONHECIDO degrada para '—' em vez de inventar grupo", async () => {
+    const { db } = fakeSupabase({ rpc: {}, tables: famTables() });
+    const data = await runWidget(
+      db,
+      config({ dimensions: [{ field: "manualdim:sumiu" }], metrics: [INT_METRIC] }),
+      AVAILABLE,
+      AGOSTO
+    );
+    expect(data.rows.every((r) => r.metric_1 == null)).toBe(true);
+  });
+});
+
+describe("filtro de coordenada (0143)", () => {
+  it("card de um membro: o filtro leva ao nível do canal e soma embora", async () => {
+    const { db, rpcCalls } = fakeSupabase({
+      rpc: { run_widget_query: () => ({ data: [{ metric_1: 0 }], error: null }) },
+      tables: famTables(),
+    });
+    const data = await runWidget(
+      db,
+      config({
+        metrics: [INT_METRIC],
+        filters: [{ field: "manualdim:canal", op: "eq", value: "ligacao" }],
+      }),
+      AVAILABLE,
+      AGOSTO
+    );
+    expect(data.rows[0].metric_1).toBe(500);
+    // O filtro de coordenada NÃO desce ao RPC.
+    for (const call of rpcCalls) {
+      expect(JSON.stringify(call.args.p_filters)).not.toContain("manualdim:");
+    }
+  });
+
+  it("dois filtros descem à célula do cruzamento", async () => {
+    const { db } = fakeSupabase({
+      rpc: { run_widget_query: () => ({ data: [{ metric_1: 0 }], error: null }) },
+      tables: famTables(),
+    });
+    const data = await runWidget(
+      db,
+      config({
+        metrics: [INT_METRIC],
+        filters: [
+          { field: "manualdim:canal", op: "eq", value: "ligacao" },
+          { field: "manualdim:vendedor", op: "eq", value: "gabriella" },
+        ],
+      }),
+      AVAILABLE,
+      AGOSTO
+    );
+    expect(data.rows[0].metric_1).toBe(250);
+  });
+
+  it("filtro do RESIDUAL seleciona o grupo, não a ausência", async () => {
+    const { db } = fakeSupabase({
+      rpc: { run_widget_query: () => ({ data: [{ metric_1: 0 }], error: null }) },
+      tables: famTables(),
+    });
+    const data = await runWidget(
+      db,
+      config({
+        metrics: [INT_METRIC],
+        filters: [{ field: "manualdim:vendedor", op: "eq", value: "__sem__" }],
+      }),
+      AVAILABLE,
+      AGOSTO
+    );
+    expect(data.rows[0].metric_1).toBe(50);
+  });
+});
+
+describe("compatibilidade da 0142 (0143)", () => {
+  it("org COM famílias, widget que não as usa: nada muda", async () => {
+    const { db, rpcCalls } = fakeSupabase({
+      rpc: {
+        run_widget_query: () => ({
+          data: [{ dim_1: "2026-08-01T00:00:00", metric_1: 12 }],
+          error: null,
+        }),
+      },
+      tables: famTables(),
+    });
+    const data = await runWidget(
+      db,
+      config({ dimensions: MES, metrics: [INT_METRIC, { field: "*", agg: "count" }] }),
+      AVAILABLE,
+      AGOSTO
+    );
+    // Sem família PEDIDA, o dado cai no nível ∅ — o total lançado à mão.
+    expect(data.rows[0].metric_1).toBe(1000);
+    expect(data.rows[0].metric_2).toBe(12);
+    expect(rpcCalls[0].args.p_metrics).toEqual([{ field: "*", agg: "count" }]);
+  });
+
+  it("sem o total lançado, um card soma embora a família mais grossa", async () => {
+    const { db } = fakeSupabase({
+      rpc: { run_widget_query: () => ({ data: [{ metric_1: 0 }], error: null }) },
+      tables: famTables({ manual_entries: NIVEIS.filter((e) => e.id !== "n0") }),
+    });
+    const data = await runWidget(
+      db,
+      config({ metrics: [INT_METRIC] }),
+      AVAILABLE,
+      AGOSTO
+    );
+    // 500 + 500 do nível {canal}, nunca os 3000 de somar todos os níveis.
+    expect(data.rows[0].metric_1).toBe(1000);
   });
 });

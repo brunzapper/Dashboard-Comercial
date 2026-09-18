@@ -31,7 +31,11 @@ import { getSessionInfo } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
 import { loadOrgAiConfig } from "@/lib/ai/config";
 import { aiSection, runJsonGenerationLoop } from "@/lib/ai/json-loop";
-import { loadManualBase } from "@/lib/manual-base/load";
+import {
+  loadManualBase,
+  loadManualDeclarations,
+} from "@/lib/manual-base/load";
+import { BUILTIN_MANUAL_FAMILIES } from "@/lib/manual-base/families";
 import { manualPeriodLabelOf } from "@/lib/manual-base/label";
 import { manualBaseModelBlock } from "@/lib/manual-base/model";
 import { buildManualBasePromptText } from "@/lib/import/manual-base/instructions";
@@ -45,7 +49,10 @@ import type {
 } from "@/lib/import/manual-base/types";
 import {
   saveManualEntry,
+  saveManualFamily,
+  saveManualFamilyMember,
   saveManualSeries,
+  setManualSeriesFamilies,
 } from "@/app/(app)/registros/base-manual/actions";
 import {
   EMPTY_MANUAL_BASE_SESSION,
@@ -131,8 +138,10 @@ interface LoadedContext {
 async function loadManualBaseEditContext(): Promise<LoadedContext> {
   const supabase = await createClient();
   const orgId = await getActiveOrgId();
-  const [base, { data: respData }, { data: opData }] = await Promise.all([
+  const [base, declarations, { data: respData }, { data: opData }] =
+    await Promise.all([
     loadManualBase(supabase, orgId),
+    loadManualDeclarations(supabase, orgId),
     supabase
       .from("responsibles")
       .select("id, display_name")
@@ -149,6 +158,56 @@ async function loadManualBaseEditContext(): Promise<LoadedContext> {
     operations: ((opData ?? []) as { id: string; name: string | null }[])
       .map((o) => ({ id: o.id, name: (o.name ?? "").trim() }))
       .filter((o) => o.name !== ""),
+    // FAMÍLIAS (0143): as cadastradas mais as EMBUTIDAS, que vivem em código.
+    // Os membros de uma embutida são os responsáveis/operações ATIVOS — é o
+    // mesmo conjunto que o seletor da tela oferece.
+    families: [
+      ...BUILTIN_MANUAL_FAMILIES.map((f) => ({
+        key: f.key,
+        label: f.label,
+        builtin: true,
+        members: (f.key === "responsavel"
+          ? ((respData ?? []) as { id: string; display_name: string | null }[]).map(
+              (r) => ({ key: r.id, label: (r.display_name ?? "").trim() })
+            )
+          : ((opData ?? []) as { id: string; name: string | null }[]).map((o) => ({
+              key: o.id,
+              label: (o.name ?? "").trim(),
+            }))
+        ).filter((m) => m.label !== ""),
+      })),
+      ...base.families.map((f) => ({
+        key: f.key,
+        label: f.label,
+        builtin: false,
+        members: base.members
+          .filter((m) => m.family_id === f.id)
+          .slice()
+          .sort((a, b) => a.sort_order - b.sort_order)
+          .map((m) => ({ key: m.key, label: m.label })),
+      })),
+    ],
+    // A declaração chega chaveada pelo ID da série; o contrato fala em CHAVE.
+    declarations: Object.fromEntries(
+      base.series.map((sr) => [sr.key, declarations[sr.id] ?? []])
+    ),
+    // Os lançamentos que JÁ existem, para a prévia dizer "100 → 120" em vez de
+    // exibir uma linha nova indistinguível de uma criação. O apply os RELÊ.
+    existing: base.entries.flatMap((e) => {
+      const sr = base.series.find((x) => x.id === e.series_id);
+      if (!sr) return [];
+      return [
+        {
+          seriesKey: sr.key,
+          periodStart: e.period_start,
+          periodEnd: e.period_end,
+          responsibleId: e.responsible_id,
+          operationId: e.operation_id,
+          coords: e.coords,
+          value: e.value,
+        },
+      ];
+    }),
     today: todayBrasilia(),
   };
 
@@ -328,6 +387,13 @@ export async function applyManualBaseCore(
   // 1) DADOS novos primeiro: os lançamentos deles precisam do id.
   const idByKey = new Map(ctx.series.map((s) => [s.key, s.id]));
   const failedSeries = new Set<string>();
+  // Os ids das famílias que JÁ existem — o contexto do contrato fala em chave
+  // (ids nunca atravessam o JSON), então o id vem de uma leitura própria.
+  const freshFamilyIds = new Map(
+    (await loadManualBase(await createClient(), await getActiveOrgId())).families.map(
+      (f) => [f.key, f.id]
+    )
+  );
   for (const s of v.parsed.series) {
     const res = await saveManualSeries(
       { label: s.label, key: s.key },
@@ -343,9 +409,88 @@ export async function applyManualBaseCore(
     else failedSeries.add(s.key);
   }
 
-  // 2) LANÇAMENTOS. UPSERT pela chave natural — reenviar o mês atualiza.
+  // 1b) FAMÍLIAS e MEMBROS novos (0143): antes dos lançamentos, porque a
+  // coordenada de um lançamento pode citar um membro que a resposta acabou de
+  // declarar. Falha aqui NÃO derruba o lote: o lançamento que cita o membro que
+  // faltou falha sozinho, no ramo abaixo (resultado POR ITEM).
+  const famIdByKey = new Map<string, string>();
+  for (const f of v.parsed.families) {
+    let familyId: string | undefined;
+    if (f.criar) {
+      const res = await saveManualFamily({ label: f.label, key: f.key }, {
+        revalidate: false,
+      });
+      results.push({
+        index: index++,
+        label: `Família “${f.label}”`,
+        ok: res.ok,
+        message: res.message,
+      });
+      if (!res.ok) continue;
+      familyId = res.id;
+    } else {
+      familyId = freshFamilyIds.get(f.key);
+    }
+    if (!familyId) continue;
+    famIdByKey.set(f.key, familyId);
+    for (const m of f.members.filter((x) => x.criar)) {
+      const res = await saveManualFamilyMember(
+        { familyId, label: m.label, key: m.key },
+        { revalidate: false }
+      );
+      results.push({
+        index: index++,
+        label: `Membro “${m.label}” de “${f.label}”`,
+        ok: res.ok,
+        message: res.message,
+      });
+    }
+  }
+
+  // 1c) A DECLARAÇÃO do dado. Sem ela a coordenada é gravada mas não particiona
+  // nada: o dado ficaria com lançamentos em níveis diferentes e a regra não
+  // ligaria. É derivada do que os lançamentos realmente usam, nunca do JSON.
+  const axesByseriesKey = new Map<string, Set<string>>();
   for (const e of v.parsed.entries) {
-    const label = `${e.seriesLabel}: ${e.value} em ${manualPeriodLabelOf(e.periodStart, e.periodEnd)}`;
+    const keys = Object.keys(e.coords);
+    if (keys.length === 0) continue;
+    const set = axesByseriesKey.get(e.seriesKey) ?? new Set<string>();
+    for (const k of keys) set.add(k);
+    axesByseriesKey.set(e.seriesKey, set);
+  }
+  for (const [seriesKey, axes] of axesByseriesKey) {
+    const seriesId = idByKey.get(seriesKey);
+    if (!seriesId) continue;
+    const already = new Set(ctx.declarations[seriesKey] ?? []);
+    const missing = [...axes].filter((a) => !already.has(a));
+    if (missing.length === 0) continue;
+    const res = await setManualSeriesFamilies(
+      seriesId,
+      [...already, ...missing],
+      { revalidate: false }
+    );
+    if (!res.ok) {
+      results.push({
+        index: index++,
+        label: `Famílias de “${seriesKey}”`,
+        ok: false,
+        message: res.message,
+      });
+    }
+  }
+
+  // 2) LANÇAMENTOS. UPSERT pela chave natural (dado × período × atribuição ×
+  // COORDENADAS) — reenviar o mês ATUALIZA.
+  for (const e of v.parsed.entries) {
+    const coordSuffix = e.coordLabel ? ` (${e.coordLabel})` : "";
+    const label =
+      `${e.seriesLabel}${coordSuffix}: ` +
+      (e.currentValue != null && e.currentValue !== e.value
+        ? e.mode === "somar"
+          ? `${e.currentValue} + ${e.value} = ${e.currentValue + e.value}`
+          : `${e.currentValue} → ${e.value}`
+        : String(e.value)) +
+      ` em ${manualPeriodLabelOf(e.periodStart, e.periodEnd)}`;
     const seriesId = idByKey.get(e.seriesKey);
     if (!seriesId || failedSeries.has(e.seriesKey)) {
       results.push({
@@ -356,14 +501,20 @@ export async function applyManualBaseCore(
       });
       continue;
     }
+    // `somar` é resolvido AQUI, sobre o valor que o catálogo FRESCO trouxe —
+    // nunca pela IA, que erraria calada se o número tivesse mudado entre a
+    // prévia e o Aplicar (o validador já releu o atual nesta rodada).
+    const value =
+      e.mode === "somar" ? (e.currentValue ?? 0) + e.value : e.value;
     const res = await saveManualEntry(
       {
         seriesId,
         periodStart: e.periodStart,
         periodEnd: e.periodEnd,
-        value: e.value,
+        value,
         responsibleId: e.responsibleId,
         operationId: e.operationId,
+        coords: e.coords,
         spread: e.spread,
       },
       { revalidate: false }

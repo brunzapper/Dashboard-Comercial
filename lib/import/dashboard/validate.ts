@@ -77,6 +77,8 @@ import { PERIOD_PRESETS, PERIOD_ALL } from "@/lib/widgets/period";
 import { FILTER_OPS } from "@/lib/widgets/filter-ops";
 import { CORE_FIELDS } from "@/lib/widgets/fields";
 import { parseManualRef } from "@/lib/manual-base/types";
+import { parseManualAxisRef } from "@/lib/manual-base/families";
+import { MANUAL_COORD_OPS } from "@/lib/manual-base/coord-filters";
 import { CALC_METRIC_FIELD } from "@/lib/widgets/calc-metrics";
 import { isClosedWeekTransform } from "@/lib/widgets/closed-week";
 import { DEFAULT_WIDGET_SIZE } from "@/lib/widgets/widget-defaults";
@@ -266,6 +268,8 @@ export function validateDashboardImport(
   // declarável no JSON — quem a alimenta é o assistente dela, com prévia e
   // apply próprios; aqui só se confere se a chave existe.
   const manualKeys = new Set(ctx.manualSeries.map((m) => m.key));
+  // 0143: as famílias, para o ramo de dimensão/filtro `manualdim:<chave>`.
+  const manualFamilyKeys = new Set(ctx.manualAxes.families.map((f) => f.key));
   // Refs `match:` só aceitam Bases RAIZ: sub-base compartilha o record_type da
   // pai e nunca casa (buildMatchFields/helpers 0104 seguem a mesma regra).
   const rootSourceKeySet = () =>
@@ -383,6 +387,7 @@ export function validateDashboardImport(
         workingSources,
         ctx.goalMetrics,
         ctx.manualSeries,
+        ctx.manualAxes,
         excludeKey ? new Set([excludeKey]) : new Set()
       )
     );
@@ -931,6 +936,38 @@ export function validateDashboardImport(
       if (!isRecord(d)) return;
       const field = asString(d.field);
       const dw = `${where}.dimensions[${j}]`;
+      // 0143: eixo de FAMÍLIA da Base manual. Ramo PRÓPRIO, fora do `checkRef`:
+      // ele é compartilhado com coluna do modo lista, campo de kanban e barra de
+      // período, e afrouxá-lo abriria os três — onde a família não é alvo
+      // válido. Precedente literal da métrica `manual:` (abaixo).
+      const axisKey = parseManualAxisRef(field);
+      if (axisKey != null) {
+        if (!manualFamilyKeys.has(axisKey)) {
+          errors.push(
+            `${dw}: não existe a família "${axisKey}" na Base manual. As famílias são: ${
+              manualFamilyKeys.size > 0
+                ? [...manualFamilyKeys].join(", ")
+                : "(nenhuma cadastrada)"
+            }.`
+          );
+          return;
+        }
+        // Transform/dateAgg/expressão não significam nada num eixo de família
+        // (ele não é data nem campo de registro): removidos com AVISO, padrão
+        // do `closedWeek` incompatível.
+        for (const k of ["transform", "dateAgg", "case_formula_text", "caseFormula"]) {
+          if (d[k] !== undefined && d[k] !== null && d[k] !== "" && d[k] !== "none") {
+            warnings.push(
+              `${dw}: "${k}" não se aplica a uma família da Base manual — ignorado.`
+            );
+          }
+        }
+        dimensions.push({
+          field,
+          ...(asString(d.label) ? { label: asString(d.label) } : {}),
+        });
+        return;
+      }
       if (!checkRef(field, dw)) return;
       const transform = asString(d.transform);
       if (transform && !TRANSFORMS.has(transform)) {
@@ -1181,6 +1218,27 @@ export function validateDashboardImport(
         errors.push(
           `${fw}: operador inválido ("${op}"). Válidos: ${[...UI_FILTER_OPS].join(", ")}.`
         );
+        return;
+      }
+      // 0143: filtro de COORDENADA. Mesmo ramo próprio da dimensão, e com os
+      // operadores restritos: só `=`/`≠`/`em (lista)`. `is_null` fica FORA de
+      // propósito — ele confundiria "não declarou a família" (outro nível) com
+      // "declarou o residual" (este nível), que é a distinção inteira.
+      const filterAxis = parseManualAxisRef(field);
+      if (filterAxis != null) {
+        if (!manualFamilyKeys.has(filterAxis)) {
+          errors.push(
+            `${fw}: não existe a família "${filterAxis}" na Base manual.`
+          );
+          return;
+        }
+        if (!MANUAL_COORD_OPS.includes(op as WidgetFilter["op"])) {
+          errors.push(
+            `${fw}: num filtro de família da Base manual só valem os operadores ${MANUAL_COORD_OPS.join(", ")}.`
+          );
+          return;
+        }
+        filters.push({ field, op: op as WidgetFilter["op"], value: f.value });
         return;
       }
       if (!checkRef(field, fw)) return;

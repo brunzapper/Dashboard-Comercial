@@ -47,7 +47,7 @@ import type { Metadata } from "next";
 
 import { createServiceClient } from "@/lib/supabase/service";
 import { snapshotClient } from "@/lib/snapshots/db-adapter";
-import { loadManualSeries } from "@/lib/manual-base/load";
+import { loadManualAxes, loadManualSeries } from "@/lib/manual-base/load";
 import { mergeGoalMetrics } from "@/lib/metas/metrics";
 import { withRpcTtlCache } from "@/lib/widgets/rpc-cache";
 import { withRpcMemo } from "@/lib/widgets/rpc-memo";
@@ -900,11 +900,25 @@ async function SnapshotContent({
     // Base manual CONGELADA (0142): sai do `db`, que redireciona para os
     // espelhos do snapshot — os operandos `manual:<chave>` das expressões
     // resolvem pelo retrato, não pela base viva.
-    const manualSeries = await loadManualSeries(db);
+    // Os EIXOS (0143) saem do MESMO `db`: um snapshot capturado antes da 0143
+    // tem famílias vazias, e aí um operando com escopo simplesmente não existe
+    // no catálogo daquele retrato — que é o desfecho correto de "o link é um
+    // RETRATO".
+    const [manualSeries, manualAxes] = await Promise.all([
+      loadManualSeries(db),
+      loadManualAxes(db),
+    ]);
     // Catálogo de operandos das expressões {=…} — builder ÚNICO
     // (lib/widgets/agg-catalog.ts), mesma montagem da action do quick-table.
     const catalog: OperandRef[] = buildAggOperandCatalog(
-      availableAggCatalogInput(available, fields, sources, goalMetrics, manualSeries)
+      availableAggCatalogInput(
+        available,
+        fields,
+        sources,
+        goalMetrics,
+        manualSeries,
+        manualAxes
+      )
     );
 
     quickTablePromise = Promise.all(

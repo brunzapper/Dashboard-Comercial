@@ -670,6 +670,65 @@ describe("operandos de META (meta:<chave>)", () => {
     ]);
   });
 
+  // 0143: o ESCOPO DE MEMBRO tem de sair do catálogo COM o grupo, senão cai no
+  // MESMO furo — o allowlist `perQueryValues` é montado percorrendo o catálogo.
+  it("manualOperandRefs emite os escopados da família DECLARADA, com o grupo", () => {
+    const refs = manualOperandRefs(
+      [{ id: "s1", key: "interacoes", label: "Interações" }] as never,
+      {
+        families: [{ id: "f1", key: "canal", label: "Canal", sort_order: 0 }],
+        members: [
+          { id: "m1", family_id: "f1", key: "ligacao", label: "Ligação", sort_order: 0 },
+        ],
+        declarations: { s1: ["canal"] },
+      }
+    );
+    expect(refs.map((r) => r.ref)).toEqual([
+      "manual:interacoes",
+      "manual:interacoes@canal=ligacao",
+      // O residual é um grupo como qualquer outro: sem ele não se escreve "os
+      // 50 sem responsável direto" numa fórmula.
+      "manual:interacoes@canal=",
+    ]);
+    expect(refs.every((r) => r.group === MANUAL_GROUP)).toBe(true);
+    expect(refs[1].label).toBe("Interações · Canal: Ligação");
+    expect(refs[2].label).toBe("Interações · Sem Canal");
+  });
+
+  it("família NÃO declarada pelo dado não vira operando", () => {
+    const refs = manualOperandRefs(
+      [{ id: "s1", key: "interacoes", label: "Interações" }] as never,
+      {
+        families: [{ id: "f1", key: "canal", label: "Canal", sort_order: 0 }],
+        members: [
+          { id: "m1", family_id: "f1", key: "ligacao", label: "Ligação", sort_order: 0 },
+        ],
+        declarations: {},
+      }
+    );
+    expect(refs.map((r) => r.ref)).toEqual(["manual:interacoes"]);
+  });
+
+  it("validateCondAggRefs: operando com ESCOPO vale fora de SOMASE", () => {
+    const catalog = [
+      { ref: "agg:count:*", label: "Contagem de registros" },
+      {
+        ref: "manual:interacoes@canal=ligacao",
+        label: "Interações · Canal: Ligação",
+        group: MANUAL_GROUP,
+      },
+    ];
+    const ok = validateCondAggRefs(
+      f(
+        ref("agg:count:*"),
+        { kind: "op", op: "/" },
+        ref("manual:interacoes@canal=ligacao")
+      ),
+      catalog as never
+    );
+    expect(ok.ok).toBe(true);
+  });
+
   // O furo da v2.7: o operando manual era OFERTADO pelo catálogo e RECUSADO no
   // save, porque só o GOAL_GROUP entrava no allowlist de topo. É a conta que
   // motivou o recurso — contagem de registros dividida por um número digitado.

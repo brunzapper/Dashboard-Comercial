@@ -1,4 +1,16 @@
-// Versão: 1.1 | Data: 17/09/2026
+// Versão: 1.3 | Data: 18/09/2026
+// v1.3 (18/09/2026): o operando com ESCOPO DE MEMBRO,
+//   `manual:<dado>@<familia>=<membro>` (0143). `parseManualRef` passa a
+//   devolver a chave do DADO nas duas formas — e isso é o que importa: ela é a
+//   base de `isManualBasisKey`, e um ref escopado que não fosse reconhecido
+//   como manual vazaria para `basisMetric` como coluna inexistente no RPC, nos
+//   OITO sítios que ramificam por ela.
+// v1.2 (18/09/2026): `ManualEntry.coords` — as FAMÍLIAS (0143). O campo é
+//   OBRIGATÓRIO de propósito (molde do `AggCatalogInput.manualSeries`): um
+//   sítio que monte lançamento sem decidir sobre o nível tem de ser erro de
+//   COMPILAÇÃO, nunca um lançamento que cai calado no nível ∅ e soma com o
+//   total. O vocabulário (família/membro/coordenada/nível) e a REGRA vivem em
+//   `families.ts` e `levels.ts`.
 // v1.1 (17/09/2026): `manualSeriesLabel` — o rótulo de exibição de um ref
 //   `manual:<chave>`. Existe porque a série NÃO é um AvailableField: o
 //   `fieldLabel` do engine/builder devolveria o ref cru, e a métrica sairia
@@ -24,6 +36,12 @@
 
 /** O ref de operando/métrica. `manual:<chave>` — namespace próprio, molde do
  *  `meta:<chave>` (lib/widgets/calc-metrics.ts). */
+import type {
+  ManualCoords,
+  ManualFamily,
+  ManualFamilyMember,
+} from "./families";
+
 export const MANUAL_OPERAND_PREFIX = "manual:";
 
 /** Grupo do operando no catálogo agregado (papel do GOAL_GROUP). */
@@ -109,25 +127,91 @@ export interface ManualEntry {
   operation_id: string | null;
   spread: ManualSpread;
   note: string | null;
+  /** O que este lançamento endereça — ver `families.ts`. `{}` é o nível ∅ (o
+   *  total), que é o que toda linha anterior à 0143 tem. */
+  coords: ManualCoords;
 }
 
 /** O par pronto para o engine: os dados e seus lançamentos. */
 export interface ManualBaseData {
   series: ManualSeries[];
   entries: ManualEntry[];
+  /** Catálogo dos eixos (0143). Vazio = base plana, comportamento da 0142. */
+  families: ManualFamily[];
+  members: ManualFamilyMember[];
 }
 
-export const EMPTY_MANUAL_BASE: ManualBaseData = { series: [], entries: [] };
+export const EMPTY_MANUAL_BASE: ManualBaseData = {
+  series: [],
+  entries: [],
+  families: [],
+  members: [],
+};
 
 /** Chave de um ref `manual:<chave>` válido, ou null. Espelho de parseGoalRef. */
 export function parseManualRef(ref: string): string | null {
-  if (!ref.startsWith(MANUAL_OPERAND_PREFIX)) return null;
-  const key = ref.slice(MANUAL_OPERAND_PREFIX.length);
-  return MANUAL_KEY_RE.test(key) ? key : null;
+  return parseManualOperand(ref)?.key ?? null;
 }
 
 export function manualRef(key: string): string {
   return `${MANUAL_OPERAND_PREFIX}${key}`;
+}
+
+/** O RESIDUAL de uma família num ref escopado: `manual:x@canal=`. Escrever a
+ *  ausência como sufixo vazio evita um segundo sentinela — e o parse a
+ *  distingue de "sem escopo" pela presença do `@`. */
+export const MANUAL_SCOPE_RESIDUAL = "";
+
+/**
+ * Um operando da Base manual, nu ou com ESCOPO DE MEMBRO.
+ *
+ * `manual:interacoes`                  → todo o dado (o nível que a rodada pedir)
+ * `manual:interacoes@canal=ligacao`    → só as ligações
+ * `manual:interacoes@canal=`           → só o residual ("Sem Canal")
+ *
+ * O escopo existe porque um filtro de widget vale para o card INTEIRO: ele não
+ * dá conta de "ligações ÷ e-mails" numa fórmula só. Ele é resolvido no ENGINE
+ * como um filtro de coordenada a mais — nada disso desce ao RPC.
+ */
+export interface ManualOperand {
+  /** A chave do DADO. */
+  key: string;
+  /** A família do escopo, ou null quando o ref é nu. */
+  axis: string | null;
+  /** A chave do membro; `null` com `axis` preenchido é o RESIDUAL. */
+  member: string | null;
+}
+
+export function parseManualOperand(ref: string): ManualOperand | null {
+  if (!ref.startsWith(MANUAL_OPERAND_PREFIX)) return null;
+  const rest = ref.slice(MANUAL_OPERAND_PREFIX.length);
+  const at = rest.indexOf("@");
+  if (at < 0) {
+    return MANUAL_KEY_RE.test(rest) ? { key: rest, axis: null, member: null } : null;
+  }
+  const key = rest.slice(0, at);
+  if (!MANUAL_KEY_RE.test(key)) return null;
+  const scope = rest.slice(at + 1);
+  const eq = scope.indexOf("=");
+  if (eq < 0) return null;
+  const axis = scope.slice(0, eq);
+  const member = scope.slice(eq + 1);
+  if (!MANUAL_KEY_RE.test(axis)) return null;
+  if (member !== MANUAL_SCOPE_RESIDUAL && !MANUAL_KEY_RE.test(member)) return null;
+  return {
+    key,
+    axis,
+    member: member === MANUAL_SCOPE_RESIDUAL ? null : member,
+  };
+}
+
+/** O ref de um operando com escopo. `member` null = o residual. */
+export function manualScopedRef(
+  key: string,
+  axis: string,
+  member: string | null
+): string {
+  return `${MANUAL_OPERAND_PREFIX}${key}@${axis}=${member ?? MANUAL_SCOPE_RESIDUAL}`;
 }
 
 /**

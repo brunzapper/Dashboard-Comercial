@@ -1,4 +1,7 @@
-// Versão: 1.0 | Data: 17/09/2026
+// Versão: 1.1 | Data: 18/09/2026
+// v1.1 (18/09/2026): os EIXOS (0143) vão junto — sem eles o gestor no ⋮ e no
+//   widget não desenhariam as colunas de coordenada, e lançar uma subdivisão
+//   fora da página de Registros seria impossível.
 // Leitura da BASE MANUAL (0142) para as superfícies do DASHBOARD: o widget
 // "Base do Dashboard" e o painel do menu ⋮.
 //
@@ -19,6 +22,11 @@ import { getSessionInfo } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
 import { loadManualBase } from "@/lib/manual-base/load";
 import type { ManualEntry, ManualSeries } from "@/lib/manual-base/types";
+import { loadManualDeclarations } from "@/lib/manual-base/load";
+import type {
+  ManualFamily,
+  ManualFamilyMember,
+} from "@/lib/manual-base/families";
 
 export interface ManualBaseOptionRow {
   id: string;
@@ -32,6 +40,9 @@ export interface ManualBaseState {
   entries: ManualEntry[];
   responsibles: ManualBaseOptionRow[];
   operations: ManualBaseOptionRow[];
+  families: ManualFamily[];
+  members: ManualFamilyMember[];
+  declarations: Record<string, string[]>;
   canEdit: boolean;
 }
 
@@ -41,6 +52,9 @@ const EMPTY: ManualBaseState = {
   entries: [],
   responsibles: [],
   operations: [],
+  families: [],
+  members: [],
+  declarations: {},
   canEdit: false,
 };
 
@@ -54,8 +68,10 @@ export async function getManualBaseState(): Promise<ManualBaseState> {
   }
   const supabase = await createClient();
   const orgId = await getActiveOrgId();
-  const [base, { data: respData }, { data: opData }] = await Promise.all([
+  const [base, declarations, { data: respData }, { data: opData }] =
+    await Promise.all([
     loadManualBase(supabase, orgId),
+    loadManualDeclarations(supabase, orgId),
     supabase
       .from("responsibles")
       .select("id, display_name")
@@ -67,6 +83,9 @@ export async function getManualBaseState(): Promise<ManualBaseState> {
     ok: true,
     series: base.series,
     entries: base.entries,
+    families: base.families,
+    members: base.members,
+    declarations,
     responsibles: (respData ?? []).map((r) => ({
       id: String(r.id),
       name: String(r.display_name ?? ""),

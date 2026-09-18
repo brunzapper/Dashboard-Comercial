@@ -6064,6 +6064,168 @@ a lista de cada Base sem dar como isolá-las. O parâmetro de `sourceChips` é
 opt-in porque a função também alimenta dimensões, filtros e colunas, onde a
 Base manual não é alvo válido.
 
+#### Famílias e níveis (0143, 18/09/2026)
+
+**O problema.** A Base manual da 0142 é uma lista PLANA: vários lançamentos do
+mesmo dado SOMAM. Mas estas quatro linhas são QUATRO LEITURAS DO MESMO 1000:
+
+```
+total .................. 1000
+por canal .............. 500 ligação + 500 e-mail
+por vendedor ........... 200 Paulo + 400 Gabriella + 350 Daniela + 50 sem vendedor
+canal × vendedor ....... 100 + 250 + 150
+```
+
+Lançar as quatro na base plana daria 3500. Daí a regra que é a feature inteira:
+**níveis NUNCA somam entre si**.
+
+**A forma.** Três objetos e um conceito derivado:
+
+- **`manual_families`** — o EIXO ("Canal"). É da ORGANIZAÇÃO e reutilizável,
+  porque a dimensão `manualdim:<chave>` precisa ter UM significado no dashboard
+  inteiro: é isso que permite um gráfico repartir dois dados diferentes pelo
+  mesmo eixo. A `key` é imutável, como a do dado.
+- **`manual_family_members`** — os valores. `sort_order` é a ordem das barras.
+- **`manual_series_families`** — o DADO declarando em que eixos se reparte.
+- **`manual_entries.coords`** (jsonb) — a COORDENADA de um lançamento. O
+  **nível** é `sorted(Object.keys(coords))`, derivado, nunca gravado.
+
+**A regra** (`resolveManualLevel`, `lib/manual-base/levels.ts`): dado o conjunto
+pedido `F` (eixos das dimensões `manualdim:` ∪ eixos dos filtros de coordenada ∪
+o escopo do operando), usa o nível exatamente `F` se houver lançamentos nele;
+senão o `L ⊇ F` com MENOS famílias extras, somando as de `L \ F`; se nenhum
+contém `F`, a métrica DAQUELE dado degrada para "—". O desempate é
+lexicográfico, só para ser determinístico.
+
+O passo "menos famílias extras" não é estética: somar embora um nível
+INCOMPLETO devolve um total menor. No exemplo, o cruzamento soma 500 de 1000 —
+então "quanto deu no total?" tem de cair no nível ∅ (1000), não no cruzado. E a
+consequência boa: um dado que só tem a margem por canal responde 1000 a um card
+sem dimensão, que é a decisão de produto "sem o total lançado, soma a família
+mais grossa".
+
+#### As duas formas de vazio
+
+A distinção que sustenta tudo:
+
+| significado | como fica |
+|---|---|
+| não endereça esta família (outro nível) | chave AUSENTE de `coords` |
+| o RESIDUAL declarado ("sem vendedor") | chave presente, valor `null` |
+
+`'{"v":null}'::jsonb` ≠ `'{}'::jsonb`, então o índice único os separa sem
+sentinela de texto. Em TypeScript a distinção só sobrevive com os acessores
+`coordDeclares` (a chave existe?) e `coordMember` (qual membro?) — escrever
+`coords[axis]` cru e testar com `if (!…)` trataria o residual como ausente, e é
+o bug mais fácil de passar em review. Na tela o rótulo é "Sem <Família>",
+**jamais "—"**: os 50 sem vendedor são um número conhecido.
+
+#### `coords` no índice único, e por que não há `coords_key`
+
+O índice natural passou a ser `(organization_id, series_id, period_start,
+period_end, responsible_id, operation_id, coords) nulls not distinct`. O jsonb
+normaliza ordem de chaves, espaços e duplicatas na serialização — ele MESMO é a
+forma canônica —, então `ON CONFLICT (…, coords)` infere o índice e não existe
+coluna denormalizada com dever de espelho entre SQL e TypeScript. A história do
+UPSERT da 0142 ("relançar a tabela do mês ATUALIZA") sobrevive intacta.
+`manualCoordsKey` continua existindo, mas só EM MEMÓRIA: chave de `Map` e
+identidade de linha na grade.
+
+`coords not null default '{}'` faz toda linha existente entrar no nível ∅: zero
+migração de dado, e a unicidade não muda para ninguém. E NADA de inferir nível a
+partir de `responsible_id is not null` — isso mudaria o número de bases já em
+uso. Quem opta pelo modelo hierárquico é a DECLARAÇÃO, explícita.
+
+#### Famílias EMBUTIDAS
+
+`responsavel` e `operacao` não são linhas de `manual_families`: vivem como
+constantes em `lib/manual-base/families.ts` (registry em CÓDIGO, molde do
+`loadMappingDomains` da 0119), então não há linha a semear por org nem trigger
+de "indeletável". Os membros delas são os responsáveis e operações VIVOS, e a
+coordenada é ESPELHADA nas colunas FK pelo dono único `applyBuiltinCoords` — é
+isso que mantém a projeção sobre as dimensões de registro e o dobramento
+apelido→principal (0101) funcionando sem tocar em `buckets.ts`. Elas não têm ref
+`manualdim:` próprio: a dimensão de registro já existe, e um segundo ref para o
+mesmo eixo faria dois gráficos "por responsável" divergirem só pela escolha do
+ref.
+
+#### O curto-circuito, e o que ele dispensou
+
+**Dimensão `manualdim:` presente ⇒ `computeRows` NÃO chama o RPC.** Não é
+otimização, é correção: nenhum registro é atribuível a um membro de família
+(não há atribuição), então repetir `count(*)` sob "Ligação" e sob "E-mail"
+dobraria o subtotal — exatamente o pecado que a regra de níveis existe para
+evitar. Métrica de registro exibe `null` ("—"), **nunca 0**: 0 leria como
+"nenhum registro nesse canal", que é falso.
+
+O ganho colateral é grande. Sem linha do RPC não há `dim_*` a reindexar, então
+`planCaseExpansion`, `contractCaseRows`, `mergeRowsByBucket` e a guarda de
+payload vazio ficam **INTOCADOS** — e o risco de um erro de índice convivendo
+com a expansão condicional desaparece em vez de ser mitigado. A mudança no meio
+ramificado de `computeRows` é um `if` de doze linhas no topo.
+
+Filtro de coordenada sai do caminho de registros em `splitManualCoordFilters`
+(`lib/manual-base/coord-filters.ts`), ANTES de `resolveFilters` — como
+`legFiltersFor` é a fonte única dos filtros de toda perna, separar ali cobre o
+RPC principal, as auxiliares, as pernas por métrica e a comparação de uma vez.
+Ele recorta **só as métricas manuais**; a de registro do mesmo widget fica
+inalterada. A assimetria é deliberada e espelha a que já valia na direção
+oposta (os filtros de registro nunca recortaram os lançamentos) — mudar aquela
+alteraria o número de widgets já salvos. Operadores: só `eq`/`neq`/`in`, e
+**`is_null` fica FORA** porque confundiria "não declarou a família" com
+"declarou o residual".
+
+#### Rótulo, ordem e o operando com escopo
+
+A linha guarda a CHAVE do membro; a resolução acontece no bloco pós-`computeRows`
+que já rotula FK e `record_type`. Dois acréscimos ali: o laço de rótulos
+ramificava por `fieldFk`, que devolve `undefined` para um eixo e faria
+`continue` (o valor sairia cru), e `dimensions` montava o rótulo com
+`fieldLabel`, que devolveria "manualdim:canal" — vira
+`manualFamilyLabel(...) ?? fieldLabel(...)`, precedente literal do
+`manualSeriesLabel` que a métrica já usa. A ordem das barras é o `sort_order` do
+membro, aplicada ANTES da rotulagem (depois dela a chave se perdeu).
+
+O operando `manual:<dado>@<familia>=<membro>` é abaixado em runtime para um
+filtro de coordenada a mais — nada disso desce ao RPC. Ele **tem** de sair do
+catálogo com `group: MANUAL_GROUP`: `validateCondAggRefs` monta o allowlist
+`perQueryValues` percorrendo o catálogo, e um operando ofertado e ausente dali é
+aceito pelo editor e RECUSADO no save, que foi o furo da v2.8.
+`AggCatalogInput.manualFamilies` é OBRIGATÓRIO pela mesma razão do
+`goalMetrics` — foram 13 sítios, e a Remuneração recebe o catálogo VAZIO,
+coerente com ela já passar `[]` em `manualSeries`.
+
+#### A conferência
+
+Níveis não somam, então nada obriga a repartição a fechar com o total — e o
+engine não inventa o resto. Sem uma tela que conte, um cruzamento preenchido
+pela metade aparece no gráfico como um número menor e ninguém descobre por quê.
+`manualConference` (`lib/manual-base/conference.ts`) mostra o total de cada
+nível e o que falta, e avisa da armadilha PRÉ-EXISTENTE (vale na 0142 também):
+no nível ∅, lançamentos COM responsável convivendo com lançamentos SEM **somam**
+— para um ser a subdivisão do outro, é preciso declarar a família. A aritmética
+de janela sai de `sumManualEntries`/`spread.ts`, nunca reimplementada: uma cópia
+discordaria do gráfico no primeiro lançamento `intersecao`.
+
+#### Onde degrada
+
+Modo lista, `dateAgg`/`runWidgetByPeriod`, kanban e eixo cuja família foi
+excluída: "—". Snapshot capturado ANTES da 0143 tem famílias vazias, então um
+eixo nele degrada — consequência correta de "o link compartilhado é um RETRATO";
+passthrough contradiria a decisão de produto da 0142.
+
+#### No contrato da IA
+
+O ALVO de um lançamento passou a ser a TRIPLA dado + período + COORDENADAS: sem
+a terceira, a rejeição de duplicata (chaveada só por dado + período) recusaria
+as células legítimas de um cruzamento inteiro. A prévia carrega o valor
+ANTERIOR, resolvido no SERVIDOR e nunca vindo do JSON, e `modo`
+substituir/somar é resolvido no apply — a IA não faz a conta, porque erraria
+calada se o número tivesse mudado entre a prévia e o Aplicar. No import de
+dashboards, `manualdim:` é aceito como dimensão e filtro em ramo PRÓPRIO: o
+`checkRef` é compartilhado com coluna do modo lista, campo de kanban e barra de
+período, e afrouxá-lo abriria os três.
+
 #### O assistente (contrato `base-manual-edit` v1)
 
 Padrão §4.17. Duas decisões moldam o contrato:
@@ -6773,6 +6935,18 @@ principalmente — para mantenedores humanos.
     assistente nunca grava direto (invariante 25). O carimbo da base entra no
     `deferredScopeById`: sem ele, editar um lançamento deixa o gráfico com o
     valor velho até um F5.
+
+    **FAMÍLIAS (0143):** o mesmo número repartido, e **níveis NUNCA somam entre
+    si**. O NÍVEL de um lançamento é o conjunto de famílias que ele endereça (as
+    chaves de `coords`), e uma consulta escolhe UM nível — o de menos famílias
+    extras, POR DADO e por OPERANDO. `coords` é jsonb e entra no índice único
+    (o jsonb é a forma canônica; nenhuma coluna denormalizada), `default '{}'`
+    faz toda linha existente cair no nível ∅ sem migração de dado, e a chave
+    AUSENTE (outro nível) é DIFERENTE do valor `null` (o residual declarado).
+    Um eixo `manualdim:` CURTO-CIRCUITA a consulta de registros: nenhum
+    registro é atribuível a um membro de família, então repetir a contagem por
+    membro dobraria o subtotal — métrica de registro vale `null`, nunca 0. Sem
+    linha do RPC não há `dim_*` a reindexar, e os RPCs seguem INTOCADOS.
 
 ## 6. Convenções do projeto
 

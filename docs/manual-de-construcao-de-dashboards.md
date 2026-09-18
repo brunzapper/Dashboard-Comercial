@@ -522,6 +522,64 @@ igual entre os dias"** — é a única em que a soma dos dias devolve o total.
   trimestre e no Total geral, porque o número manual soma como qualquer
   quantidade.
 
+#### Repartir o mesmo número: famílias (0143)
+
+Às vezes o número tem divisões por dentro. "Total de interações com clientes:
+1000" pode ser lido de várias maneiras ao mesmo tempo:
+
+| leitura | números |
+|---|---|
+| total | 1000 |
+| por Canal | ligação 500 · e-mail 500 |
+| por Vendedor | Paulo 200 · Gabriella 400 · Daniela 350 · sem vendedor 50 |
+| Canal × Vendedor | ligação/Paulo 100 · ligação/Gabriella 250 · ligação/Daniela 150 |
+
+São **quatro leituras das MESMAS mil interações** — não são 3500. A regra que o
+sistema aplica é justamente essa: **as leituras nunca se somam entre si**. Ele
+escolhe UMA e mostra só ela.
+
+Uma **família** é uma dessas maneiras de repartir ("Canal", "Vendedor"), e os
+**membros** são os valores dela ("Ligação", "E-mail").
+
+**Como montar**, em Registros → Base manual:
+
+1. Na seção **Famílias**, crie "Canal" e acrescente os membros "Ligação" e
+   "E-mail". A ordem dos membros é a ordem das barras no gráfico.
+2. Em **"Cada dado se reparte por…"**, marque "Canal" no dado "Total de
+   interações". Enquanto nada está marcado, todos os lançamentos do dado somam
+   entre si, exatamente como antes — é a marcação que liga a regra.
+3. Em **Nova linha**, o seletor "Canal" aparece com três respostas: *Não
+   repartir* (a linha é o TOTAL), *Sem Canal* (o resíduo — um grupo de verdade,
+   com número próprio) ou um membro.
+4. Lance o total numa linha e cada fatia na sua. A coluna **Reparte** mostra o
+   que cada linha endereça.
+
+**Como usar nos widgets:**
+
+- **Card com o total**: métrica `Total de interações`, sem dimensão. Se você não
+  lançou o total, ele soma a família mais grossa que existir — e o total
+  lançado à mão, quando existe, sempre vence.
+- **Card de um membro** ("500 ligações"): a mesma métrica, mais um **filtro**
+  Canal = Ligação.
+- **Gráfico destrinchando o dado**: dimensão **Canal** (grupo "Famílias da Base
+  manual"), métrica `Total de interações`.
+- **Tabela cruzada**: duas dimensões, Canal e Vendedor.
+- **Numa fórmula**: além do dado inteiro, cada membro aparece como operando
+  próprio — `[Total de interações · Canal: Ligação]` —, o que permite escrever
+  "ligações ÷ e-mails" num card só.
+
+**Três coisas que valem saber antes:**
+
+- Num widget com dimensão de família, **só os números da Base manual aparecem**.
+  Uma contagem de registros ao lado exibe "—", e não zero: nenhum registro
+  pertence a "Ligação", e inventar um rateio seria pior que dizer "não sei".
+- **Se a repartição não fecha com o total, o gráfico mostra a repartição** — ele
+  não inventa o resto. O bloco **Conferência**, no fim da tela, mostra o total
+  de cada leitura e quanto falta. No exemplo acima o cruzamento soma 500 de
+  1000, e é ali que isso fica visível.
+- Um filtro de família recorta **só os números da Base manual**. A contagem de
+  registros do mesmo widget não é afetada.
+
 #### O que ele não faz (e por quê)
 
 - **Dimensão que não seja data, responsável ou operação exibe "—".** Um

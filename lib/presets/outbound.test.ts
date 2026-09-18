@@ -7,6 +7,7 @@
 // perRecordCalcOperands p/ o campo tier_contas) — um ref digitado errado
 // quebra AQUI, não em produção com widget zerado. Também pina as regras de
 // jul/2026 das sub-fontes (fonte "Outro" + corte na Data Reunião).
+import { EMPTY_MANUAL_AXIS_CATALOG } from "@/lib/manual-base/families";
 import { describe, expect, it } from "vitest";
 
 import { validateFormulaForContext } from "@/lib/records/formula-validate";
@@ -57,7 +58,7 @@ const DEFS: AggCatalogDefRow[] = [
   { field_key: "dias_em_prospeccao", label: "Dias em prospecção", data_type: "numero", applies_to: ["meetime_outbound"] },
 ];
 
-const aggCatalog = buildAggOperandCatalog(defsAggCatalogInput(DEFS, SOURCES, [], []));
+const aggCatalog = buildAggOperandCatalog(defsAggCatalogInput(DEFS, SOURCES, [], [], EMPTY_MANUAL_AXIS_CATALOG));
 
 describe("preset outbound — estrutura", () => {
   it("presetKeys únicos, prefixados e com tab declarada", () => {

@@ -2104,8 +2104,10 @@ This version has breaking changes — APIs, conventions, and file structure may 
   manual não tem campo de data e casa com o INTERVALO do período (não com uma
   coluna): fora de `bases`/`sources`/`periodBar.fieldBySource`, e "todo o
   período" conta tudo. No construtor as séries têm CHIP próprio
-  (`MANUAL_CHIP_KEY`, opt-in em `sourceChips` — dimensão/filtro/coluna não são
-  alvo e ganhariam chip vazio).
+  (`MANUAL_CHIP_KEY`, opt-in em `sourceChips`). **A razão do opt-in mudou de
+  sentido na 0143**: dimensão e FILTRO passaram a ofertar as FAMÍLIAS, então lá
+  o chip tem conteúdo; o que segue valendo é "chip só onde há algo dentro" —
+  coluna do modo lista, filtro rápido e busca continuam com o opt-in desligado.
   Escrita por choke point
   ÚNICO (`app/(app)/registros/base-manual/actions.ts`) para as TRÊS superfícies
   — página de Registros, ⋮ do dashboard e o widget `base_manual` —, sempre com
@@ -2126,6 +2128,74 @@ This version has breaking changes — APIs, conventions, and file structure may 
   primeira. O TURNO entra por rota NDJSON, nunca por action (uma action de dois
   minutos congelaria a fila do cliente, e a vítima seria a grade ao lado). Fora
   do v1: moeda e a Remuneração. Ver `docs/arquitetura.md` §4.26 e invariante 41.
+- **FAMÍLIAS da Base manual: o mesmo número repartido, e NÍVEIS NUNCA SOMAM
+  ENTRE SI (0143, 18/09/2026):** uma **família** (`manual_families`) é um eixo
+  categórico da ORGANIZAÇÃO, reutilizável, endereçado pela dimensão
+  `manualdim:<chave>`; **membros** (`manual_family_members`) são os valores
+  dele, e o `sort_order` é a ordem das barras; a **coordenada**
+  (`manual_entries.coords` jsonb) é o que UM lançamento endereça. O **nível** de
+  um lançamento é o CONJUNTO de famílias que ele endereça, e a regra é que
+  níveis não somam: total 1000, margem por canal 500+500, margem por vendedor
+  200+400+350+50 e cruzamento 100+250+150 são QUATRO LEITURAS DO MESMO 1000 —
+  somá-las daria 3500. Uma consulta escolhe UM nível
+  (`resolveManualLevel`, `lib/manual-base/levels.ts`), preferindo o de MENOS
+  famílias extras: é isso que faz um card sem dimensão cair no total lançado à
+  mão ou, sem ele, somar embora a família mais grossa. A escolha é POR DADO (e
+  por OPERANDO), nunca por widget.
+  **As DUAS formas de vazio de `coords` são diferentes e é nisso que a feature
+  se apoia:** chave AUSENTE = não endereça a família (outro nível); valor `null`
+  = o RESIDUAL declarado ("50 sem responsável direto" é um grupo, não ausência
+  de informação). Em TypeScript isso só sobrevive com os acessores
+  `coordDeclares`/`coordMember` — `if (!coords[axis])` trata o residual como
+  ausente e é o bug mais fácil de passar em review; na tela o rótulo é
+  "Sem &lt;Família&gt;", JAMAIS "—".
+  **`coords` é jsonb e ENTRA no índice único** (o jsonb normaliza ordem de
+  chaves e espaços, então ele mesmo é a forma canônica — nenhuma coluna
+  denormalizada com dever de espelho, e `ON CONFLICT (…, coords)` infere o
+  índice): a história do UPSERT da 0142 sobrevive intacta.
+  **`coords not null default '{}'` ⇒ compatibilidade estrutural** — toda linha
+  existente entra no nível ∅, zero migração de dado, e NADA de inferir nível a
+  partir de `responsible_id is not null`. Quem opta pelo modelo hierárquico é a
+  DECLARAÇÃO (`manual_series_families`), explícita; é ela também que faz as
+  famílias EMBUTIDAS (`responsavel`/`operacao` — registry em CÓDIGO em
+  `lib/manual-base/families.ts`, molde do `loadMappingDomains`) entrarem no
+  nível, com a coordenada ESPELHADA nas colunas FK pelo dono único
+  `applyBuiltinCoords` (é o que mantém a projeção sobre as dimensões de registro
+  e o dobramento apelido→principal sem tocar em `buckets.ts`).
+  **Eixo de família CURTO-CIRCUITA a consulta de registros** — não é otimização,
+  é correção: nenhum registro é atribuível a um membro de família, então repetir
+  a contagem por membro dobraria o subtotal, e rateio inventado é o que o §4.26
+  já proíbe. Métrica de registro exibe `null` ("—"), NUNCA 0. De lambuja, sem
+  linha do RPC não há `dim_*` a reindexar: `planCaseExpansion`,
+  `contractCaseRows`, `mergeRowsByBucket` e a guarda de payload vazio ficam
+  INTOCADOS. **RPCs de widget INTOCADAS** (invariante 1).
+  Filtro `manualdim:` sai do caminho de registros em `splitManualCoordFilters`
+  (`lib/manual-base/coord-filters.ts`), entra no conjunto PEDIDO do nível e
+  recorta SÓ as métricas manuais (a de registro do mesmo widget fica
+  inalterada — assimetria deliberada, espelho da que já valia na direção
+  oposta); operadores só `eq`/`neq`/`in`, e **`is_null` fica FORA de propósito**
+  porque confundiria "não declarou" com "declarou o residual".
+  Operando com ESCOPO DE MEMBRO `manual:<dado>@<familia>=<membro>` é um filtro
+  de coordenada a mais, resolvido no engine, e TEM de sair do catálogo com
+  `group: MANUAL_GROUP` — senão cai no furo da v2.8 (ofertado pelo editor,
+  recusado no save pelo allowlist `perQueryValues`). `AggCatalogInput
+  .manualFamilies` é OBRIGATÓRIO pela mesma razão do `goalMetrics`; a
+  Remuneração recebe `EMPTY_MANUAL_AXIS_CATALOG`, coerente com ela já passar
+  `[]` em `manualSeries`. O RÓTULO do eixo e do membro tem dono único
+  (`manualFamilyLabel`/`manualMemberLabel`), precedente do `manualSeriesLabel`.
+  Degrada para "—": modo lista, `dateAgg`/`runWidgetByPeriod`, kanban, e eixo de
+  família cuja chave não existe mais. Snapshot capturado ANTES da 0143 tem
+  famílias vazias ⇒ "—" no link antigo, consequência correta de "o link é um
+  RETRATO". A CONFERÊNCIA (`lib/manual-base/conference.ts`) mostra o total de
+  cada nível e o que falta — nada obriga a repartição a fechar, e o engine não
+  inventa o resto; ela também avisa da armadilha PRÉ-EXISTENTE do nível ∅ com
+  atribuição misturada (lançamentos com e sem responsável SOMAM). A aritmética
+  de janela dela sai de `spread.ts`, nunca reimplementada. No contrato
+  `base-manual-edit`, o ALVO é a TRIPLA dado + período + coordenadas (sem ela a
+  rejeição de duplicata recusaria as células legítimas de um cruzamento), a
+  prévia carrega o valor ANTERIOR resolvido no SERVIDOR e `modo`
+  substituir/somar é resolvido no apply — a IA nunca faz a conta. Ver
+  `docs/arquitetura.md` §4.26 e invariante 41.
 - **Lixeira de registros (0121): `deleted_at` só muda por ADMIN e toda leitura
   nova de `records` decide EXPLICITAMENTE sobre a lixeira (07/08/2026):**
   soft delete de 30 dias — enviar/restaurar/purgar SÓ pelas actions de

@@ -119,9 +119,17 @@ import {
   MANUAL_GROUP,
   isManualBasisKey,
   manualRef,
+  manualScopedRef,
+  parseManualOperand,
   parseManualRef,
   type ManualSeries,
 } from "@/lib/manual-base/types";
+import {
+  EMPTY_MANUAL_AXIS_CATALOG,
+  isBuiltinManualFamily,
+  manualResidualLabel,
+  type ManualAxisCatalog,
+} from "@/lib/manual-base/families";
 import type { RefOption } from "@/lib/records/date-operands";
 import {
   foldBreakdowns,
@@ -458,29 +466,74 @@ export function goalOperandRefs(
 // lib/manual-base/types.ts (módulo puro, sem dependência de widgets) e são
 // reexportados aqui porque os consumidores do engine já importam deste módulo
 // o par `isCondBasisKey`/`basisMetric` que precisam ramificar junto.
-export { isManualBasisKey, parseManualRef };
+export { isManualBasisKey, parseManualOperand, parseManualRef };
 
-/** Chaves `manual:` da fórmula (dedup) — rodar sobre a fórmula EXPANDIDA. */
+/**
+ * Os REFS `manual:` da fórmula (dedup) — rodar sobre a fórmula EXPANDIDA.
+ *
+ * Devolve o REF INTEIRO, não a chave do dado: desde a 0143 um operando pode
+ * carregar ESCOPO DE MEMBRO (`manual:x@canal=ligacao`), e o ref é também a
+ * chave de basis. Colapsar para a chave faria "ligações ÷ e-mails" ler o mesmo
+ * número nas duas pernas.
+ */
 export function manualOperandKeys(formula: Formula): string[] {
   const out: string[] = [];
   const seen = new Set<string>();
   for (const ref of formulaRefs(formula)) {
-    const key = parseManualRef(ref);
-    if (key && !seen.has(key)) {
-      seen.add(key);
-      out.push(key);
+    if (parseManualRef(ref) && !seen.has(ref)) {
+      seen.add(ref);
+      out.push(ref);
     }
   }
   return out;
 }
 
-/** Operandos da Base manual no catálogo agregado — um por DADO cadastrado. */
-export function manualOperandRefs(series: ManualSeries[]): RefOption[] {
-  return series.map((s) => ({
-    ref: manualRef(s.key),
-    label: s.label,
-    group: MANUAL_GROUP,
-  }));
+/**
+ * Operandos da Base manual no catálogo agregado: um por DADO cadastrado, mais
+ * um por (dado × família DECLARADA × membro) — o ESCOPO DE MEMBRO da 0143.
+ *
+ * Por que os escopados TÊM de sair daqui: `validateCondAggRefs` monta o
+ * allowlist `perQueryValues` PERCORRENDO o catálogo. Um operando ofertado na
+ * UI e ausente aqui é aceito pelo editor e RECUSADO no save, com a mensagem
+ * enganosa de "só dentro de SOMASE" — foi exatamente o furo da v2.8.
+ *
+ * As famílias EMBUTIDAS (`responsavel`/`operacao`) ficam FORA da emissão de
+ * propósito: os membros delas são os responsáveis e as operações vivos, o que
+ * daria dezenas de operandos por dado, e um card de um responsável só já se faz
+ * com o filtro `responsible_id` que existe desde sempre.
+ */
+export function manualOperandRefs(
+  series: ManualSeries[],
+  axes: ManualAxisCatalog = EMPTY_MANUAL_AXIS_CATALOG
+): RefOption[] {
+  const out: RefOption[] = [];
+  for (const s of series) {
+    out.push({ ref: manualRef(s.key), label: s.label, group: MANUAL_GROUP });
+    for (const famKey of axes.declarations[s.id] ?? []) {
+      if (isBuiltinManualFamily(famKey)) continue;
+      const fam = axes.families.find((f) => f.key === famKey);
+      if (!fam) continue;
+      const members = axes.members
+        .filter((m) => m.family_id === fam.id)
+        .slice()
+        .sort((a, b) => a.sort_order - b.sort_order);
+      for (const m of members) {
+        out.push({
+          ref: manualScopedRef(s.key, fam.key, m.key),
+          label: `${s.label} · ${fam.label}: ${m.label}`,
+          group: MANUAL_GROUP,
+        });
+      }
+      // O RESIDUAL é um grupo como qualquer outro — deixá-lo de fora tornaria
+      // impossível escrever "os 50 sem responsável direto" numa fórmula.
+      out.push({
+        ref: manualScopedRef(s.key, fam.key, null),
+        label: `${s.label} · ${manualResidualLabel(fam.label)}`,
+        group: MANUAL_GROUP,
+      });
+    }
+  }
+  return out;
 }
 
 // Chave de basis: 'sum:<field>' | 'count:<field>' | 'count:*'. Operando

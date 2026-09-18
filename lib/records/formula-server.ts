@@ -13,7 +13,8 @@ import type { createClient } from "@/lib/supabase/server";
 import { loadSources } from "@/lib/config/sources";
 import { loadGoalMetrics } from "@/lib/config/goal-metrics";
 import type { GoalMetricDef } from "@/lib/metas/metrics";
-import { loadManualSeries } from "@/lib/manual-base/load";
+import { loadManualAxes, loadManualSeries } from "@/lib/manual-base/load";
+import type { ManualAxisCatalog } from "@/lib/manual-base/families";
 import type { ManualSeries } from "@/lib/manual-base/types";
 import { formulaCondAggInfo, type Formula } from "@/lib/records/formulas";
 import {
@@ -88,15 +89,26 @@ export function forbiddenOperandKeys(
 // `manualSeries` = dados da Base manual (operandos `manual:<chave>`,
 // 17/09/2026). A Base é por ORGANIZAÇÃO, então um campo 'calculado_agg'
 // reutilizável pode citá-la — quem resolve o valor é o engine, em runtime.
+// `manualAxes` = os EIXOS (0143), que dão os operandos com ESCOPO DE MEMBRO.
+// Este é o sítio da MURALHA: se ele não vir os mesmos eixos que o construtor
+// oferta, o save recusa uma fórmula que o editor aceitou (o furo da v2.8).
 export function aggOperandCatalog(
   rows: DefRow[],
   forbidden: Set<string>,
   sources: Sources,
   goalMetrics: GoalMetricDef[],
-  manualSeries: ManualSeries[]
+  manualSeries: ManualSeries[],
+  manualAxes: ManualAxisCatalog
 ): OperandRef[] {
   return buildAggOperandCatalog(
-    defsAggCatalogInput(rows, sources, goalMetrics, manualSeries, forbidden)
+    defsAggCatalogInput(
+      rows,
+      sources,
+      goalMetrics,
+      manualSeries,
+      manualAxes,
+      forbidden
+    )
   );
 }
 
@@ -209,17 +221,26 @@ export async function resolveAndValidateFormula(
   fieldKey?: string
 ): Promise<{ ok: true; formula: Formula } | { ok: false; message: string }> {
   const isAgg = f.dataType === "calculado_agg";
-  const [rows, sources, goalMetrics, manualSeries] = await Promise.all([
-    loadDefRows(supabase),
-    loadSources(supabase),
-    loadGoalMetrics(supabase),
-    loadManualSeries(supabase),
-  ]);
+  const [rows, sources, goalMetrics, manualSeries, manualAxes] =
+    await Promise.all([
+      loadDefRows(supabase),
+      loadSources(supabase),
+      loadGoalMetrics(supabase),
+      loadManualSeries(supabase),
+      loadManualAxes(supabase),
+    ]);
   const forbidden = forbiddenOperandKeys(rows, fieldKey);
   // Catálogo do CONTEXTO (agregado ou por-registro) — builder único
   // compartilhado com os editores; tokenização e validação usam o mesmo.
   const catalog = isAgg
-    ? aggOperandCatalog(rows, forbidden, sources, goalMetrics, manualSeries)
+    ? aggOperandCatalog(
+        rows,
+        forbidden,
+        sources,
+        goalMetrics,
+        manualSeries,
+        manualAxes
+      )
     : serverOperandCatalog(rows, forbidden, sources);
   let formula = f.formula;
   if (f.formulaMode === "text") {

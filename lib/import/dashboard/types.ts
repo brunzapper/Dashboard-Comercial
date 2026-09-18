@@ -138,6 +138,10 @@ export interface DashboardImportContext {
   // Dados da Base manual — operandos `manual:<chave>` (0142, 17/09/2026).
   // Mesmo papel: sem eles o validador recusaria fórmula que o editor aceita.
   manualSeries: import("@/lib/manual-base/types").ManualSeries[];
+  // Eixos da Base manual — famílias/membros/declaração (0143). Mesmo papel: é o
+  // que permite ao validador aceitar um operando com ESCOPO DE MEMBRO e uma
+  // dimensão `manualdim:<familia>` que o construtor oferta.
+  manualAxes: import("@/lib/manual-base/families").ManualAxisCatalog;
 }
 
 export interface DashboardImportValidation {

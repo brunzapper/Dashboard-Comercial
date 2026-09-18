@@ -336,8 +336,9 @@ promovida a tipo próprio).
 - "agg": ${enumKeys(AGG_LABELS)}. "field": "*" = contagem de registros
   (agg count). count de um campo = registros com o campo PREENCHIDO.
 - Métrica da BASE MANUAL: "field": "manual:<chave>" (chaves em manual_series do
-  modelo), SEM "agg" — o valor já é a soma dos lançamentos do recorte. Só como
-  MÉTRICA: "manual:" nunca vale como dimensão, filtro ou coluna.
+  modelo), SEM "agg" — o valor já é a soma dos lançamentos do recorte. O prefixo
+  "manual:" vale SÓ como métrica: nunca como dimensão, filtro ou coluna. (Quem
+  é dimensão e filtro é "manualdim:" — outro prefixo, ver abaixo.)
 - Métrica de FÓRMULA própria: use "formula_text" (contexto de totais — mesmas
   regras do calculado_agg) + opcionais "resultPercent": true (exibe ×100 + "%")
   ou "resultCurrency": "BRL". Ex.: taxa de conversão entre Bases:
@@ -346,11 +347,36 @@ promovida a tipo próprio).
   das Bases do widget; os grupos/linhas continuam vindo das Bases do widget).
 - "percent": true só ANEXA "%" (não multiplica ×100).
 
+### Famílias da Base manual: repartir o MESMO número
+- Uma FAMÍLIA é uma maneira de dividir um número digitado. "Total de interações:
+  1000", "dessas, 500 por ligação e 500 por e-mail" e "200 do Paulo, 400 da
+  Gabriella, 350 da Daniela e 50 sem responsável direto" são TRÊS LEITURAS DAS
+  MESMAS mil interações. As leituras NUNCA se somam entre si.
+- "manualdim:<chave da família>" (chaves em manual_familias do modelo) vale como
+  DIMENSÃO e como campo de FILTRO — e nunca como métrica, coluna do modo lista,
+  campo de kanban ou campo da barra de período.
+- Um widget com dimensão "manualdim:…" é SÓ da Base manual: nenhuma consulta de
+  registros roda nele, e uma métrica de registro ao lado exibe "—" (nenhum
+  registro é atribuível a "Ligação"). Não misture contagem de registros no mesmo
+  widget.
+- Num eixo de família o "transform", o "dateAgg" e a expressão condicional não
+  se aplicam (ela não é data nem campo de registro) — são ignorados.
+- Filtro de família só aceita os operadores eq, neq e in, e ele recorta SÓ as
+  métricas da Base manual (a métrica de registro do mesmo widget não é afetada).
+  É assim que se faz um card de UM membro: métrica "manual:<chave>" + filtro
+  "manualdim:canal" eq "ligacao".
+- Cada dado se reparte só pelas famílias que estão em "reparte_por" dele
+  (manual_series do modelo). Pedir outra família faz o número virar "—".
+- Para cruzar duas famílias (uma tabela "Canal × Vendedor"), use as DUAS como
+  dimensões. Se o cruzamento não estiver lançado por inteiro, a tabela mostra o
+  que existe — não é para inventar o resto.
+
 ### Base manual e PERÍODO (leia antes de misturar os dois)
 - A Base manual NÃO é uma Base e NÃO tem campo de data. Nunca a coloque em
-  "bases", em "sources" de widget, em "periodBar.fieldBySource", nem como
-  dimensão/filtro/coluna. Pedir um campo de período para ela é erro de
-  modelagem, não uma opção.
+  "bases", em "sources" de widget nem em "periodBar.fieldBySource". Pedir um
+  campo de período para ela é erro de modelagem, não uma opção. (Como dimensão
+  e filtro existe o "manualdim:" das FAMÍLIAS, acima — o que não existe é a
+  Base manual como Base.)
 - Ela responde ao PERÍODO DO DASHBOARD seja ele qual for — preset, intervalo
   personalizado ou a barra por Base. Cada Base de registros compara a SUA
   coluna de data (fechamento, criação…), mas o intervalo é UM só, e é com ele

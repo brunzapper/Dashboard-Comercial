@@ -85,6 +85,9 @@ import {
   type SourceKey,
 } from "@/lib/sources";
 import { loadManualBase } from "@/lib/manual-base/load";
+import { splitManualCoordFilters } from "@/lib/manual-base/coord-filters";
+import { resolveManualLevel } from "@/lib/manual-base/levels";
+import type { ManualEntry } from "@/lib/manual-base/types";
 import { sumManualEntries } from "@/lib/manual-base/spread";
 import { manualRef, parseManualRef } from "@/lib/manual-base/types";
 import {
@@ -229,9 +232,15 @@ export async function runCalculatedWidget(
   // Filtro por NOME em relação (31/07/2026): resolve UMA vez, ANTES do canon
   // (nome → id principal → grupo); scopedAuxInputs é síncrona — o resolve
   // fica aqui fora e o resultado serve às pernas auxiliares também.
+  // 0143: filtro de COORDENADA sai do caminho de registros ANTES de tudo —
+  // mesmo split do `runWidget`. Ele é o que faz um card mostrar "500 ligações":
+  // sem dimensão nenhuma na tela, o recorte por membro é a única forma de pedir
+  // um número de dentro do total.
+  const { record: recordFilters, coords: coordFilters } =
+    splitManualCoordFilters(input.filters ?? []);
   const namedFilters = await resolveFkFilterNames(
     supabase,
-    resolveFilters(input.filters ?? [])
+    resolveFilters(recordFilters)
   );
   // Segmentação por fonte antes dos filtros sintéticos (mesma ordem do engine).
   const baseFilters = applyFilterSourceTargets(
@@ -477,6 +486,28 @@ export async function runCalculatedWidget(
   if (manualKeys.length > 0) {
     const base = await loadManualBase(supabase);
     const idByKey = new Map(base.series.map((x) => [x.key, x.id]));
+    // 0143: a escolha de NÍVEL é por dado, e aqui não há dimensão nenhuma —
+    // então o conjunto pedido é só o dos eixos FILTRADOS (por isso a DECLARAÇÃO
+    // não é lida neste caminho: ela só importa para a família EMBUTIDA entrar no
+    // nível quando existe uma dimensão de responsável/operação na tela). Sem
+    // filtro, cai no nível ∅ (o total lançado à mão) ou, sem ele, soma embora a
+    // família mais grossa. Resolução `null` deixa a chave AUSENTE da basis ⇒
+    // "—": pedir uma família que o dado não tem é "não sei", nunca 0 (que
+    // dividiria e mentiria).
+    const levelBySeries = new Map<string, ManualEntry[] | null>();
+    for (const key of manualKeys) {
+      const chave = parseManualRef(key);
+      const id = chave ? idByKey.get(chave) : undefined;
+      if (!id) {
+        levelBySeries.set(key, null);
+        continue;
+      }
+      const res = resolveManualLevel(
+        base.entries.filter((e) => e.series_id === id),
+        { dimAxes: [], filters: coordFilters }
+      );
+      levelBySeries.set(key, res ? res.entries : null);
+    }
     const fill = (
       target: BasisValues,
       rawTarget: Record<string, number | null>,
@@ -484,15 +515,19 @@ export async function runCalculatedWidget(
     ) => {
       for (const key of manualKeys) {
         const chave = parseManualRef(key);
-        const id = chave ? idByKey.get(chave) : undefined;
-        const value = id
-          ? sumManualEntries(
-              base.entries.filter((e) => e.series_id === id),
-              { from: p?.from ?? null, to: p?.to ?? null }
-            )
-          : 0;
-        target[manualRef(chave ?? "")] = value;
-        rawTarget[manualRef(chave ?? "")] = value;
+        const ref = manualRef(chave ?? "");
+        const levelEntries = levelBySeries.get(key);
+        if (levelEntries == null) {
+          delete target[ref];
+          delete rawTarget[ref];
+          continue;
+        }
+        const value = sumManualEntries(levelEntries, {
+          from: p?.from ?? null,
+          to: p?.to ?? null,
+        });
+        target[ref] = value;
+        rawTarget[ref] = value;
       }
     };
     fill(basis, rawBasis, input.period);

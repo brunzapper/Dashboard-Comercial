@@ -189,13 +189,20 @@ import {
 } from "@/lib/source-folders";
 import { useSources } from "@/components/sources-context";
 import { useGoalMetrics } from "@/components/goal-metrics-context";
-import { useManualSeries } from "@/components/manual-series-context";
+import { useManualAxes, useManualSeries } from "@/components/manual-series-context";
 import {
   MANUAL_GROUP,
   manualRef,
   manualSeriesLabel,
   parseManualRef,
 } from "@/lib/manual-base/types";
+import {
+  manualAxisDefaultLabel,
+  manualAxisFieldOptions,
+  manualAxisValueSource,
+} from "@/components/dashboards/manual-axis-options";
+import { parseManualAxisRef } from "@/lib/manual-base/families";
+import { MANUAL_COORD_OPS } from "@/lib/manual-base/coord-filters";
 import { useSourceFolders } from "@/components/source-folders-context";
 import {
   Sheet,
@@ -1049,11 +1056,18 @@ export function WidgetBuilder({
   const sourceLabels = useSourceLabels();
   const goalMetrics = useGoalMetrics();
   const manualSeries = useManualSeries();
+  // 0143: os EIXOS vêm do MESMO provider — um segundo contexto divergiria
+  // do primeiro sítio que esquecesse de consumi-lo.
+  const manualAxes = useManualAxes();
   const fieldSourceChips = sourceChips(sourceLabels);
   // v1.27: o dropdown de MÉTRICA é o único que oferta a Base manual, então é o
   // único que ganha o chip dela — e só com dado lançado (chip vazio engana).
   const metricChips =
     manualSeries.length > 0
+      ? sourceChips(sourceLabels, { manual: true })
+      : fieldSourceChips;
+  const axisChips =
+    manualAxes.families.length > 0
       ? sourceChips(sourceLabels, { manual: true })
       : fieldSourceChips;
 
@@ -1116,13 +1130,22 @@ export function WidgetBuilder({
             catalog,
             goalMetrics,
             manualSeries,
+            manualAxes,
             { withNested: true }
           )
         ),
         available,
         sourceLabels
       ),
-    [available, fields, sourceLabels, catalog, goalMetrics, manualSeries]
+    [
+      available,
+      fields,
+      sourceLabels,
+      catalog,
+      goalMetrics,
+      manualSeries,
+      manualAxes,
+    ]
   );
   // Campos "Calculado (totais)" salvos em /campos: entram SÓ como métrica.
   const aggCalcFields = available.filter((f) => f.aggCalc);
@@ -3570,6 +3593,7 @@ export function WidgetBuilder({
           >
             {dimensions.map((d, i) => {
               const af = available.find((a) => a.field === d.field);
+              const isAxis = parseManualAxisRef(d.field) != null;
               return (
                 <DimensionRow
                   key={i}
@@ -3577,12 +3601,19 @@ export function WidgetBuilder({
                   // No modo lista as dimensões são colunas do cliente → permite
                   // campos sintéticos (ex.: "Data atual"). Na tabela/gráfico
                   // agregado a dimensão vai ao RPC → só campos reais.
-                  fieldOptions={isRecordList ? availableOptions : rpcFieldOptions}
-                  fieldChips={fieldSourceChips}
+                  fieldOptions={
+                    isRecordList
+                      ? availableOptions
+                      : [...rpcFieldOptions, ...manualAxisFieldOptions(manualAxes)]
+                  }
+                  fieldChips={isRecordList ? fieldSourceChips : axisChips}
                   transformOptions={transformOptions}
                   dateAggOptions={dateAggOptions}
-                  isDateField={isDate(d.field)}
-                  defaultLabel={fieldLabel(d.field, available)}
+                  isDateField={isAxis ? false : isDate(d.field)}
+                  defaultLabel={
+                    manualAxisDefaultLabel(d.field, manualAxes) ??
+                    fieldLabel(d.field, available)
+                  }
                   isRecordList={isRecordList}
                   columnAggValue={columnAgg[d.field]}
                   unifiedSourceOptions={
@@ -3599,13 +3630,13 @@ export function WidgetBuilder({
                       return next;
                     })
                   }
-                  caseCapable={caseCapableFor(d)}
+                  caseCapable={isAxis ? false : caseCapableFor(d)}
                   caseCatalog={caseDimCatalog}
                   editable={effEditable(d.field)}
                   writeBack={columnFlags[d.field]?.writeBack ?? false}
                   editableCapable={af?.editableCapable ?? false}
                   writable={af?.writable ?? false}
-                  fieldMenu={renderFieldMenu(d.field)}
+                  fieldMenu={isAxis ? null : renderFieldMenu(d.field)}
                   onChange={(patch) =>
                     setDimensions((prev) => {
                       const next = [...prev];
@@ -3799,11 +3830,33 @@ export function WidgetBuilder({
               <FilterRow
                 key={i}
                 filter={f}
-                fieldOptions={rpcFieldOptions}
-                fieldChips={fieldSourceChips}
-                opOptions={FILTER_OP_OPTIONS}
+                fieldOptions={[
+                  ...rpcFieldOptions,
+                  ...manualAxisFieldOptions(manualAxes),
+                ]}
+                fieldChips={axisChips}
+                // 0143: num eixo de família só `=`/`≠`/`em (lista)` fazem
+                // sentido. `é vazio` fica FORA de propósito: ele confundiria
+                // "não declarou a família" (outro nível) com "declarou o
+                // residual" (este nível), que é a distinção inteira — e o
+                // residual já é um valor selecionável na lista.
+                opOptions={
+                  parseManualAxisRef(f.field) != null
+                    ? FILTER_OP_OPTIONS.filter((o) =>
+                        MANUAL_COORD_OPS.includes(o.value as FilterOp)
+                      )
+                    : FILTER_OP_OPTIONS
+                }
                 sourceOptions={filterSourceOptions(f)}
-                valueSource={filterValueSource(f.field)}
+                // 0143: eixo de FAMÍLIA — os valores são as chaves dos
+                // MEMBROS. A decisão fica AQUI, e não dentro de
+                // `filterValueSource`: um early return com closure ali dentro
+                // faz o React Compiler desistir de compilar o construtor
+                // (medido), e com ele cai a memoização do `calcRefs`.
+                valueSource={
+                  manualAxisValueSource(f.field, manualAxes) ??
+                  filterValueSource(f.field)
+                }
                 onChange={(patch) =>
                   setFilters((prev) => {
                     const next = [...prev];

@@ -42,6 +42,7 @@ import { isCoreDef } from "@/lib/records/core-defs";
 import type { GoalMetricDef } from "@/lib/metas/metrics";
 import type { SourceDef } from "@/lib/sources";
 import type { ManualSeries } from "@/lib/manual-base/types";
+import type { ManualAxisCatalog } from "@/lib/manual-base/families";
 import {
   aggNestedOperandRefs,
   aggOperandRefs,
@@ -86,6 +87,13 @@ export interface AggCatalogInput {
   // Dados da BASE MANUAL (loadManualSeries/useManualSeries) — operandos
   // `manual:<chave>`. OBRIGATÓRIO pela mesma razão do goalMetrics.
   manualSeries: ManualSeries[];
+  // Eixos da BASE MANUAL (0143) — operandos com ESCOPO DE MEMBRO
+  // `manual:<dado>@<familia>=<membro>`. OBRIGATÓRIO pela MESMA razão, e aqui a
+  // razão morde mais: o allowlist `perQueryValues` de validateCondAggRefs é
+  // montado PERCORRENDO este catálogo, então um sítio que passe eixos vazios
+  // onde outro os oferta produz exatamente o furo da v2.8 — editor aceita, save
+  // recusa.
+  manualFamilies: ManualAxisCatalog;
 }
 
 /** Catálogo agregado completo: agg:* + variantes @fonte + aninhados + operandos
@@ -103,7 +111,7 @@ export function buildAggOperandCatalog(input: AggCatalogInput): OperandRef[] {
     ),
     ...aggNestedOperandRefs(input.nested ?? []),
     ...goalOperandRefs(input.goalMetrics),
-    ...manualOperandRefs(input.manualSeries),
+    ...manualOperandRefs(input.manualSeries, input.manualFamilies),
     ...condAggOperandRefs(
       input.numeric,
       input.customCond,
@@ -139,6 +147,7 @@ export function availableAggCatalogInput(
   sources: SourceDef[],
   goalMetrics: GoalMetricDef[],
   manualSeries: ManualSeries[],
+  manualFamilies: ManualAxisCatalog,
   opts?: { withNested?: boolean }
 ): AggCatalogInput {
   const defs = allDefs.filter((d) => !isCoreDef(d));
@@ -180,6 +189,7 @@ export function availableAggCatalogInput(
     sources,
     goalMetrics,
     manualSeries,
+    manualFamilies,
   };
 }
 
@@ -193,6 +203,7 @@ export function defsAggCatalogInput(
   sources: SourceDef[],
   goalMetrics: GoalMetricDef[],
   manualSeries: ManualSeries[],
+  manualFamilies: ManualAxisCatalog,
   forbidden: Set<string> = new Set()
 ): AggCatalogInput {
   const defs = allDefs.filter((d) => !isCoreDef(d));
@@ -256,5 +267,6 @@ export function defsAggCatalogInput(
     sources,
     goalMetrics,
     manualSeries,
+    manualFamilies,
   };
 }

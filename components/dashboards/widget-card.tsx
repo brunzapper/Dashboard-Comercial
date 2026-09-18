@@ -153,7 +153,7 @@ import {
 } from "@/lib/widgets/agg-catalog";
 import { useSources } from "@/components/sources-context";
 import { useGoalMetrics } from "@/components/goal-metrics-context";
-import { useManualSeries } from "@/components/manual-series-context";
+import { useManualAxes, useManualSeries } from "@/components/manual-series-context";
 import type { OperandRef } from "@/lib/records/date-operands";
 import { deleteWidget } from "@/app/(app)/dashboards/actions";
 import { copyWidget } from "@/lib/widgets/clipboard";
@@ -392,6 +392,9 @@ export const WidgetCard = memo(function WidgetCard({
   const sourcesCatalog = useSources();
   const goalMetrics = useGoalMetrics();
   const manualSeries = useManualSeries();
+  // 0143: os EIXOS vêm do MESMO provider — um segundo contexto divergiria
+  // do primeiro sítio que esquecesse de consumi-lo.
+  const manualAxes = useManualAxes();
   // Save do builder em andamento (painel já fechado): exibe o overlay de
   // processamento sobre o card até a revalidação entregar os dados novos.
   const [saving, setSaving] = useState(false);
@@ -690,7 +693,8 @@ export const WidgetCard = memo(function WidgetCard({
         fields,
         sourcesCatalog,
         goalMetrics,
-        manualSeries
+        manualSeries,
+        manualAxes
       )
     );
   }, [
@@ -698,6 +702,7 @@ export const WidgetCard = memo(function WidgetCard({
     availableForBuilder,
     fields,
     sourcesCatalog,
+    manualAxes,
     goalMetrics,
     manualSeries,
   ]);

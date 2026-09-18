@@ -18,6 +18,7 @@
 // em settings-docs.ts); aqui fica o que o typecheck não vê. Também confere as
 // CONTAGENS das enumerações do manual (§16.2) — o drift mais comum quando
 // nasce um widget/função/paleta sem tocar o doc.
+import { EMPTY_MANUAL_AXIS_CATALOG } from "@/lib/manual-base/families";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -174,6 +175,7 @@ describe("prompt de importação por IA — paridade com o código", () => {
       operationNames: [],
       goalMetrics: BUILTIN_GOAL_METRICS,
       manualSeries: [],
+      manualAxes: EMPTY_MANUAL_AXIS_CATALOG,
     };
     const res = validateDashboardImport(SPEC_EXAMPLE, ctx);
     expect(res.errors).toEqual([]);

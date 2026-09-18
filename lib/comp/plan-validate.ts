@@ -18,6 +18,7 @@
 // módulo existe para que a prévia use a MESMA régua e possa devolver mensagens
 // por fator ao laço de autocorreção — o parse cru só sabe dizer "Configuração
 // do plano inválida", inútil para uma IA corrigir.
+import { EMPTY_MANUAL_AXIS_CATALOG } from "@/lib/manual-base/families";
 import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
@@ -193,6 +194,7 @@ export async function validateCompPlanSave(
       // operando não resolvido aqui viraria dinheiro a menos na folha, sem
       // erro nenhum.
       [],
+      EMPTY_MANUAL_AXIS_CATALOG,
       {
       withNested: true,
     })

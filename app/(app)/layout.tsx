@@ -53,7 +53,7 @@ import {
 import { resolveSidebarPins } from "@/lib/config/sidebar-pins";
 import { allowedOperacaoCards } from "@/lib/operacao/cards";
 import { loadGoalMetrics } from "@/lib/config/goal-metrics";
-import { loadManualSeries } from "@/lib/manual-base/load";
+import { loadManualAxes, loadManualSeries } from "@/lib/manual-base/load";
 import { resolveTheme, resolveThemeTokens } from "@/lib/theme";
 import { ROLE_LABELS, type RoleKey } from "@/lib/auth/roles";
 import { ThemeSync } from "@/components/layout/theme-sync";
@@ -148,6 +148,7 @@ export default async function AppLayout({
     dueCount,
     goalMetrics,
     manualSeries,
+    manualAxes,
   ] = await Promise.all([
     loadUserSettings(user.id),
     loadSources(supabase, org?.id),
@@ -158,6 +159,11 @@ export default async function AppLayout({
     // Base manual (0142): os DADOS (não os lançamentos) alimentam os
     // operandos `manual:<chave>` dos editores de fórmula.
     loadManualSeries(supabase, org?.id),
+    // 0143: os EIXOS (famílias/membros/declaração) alimentam os operandos com
+    // ESCOPO DE MEMBRO e as opções de dimensão `manualdim:` do construtor. Vão
+    // no MESMO provider dos dados: separá-los abriria a porta para um sítio
+    // ofertar o que o outro recusa.
+    loadManualAxes(supabase, org?.id),
   ]);
   const sourceLabels = mergeSourceLabels(labelsValue, sources);
   // Preferências de interface: padrão do app → org (com trava) → usuário.
@@ -223,7 +229,7 @@ export default async function AppLayout({
   return (
     <SourcesProvider sources={sources}>
       <GoalMetricsProvider metrics={goalMetrics}>
-      <ManualSeriesProvider series={manualSeries}>
+      <ManualSeriesProvider series={manualSeries} axes={manualAxes}>
       <SourceFoldersProvider folders={sourceFolders}>
       <SourceLabelsProvider labels={sourceLabels}>
         {/* Sinal realtime (records/tasks/comments) → event bus + refresh

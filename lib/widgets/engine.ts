@@ -145,7 +145,18 @@ import {
   hasManualRefs,
 } from "@/lib/manual-base/resolve";
 import { manualDimPlans } from "@/lib/manual-base/buckets";
-import { loadManualBase, loadManualSeries } from "@/lib/manual-base/load";
+import {
+  loadManualBase,
+  loadManualDeclarations,
+  loadManualFamilies,
+  loadManualSeries,
+} from "@/lib/manual-base/load";
+import { splitManualCoordFilters } from "@/lib/manual-base/coord-filters";
+import {
+  manualFamilyLabel,
+  manualMemberLabel,
+  parseManualAxisRef,
+} from "@/lib/manual-base/families";
 import {
   EMPTY_MANUAL_BASE,
   isManualBasisKey,
@@ -1570,8 +1581,23 @@ async function runWidgetByPeriod(
     return row;
   });
 
+  // 0143: o eixo de família também degrada AQUI (o valor da dim vira "—", pois
+  // não há registro a que atribuir o membro), mas o cabeçalho precisa do rótulo
+  // certo — mesma razão do `periodManualSeries` logo abaixo.
+  const periodManualFamilies = config.dimensions.some((d) =>
+    parseManualAxisRef(d.field)
+  )
+    ? await loadManualFamilies(supabase)
+    : [];
   const dimensions = dims.map((d, i) => {
-    const base = d.field === "record_type" ? "Base" : fieldLabel(d.field, available);
+    // 0143: a família não está em `available`, então `fieldLabel` devolveria
+    // "manualdim:canal". Precedente literal do `manualSeriesLabel` que a
+    // métrica usa logo abaixo (v1.13).
+    const base =
+      d.field === "record_type"
+        ? "Base"
+        : (manualFamilyLabel(d.field, periodManualFamilies) ??
+          fieldLabel(d.field, available));
     const suffix =
       d.transform && d.transform !== "none"
         ? ` (${TRANSFORM_LABELS[d.transform]})`
@@ -1694,8 +1720,18 @@ export async function runWidget(
     : EMPTY_CANON;
   // Filtro por NOME em relação (31/07/2026): resolve ANTES da expansão
   // canônica (nome → id principal → grupo). Fast path sem nome = mesma lista.
+  // BASE MANUAL / FAMÍLIAS (0143): filtro de COORDENADA (`manualdim:<familia>`)
+  // sai do caminho de registros ANTES de tudo. Ele não é campo — nem
+  // `resolveFilters` nem `resolveFkFilterNames` devem vê-lo —, e o que ele
+  // recorta é só a métrica da Base manual (a métrica de REGISTRO do mesmo
+  // widget fica inalterada; a assimetria é deliberada e está no SPEC).
+  // Como `legFiltersFor` é a fonte ÚNICA dos filtros de toda perna, separar
+  // aqui cobre o RPC principal, as auxiliares de condição, as pernas por
+  // métrica e a rodada de comparação de uma vez.
+  const { record: recordFilters, coords: coordFilters } =
+    splitManualCoordFilters(config.filters ?? []);
   const resolved = expandResponsibleFilters(
-    await resolveFkFilterNames(supabase, resolveFilters(config.filters ?? [])),
+    await resolveFkFilterNames(supabase, resolveFilters(recordFilters)),
     respCanon
   );
   const legFiltersFor = (
@@ -1811,13 +1847,28 @@ export async function runWidget(
       if (keys.length > 0) calcManualKeys.set(i, keys);
       return;
     }
-    const key = parseManualRef(m.field);
-    if (key) manualMetricKeys.set(i, key);
+    // 0143: guarda o REF, não a chave — uma métrica direta com escopo de
+    // membro (`manual:x@canal=ligacao`) é um operando diferente do ref nu.
+    if (parseManualRef(m.field)) manualMetricKeys.set(i, m.field);
   });
-  const usesManual = hasManualRefs({ manualMetricKeys, calcManualKeys });
+  // 0143: um eixo de FAMÍLIA (ou um filtro de coordenada) também aciona a Base
+  // manual, mesmo sem métrica manual — é o que carrega o catálogo de onde sai o
+  // RÓTULO do eixo. Sem isto, um widget com dimensão `manualdim:canal` exibiria
+  // "manualdim:canal" no cabeçalho.
+  const manualAxes = config.dimensions
+    .map((d) => parseManualAxisRef(d.field))
+    .filter((a): a is string => a != null);
+  const usesManual =
+    hasManualRefs({ manualMetricKeys, calcManualKeys }) ||
+    manualAxes.length > 0 ||
+    coordFilters.length > 0;
   const manualBase: ManualBaseData = usesManual
     ? await loadManualBase(supabase)
     : EMPTY_MANUAL_BASE;
+  const manualDeclarations = usesManual
+    ? await loadManualDeclarations(supabase)
+    : {};
+  const manualFamilyKeys = new Set(manualBase.families.map((f) => f.key));
 
   // SUB-FONTES conviver (0078): pernas EXTRAS (sub convivendo com a pai, ou 2+
   // subs da mesma pai) não cabem na consulta única — cada FONTE de linha vira
@@ -2092,6 +2143,47 @@ export async function runWidget(
   // condição/moeda + pernas por fonte + remapeamento e avaliação das métricas
   // calculadas) para um par dims/pipeline-de-filtros. A mesma rodada serve o
   // período atual e o de comparação — `dims` SOMBREIA o de fora de propósito;
+  // A costura com a Base manual, num lugar só: o fim de uma rodada normal e o
+  // curto-circuito do eixo de família passam por AQUI. Extraído na 0143 porque
+  // duas chamadas com doze argumentos cada divergiriam na primeira mudança.
+  const applyManualBaseFor = (
+    rows: WidgetRow[],
+    dims: Dimension[],
+    runPeriod: DashboardPeriod | null | undefined,
+    familyAxis: boolean
+  ): WidgetRow[] =>
+    applyManualBase({
+      rows,
+      plans: manualDimPlans(
+        dims,
+        (field) => available.find((f) => f.field === field)?.isDate === true,
+        manualFamilyKeys
+      ),
+      base: manualBase,
+      period: { from: runPeriod?.from ?? null, to: runPeriod?.to ?? null },
+      canonicalById: respCanon.canonicalById,
+      manualMetricKeys,
+      calcManualKeys,
+      coordFilters,
+      declarations: manualDeclarations,
+      // Só com eixo de família na TELA a métrica de registro perde sentido. Um
+      // filtro de coordenada não degrada nada: ele recorta o número manual e
+      // deixa o de registro como estava.
+      recordMetricsDegrade: familyAxis,
+      metricCount: config.metrics.length,
+      metricIsCount: (i) => config.metrics[i]?.agg === "count",
+      evalCalc: (i, basis) => {
+        const rc = calcResolved.get(i);
+        return rc?.formula
+          ? evalCalcMoney(
+              rc.formula,
+              basis,
+              calcMoneyMeta(rc, rates, conversionPeriod)
+            ).value
+          : null;
+      },
+    });
+
   // `filtersOf` reconstrói os filtros para as fontes de cada perna;
   // `runPeriod` é o período DESTA rodada (atual/perna do align/comparação) —
   // insumo das auxes de operandos escopados (período pela data do escopo).
@@ -2100,6 +2192,21 @@ export async function runWidget(
     filtersOf: (srcs?: SourceKey[]) => WidgetFilter[],
     runPeriod?: DashboardPeriod | null
   ): Promise<WidgetRow[]> => {
+    // EIXO DE FAMÍLIA (0143): o widget é MANUAL-ONLY e NENHUMA consulta de
+    // registros roda. Não é otimização — é correção. Nenhum registro é
+    // atribuível a um membro de família (não há atribuição), então repetir a
+    // contagem sob "Ligação" e sob "E-mail" dobraria o subtotal, que é
+    // exatamente o pecado que a regra de níveis existe para evitar; e inventar
+    // rateio é o que o §4.26 já proíbe. Métrica de registro exibe "—".
+    //
+    // O curto-circuito é também o que dispensa mexer no resto de computeRows:
+    // sem linha do RPC não há `dim_*` a reindexar, então `planCaseExpansion`,
+    // `contractCaseRows`, `mergeRowsByBucket` e a guarda de payload vazio
+    // ficam INTOCADOS — e as linhas do eixo nascem já na ordem posicional da
+    // config, direto de applyManualBase.
+    if (manualAxes.length > 0) {
+      return applyManualBaseFor([], dims, runPeriod, true);
+    }
     const filters = filtersOf(effMainSources);
     // Payload de dims p/ os RPCs desta rodada (Semana Fechada): sáb–sex desce
     // como 'day' (o merge client-side funde adiante) e seg_dom+week_month
@@ -2762,30 +2869,7 @@ export async function runWidget(
     // fusão somaria as duas. Rotulagem de FK e ordenação vêm depois, em
     // runWidget — por isso a linha sintética sai rotulada de graça.
     if (!usesManual) return merged;
-    return applyManualBase({
-      rows: merged,
-      plans: manualDimPlans(
-        dims,
-        (field) => available.find((f) => f.field === field)?.isDate === true
-      ),
-      base: manualBase,
-      period: { from: runPeriod?.from ?? null, to: runPeriod?.to ?? null },
-      canonicalById: respCanon.canonicalById,
-      manualMetricKeys,
-      calcManualKeys,
-      metricCount: config.metrics.length,
-      metricIsCount: (i) => config.metrics[i]?.agg === "count",
-      evalCalc: (i, basis) => {
-        const rc = calcResolved.get(i);
-        return rc?.formula
-          ? evalCalcMoney(
-              rc.formula,
-              basis,
-              calcMoneyMeta(rc, rates, conversionPeriod)
-            ).value
-          : null;
-      },
-    });
+    return applyManualBaseFor(merged, dims, runPeriod, false);
   };
 
   // Rodada de comparação em paralelo com a principal. Qualquer falha aqui
@@ -3199,6 +3283,37 @@ export async function runWidget(
     });
   }
 
+  // EIXO DE FAMÍLIA (0143): a ordem das barras é o `sort_order` do MEMBRO, não
+  // a ordem de iteração do Map da projeção. Roda ANTES da rotulagem, de
+  // propósito: depois dela a linha já carrega o rótulo e a chave se perdeu.
+  // O residual ("Sem Canal") vai por último — ele é um grupo legítimo, mas é o
+  // resto.
+  const familyDimRanks = dims
+    .map((d, i) => ({ axis: parseManualAxisRef(d.field), key: `dim_${i + 1}` }))
+    .filter((x): x is { axis: string; key: string } => x.axis != null)
+    .map(({ axis, key }) => {
+      const fam = manualBase.families.find((f) => f.key === axis);
+      const rank = new Map<string, number>();
+      if (fam) {
+        manualBase.members
+          .filter((m) => m.family_id === fam.id)
+          .sort((a, b) => a.sort_order - b.sort_order)
+          .forEach((m, i) => rank.set(m.key, i));
+      }
+      return { key, rank };
+    });
+  if (familyDimRanks.length > 0) {
+    const LAST = Number.MAX_SAFE_INTEGER;
+    rows.sort((a, b) => {
+      for (const { key, rank } of familyDimRanks) {
+        const av = a[key] == null ? LAST : (rank.get(String(a[key])) ?? LAST - 1);
+        const bv = b[key] == null ? LAST : (rank.get(String(b[key])) ?? LAST - 1);
+        if (av !== bv) return av - bv;
+      }
+      return 0;
+    });
+  }
+
   // Resolve rótulos das dimensões: FK (id→nome), fonte (record_type→label) e os
   // transforms de data "por nome" (bucket ISO → Janeiro / 1ª semana de Janeiro).
   // As dimensões FK acumulam suas buscas e um Promise.all as roda juntas
@@ -3232,6 +3347,22 @@ export async function runWidget(
       }
       continue;
     }
+    // 0143: eixo de família. `fieldFk` devolve undefined para ele e o laço
+    // faria `continue`, deixando a CHAVE do membro crua na tela. O residual
+    // (`null`) vira "Sem <Família>" — nunca "—", que leria como ausência de
+    // informação onde há um número conhecido.
+    const axis = parseManualAxisRef(dim.field);
+    if (axis != null) {
+      for (const r of rows) {
+        r[key] = manualMemberLabel(
+          axis,
+          r[key] == null ? null : String(r[key]),
+          manualBase.families,
+          manualBase.members
+        );
+      }
+      continue;
+    }
     const fk = fieldFk(dim.field, available);
     if (!fk) continue;
     const ids = Array.from(
@@ -3250,7 +3381,14 @@ export async function runWidget(
   });
 
   const dimensions = dims.map((d, i) => {
-    const base = d.field === "record_type" ? "Base" : fieldLabel(d.field, available);
+    // 0143: a família não está em `available`, então `fieldLabel` devolveria
+    // "manualdim:canal". Precedente literal do `manualSeriesLabel` que a
+    // métrica usa três blocos abaixo (v1.13).
+    const base =
+      d.field === "record_type"
+        ? "Base"
+        : (manualFamilyLabel(d.field, manualBase.families) ??
+          fieldLabel(d.field, available));
     const suffix =
       d.transform && d.transform !== "none"
         ? ` (${TRANSFORM_LABELS[d.transform]})`
