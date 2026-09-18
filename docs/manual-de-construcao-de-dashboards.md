@@ -562,6 +562,12 @@ Sem IA configurada na organização, **Copiar prompt** monta as instruções par
 colar em qualquer IA externa, e **Colar JSON** traz a resposta dela pela mesma
 conferência.
 
+**A IA que monta dashboards também enxerga estes números.** O prompt dela leva
+os lançamentos (valor, período e forma de contagem), então dá para pedir em
+português um card que cruze registros com um número digitado — "conversão por
+mês: negócios fechados dividido por e-mails respondidos" — sem precisar dizer
+os valores. Vale para a IA de dentro do painel e para uma IA externa.
+
 Não existe exclusão por IA: o que existe é a atualização (relançar o mês). Para
 apagar, use a lixeira da linha.
 
@@ -779,15 +785,27 @@ etc.). O fluxo, guiado no próprio painel:
    **Conexões** entre as Bases, nomes de responsáveis/operações e uma
    **amostra de ~20 registros reais por Base** escolhida para que TODA coluna
    com dado no banco apareça preenchida em pelo menos uma linha (colunas
-   totalmente vazias são listadas como tal). A especificação dentro do prompt
+   totalmente vazias são listadas como tal), e a **Base manual inteira** —
+   os dados e os lançamentos, com valor, período e forma de contagem (§2.7),
+   que é o que permite à IA propor cruzamentos como "fechados ÷ e-mails
+   respondidos". A especificação dentro do prompt
    é **gerada do próprio código do sistema** (tipos de widget, agregações,
    operadores, períodos, paletas e as chaves de settings/aparência saem das
    mesmas constantes que a UI usa), então recursos novos do construtor entram
    nela automaticamente.
 4. Cole o prompt na IA, **descreva o dashboard desejado** e receba o JSON.
-5. Cole o JSON no painel e clique em **"Importar dashboard"**. O sistema
+5. Cole o JSON no painel e clique em **"Conferir JSON"**. O sistema
    valida tudo (tipos de widget, campos referenciados, fórmulas, operadores…)
-   e lista os erros em português — basta devolvê-los à IA para corrigir.
+   e lista os erros em português — basta devolvê-los à IA para corrigir. Dando
+   certo, aparece a **prévia** (o que é novo e o que será atualizado, widget a
+   widget) e nada é gravado até você clicar em **Aplicar**.
+
+**O copiar/colar vale nos três modos.** Em "Editar" e "Criar a partir de", o
+prompt copiado leva também o **estado atual do dashboard** — a IA externa
+enxerga os widgets que já existem e pode alterá-los, em vez de começar do zero.
+E o mesmo fluxo existe **dentro do dashboard**: no painel "Editar com IA", a
+seção "Usar uma IA externa" tem os mesmos dois botões, e o JSON conferido vira
+a mesma prévia que o Aplicar e o Desfazer já conhecem.
 
 O JSON pode declarar, além de abas e widgets (com cálculos e aparência), os
 **campos personalizados**, as **Sub-bases** e as **correspondências** de que o

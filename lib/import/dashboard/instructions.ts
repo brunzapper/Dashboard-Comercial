@@ -1,3 +1,9 @@
+// Versão: 1.12 | Data: 17/09/2026
+// v1.12 (17/09/2026): o SPEC passa a dizer que os VALORES da Base manual estão
+//   no modelo (manual_lancamentos) e ganha a seção "Base manual e PERÍODO" — a
+//   regra que mais confunde uma IA, porque toda Base tem campo de data e esta
+//   não tem nenhum: ela casa com o INTERVALO do dashboard, não com uma coluna.
+//   Prosa nova, sem enum novo: as contagens do §16.2 não mudam.
 // Versão: 1.11 | Data: 17/09/2026
 // v1.11 (17/09/2026): BASE MANUAL (0142) no SPEC — o operando de fórmula
 //   [manual:<chave>] (com a semântica que o distingue da meta: soma no
@@ -251,6 +257,9 @@ Base filtrar pela SUA coluna de data (ex.: negócios por "closed_at", leads por
   vale 0. Exibe "—" quando a dimensão não é data/responsável/operação, no modo
   "lista de registros" e em "Agrupar período"; como a meta, não entra em
   SOMASE/CONT.SE/MÉDIASE. Ex.: [agg:count:*] / [manual:emails_replied].
+  Os VALORES estão no modelo, em "manual_lancamentos" — use-os para decidir se
+  a conta faz sentido (ordem de grandeza, meses cobertos), nunca para gravar
+  número nenhum no JSON: o widget lê a Base manual em tempo real.
 - Sintaxe: operandos entre colchetes [Rótulo] ou [ref] (ex.: [custom:forecast],
   [agg:sum:value], [agg:count:*@leads]); argumentos separados por ";" (vírgula
   é decimal: 1,5); texto "entre aspas"; comparadores = <> < > <= >=.
@@ -336,6 +345,25 @@ promovida a tipo próprio).
 - "sources" NA MÉTRICA = a métrica agrega sobre essas Bases (pode ser diferente
   das Bases do widget; os grupos/linhas continuam vindo das Bases do widget).
 - "percent": true só ANEXA "%" (não multiplica ×100).
+
+### Base manual e PERÍODO (leia antes de misturar os dois)
+- A Base manual NÃO é uma Base e NÃO tem campo de data. Nunca a coloque em
+  "bases", em "sources" de widget, em "periodBar.fieldBySource", nem como
+  dimensão/filtro/coluna. Pedir um campo de período para ela é erro de
+  modelagem, não uma opção.
+- Ela responde ao PERÍODO DO DASHBOARD seja ele qual for — preset, intervalo
+  personalizado ou a barra por Base. Cada Base de registros compara a SUA
+  coluna de data (fechamento, criação…), mas o intervalo é UM só, e é com ele
+  que o número digitado casa. Por isso um mesmo card pode cruzar Negócios por
+  "closed_at", Leads por "source_created_at" e um número manual: os três
+  obedecem ao mesmo intervalo.
+- Em "todo o período" o número CONTA TUDO (sem limite não há recorte) — pode
+  propor KPI assim sem medo de o valor sumir.
+- Quanto de cada lançamento entra na janela é a "distribuicao" DELE (vem em
+  manual_lancamentos): "Valor cheio em todo período que encostar" repete em
+  cada bucket tocado de propósito, e "Distribuir por igual entre os dias" é a
+  única em que a soma dos dias devolve o total. Leve isso em conta ao escolher
+  o formato de data da dimensão.
 
 ### Filtros
 - "op": ${filterOpList}.

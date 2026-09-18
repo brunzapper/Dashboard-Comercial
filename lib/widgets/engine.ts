@@ -1,3 +1,9 @@
+// Versão: 1.14 | Data: 17/09/2026
+// v1.14 (17/09/2026): CORREÇÃO — card sem dimensão cuja única métrica é da Base
+// manual mandava SELECT vazio ao RPC ("Widget sem dimensões nem métricas"). A
+// guarda que empurra a contagem descartável só cobria métrica calculada e
+// perna de sub-base; a métrica manual plana não tem nem uma nem outra. Era
+// inalcançável até a UI passar a ofertá-la.
 // Versão: 1.13 | Data: 17/09/2026
 // v1.13 (17/09/2026): RÓTULO da métrica da Base manual. Uma métrica
 // `manual:<chave>` (que o engine já resolvia desde a 0142, e que agora o
@@ -2150,11 +2156,19 @@ export async function runWidget(
         }
       }
     }
-    // Toda métrica é calculada/de perna e sem operando na principal: o RPC não
-    // aceita SELECT vazio — pede uma contagem descartada só p/ a consulta valer
-    // (com pernas, a principal continua necessária: ela define as linhas).
+    // Toda métrica é resolvida FORA do RPC (calculada, de perna, ou da Base
+    // manual) e sem operando na principal: o RPC não aceita SELECT vazio —
+    // ergue `Widget sem dimensões nem métricas` — então pede uma contagem
+    // descartada só p/ a consulta valer (com pernas, a principal continua
+    // necessária: ela define as linhas).
+    // v1.14 (17/09/2026): `manualMetricKeys` entrou na condição. Um card SEM
+    // dimensão cuja ÚNICA métrica é `manual:<chave>` não tem calc nem perna —
+    // a guarda não disparava, o payload ia vazio e o widget não carregava. A
+    // linha descartável é também onde `applyManualBase` escreve o valor.
     if (
-      (calcResolved.size > 0 || legs.length > 0) &&
+      (calcResolved.size > 0 ||
+        legs.length > 0 ||
+        manualMetricKeys.size > 0) &&
       rpcMetrics.length === 0 &&
       dims.length === 0
     ) {

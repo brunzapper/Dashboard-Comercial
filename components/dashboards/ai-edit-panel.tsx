@@ -1,3 +1,13 @@
+// Versão: 1.3 | Data: 17/09/2026
+// v1.3 (17/09/2026): bloco de IA EXTERNA (copiar prompt → colar JSON), que o
+//   painel não tinha de forma alguma — todo o resto do sistema (operações,
+//   mapeamentos, tarefas, Base manual) já oferecia as duas entradas para o
+//   mesmo contrato. O prompt vai com o ESTADO ATUAL do board; a colagem é
+//   CONFERIDA no servidor e vira a prévia pendente da sessão, então o
+//   "Aplicar" acima serve às duas origens sem mudar uma linha — ele já lia o
+//   JSON do banco. A colagem herda daí o Desfazer, o Descartar e a
+//   sobrevivência a um F5, e nunca respeita "aplicar automaticamente": quem
+//   cola de fora precisa ver o que vai entrar.
 // Versão: 1.2 | Data: 11/09/2026
 // v1.2 (11/09/2026): o laço de leitura do NDJSON virou `readNdjsonTurn`
 // (lib/ai/read-ndjson-turn.ts). Estava byte a byte igual ao do painel da
@@ -30,6 +40,9 @@ import {
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import {
+  ChevronDown,
+  ChevronRight,
+  ClipboardCopy,
   PanelRightClose,
   RotateCcw,
   Send,
@@ -49,8 +62,10 @@ import {
 } from "@/components/dashboards/ai-chat-log";
 import {
   applyAiEditPending,
+  copyDashboardAiPrompt,
   discardAiEditPending,
   loadAiEditSession,
+  pasteDashboardAiJson,
   resetAiEditSession,
   undoAiEditSession,
 } from "@/app/(app)/dashboards/ai-session-actions";
@@ -62,7 +77,7 @@ import { AI_PROVIDER_LABELS, isAiProvider } from "@/lib/ai/models";
 
 type PanelState = "closed" | "open" | "collapsed";
 // "turn" não passa mais por aqui — o turno usa a rota de streaming (turnBusy).
-type Action = "load" | "apply" | "undo" | "reset" | null;
+type Action = "load" | "apply" | "undo" | "reset" | "paste" | null;
 
 // Handle imperativo p/ o trigger externo (dropdown "Editar" da toolbar).
 export interface AiEditPanelHandle {
@@ -100,6 +115,12 @@ export function AiEditPanel({
   // Aviso fora do chat: erro de gate/salvamento (ok:false não substitui o chat).
   const [notice, setNotice] = useState<string | null>(null);
   const [confirmRestart, setConfirmRestart] = useState(false);
+  // Fluxo de IA EXTERNA (copiar prompt → colar JSON). `promptFallback` guarda
+  // o texto quando o clipboard é bloqueado — padrão das outras telas.
+  const [externalOpen, setExternalOpen] = useState(false);
+  const [pasted, setPasted] = useState("");
+  const [promptFallback, setPromptFallback] = useState("");
+  const [copying, setCopying] = useState(false);
   const [action, setAction] = useState<Action>(null);
   const [busy, startBusy] = useTransition();
   // Turno em voo pela rota de streaming (fora do useTransition das actions) +
@@ -149,6 +170,42 @@ export function AiEditPanel({
     setNotice(null);
     startBusy(async () => {
       absorb(await fn());
+    });
+  }
+
+  // ---- IA externa: mesmo contrato, mesma prévia, mesmo Aplicar ----
+  async function copyPrompt(variant: "compacto" | "completo") {
+    if (anyBusy || copying) return;
+    setCopying(true);
+    setNotice(null);
+    setPromptFallback("");
+    try {
+      const res = await copyDashboardAiPrompt(dashboardId, variant);
+      if (!res.ok || !res.prompt) {
+        setNotice(res.message ?? "Não foi possível montar o prompt.");
+        return;
+      }
+      try {
+        await navigator.clipboard.writeText(res.prompt);
+        setNotice("Prompt copiado — cole na IA externa e traga o JSON de volta.");
+      } catch {
+        // Clipboard bloqueado (http, permissão): mostra para copiar à mão.
+        setPromptFallback(res.prompt);
+        setNotice("Não consegui copiar sozinho — selecione o texto abaixo.");
+      }
+      if (res.message) setNotice(res.message);
+    } finally {
+      setCopying(false);
+    }
+  }
+
+  function checkPasted() {
+    const raw = pasted.trim();
+    if (!raw || anyBusy) return;
+    run("paste", async () => {
+      const state = await pasteDashboardAiJson(dashboardId, raw);
+      if (state.ok) setPasted("");
+      return state;
     });
   }
 
@@ -390,6 +447,72 @@ export function AiEditPanel({
                 />
                 Aplicar automaticamente
               </label>
+            </div>
+            {/* IA EXTERNA: as MESMAS prévia/Aplicar do turno ao vivo — a
+                colagem grava a prévia na sessão, então o "Aplicar" acima
+                serve às duas origens. Funciona sem IA configurada. */}
+            <div className="flex flex-col gap-2 border-t pt-2">
+              <button
+                type="button"
+                className="text-muted-foreground hover:text-foreground flex items-center gap-1 self-start text-xs font-medium"
+                onClick={() => setExternalOpen((v) => !v)}
+              >
+                {externalOpen ? (
+                  <ChevronDown className="size-3.5" />
+                ) : (
+                  <ChevronRight className="size-3.5" />
+                )}
+                Usar uma IA externa (copiar prompt → colar JSON)
+              </button>
+              {externalOpen ? (
+                <div className="flex flex-col gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      disabled={anyBusy || copying}
+                      onClick={() => copyPrompt("compacto")}
+                    >
+                      <ClipboardCopy className="size-4" /> Copiar prompt
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      disabled={anyBusy || copying}
+                      onClick={() => copyPrompt("completo")}
+                      title="Anexa o manual de construção inteiro — para IAs que precisam da referência completa."
+                    >
+                      + manual
+                    </Button>
+                  </div>
+                  {promptFallback ? (
+                    <Textarea
+                      readOnly
+                      value={promptFallback}
+                      onFocus={(e) => e.currentTarget.select()}
+                      className="h-24 shrink-0 font-mono text-[11px]"
+                    />
+                  ) : null}
+                  <Textarea
+                    value={pasted}
+                    onChange={(e) => setPasted(e.target.value)}
+                    placeholder="Cole aqui o JSON devolvido pela IA externa…"
+                    className="h-20 shrink-0 font-mono text-[11px]"
+                  />
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="self-start"
+                    disabled={anyBusy || pasted.trim().length === 0}
+                    onClick={checkPasted}
+                  >
+                    {action === "paste" && busy ? "Conferindo…" : "Conferir JSON"}
+                  </Button>
+                </div>
+              ) : null}
             </div>
             <div className="flex flex-wrap items-center gap-2 border-t pt-2">
               <Button

@@ -1,3 +1,9 @@
+// Versão: 1.27 | Data: 17/09/2026
+// v1.27 (17/09/2026): chip "Base manual" no dropdown de métrica. Na v1.26 as
+//   séries iam sem `chips` e, pela regra do Combobox, apareciam sob TODOS os
+//   chips — inclusive os de Base, às quais não pertencem, e sem jeito de
+//   isolá-las. Chip próprio resolve os dois lados; ele é opt-in em
+//   `sourceChips` para não criar chip vazio em dimensão/filtro/coluna.
 // Versão: 1.26 | Data: 17/09/2026
 // v1.26 (17/09/2026): a BASE MANUAL (0142) entra no dropdown "Campo da
 //   métrica", grupo "Base manual" — antes o número digitado só era alcançável
@@ -256,6 +262,7 @@ import {
   fieldOptionLabel,
   fieldOptionTitle,
   opHasNoValue,
+  MANUAL_CHIP_KEY,
   sourceChips,
   toFieldOptions,
 } from "@/lib/widgets/filter-ops";
@@ -1043,6 +1050,12 @@ export function WidgetBuilder({
   const goalMetrics = useGoalMetrics();
   const manualSeries = useManualSeries();
   const fieldSourceChips = sourceChips(sourceLabels);
+  // v1.27: o dropdown de MÉTRICA é o único que oferta a Base manual, então é o
+  // único que ganha o chip dela — e só com dado lançado (chip vazio engana).
+  const metricChips =
+    manualSeries.length > 0
+      ? sourceChips(sourceLabels, { manual: true })
+      : fieldSourceChips;
 
   // Pernas extras de sub-base na seleção atual (2+ subs da mesma base, ou sub
   // "conviver" junto da pai) — habilitam o seletor "Exibição das sub-bases"
@@ -1190,14 +1203,19 @@ export function WidgetBuilder({
     { value: "*", label: "Contagem de registros" },
     ...toFieldOptions(numericFields, sourceLabels),
     ...toFieldOptions(aggCalcFields, sourceLabels),
-    // BASE MANUAL (v1.26): os números DIGITADOS também são métrica direta — a
-    // Base manual é global da org e OCULTA (não é linha de data_sources), por
-    // isso vai sem `chips`, como os sentinelas acima: aparece em qualquer chip
-    // de fonte porque não pertence a nenhuma.
+    // BASE MANUAL (v1.27): os números DIGITADOS também são métrica direta. Eles
+    // têm CHIP PRÓPRIO — na v1.26 iam sem `chips` e a regra do Combobox
+    // ("opção sem chips aparece em todos") os fazia poluir a lista de cada
+    // Base, onde não pertencem, sem dar como isolá-los. Com o chip: aparecem
+    // em "Todas" (que não filtra), sozinhos no chip "Base manual", e somem dos
+    // chips de Base. O rótulo segue a convenção da visão "Todas"
+    // ("Fonte · Campo"), com `cleanLabel` para quando o chip está ativo.
     ...manualSeries.map((ms) => ({
       value: manualRef(ms.key),
-      label: ms.label,
+      label: `${MANUAL_GROUP} · ${ms.label}`,
+      cleanLabel: ms.label,
       group: MANUAL_GROUP,
+      chips: [MANUAL_CHIP_KEY],
     })),
     { value: CALC_METRIC_FIELD, label: "ƒ Métrica calculada (fórmula própria)…" },
   ];
@@ -3651,7 +3669,7 @@ export function WidgetBuilder({
                 key={i}
                 metric={m}
                 metricOptions={metricOptions}
-                fieldChips={fieldSourceChips}
+                fieldChips={metricChips}
                 aggOptions={aggOptions}
                 isMoney={isMoneyField(m.field)}
                 isAggCalc={isAggCalcField(m.field)}

@@ -1,3 +1,13 @@
+// Versão: 1.3 | Data: 17/09/2026
+// v1.3 (17/09/2026): três blocos EXTRAÍDOS de generateDashboardCore, sem
+//   mudança de comportamento — contexto por modo, montagem do system e a
+//   checagem do JSON (esta última foi para lib/import/dashboard/check.ts, que
+//   é puro e portanto testável; este arquivo é server-only). Em cima deles, as
+//   duas entradas de IA EXTERNA: `buildDashboardPromptCore` (copiar prompt,
+//   agora COM o estado atual do board — era só isso que faltava para o painel
+//   poder oferecê-lo) e `previewDashboardJsonCore` (conferir JSON colado, sem
+//   escrever). Nenhuma das duas exige IA configurada: é para a organização sem
+//   provedor que o fluxo manual existe.
 // Versão: 1.2 | Data: 17/09/2026
 // v1.2 (17/09/2026): repassa `onNotice` (aviso de rebaixamento de modelo do
 //   Gemini) e para de prefixar o provedor numa mensagem que já se apresenta —
@@ -21,31 +31,30 @@
 // autocorreção, truncamento) segue documentado lá.
 import "server-only";
 
-import { getSessionInfo } from "@/lib/auth/session";
+import { getSessionInfo, type SessionInfo } from "@/lib/auth/session";
 import { getActiveOrgId } from "@/lib/auth/org";
 import { createClient } from "@/lib/supabase/server";
 import { loadSources } from "@/lib/config/sources";
 import { loadOrgAiConfig } from "@/lib/ai/config";
 import { getAiClient, AiTruncatedError, type AiMessage } from "@/lib/ai";
 import { providerLabel } from "@/lib/ai/json-loop";
-import { buildImportPrompt } from "@/app/(app)/dashboards/import-prompt-actions";
+import {
+  buildImportPrompt,
+  type ImportPromptVariant,
+} from "@/app/(app)/dashboards/import-prompt-actions";
 import { loadImportContext } from "@/lib/import/dashboard/context";
+import { checkDashboardJson } from "@/lib/import/dashboard/check";
 import {
   DASHBOARD_SETTINGS_DOC,
   documentedKeys,
 } from "@/lib/import/dashboard/settings-docs";
-import { validateDashboardImport } from "@/lib/import/dashboard/validate";
-import { normalizeImportRaw } from "@/lib/import/dashboard/rewrite";
 import {
   exportDashboardJson,
   type ExportDashRow,
   type ExportWidgetRow,
 } from "@/lib/import/dashboard/export";
 import { loadExportFkNames } from "@/lib/import/dashboard/export-fk-names";
-import {
-  IMPORT_PRESET_PREFIX,
-  type ImportWidgetSpec,
-} from "@/lib/import/dashboard/types";
+import type { ImportWidgetSpec } from "@/lib/import/dashboard/types";
 import {
   fuseExtraReferences,
   MAX_EXTRA_REFS,
@@ -252,40 +261,50 @@ async function applyFromReference(
  * tokens extras — ver lib/ai/types.ts); passa por TODAS as tentativas do laço
  * de autocorreção.
  */
-export async function generateDashboardCore(
-  input: GenerateDashboardInput,
-  onThought?: (chunk: string) => void,
-  onNotice?: (text: string) => void
-): Promise<GenerateDashboardState> {
-  const t0 = Date.now();
+/** O que o contexto por modo LÊ do pedido. Estreito de propósito: as entradas
+ *  de IA externa (copiar prompt / colar JSON) não têm `description`. */
+interface DashboardModeInput {
+  mode?: AiDashboardMode;
+  bases?: string[];
+  targetDashboardId?: string;
+  extraReferenceIds?: string[];
+}
+
+/** O que o modo resolve antes de montar prompt ou validar JSON. */
+interface DashboardModeContext {
+  mode: AiDashboardMode;
+  bases: string[];
+  stateJson: string | null;
+  chave: string;
+  modeRules: string;
+  currentTabs?: { id: string; name: string; color?: string }[];
+  currentRoles?: string[];
+  avoidName?: string;
+  existingKeys: Set<string>;
+  baseWidgets?: ImportWidgetSpec[];
+  refWidgets?: ImportWidgetSpec[];
+  refSections: { title: string; body: string }[];
+  currentCanvas?: Record<string, unknown>;
+}
+
+/**
+ * Contexto por MODO: bases, estado atual (from/edit), chave canônica, regras.
+ *
+ * Extraído de `generateDashboardCore` em 17/09/2026 — sem mudança de
+ * comportamento. O turno ao vivo não era o único a precisar disto: o
+ * "Copiar prompt" de um dashboard existente e a conferência de um JSON colado
+ * dependem do MESMO estado exportado (é daqui que sai `baseWidgets`, a base do
+ * merge por widget). Montar isso uma segunda vez seria a régua paralela que a
+ * invariante 25 proíbe.
+ */
+async function resolveDashboardModeContext(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  session: SessionInfo,
+  input: DashboardModeInput
+): Promise<
+  { ok: true; ctx: DashboardModeContext } | { ok: false; message: string }
+> {
   const mode: AiDashboardMode = input.mode ?? "new";
-  const session = await getSessionInfo();
-  if (!session) return { ok: false, message: "Sessão expirada." };
-  if (!session.permissions.includes("create_dashboards")) {
-    return { ok: false, message: "Você não tem permissão para criar dashboards." };
-  }
-  const description = (input.description ?? "").trim();
-  if (!description) {
-    return { ok: false, message: "Descreva o que você quer." };
-  }
-  const priorTurns = (input.priorTurns ?? [])
-    .map((t) => String(t ?? "").trim())
-    .filter(Boolean)
-    .slice(-MAX_PRIOR_TURNS);
-  const autoApply = input.autoApply !== false;
-
-  const orgId = await getActiveOrgId();
-  const aiConfig = await loadOrgAiConfig(orgId);
-  if (!aiConfig) {
-    return {
-      ok: false,
-      message:
-        "IA não configurada para esta organização. Cadastre o provedor e a chave em Configurações → Integrações.",
-    };
-  }
-
-  const supabase = await createClient();
-
   // ---- Contexto por modo: bases, estado atual (from/edit), chave canônica.
   let bases: string[];
   let stateJson: string | null = null;
@@ -403,20 +422,55 @@ export async function generateDashboardCore(
     }
   }
 
-  // ---- System: spec + modelo das Bases + amostras (reuso do fluxo manual) +
-  // estado atual + regras do modo.
-  const prompt = await buildImportPrompt(bases, "compacto");
+  return {
+    ok: true,
+    ctx: {
+      mode,
+      bases,
+      stateJson,
+      chave,
+      modeRules,
+      currentTabs,
+      currentRoles,
+      avoidName,
+      existingKeys,
+      baseWidgets,
+      refWidgets,
+      refSections,
+      currentCanvas,
+    },
+  };
+}
+
+/**
+ * O prompt de sistema INTEIRO: spec + modelo das Bases + amostras (reuso do
+ * fluxo manual) + estado atual + referências + prévia pendente + regras do
+ * modo.
+ *
+ * Extraído em 17/09/2026. Era isto que faltava para o painel do dashboard
+ * poder oferecer "Copiar prompt": `buildImportPrompt` sozinho não conhece o
+ * ESTADO do board, e um copiar-prompt sem ele mandaria a IA externa editar às
+ * cegas.
+ */
+async function buildDashboardSystemPrompt(
+  ctx: DashboardModeContext,
+  opts: { variant: ImportPromptVariant; pendingJson?: string }
+): Promise<{ ok: true; system: string } | { ok: false; message: string }> {
+  const prompt = await buildImportPrompt(ctx.bases, opts.variant);
   if (!prompt.ok || !prompt.prompt) {
-    return { ok: false, message: prompt.message ?? "Não foi possível montar o prompt." };
+    return {
+      ok: false,
+      message: prompt.message ?? "Não foi possível montar o prompt.",
+    };
   }
   let system = prompt.prompt;
-  if (stateJson) {
-    system += section("ESTADO ATUAL DO DASHBOARD (JSON)", stateJson);
+  if (ctx.stateJson) {
+    system += section("ESTADO ATUAL DO DASHBOARD (JSON)", ctx.stateJson);
   }
-  for (const s of refSections) system += section(s.title, s.body);
+  for (const s of ctx.refSections) system += section(s.title, s.body);
   // Prévia pendente (auto-aplicar OFF): sem isso a IA não enxerga o que ela
   // mesma propôs no turno anterior — "ajusta o card que você criou" falharia.
-  const pendingJson = (input.pendingJson ?? "").trim();
+  const pendingJson = (opts.pendingJson ?? "").trim();
   if (pendingJson) {
     system += section(
       "PRÉVIA PENDENTE (AINDA NÃO APLICADA)",
@@ -428,7 +482,149 @@ export async function generateDashboardCore(
         pendingJson
     );
   }
-  system += section("REGRAS DESTE MODO", modeRules);
+  system += section("REGRAS DESTE MODO", ctx.modeRules);
+  return { ok: true, system };
+}
+
+/** Gate comum das entradas de dashboard por IA (viva ou externa). */
+async function gateDashboardAi(): Promise<
+  { ok: true; session: SessionInfo } | { ok: false; message: string }
+> {
+  const session = await getSessionInfo();
+  if (!session) return { ok: false, message: "Sessão expirada." };
+  if (!session.permissions.includes("create_dashboards")) {
+    return {
+      ok: false,
+      message: "Você não tem permissão para criar dashboards.",
+    };
+  }
+  return { ok: true, session };
+}
+
+/**
+ * O prompt completo para uma IA EXTERNA (fluxo copiar-prompt → colar-JSON).
+ *
+ * Mesmo SPEC, mesmo modelo e mesmo ESTADO ATUAL que o turno ao vivo monta —
+ * uma entrada, um contrato. NÃO exige IA configurada de propósito: este
+ * caminho existe justamente para a organização que não tem provedor
+ * cadastrado (padrão de operações/mapeamentos/Base manual).
+ */
+export async function buildDashboardPromptCore(input: {
+  mode?: AiDashboardMode;
+  targetDashboardId?: string;
+  bases?: string[];
+  extraReferenceIds?: string[];
+  variant?: ImportPromptVariant;
+}): Promise<{ ok: boolean; prompt?: string; message?: string }> {
+  const gate = await gateDashboardAi();
+  if (!gate.ok) return { ok: false, message: gate.message };
+  const supabase = await createClient();
+  const modeCtx = await resolveDashboardModeContext(supabase, gate.session, input);
+  if (!modeCtx.ok) return { ok: false, message: modeCtx.message };
+  const res = await buildDashboardSystemPrompt(modeCtx.ctx, {
+    variant: input.variant ?? "compacto",
+  });
+  if (!res.ok) return { ok: false, message: res.message };
+  return { ok: true, prompt: res.system };
+}
+
+/**
+ * Confere um JSON COLADO de IA externa — mesma prévia do turno ao vivo, sem IA.
+ *
+ * Nunca escreve: devolve o JSON NORMALIZADO para quem chamou guardar como
+ * prévia. A normalização não é cosmética — é ela que reescreve a identidade no
+ * servidor (uma `chave` copiada de outro board sobrescreveria a origem).
+ */
+export async function previewDashboardJsonCore(
+  raw: string,
+  input: {
+    mode?: AiDashboardMode;
+    targetDashboardId?: string;
+    bases?: string[];
+    extraReferenceIds?: string[];
+  }
+): Promise<{
+  ok: boolean;
+  message: string;
+  pendingJson?: string;
+  summary?: string[];
+  warnings?: string[];
+  errors?: string[];
+}> {
+  const text = (raw ?? "").trim();
+  if (!text) return { ok: false, message: "Cole o JSON devolvido pela IA." };
+  const gate = await gateDashboardAi();
+  if (!gate.ok) return { ok: false, message: gate.message };
+  const supabase = await createClient();
+  const modeCtx = await resolveDashboardModeContext(supabase, gate.session, input);
+  if (!modeCtx.ok) return { ok: false, message: modeCtx.message };
+
+  const importCtx = await loadImportContext(supabase);
+  const checked = checkDashboardJson(text, modeCtx.ctx, importCtx);
+  if (!checked.ok) {
+    return {
+      ok: false,
+      message: "O JSON tem problemas — corrija na IA externa e cole de novo.",
+      errors: checked.errors,
+    };
+  }
+  return {
+    ok: true,
+    message: "Prévia pronta — revise as mudanças e clique em Aplicar.",
+    pendingJson: checked.normalized,
+    summary: checked.summary,
+    warnings: checked.warnings,
+  };
+}
+
+export async function generateDashboardCore(
+  input: GenerateDashboardInput,
+  onThought?: (chunk: string) => void,
+  onNotice?: (text: string) => void
+): Promise<GenerateDashboardState> {
+  const t0 = Date.now();
+  const mode: AiDashboardMode = input.mode ?? "new";
+  const session = await getSessionInfo();
+  if (!session) return { ok: false, message: "Sessão expirada." };
+  if (!session.permissions.includes("create_dashboards")) {
+    return { ok: false, message: "Você não tem permissão para criar dashboards." };
+  }
+  const description = (input.description ?? "").trim();
+  if (!description) {
+    return { ok: false, message: "Descreva o que você quer." };
+  }
+  const priorTurns = (input.priorTurns ?? [])
+    .map((t) => String(t ?? "").trim())
+    .filter(Boolean)
+    .slice(-MAX_PRIOR_TURNS);
+  const autoApply = input.autoApply !== false;
+
+  const orgId = await getActiveOrgId();
+  const aiConfig = await loadOrgAiConfig(orgId);
+  if (!aiConfig) {
+    return {
+      ok: false,
+      message:
+        "IA não configurada para esta organização. Cadastre o provedor e a chave em Configurações → Integrações.",
+    };
+  }
+
+  const supabase = await createClient();
+
+  // ---- Contexto por modo (extraído em 17/09/2026 — ver a função).
+  const modeCtxRes = await resolveDashboardModeContext(supabase, session, input);
+  if (!modeCtxRes.ok) return { ok: false, message: modeCtxRes.message };
+  // Só a chave sobrevive aqui: o resto do contexto vai INTEIRO para as funções
+  // extraídas, e repetir os campos soltos convidaria a divergirem.
+  const { chave } = modeCtxRes.ctx;
+
+  // ---- System (extraído em 17/09/2026 — o "Copiar prompt" usa o mesmo).
+  const systemRes = await buildDashboardSystemPrompt(modeCtxRes.ctx, {
+    variant: "compacto",
+    pendingJson: input.pendingJson,
+  });
+  if (!systemRes.ok) return { ok: false, message: systemRes.message };
+  const system = systemRes.system;
 
   const ctx = await loadImportContext(supabase);
   const client = getAiClient(aiConfig);
@@ -480,29 +676,10 @@ export async function generateDashboardCore(
     }
     lastRaw = raw;
 
-    // Identidade canônica + injeções protetivas + base do merge por widget
-    // (só no modo Editar) ANTES da validação.
-    const normalized = normalizeImportRaw(raw, {
-      chave,
-      currentTabs,
-      currentRoles,
-      avoidName,
-      baseWidgets,
-      refWidgets,
-      currentCanvas,
-    });
-
-    const validation = validateDashboardImport(normalized, ctx);
-    if (validation.ok && validation.preset) {
-      // Resumo por widget (prévia e mensagem): novo × atualiza.
-      const prefix = `${IMPORT_PRESET_PREFIX}${chave}.`;
-      const summary = validation.preset.widgets.map((w) => {
-        const key = w.presetKey.startsWith(prefix)
-          ? w.presetKey.slice(prefix.length)
-          : w.presetKey;
-        const exists = existingKeys.has(key);
-        return `${exists ? "atualiza" : "novo"}: ${w.title}`;
-      });
+    const checked = checkDashboardJson(raw, modeCtxRes.ctx, ctx);
+    if (checked.ok) {
+      const { normalized, summary } = checked;
+      const validation = { warnings: checked.warnings };
 
       if (!autoApply) {
         return {
@@ -532,7 +709,7 @@ export async function generateDashboardCore(
       return { ...applied, summary, chave, mode };
     }
 
-    lastErrors = validation.errors;
+    lastErrors = checked.errors;
     // Turno de correção (interno à tentativa): JSON anterior + erros pt-BR.
     messages.push({ role: "assistant", content: raw });
     messages.push({

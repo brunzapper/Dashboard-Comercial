@@ -1,3 +1,6 @@
+// Versão: 1.3 | Data: 17/09/2026
+// v1.3 (17/09/2026): guarda da seção "Base manual e PERÍODO" do SPEC — ela é a
+//   única fonte do modelo sem campo de data, e a regra se perde fácil.
 // Versão: 1.2 | Data: 17/09/2026
 // v1.2 (17/09/2026): guarda de que o SPEC ensina as DUAS superfícies da Base
 //   manual — o operando [manual:<chave>] e a métrica "field": "manual:<chave>".
@@ -184,6 +187,19 @@ describe("prompt de importação por IA — paridade com o código", () => {
     expect(prompt).toContain("[manual:<chave>]");
     expect(prompt).toContain('"field": "manual:<chave>"');
     expect(prompt).toContain("manual_series");
+  });
+
+  // v1.12: a Base manual é a única coisa do modelo SEM campo de data, e toda
+  // Base tem um — sem estas frases a IA tenta dar um a ela (ou a põe em
+  // `bases`) e o widget sai errado de um jeito que só aparece ao trocar o
+  // período. Os VALORES no prompt são o que permite o cruzamento.
+  it("declara que a Base manual não tem campo de período e obedece ao intervalo", () => {
+    expect(prompt).toContain("manual_lancamentos");
+    expect(prompt).toContain("Base manual e PERÍODO");
+    expect(prompt).toContain("NÃO tem campo de data");
+    expect(prompt).toContain("periodBar.fieldBySource");
+    expect(prompt).toContain("todo o período");
+    expect(prompt).toContain("distribuicao");
   });
 });
 

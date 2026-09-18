@@ -1,3 +1,10 @@
+// Versão: 1.2 | Data: 17/09/2026
+// v1.2 (17/09/2026): as duas entradas de IA EXTERNA do painel —
+//   `copyDashboardAiPrompt` (o prompt COM o estado atual do board) e
+//   `pasteDashboardAiJson` (confere o JSON colado e o guarda como PRÉVIA).
+//   A colagem grava `pending` na linha da sessão, então o "Aplicar" existente
+//   serve às duas origens sem mudar nada: ele já lê o JSON do BANCO. Com isso
+//   a colagem herda o Desfazer, o Descartar e a sobrevivência a um F5.
 // Versão: 1.1 | Data: 26/07/2026
 // Sessão PERSISTIDA da edição com IA dentro do dashboard (painel "Editar com
 // IA"). Uma linha por (usuário, dashboard) em `dashboard_ai_sessions` (0098):
@@ -40,6 +47,11 @@ import {
 } from "@/lib/ai/edit-session";
 import { restoreDashboardSnapshot } from "@/app/(app)/dashboards/actions";
 import { applyGeneratedDashboard } from "@/app/(app)/dashboards/ai-generate-actions";
+import {
+  buildDashboardPromptCore,
+  previewDashboardJsonCore,
+} from "@/lib/ai/generate-dashboard";
+import type { ImportPromptVariant } from "@/app/(app)/dashboards/import-prompt-actions";
 
 /** Estado persistido da sessão (abre o painel / F5). */
 export async function loadAiEditSession(
@@ -61,6 +73,75 @@ export async function runAiEditTurn(
   autoApply: boolean
 ): Promise<AiEditSessionState> {
   return runAiEditTurnCore(dashboardId, message, autoApply);
+}
+
+/**
+ * Prompt para IA EXTERNA, deste board. Mesmo SPEC/modelo/estado do turno ao
+ * vivo — uma entrada, um contrato. Não exige IA configurada.
+ */
+export async function copyDashboardAiPrompt(
+  dashboardId: string,
+  variant: ImportPromptVariant
+): Promise<{ ok: boolean; prompt?: string; message?: string }> {
+  const gate = await gateAiEdit(dashboardId);
+  if (!gate.ok) return { ok: false, message: gate.message };
+  return buildDashboardPromptCore({
+    mode: "edit",
+    targetDashboardId: dashboardId,
+    variant,
+  });
+}
+
+/**
+ * Confere um JSON COLADO de IA externa e o guarda como PRÉVIA da sessão.
+ *
+ * A colagem entra pela MESMA porta da prévia da IA interna: gravando `pending`
+ * na linha, o "Aplicar" existente (que lê o JSON do BANCO) serve aos dois sem
+ * mudar uma linha — e a colagem herda de graça o Desfazer, o Descartar e a
+ * sobrevivência a um F5. Nunca respeita auto-aplicar: quem cola de fora
+ * precisa ver o que vai entrar.
+ */
+export async function pasteDashboardAiJson(
+  dashboardId: string,
+  raw: string
+): Promise<AiEditSessionState> {
+  const gate = await gateAiEdit(dashboardId);
+  if (!gate.ok) return gateError(gate.message);
+  const row = await loadRow(gate.supabase, gate.userId, dashboardId);
+
+  const res = await previewDashboardJsonCore(raw, {
+    mode: "edit",
+    targetDashboardId: dashboardId,
+  });
+
+  const next: SessionRow = { ...row, chat: [...row.chat] };
+  next.chat.push({ kind: "user", text: "(JSON colado de IA externa)" });
+  if (res.ok && res.pendingJson) {
+    next.pending = { json: res.pendingJson, summary: res.summary ?? [] };
+    next.chat.push({
+      kind: "ok",
+      text: res.message,
+      summary: res.summary,
+    });
+  } else {
+    next.chat.push({ kind: "error", text: res.message, errors: res.errors });
+  }
+
+  const saveErr = await saveRow(
+    gate.supabase,
+    gate.orgId,
+    gate.userId,
+    dashboardId,
+    next
+  );
+  if (saveErr) {
+    return {
+      ...stateFrom(next),
+      ok: false,
+      message: `Falha ao salvar a sessão: ${saveErr}`,
+    };
+  }
+  return { ...stateFrom(next), ok: res.ok, message: res.message };
 }
 
 /** Aplica a prévia pendente lendo o JSON do BANCO (nada confiado do cliente). */

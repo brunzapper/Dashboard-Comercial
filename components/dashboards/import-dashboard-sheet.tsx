@@ -1,3 +1,12 @@
+// Versão: 2.3 | Data: 17/09/2026
+// v2.3 (17/09/2026): o fluxo de IA EXTERNA vale nos TRÊS modos e passa por
+//   PRÉVIA. Ele vivia preso ao "Criar novo" por duas razões que sumiram: o
+//   prompt não carregava o ESTADO do board (agora sai de
+//   buildDashboardAiPrompt, ciente do modo) e o JSON colado ia direto para
+//   `importDashboardJson`, que só sabia CRIAR e escrevia sem ninguém revisar.
+//   Agora a colagem é conferida por previewDashboardAiJson e alimenta a MESMA
+//   caixa de prévia do turno ao vivo — o Aplicar é um só. "Importar dashboard"
+//   virou "Conferir JSON" porque é isso que o botão faz.
 // Versão: 2.2 | Data: 30/07/2026
 // v2.2 (30/07/2026): MESCLA no "Criar a partir de" — além da referência
 //   principal (copiada fielmente), checkboxes de referências ADICIONAIS (cap
@@ -14,8 +23,8 @@
 //   new/from a sessão VIRA edit no dashboard criado. Switch "Aplicar
 //   automaticamente": desligado, cada turno devolve uma prévia (resumo por
 //   widget) e o Aplicar é manual. "Desfazer edição da IA" restaura o snapshot
-//   capturado antes do turno (restoreDashboardSnapshot). O fluxo manual
-//   (copiar prompt → colar JSON) permanece no modo Criar novo.
+//   capturado antes do turno (restoreDashboardSnapshot). (O fluxo manual só
+//   valia no Criar novo — destravado na v2.3.)
 // v1.1 (23/07/2026): seleção MULTI-Base; prompt compacto/completo.
 "use client";
 
@@ -62,17 +71,17 @@ import {
 import { useSourceFolders } from "@/components/source-folders-context";
 import type { DashboardSnapshot } from "@/lib/widgets/history";
 import {
-  buildImportPrompt,
   type ImportPromptVariant,
 } from "@/app/(app)/dashboards/import-prompt-actions";
 import {
-  importDashboardJson,
   restoreDashboardSnapshot,
   type ImportDashboardState,
 } from "@/app/(app)/dashboards/actions";
 import {
   applyGeneratedDashboard,
+  buildDashboardAiPrompt,
   generateDashboardWithAi,
+  previewDashboardAiJson,
 } from "@/app/(app)/dashboards/ai-generate-actions";
 // Tipos direto do núcleo (server-only, mas `import type` é apagado no build) —
 // a action não re-exporta tipos (quebraria o chunk de actions; ver lá).
@@ -183,12 +192,45 @@ export function ImportDashboardSheet({
     setExtraIds((prev) => (on ? [...prev, id] : prev.filter((x) => x !== id)));
   }
 
+  // Recorte EFETIVO do fluxo: depois de aplicar uma criação, a conversa
+  // continua como edição daquele board (sessionTarget). O turno ao vivo e as
+  // duas entradas de IA externa leem o MESMO recorte — se divergissem, o
+  // prompt copiado descreveria um alvo e o JSON colado validaria contra outro.
+  function effScope(): { effMode: AiDashboardMode; effTarget?: string } {
+    const effMode: AiDashboardMode = sessionTarget ? "edit" : mode;
+    const effTarget = sessionTarget
+      ? sessionTarget.id
+      : mode === "new"
+        ? undefined
+        : boardId;
+    return { effMode, effTarget };
+  }
+
+  // "Criar novo" precisa de Bases marcadas; os modos com board precisam do
+  // board. Sem isso o botão prometeria um prompt que o servidor recusaria.
+  const copyBlocked = (() => {
+    const { effMode, effTarget } = effScope();
+    return effMode === "new" ? bases.length === 0 : !effTarget;
+  })();
+
   function copyPrompt(variant: ImportPromptVariant) {
-    if (bases.length === 0) return;
+    const { effMode, effTarget } = effScope();
+    if (effMode === "new" && bases.length === 0) return;
+    if (effMode !== "new" && !effTarget) return;
     setCopyError(null);
     setManualPrompt(null);
     startCopy(async () => {
-      const res = await buildImportPrompt(bases, variant);
+      // v1.x: o prompt agora carrega o ESTADO ATUAL nos modos com board — sem
+      // ele a IA externa editaria às cegas, que é por que o bloco vivia preso
+      // ao "Criar novo".
+      const res = await buildDashboardAiPrompt({
+        mode: effMode,
+        bases: effMode === "new" ? bases : undefined,
+        targetDashboardId: effTarget,
+        extraReferenceIds:
+          effMode === "from" && extraIds.length > 0 ? extraIds : undefined,
+        variant,
+      });
       if (!res.ok || !res.prompt) {
         setCopyError(res.message ?? "Não foi possível montar o prompt.");
         return;
@@ -205,15 +247,44 @@ export function ImportDashboardSheet({
     });
   }
 
+  // Colagem de IA externa: CONFERE e vira PRÉVIA — nunca grava direto. Antes
+  // ia para `importDashboardJson`, que só sabia CRIAR (daí o bloco existir só
+  // no "Criar novo") e escrevia sem ninguém revisar. Com a prévia, os três
+  // modos passam pela mesma porta do turno ao vivo.
   function runImport() {
+    const raw = json.trim();
+    if (!raw) return;
+    const { effMode, effTarget } = effScope();
+    if (effMode === "new" && bases.length === 0) return;
+    if (effMode !== "new" && !effTarget) return;
     setResult(null);
+    setChat((c) => [...c, { kind: "user", text: "(JSON colado de IA externa)" }]);
     startImport(async () => {
-      const res = await importDashboardJson(json);
-      setResult(res);
-      if (res.ok && res.id) {
-        setOpen(false);
-        router.push(`/dashboards/${res.id}`);
+      const res = await previewDashboardAiJson(raw, {
+        mode: effMode,
+        bases: effMode === "new" ? bases : undefined,
+        targetDashboardId: effTarget,
+        extraReferenceIds:
+          effMode === "from" && extraIds.length > 0 ? extraIds : undefined,
+      });
+      if (res.ok && res.pendingJson) {
+        setPending({
+          json: res.pendingJson,
+          summary: res.summary ?? [],
+          mode: effMode,
+          targetDashboardId: effTarget,
+        });
+        setJson("");
+        setChat((c) => [
+          ...c,
+          { kind: "ok", text: res.message, summary: res.summary },
+        ]);
+        return;
       }
+      setChat((c) => [
+        ...c,
+        { kind: "error", text: res.message, errors: res.errors },
+      ]);
     });
   }
 
@@ -248,12 +319,7 @@ export function ImportDashboardSheet({
   function runTurn() {
     const text = description.trim();
     if (!text || genPending) return;
-    const effMode: AiDashboardMode = sessionTarget ? "edit" : mode;
-    const effTarget = sessionTarget
-      ? sessionTarget.id
-      : mode === "new"
-        ? undefined
-        : boardId;
+    const { effMode, effTarget } = effScope();
     if (effMode === "new" && bases.length === 0) return;
     if (effMode !== "new" && !effTarget) return;
 
@@ -608,16 +674,19 @@ export function ImportDashboardSheet({
               )}
             </div>
 
-            {/* -------- Fluxo manual (só Criar novo) -------- */}
-            {mode === "new" ? (
-              <>
+            {/* -------- Fluxo manual (IA externa) — os TRÊS modos -------- */}
+            {/* Até 17/09/2026 este bloco existia só no "Criar novo", porque o
+                prompt não carregava o estado do board e o JSON colado ia
+                direto para a criação. Com o prompt ciente do modo e a prévia
+                server-side, serve a Editar e Criar-a-partir-de também. */}
+            <>
                 <div className="flex flex-col gap-2">
-                  <Label>Ou gere manualmente (copiar prompt → colar JSON)</Label>
+                  <Label>Ou use uma IA externa (copiar prompt → colar JSON)</Label>
                   <div className="flex flex-wrap gap-2">
                     <Button
                       type="button"
                       variant="secondary"
-                      disabled={bases.length === 0 || copyPending}
+                      disabled={copyBlocked || copyPending}
                       onClick={() => copyPrompt("compacto")}
                     >
                       {copied === "compacto" ? (
@@ -630,7 +699,7 @@ export function ImportDashboardSheet({
                     <Button
                       type="button"
                       variant="secondary"
-                      disabled={bases.length === 0 || copyPending}
+                      disabled={copyBlocked || copyPending}
                       onClick={() => copyPrompt("completo")}
                     >
                       {copied === "completo" ? (
@@ -676,7 +745,9 @@ export function ImportDashboardSheet({
                 </div>
 
                 <div className="flex flex-col gap-2">
-                  <Label htmlFor="import-json">JSON devolvido pela IA</Label>
+                  <Label htmlFor="import-json">
+                    JSON devolvido pela IA externa
+                  </Label>
                   <Textarea
                     id="import-json"
                     value={json}
@@ -689,7 +760,7 @@ export function ImportDashboardSheet({
                     disabled={!json.trim() || importPending}
                     onClick={runImport}
                   >
-                    {importPending ? "Importando…" : "Importar dashboard"}
+                    {importPending ? "Conferindo…" : "Conferir JSON"}
                   </Button>
                 </div>
 
@@ -712,8 +783,7 @@ export function ImportDashboardSheet({
                     ))}
                   </ul>
                 ) : null}
-              </>
-            ) : null}
+            </>
           </div>
         </ResizableSheetContent>
       </Sheet>

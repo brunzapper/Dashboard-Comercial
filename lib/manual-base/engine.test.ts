@@ -1,3 +1,8 @@
+// Versão: 1.2 | Data: 17/09/2026
+// v1.2 (17/09/2026): regressão do card SÓ com métrica manual — o payload não
+//   pode ir vazio ao RPC (ele ergue 'Widget sem dimensões nem métricas'). O
+//   caso já existia aqui, mas asseverando só o VALOR: o fake não emula a
+//   exceção do Postgres, então o teste passava com a consulta quebrada.
 // Versão: 1.1 | Data: 17/09/2026
 // v1.1 (17/09/2026): o RÓTULO da métrica manual vem do DADO (manualSeriesLabel)
 //   — a série não está em `available`, e o fieldLabel devolveria o ref cru.
@@ -363,6 +368,35 @@ describe("sem dimensão (KPI/card)", () => {
     );
     // Julho está fora do período; agosto entra inteiro (rateio dentro da janela).
     expect(data.rows[0].metric_1).toBeCloseTo(35, 9);
+  });
+
+  // REGRESSÃO (17/09/2026): o RPC ergue `Widget sem dimensões nem métricas`
+  // quando p_metrics E p_dimensions chegam vazios — e a métrica manual sai do
+  // payload por não ser coluna. Sem dimensão e sem nenhuma métrica de registro,
+  // a consulta ia vazia e o card exibia "Não foi possível carregar este widget".
+  // O fake não emula a exceção do Postgres, então a asserção é sobre os
+  // ARGUMENTOS (doutrina do topo deste arquivo): tem de ir a contagem
+  // descartável que a guarda de `computeRows` empurra.
+  it("métrica manual ÚNICA sem dimensão não manda SELECT vazio ao RPC", async () => {
+    const { db, rpcCalls } = fakeSupabase({
+      rpc: { run_widget_query: () => ({ data: [{ metric_1: 0 }], error: null }) },
+      tables: manualTables([entry()]),
+    });
+
+    const data = await runWidget(
+      db,
+      config({ dimensions: [], metrics: [{ field: "manual:emails_replied", agg: "sum" }] }),
+      AVAILABLE,
+      AGOSTO
+    );
+
+    expect(rpcCalls).toHaveLength(1);
+    expect(rpcCalls[0].args.p_dimensions).toEqual([]);
+    // Nem vazio (o RPC recusaria), nem com o ref manual (invariante 1).
+    expect(rpcCalls[0].args.p_metrics).toEqual([{ field: "*", agg: "count" }]);
+    expect(payloadText(rpcCalls[0].args)).not.toContain("manual:");
+    // E o valor digitado chega na linha, por cima da contagem descartável.
+    expect(data.rows[0].metric_1).toBe(35);
   });
 });
 
