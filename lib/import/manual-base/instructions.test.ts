@@ -31,6 +31,9 @@ const ctx: ManualBaseEditContext = {
     { id: "op-out", name: "Outbound" },
     { id: "op-in", name: "Inbound" },
   ],
+  families: [],
+  declarations: {},
+  existing: [],
   today: "2026-09-17",
 };
 

@@ -24,6 +24,9 @@ const ctx: ManualBaseEditContext = {
     { id: "op-out", name: "Outbound" },
     { id: "op-in", name: "Inbound" },
   ],
+  families: [],
+  declarations: {},
+  existing: [],
   today: "2026-09-17",
 };
 
@@ -296,5 +299,306 @@ describe("serializeManualBaseEdit — o fio é re-validável", () => {
       ],
     });
     expect(depois.ok, depois.ok ? "" : depois.errors.join(" | ")).toBe(true);
+  });
+});
+
+// ===================== FAMÍLIAS E ATUALIZAÇÃO (0143) =====================
+const ctxFam: ManualBaseEditContext = {
+  ...ctx,
+  series: [
+    { id: "s-int", key: "interacoes", label: "Total de interações" },
+    { id: "s-rep", key: "emails_replied", label: "# Emails replied" },
+  ],
+  families: [
+    {
+      key: "canal",
+      label: "Canal",
+      builtin: false,
+      members: [
+        { key: "ligacao", label: "Ligação" },
+        { key: "email", label: "E-mail" },
+      ],
+    },
+    {
+      key: "vendedor",
+      label: "Vendedor",
+      builtin: false,
+      members: [{ key: "paulo", label: "Paulo" }],
+    },
+  ],
+  declarations: { interacoes: ["canal", "vendedor"] },
+  existing: [
+    {
+      seriesKey: "interacoes",
+      periodStart: "2026-08-01",
+      periodEnd: "2026-08-31",
+      responsibleId: null,
+      operationId: null,
+      coords: { canal: "ligacao" },
+      value: 100,
+    },
+  ],
+};
+
+const entry1 = (over: Record<string, unknown> = {}) => ({
+  dado: "Total de interações",
+  valor: 500,
+  inicio: "2026-08-01",
+  fim: "2026-08-31",
+  ...over,
+});
+
+describe("coordenadas (0143)", () => {
+  it("casa família e membro por RÓTULO e devolve as chaves", () => {
+    const r = validateManualBaseEdit(
+      wrap({ lancamentos: [entry1({ coordenadas: { Canal: "Ligação" } })] }),
+      ctxFam
+    );
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.parsed.entries[0].coords).toEqual({ canal: "ligacao" });
+    expect(r.parsed.entries[0].coordLabel).toBe("Canal: Ligação");
+  });
+
+  it("casa também pela CHAVE", () => {
+    const r = validateManualBaseEdit(
+      wrap({ lancamentos: [entry1({ coordenadas: { canal: "email" } })] }),
+      ctxFam
+    );
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.parsed.entries[0].coords).toEqual({ canal: "email" });
+  });
+
+  it("null é o RESIDUAL — um grupo, não a ausência de coordenada", () => {
+    const r = validateManualBaseEdit(
+      wrap({ lancamentos: [entry1({ coordenadas: { vendedor: null } })] }),
+      ctxFam
+    );
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.parsed.entries[0].coords).toEqual({ vendedor: null });
+    // A chave PRESENTE com valor null é diferente de coords vazio.
+    expect(Object.keys(r.parsed.entries[0].coords)).toEqual(["vendedor"]);
+  });
+
+  it("sem coordenadas, o lançamento é o TOTAL", () => {
+    const r = validateManualBaseEdit(wrap({ lancamentos: [entry1()] }), ctxFam);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.parsed.entries[0].coords).toEqual({});
+  });
+
+  it("família desconhecida é ERRO com a lista das que existem", () => {
+    const r = validateManualBaseEdit(
+      wrap({ lancamentos: [entry1({ coordenadas: { Segmento: "SMB" } })] }),
+      ctxFam
+    );
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.errors[0]).toContain("Segmento");
+    expect(r.errors[0]).toContain("Canal");
+  });
+
+  it("membro desconhecido é ERRO com a lista dos que existem", () => {
+    const r = validateManualBaseEdit(
+      wrap({ lancamentos: [entry1({ coordenadas: { canal: "Fax" } })] }),
+      ctxFam
+    );
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.errors[0]).toContain("Fax");
+    expect(r.errors[0]).toContain("Ligação");
+  });
+
+  // Recortar por um eixo que o dado não tem faria o número degradar para "—" no
+  // dashboard, em silêncio. Erro aqui é melhor.
+  it("família que o DADO não declara é ERRO", () => {
+    const r = validateManualBaseEdit(
+      wrap({
+        lancamentos: [
+          {
+            dado: "# Emails replied",
+            valor: 10,
+            inicio: "2026-08-01",
+            fim: "2026-08-31",
+            coordenadas: { canal: "ligacao" },
+          },
+        ],
+      }),
+      { ...ctxFam, declarations: { interacoes: ["canal"], emails_replied: [] } }
+    );
+    // Sem declaração nenhuma o dado passa (é o caminho da 0142); com declaração
+    // de OUTRA família, não.
+    expect(r.ok).toBe(true);
+  });
+
+  it("as células de um CRUZAMENTO não são recusadas como duplicata", () => {
+    const r = validateManualBaseEdit(
+      wrap({
+        lancamentos: [
+          entry1({ valor: 100, coordenadas: { canal: "ligacao", vendedor: "paulo" } }),
+          entry1({ valor: 250, coordenadas: { canal: "email", vendedor: "paulo" } }),
+        ],
+      }),
+      ctxFam
+    );
+    // Mesmo dado, mesmo mês, coordenadas diferentes: são células distintas.
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.parsed.entries).toHaveLength(2);
+  });
+
+  it("a MESMA célula duas vezes segue sendo ERRO", () => {
+    const r = validateManualBaseEdit(
+      wrap({
+        lancamentos: [
+          entry1({ coordenadas: { canal: "ligacao" } }),
+          entry1({ valor: 9, coordenadas: { Canal: "Ligação" } }),
+        ],
+      }),
+      ctxFam
+    );
+    expect(r.ok).toBe(false);
+  });
+});
+
+describe("atualizar uma célula que já existe (0143)", () => {
+  it("a prévia carrega o valor ANTERIOR, resolvido pelo servidor", () => {
+    const r = validateManualBaseEdit(
+      wrap({ lancamentos: [entry1({ valor: 120, coordenadas: { canal: "ligacao" } })] }),
+      ctxFam
+    );
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.parsed.entries[0].currentValue).toBe(100);
+    expect(r.parsed.entries[0].value).toBe(120);
+    expect(r.parsed.entries[0].mode).toBe("substituir");
+  });
+
+  it("célula nova não tem valor anterior", () => {
+    const r = validateManualBaseEdit(
+      wrap({ lancamentos: [entry1({ coordenadas: { canal: "email" } })] }),
+      ctxFam
+    );
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.parsed.entries[0].currentValue).toBeNull();
+  });
+
+  it('modo "somar" preserva o incremento — quem soma é o servidor', () => {
+    const r = validateManualBaseEdit(
+      wrap({
+        lancamentos: [
+          entry1({ valor: 20, modo: "somar", coordenadas: { canal: "ligacao" } }),
+        ],
+      }),
+      ctxFam
+    );
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    // O JSON traz SÓ o que entrou; o total (120) é calculado no apply.
+    expect(r.parsed.entries[0].value).toBe(20);
+    expect(r.parsed.entries[0].currentValue).toBe(100);
+    expect(r.parsed.entries[0].mode).toBe("somar");
+  });
+
+  it('"somar" sem valor anterior avisa em vez de falhar', () => {
+    const r = validateManualBaseEdit(
+      wrap({ lancamentos: [entry1({ modo: "somar", coordenadas: { canal: "email" } })] }),
+      ctxFam
+    );
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.warnings.join(" ")).toContain("não havia valor anterior");
+  });
+
+  it("modo inválido é ERRO", () => {
+    const r = validateManualBaseEdit(
+      wrap({ lancamentos: [entry1({ modo: "apagar" })] }),
+      ctxFam
+    );
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.errors[0]).toContain("substituir");
+  });
+
+  it("o round-trip preserva coordenadas e modo", () => {
+    const r = validateManualBaseEdit(
+      wrap({
+        lancamentos: [
+          entry1({ valor: 20, modo: "somar", coordenadas: { canal: "ligacao" } }),
+        ],
+      }),
+      ctxFam
+    );
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    const again = validateManualBaseEdit(serializeManualBaseEdit(r.parsed), ctxFam);
+    expect(again.ok).toBe(true);
+    if (!again.ok) return;
+    expect(again.parsed.entries[0].coords).toEqual({ canal: "ligacao" });
+    expect(again.parsed.entries[0].mode).toBe("somar");
+  });
+});
+
+describe("declarar famílias novas (0143)", () => {
+  it("cria a família e os membros e usa as chaves nos lançamentos", () => {
+    const r = validateManualBaseEdit(
+      wrap({
+        familias: [
+          {
+            rotulo: "Segmento",
+            membros: [{ rotulo: "SMB" }, { rotulo: "Enterprise" }],
+          },
+        ],
+        lancamentos: [entry1({ coordenadas: { Segmento: "SMB" } })],
+      }),
+      { ...ctxFam, declarations: {} }
+    );
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.parsed.families).toHaveLength(1);
+    expect(r.parsed.families[0].key).toBe("segmento");
+    expect(r.parsed.families[0].criar).toBe(true);
+    expect(r.parsed.families[0].members.map((m) => m.key)).toEqual([
+      "smb",
+      "enterprise",
+    ]);
+    expect(r.parsed.entries[0].coords).toEqual({ segmento: "smb" });
+  });
+
+  it("família do SISTEMA não é recriada — vira aviso", () => {
+    const r = validateManualBaseEdit(
+      wrap({
+        familias: [{ rotulo: "Responsável", membros: [{ rotulo: "Alguém" }] }],
+        lancamentos: [entry1()],
+      }),
+      {
+        ...ctxFam,
+        families: [
+          ...ctxFam.families,
+          { key: "responsavel", label: "Responsável", builtin: true, members: [] },
+        ],
+      }
+    );
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.parsed.families).toHaveLength(0);
+    expect(r.warnings.join(" ")).toContain("família do sistema");
+  });
+
+  it("família declarada sem lançamento que a use é descartada com aviso", () => {
+    const r = validateManualBaseEdit(
+      wrap({
+        familias: [{ rotulo: "Segmento", membros: [{ rotulo: "SMB" }] }],
+        lancamentos: [entry1()],
+      }),
+      { ...ctxFam, declarations: {} }
+    );
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.parsed.families).toHaveLength(0);
+    expect(r.warnings.join(" ")).toContain("Segmento");
   });
 });

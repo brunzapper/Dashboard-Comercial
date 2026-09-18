@@ -620,3 +620,134 @@ describe("métrica da Base manual (manual:<chave>)", () => {
     expect(res.errors.join(" ")).toContain("manual:emails_replied");
   });
 });
+
+// ===================== FAMÍLIAS DA BASE MANUAL (0143) =====================
+const ctxAxes: DashboardImportContext = {
+  ...ctx,
+  manualSeries: [
+    {
+      id: "s1",
+      key: "interacoes",
+      label: "Total de interações",
+      default_spread: "ancora",
+      sort_order: 0,
+    },
+  ],
+  manualAxes: {
+    families: [{ id: "f1", key: "canal", label: "Canal", sort_order: 0 }],
+    members: [
+      { id: "m1", family_id: "f1", key: "ligacao", label: "Ligação", sort_order: 0 },
+    ],
+    declarations: { s1: ["canal"] },
+  },
+};
+
+function axisDoc(widget: Record<string, unknown>): string {
+  return JSON.stringify({
+    formato: "dashboard-import",
+    versao: 1,
+    chave: "teste_fam",
+    bases: ["deals"],
+    dashboard: { name: "Teste", visible_to_roles: [], settings: {} },
+    widgets: [
+      {
+        key: "w",
+        title: "W",
+        visual_type: "barra",
+        sources: ["deals"],
+        dimensions: [],
+        metrics: [{ field: "manual:interacoes" }],
+        filters: [],
+        grid_position: { x: 0, y: 0, w: 4, h: 4 },
+        ...widget,
+      },
+    ],
+  });
+}
+
+describe("manualdim: como dimensão e filtro (0143)", () => {
+  it("aceita a família como DIMENSÃO", () => {
+    const res = validateDashboardImport(
+      axisDoc({ dimensions: [{ field: "manualdim:canal" }] }),
+      ctxAxes
+    );
+    expect(res.errors).toEqual([]);
+    expect(res.ok).toBe(true);
+  });
+
+  it("aceita a família como campo de FILTRO", () => {
+    const res = validateDashboardImport(
+      axisDoc({ filters: [{ field: "manualdim:canal", op: "eq", value: "ligacao" }] }),
+      ctxAxes
+    );
+    expect(res.errors).toEqual([]);
+    expect(res.ok).toBe(true);
+  });
+
+  it("família desconhecida é ERRO, com a lista das que existem", () => {
+    const res = validateDashboardImport(
+      axisDoc({ dimensions: [{ field: "manualdim:segmento" }] }),
+      ctxAxes
+    );
+    expect(res.ok).toBe(false);
+    expect(res.errors.join(" ")).toContain("segmento");
+    expect(res.errors.join(" ")).toContain("canal");
+  });
+
+  // `is_null` confundiria "não declarou a família" com "declarou o residual",
+  // que é a distinção que sustenta a feature inteira.
+  it("operador fora de eq/neq/in num filtro de família é ERRO", () => {
+    const res = validateDashboardImport(
+      axisDoc({ filters: [{ field: "manualdim:canal", op: "is_null" }] }),
+      ctxAxes
+    );
+    expect(res.ok).toBe(false);
+    expect(res.errors.join(" ")).toContain("eq");
+  });
+
+  it("transform num eixo de família é AVISO e sai da config", () => {
+    const res = validateDashboardImport(
+      axisDoc({ dimensions: [{ field: "manualdim:canal", transform: "month" }] }),
+      ctxAxes
+    );
+    expect(res.ok).toBe(true);
+    expect(res.warnings.join(" ")).toContain("família");
+    // O resultado materializado é o PRESET — e é nele que se confere que o
+    // transform saiu de verdade da dimensão (um `res.doc` inexistente faria a
+    // asserção passar vazia, que é como esta linha nasceu errada).
+    const dim = res.preset?.widgets[0].dimensions?.[0];
+    expect(dim?.field).toBe("manualdim:canal");
+    expect(dim?.transform).toBeUndefined();
+  });
+
+  // O ramo é PRÓPRIO justamente para não afrouxar o checkRef, que é
+  // compartilhado com coluna do modo lista e campo de kanban.
+  it("família NÃO vale como campo da barra de período", () => {
+    const res = validateDashboardImport(
+      JSON.stringify({
+        formato: "dashboard-import",
+        versao: 1,
+        chave: "teste_fam",
+        bases: ["deals"],
+        dashboard: {
+          name: "Teste",
+          visible_to_roles: [],
+          settings: {
+            periodBar: { fieldBySource: { deals: "manualdim:canal" } },
+          },
+        },
+        widgets: [],
+      }),
+      ctxAxes
+    );
+    expect(res.ok).toBe(false);
+  });
+
+  it("família NÃO vale como métrica", () => {
+    const res = validateDashboardImport(
+      axisDoc({ metrics: [{ field: "manualdim:canal", agg: "sum" }] }),
+      ctxAxes
+    );
+    expect(res.ok).toBe(false);
+  });
+});

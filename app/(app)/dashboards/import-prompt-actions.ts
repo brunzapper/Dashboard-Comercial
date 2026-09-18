@@ -38,7 +38,10 @@ import { getSessionInfo } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
 import { loadSources } from "@/lib/config/sources";
 import { loadGoalMetrics } from "@/lib/config/goal-metrics";
-import { loadManualBase } from "@/lib/manual-base/load";
+import {
+  loadManualBase,
+  loadManualDeclarations,
+} from "@/lib/manual-base/load";
 import { manualBaseModelBlock } from "@/lib/manual-base/model";
 import { fieldAppliesToSource, recordTypeOf, type SourceDef } from "@/lib/sources";
 import { CORE_FIELDS } from "@/lib/widgets/fields";
@@ -134,6 +137,7 @@ export async function buildImportPrompt(
     { data: matchData },
     goalMetrics,
     manualBase,
+    manualDeclarations,
   ] = await Promise.all([
     supabase
       .from("field_definitions")
@@ -152,6 +156,7 @@ export async function buildImportPrompt(
       .eq("enabled", true),
     loadGoalMetrics(supabase),
     loadManualBase(supabase),
+    loadManualDeclarations(supabase),
   ]);
   const defs = (defsData ?? []) as FieldDefRow[];
   const respLabels = new Map(
@@ -280,10 +285,15 @@ export async function buildImportPrompt(
       respById: respLabels,
       opById: opLabels,
       includeSpread: true,
+      // 0143: sem a DECLARAÇÃO, a IA não sabe em que eixos cada dado se
+      // reparte — e sem as `coordenadas` de cada lançamento veria "1000",
+      // "500" e "500" do mesmo mês como 2000.
+      declarations: manualDeclarations,
     });
     if (b.dados.length === 0) return {}; // org sem Base manual: nenhuma seção
     return {
       manual_series: b.dados,
+      ...(b.familias ? { manual_familias: b.familias } : {}),
       manual_lancamentos: b.lancamentos,
       ...(b.truncado
         ? {
