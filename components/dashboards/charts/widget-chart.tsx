@@ -1,4 +1,19 @@
-// Versão: 3.5 | Data: 25/07/2026
+// Versão: 3.6 | Data: 18/09/2026
+// v3.6 (18/09/2026): BUG corrigido — a linha "Total geral" da tabela agregada
+//   não pegava a cor gravada em appearance.table.rowColors. renderSubtotalRow
+//   calcula a chave de cor como `__grp:${opts?.keyId ?? label}`, e o chamador
+//   da linha de total não passava `keyId` (só o rótulo "Total geral"),
+//   deixando a chave cair no fallback pelo LABEL — divergindo da chave
+//   reservada `"__grand"` já usada (e gravada no banco) desde antes de um
+//   refactor anterior, e que os componentes irmãos (record-list-table.tsx,
+//   entity-list-table.tsx) sempre exigiram como parâmetro OBRIGATÓRIO. Como
+//   essa chave nunca dependia do "Agrupar por", tirar/refazer o agrupamento
+//   nunca a corrigia — só as linhas de grupo (mês), cuja chave é dinâmica.
+//   `keyId` virou obrigatório em `renderSubtotalRow` (era opcional com
+//   fallback pro label) e a linha de total agora passa a chave reservada
+//   GRAND_TOTAL_ROW_KEY = "__grand" — religando a cor já salva no banco, sem
+//   precisar de migração. `npm run typecheck` agora reprova qualquer chamada
+//   futura que esqueça o keyId.
 // v3.5 (25/07/2026): rótulos de barra horizontal — a margem direita passa a
 //   RESERVAR a largura real (medida) do rótulo externo mais largo (dados,
 //   total do stack e variação; antes: 12px fixos = rótulo cortado na barra
@@ -161,6 +176,13 @@ function CondIcon({ style }: { style: ResolvedCondStyle | null }) {
 
 // noop p/ quando não há edição (canEdit=false).
 const NOOP = () => {};
+
+// Chave reservada da linha de Total geral (rowColors/cellColors), IDÊNTICA à
+// usada por record-list-table.tsx e entity-list-table.tsx para a mesma linha
+// — NUNCA derive essa chave do rótulo de exibição ("Total geral"), que é
+// texto, pode mudar, e não teria como ficar estável entre reconfigurações do
+// "Agrupar por" (v3.6).
+const GRAND_TOTAL_ROW_KEY = "__grand";
 
 // `decimals` (18/07/2026): casas fixas da aparência; undefined = teto de 2.
 function fmt(v: unknown, decimals?: number): string {
@@ -2472,21 +2494,24 @@ function AppearanceTable({
   };
 
   // Linha de subtotais de um grupo (cabeçalho recolhível) ou total geral.
+  // `keyId` é OBRIGATÓRIO (v3.6): é a chave de armazenamento em rowColors/
+  // cellColors, e `label` é só texto de exibição — nunca use um como
+  // fallback do outro (foi exatamente isso que quebrou a cor do Total geral).
   const renderSubtotalRow = (
     label: string,
     rs: Record<string, unknown>[],
-    opts?: {
+    opts: {
       collapsible?: boolean;
       isCollapsed?: boolean;
       onToggle?: () => void;
       level?: number;
-      keyId?: string;
+      keyId: string;
       isGrand?: boolean;
     }
   ) => {
     // Chave estável da linha de grupo (inclui o caminho hierárquico) — rowKey nos
     // mapas de cor, isolada das linhas de dados pelo prefixo `__grp:`.
-    const grpKey = `__grp:${opts?.keyId ?? label}`;
+    const grpKey = `__grp:${opts.keyId}`;
     const rowCp = t.rowColors?.[grpKey];
     const cellExtra = (colKey: string) => {
       const cellCp = t.cellColors?.[`${grpKey}:${colKey}`];
@@ -2965,7 +2990,10 @@ function AppearanceTable({
               )
             : rows.map(renderDataRow)}
           {groupLevels.length > 0 && rows.length > 0
-            ? renderSubtotalRow("Total geral", rows, { isGrand: true })
+            ? renderSubtotalRow("Total geral", rows, {
+                isGrand: true,
+                keyId: GRAND_TOTAL_ROW_KEY,
+              })
             : null}
         </TableBody>
       </Table>
