@@ -2696,6 +2696,48 @@ lê/edita em conversa multi-turno. Sem migração de banco. Peças:
   FÁBRICA re-identifica o board como `import:` — ele deixa de ser atualizado
   por "Gerar presets" (que recriará o de fábrica à parte). O picker avisa.
 
+#### 4.11.2b IA EXTERNA: copiar prompt → colar JSON, nos dois lugares (17/09/2026)
+
+Até aqui o domínio de dashboards era o ÚNICO fora do padrão que o resto do
+sistema segue (operações, mapeamentos, tarefas, kanban, registros, Base
+manual): `preview<X>Core(raw)` + `build<X>PromptCore()` + prévia server-side,
+três entradas para um contrato. O painel dentro do dashboard não tinha
+copiar-prompt nem colar-JSON, e na Home o bloco existia preso ao modo "Criar
+novo", com o JSON colado indo direto para `importDashboardJson` — que só sabe
+CRIAR e escreve sem ninguém revisar.
+
+O que faltava não era UI: era que **o prompt não conhecia o board**.
+`buildImportPrompt` monta o modelo das Bases e mais nada; quem acrescenta
+`ESTADO ATUAL`, referências e regras do modo era código inline dentro de
+`generateDashboardCore`. Por isso três blocos foram EXTRAÍDOS de lá, sem
+mudança de comportamento:
+
+- `resolveDashboardModeContext` — bases, estado exportado, chave canônica,
+  regras, `baseWidgets` (a base do merge por widget);
+- `buildDashboardSystemPrompt` — o system inteiro;
+- `checkDashboardJson` — normalizar + validar + resumir (novo × atualiza).
+
+Este último mora em `lib/import/dashboard/check.ts`, não no núcleo: o núcleo é
+`server-only` e não pode ser importado por um teste (mesma razão que separa
+`lib/ai/operacao/scopes.ts` de `handlers.ts`). E ele merecia um: é o
+`normalizeImportRaw` dentro dele que **reescreve a identidade no servidor** —
+sem isso, um JSON colado trazendo a `chave` de outro board sobrescreveria o
+board de ORIGEM. O teste pina exatamente essa sobrescrita.
+
+Em cima dos três, `buildDashboardPromptCore` e `previewDashboardJsonCore`.
+Nenhum dos dois exige IA configurada: o fluxo manual existe justamente para a
+organização sem provedor.
+
+**No painel**, a colagem grava `pending` na linha da sessão — e com isso o
+"Aplicar" existente serve às DUAS origens sem mudar uma linha, porque ele já
+lia o JSON do BANCO. A colagem herda daí o Desfazer, o Descartar e a
+sobrevivência a um F5. Ela nunca respeita "aplicar automaticamente": quem cola
+de fora precisa ver o que vai entrar.
+
+**Na Home**, o bloco vale nos três modos e a colagem alimenta a MESMA caixa de
+prévia do turno ao vivo (client-state, como sempre foi ali). "Importar
+dashboard" virou "Conferir JSON", que é o que o botão faz.
+
 #### 4.11.3 Painel "Editar com IA" dentro do dashboard — sessão persistida (24/07/2026)
 
 A conversa do §4.11.2 também abre DENTRO de um dashboard, sempre em modo
@@ -5978,6 +6020,49 @@ de metas e feriados, que são lidos ao vivo de propósito. O congelamento copia 
 base da org do dashboard SEM aplicar as restrições do snapshot:
 `allowed_responsible_ids` recortaria para fora todo lançamento não atribuído, e
 ninguém pediu isso — o recorte que vale é o do período, na consulta.
+
+#### A Base manual dentro da IA de DASHBOARDS (17/09/2026)
+
+Três coisas mudaram para que se possa pedir a uma IA um painel que cruza
+registros com números digitados.
+
+**1. O modelo leva os lançamentos, não só os nomes.** A entrega da 0142 pôs
+`manual_series` (`{chave, rotulo}`) no dump — a IA sabia que "# Emails replied"
+existe e nada mais, então escrevia a fórmula de cruzamento no escuro. Agora vão
+os lançamentos, serializados pelo dono ÚNICO do vocabulário
+(`lib/manual-base/model.ts`): `dado` / `periodo` / `valor` / `operacao` /
+`responsavel` são as palavras que o contrato `base-manual-edit` já usa na
+leitura, e duas grafias fariam a IA aprender uma num prompt e outra no seguinte.
+Ids nunca atravessam. Como `buildImportPrompt` é o ÚNICO sítio que monta o dump
+(o painel reusa via `generateDashboardCore`), isso serviu a IA interna e o
+"Copiar prompt" de uma vez. A `distribuicao` vai junto — é ela que decide se o
+número repete em cada bucket tocado ou se divide por dia, e sem ela a IA não tem
+como prever o que ele faz num gráfico. Teto de 400, mais recentes primeiro.
+
+**2. O SPEC declara a regra do PERÍODO.** É a que mais confunde: toda Base tem
+campo de data e esta não tem nenhum. `applyManualBase` recebe o INTERVALO da
+rodada (`{from, to}` de `runPeriod`), nunca uma coluna — então a Base manual
+casa com o período do dashboard seja qual for a coluna de cada Base, um card
+pode cruzar Negócios por `closed_at` com Leads por `source_created_at` e um
+número digitado, e "todo o período" conta tudo (`ManualWindow` trata os nulos
+como ausência de limite). Sem dizer isso ao modelo, ele tenta dar um campo de
+período à Base manual ou a põe em `bases` — e o erro só aparece quando alguém
+troca o período. Guarda em `instructions.test.ts`.
+
+**3. O widget quebrava.** Card SEM dimensão cuja única métrica era manual
+mandava `p_metrics` e `p_dimensions` vazios ao RPC, que ergue
+`Widget sem dimensões nem métricas`. A métrica sai do payload por não ser
+coluna, e a guarda que empurra a contagem descartável só cobria métrica
+calculada e perna de sub-base. Era inalcançável enquanto nenhuma tela criava a
+métrica; ofertá-la no dropdown abriu o caminho. O teste do caso existia e
+passava — asseverava o VALOR, e o cliente fake não emula a exceção do Postgres;
+o novo assevera os ARGUMENTOS.
+
+No construtor, as séries têm **chip próprio** (`MANUAL_CHIP_KEY`): iam sem
+`chips` e, pela regra do Combobox ("opção sem chips aparece em todos"), poluíam
+a lista de cada Base sem dar como isolá-las. O parâmetro de `sourceChips` é
+opt-in porque a função também alimenta dimensões, filtros e colunas, onde a
+Base manual não é alvo válido.
 
 #### O assistente (contrato `base-manual-edit` v1)
 

@@ -1,3 +1,8 @@
+// Versão: 2.4 | Data: 17/09/2026
+// v2.4 (17/09/2026): wrappers das duas entradas de IA EXTERNA —
+//   `buildDashboardAiPrompt` (prompt ciente do MODO, com o estado atual do
+//   board) e `previewDashboardAiJson` (confere o JSON colado, sem escrever).
+//   Com elas o copiar/colar da Home deixa de valer só no "Criar novo".
 // Versão: 2.3 | Data: 26/07/2026
 // v2.3 (26/07/2026): o CORPO da geração mudou-se para
 //   lib/ai/generate-dashboard.ts (generateDashboardCore/
@@ -41,12 +46,15 @@
 import {
   applyGeneratedDashboardCore,
   generateDashboardCore,
+  buildDashboardPromptCore,
+  previewDashboardJsonCore,
 } from "@/lib/ai/generate-dashboard";
 // SÓ import de tipos — NÃO re-exportar tipos daqui: o compilador de módulos
 // "use server" (Turbopack) emite `export type {...}` como re-export de VALOR e
 // TODAS as actions da página quebram em runtime (ReferenceError na avaliação
 // do chunk). Consumidores importam os tipos direto de
 // @/lib/ai/generate-dashboard (import type é apagado no build).
+import type { ImportPromptVariant } from "@/app/(app)/dashboards/import-prompt-actions";
 import type {
   AiDashboardMode,
   GenerateDashboardInput,
@@ -64,4 +72,41 @@ export async function applyGeneratedDashboard(
   ctx: { mode: AiDashboardMode; targetDashboardId?: string }
 ): Promise<GenerateDashboardState> {
   return applyGeneratedDashboardCore(raw, ctx);
+}
+
+/**
+ * Prompt para IA EXTERNA, ciente do MODO (v2.4, 17/09/2026).
+ *
+ * Substitui a chamada direta a `buildImportPrompt` no sheet da Home: aquela só
+ * monta o modelo das Bases, sem o ESTADO ATUAL do board — e era por isso que o
+ * bloco de copiar/colar existia apenas no modo "Criar novo".
+ */
+export async function buildDashboardAiPrompt(input: {
+  mode?: AiDashboardMode;
+  bases?: string[];
+  targetDashboardId?: string;
+  extraReferenceIds?: string[];
+  variant?: ImportPromptVariant;
+}): Promise<{ ok: boolean; prompt?: string; message?: string }> {
+  return buildDashboardPromptCore(input);
+}
+
+/** Confere um JSON colado de IA externa e devolve a PRÉVIA — nunca escreve. */
+export async function previewDashboardAiJson(
+  raw: string,
+  input: {
+    mode?: AiDashboardMode;
+    bases?: string[];
+    targetDashboardId?: string;
+    extraReferenceIds?: string[];
+  }
+): Promise<{
+  ok: boolean;
+  message: string;
+  pendingJson?: string;
+  summary?: string[];
+  warnings?: string[];
+  errors?: string[];
+}> {
+  return previewDashboardJsonCore(raw, input);
 }

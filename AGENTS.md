@@ -442,6 +442,26 @@ This version has breaking changes — APIs, conventions, and file structure may 
   thinking num modelo em que ele vem desligado (só exibir onde o raciocínio já
   é padrão — por isso Claude/OpenAI seguem sem). Título do painel = MODELO
   configurado (1ª letra maiúscula).
+- **IA de dashboards: três entradas, um contrato (17/09/2026):** o domínio era
+  o ÚNICO fora do padrão `preview<X>Core`/`build<X>PromptCore` que operações,
+  mapeamentos, tarefas, kanban, registros e a Base manual já seguiam — o painel
+  in-dashboard não tinha copiar-prompt nem colar-JSON, e na Home o bloco vivia
+  preso ao modo "Criar novo" colando direto em `importDashboardJson` (que só
+  CRIA e escreve sem revisão). O que faltava não era UI: o prompt não conhecia
+  o BOARD. Por isso `generateDashboardCore` cedeu três blocos, SEM mudança de
+  comportamento — `resolveDashboardModeContext`, `buildDashboardSystemPrompt` e
+  `checkDashboardJson`. Este último vive em `lib/import/dashboard/check.ts`
+  (PURO) e não no núcleo, que é `server-only` e não pode ser importado por um
+  teste (precedente `lib/ai/operacao/scopes.ts` × `handlers.ts`); e ele merecia
+  teste porque é o `normalizeImportRaw` dele que REESCREVE a identidade no
+  servidor — JSON colado com a `chave` de outro board sobrescreveria a ORIGEM.
+  Em cima: `buildDashboardPromptCore` e `previewDashboardJsonCore`, nenhuma
+  exigindo IA configurada (o fluxo manual existe para a org SEM provedor). No
+  painel a colagem grava `pending` na linha da sessão, então o "Aplicar"
+  existente serve às duas origens sem mudar nada (ele já lia o JSON do BANCO) e
+  a colagem herda Desfazer/Descartar/F5; ela NUNCA respeita "aplicar
+  automaticamente". Na Home o bloco vale nos três modos e a prévia segue
+  client-state. NÃO remonte prompt ou validação fora desses módulos.
 - **Espaço de grid v2 (grade fina) e páginas de widget (25/07/2026):**
   unidades de `grid_position`/`ShapeLine`/`canvas` dependem de
   `settings.canvas.gridVersion` (2 = fino base-120 sem margens, linha quadrada
@@ -2071,6 +2091,21 @@ This version has breaking changes — APIs, conventions, and file structure may 
   os três) e entra num ramo próprio da métrica, com chave desconhecida como ERRO.
   Rótulo SÓ por `manualSeriesLabel` (a série não é `AvailableField` — o
   `fieldLabel` devolveria o ref cru), nos dois sítios de rótulo do engine.
+  **Card sem dimensão cuja ÚNICA métrica é manual (17/09/2026):** a guarda que
+  empurra a contagem descartável quando o payload iria VAZIO ao RPC (que ergue
+  `Widget sem dimensões nem métricas`) precisa incluir `manualMetricKeys` — a
+  métrica manual plana não tem calc nem perna, e sem isso o widget não carrega.
+  **A IA de dashboards recebe a base INTEIRA (17/09/2026):** o dump
+  (`buildImportPrompt`, sítio ÚNICO) leva `manual_lancamentos` serializados por
+  `lib/manual-base/model.ts` — dono único do vocabulário `dado`/`periodo`/
+  `valor`/`operacao`/`responsavel`, o MESMO do contrato `base-manual-edit`
+  (duas grafias fariam a IA aprender uma num prompt e outra no seguinte); ids
+  nunca atravessam e a `distribuicao` vai junto. O SPEC DECLARA que a Base
+  manual não tem campo de data e casa com o INTERVALO do período (não com uma
+  coluna): fora de `bases`/`sources`/`periodBar.fieldBySource`, e "todo o
+  período" conta tudo. No construtor as séries têm CHIP próprio
+  (`MANUAL_CHIP_KEY`, opt-in em `sourceChips` — dimensão/filtro/coluna não são
+  alvo e ganhariam chip vazio).
   Escrita por choke point
   ÚNICO (`app/(app)/registros/base-manual/actions.ts`) para as TRÊS superfícies
   — página de Registros, ⋮ do dashboard e o widget `base_manual` —, sempre com
