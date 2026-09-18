@@ -1,4 +1,9 @@
-// Versão: 1.3 | Data: 17/09/2026
+// Versão: 1.4 | Data: 18/09/2026
+// v1.4 (18/09/2026): a razão do opt-in MUDOU de sentido com as FAMÍLIAS (0143).
+//   Dimensão e FILTRO passaram a ofertar `manualdim:<familia>`, então lá o chip
+//   tem conteúdo. O que continua valendo é a outra metade da regra: o chip só
+//   entra quando há algo DENTRO dele — coluna do modo lista, filtro rápido e
+//   busca seguem sem alvo manual e continuam passando o opt-in desligado.
 // v1.3 (17/09/2026): `sourceChips` aceita o chip OPT-IN da Base manual
 //   (MANUAL_CHIP_KEY). Opt-in porque a função também alimenta dimensões,
 //   filtros e colunas, onde a Base manual não é alvo válido — chip vazio ali
@@ -67,10 +72,11 @@ export const MANUAL_CHIP_KEY = "__manual__";
 // Chips de fonte dos dropdowns de campo (prop `chips` do Combobox; o chip
 // "Todas" é implícito no componente). NAVEGAÇÃO apenas — não altera a consulta.
 //
-// `manual` é OPT-IN (17/09/2026): esta função alimenta também dimensões,
-// filtros, colunas e filtros rápidos, e a Base manual não é alvo válido em
-// nenhum deles — um chip sempre vazio ali seria armadilha. Só o dropdown de
-// MÉTRICA o pede, e só quando a organização tem algum dado lançado.
+// `manual` é OPT-IN: o chip só deve aparecer onde há algo dentro dele — um chip
+// sempre vazio é armadilha igual à da opção sem `chips`, que aparece em todos.
+// Quem o pede: MÉTRICA (os dados, desde 17/09/2026) e, desde a 0143, DIMENSÃO e
+// FILTRO (as famílias). Coluna do modo lista, filtro rápido e busca seguem sem
+// alvo manual — e seguem passando o opt-in desligado.
 export function sourceChips(
   labels: SourceDisplayLabels,
   opts?: { manual?: boolean }
