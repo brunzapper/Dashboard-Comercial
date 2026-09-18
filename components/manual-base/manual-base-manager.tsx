@@ -39,9 +39,19 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { HelpHint } from "@/components/ui/help-hint";
 import { useBackgroundSave } from "@/lib/feedback/use-background-save";
 import {
+  BUILTIN_MANUAL_FAMILIES,
   EMPTY_MANUAL_COORDS,
+  coordDeclares,
+  coordMember,
+  familyLabelOfKey,
+  isBuiltinManualFamily,
+  manualMembersOf,
+  manualResidualLabel,
   type ManualCoords,
+  type ManualFamily,
+  type ManualFamilyMember,
 } from "@/lib/manual-base/families";
+import { manualConference } from "@/lib/manual-base/conference";
 import {
   DEFAULT_MANUAL_SPREAD,
   MANUAL_SPREADS,
@@ -53,9 +63,14 @@ import {
 } from "@/lib/manual-base/types";
 import {
   deleteManualEntry,
+  deleteManualFamily,
+  deleteManualFamilyMember,
   deleteManualSeries,
   saveManualEntry,
+  saveManualFamily,
+  saveManualFamilyMember,
   saveManualSeries,
+  setManualSeriesFamilies,
 } from "@/app/(app)/registros/base-manual/actions";
 
 import {
@@ -77,6 +92,11 @@ export interface ManualBaseManagerProps {
   entries: ManualEntry[];
   responsibles: ManualBaseOption[];
   operations: ManualBaseOption[];
+  /** Os EIXOS cadastrados (0143). Vazio = base plana, a tela da 0142. */
+  families?: ManualFamily[];
+  members?: ManualFamilyMember[];
+  /** `series_id` → chaves de família declaradas. */
+  declarations?: Record<string, string[]>;
   canEdit: boolean;
   /** Widget/sheet: esconde a gestão de DADOS e o assistente, deixando só a
    *  grade de lançamentos. */
@@ -101,13 +121,24 @@ const todayMonth = (): string => {
   return `${y}-${m}`;
 };
 
+/** pt-BR sem casas forçadas: a Base manual guarda quantidades, e "1.000" lê
+ *  melhor que "1000,00" numa linha de conferência. */
+const formatNumber = (n: number): string =>
+  new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 2 }).format(n);
+
 const NONE = "__none__";
+/** O RESIDUAL nos seletores. Distinto de NONE: "Sem Canal" é um GRUPO, e
+ *  "Não repartir" é não endereçar a família. */
+const RESIDUAL = "__residual__";
 
 export function ManualBaseManager({
   series,
   entries,
   responsibles,
   operations,
+  families = [],
+  members = [],
+  declarations = {},
   canEdit,
   compact,
   onlySeries,
@@ -129,6 +160,27 @@ export function ManualBaseManager({
   }
 
   const columns = useMemo(() => manualColumns(series, onlySeries), [series, onlySeries]);
+  // Todas as famílias OFERTÁVEIS: as cadastradas mais as EMBUTIDAS, que vivem
+  // em código e não têm linha no banco (registry código ∪ banco).
+  const allFamilyKeys = useMemo(
+    () => [
+      ...BUILTIN_MANUAL_FAMILIES.map((f) => f.key),
+      ...families.map((f) => f.key),
+    ],
+    [families]
+  );
+  // As famílias das COLUNAS em tela: a linha da grade é uma coordenada só,
+  // compartilhada por todos os dados, então o que vale é a UNIÃO das declaradas
+  // pelos dados visíveis.
+  const rowFamilyKeys = useMemo(() => {
+    const out: string[] = [];
+    for (const col of columns) {
+      for (const key of declarations[col.id] ?? []) {
+        if (!out.includes(key)) out.push(key);
+      }
+    }
+    return out;
+  }, [columns, declarations]);
   const grid = useMemo(() => buildManualGrid(rows), [rows]);
 
   const [newMonth, setNewMonth] = useState(todayMonth);
@@ -140,6 +192,24 @@ export function ManualBaseManager({
   // o que toda linha era antes das famílias existirem.
   const [newCoords, setNewCoords] = useState<ManualCoords>(EMPTY_MANUAL_COORDS);
   const [pendingRows, setPendingRows] = useState<ManualGridRow[]>([]);
+  // A CONFERÊNCIA por dado. Ela existe porque níveis não somam entre si: nada
+  // obriga a repartição a fechar com o total, e o engine NÃO inventa o resto.
+  // Sem esta tela, um cruzamento preenchido pela metade aparece no gráfico como
+  // um número menor e ninguém descobre por quê. A janela é o mês da linha nova —
+  // é o recorte que a pessoa está editando.
+  const conference = useMemo(() => {
+    const window = { from: `${newMonth}-01`, to: monthEnd(newMonth) };
+    return columns.map((col) => ({
+      series: col,
+      conf: manualConference(
+        { series, entries: rows, families, members },
+        { seriesId: col.id, window }
+      ),
+    }));
+  }, [columns, series, rows, families, members, newMonth]);
+  const [newFamilyLabel, setNewFamilyLabel] = useState("");
+  const [newMemberLabel, setNewMemberLabel] = useState<Record<string, string>>({});
+  const [confirmFamily, setConfirmFamily] = useState<ManualFamily | null>(null);
   const [confirmSeries, setConfirmSeries] = useState<ManualSeries | null>(null);
   const [confirmRow, setConfirmRow] = useState<ManualGridRow | null>(null);
 
@@ -227,6 +297,9 @@ export function ManualBaseManager({
             value,
             responsibleId: row.responsibleId,
             operationId: row.operationId,
+            // 0143: a coordenada da LINHA. Sem ela o upsert cairia no slot do
+            // nível ∅ e a fatia sobrescreveria o total.
+            coords: row.coords,
             spread: row.spread,
           },
           { revalidate: false }
@@ -260,6 +333,7 @@ export function ManualBaseManager({
               value: cell.value,
               responsibleId: row.responsibleId,
               operationId: row.operationId,
+              coords: row.coords,
               spread,
             },
             { revalidate: false }
@@ -311,6 +385,47 @@ export function ManualBaseManager({
     return e ? String(e.value) : "";
   };
 
+  const addFamily = () => {
+    const label = newFamilyLabel.trim();
+    if (!label) return;
+    setNewFamilyLabel("");
+    save({
+      key: `family:new:${label}`,
+      context: "Não foi possível criar a família",
+      action: () => saveManualFamily({ label, sortOrder: families.length }),
+    });
+  };
+
+  const addMember = (family: ManualFamily) => {
+    const label = (newMemberLabel[family.id] ?? "").trim();
+    if (!label) return;
+    setNewMemberLabel((prev) => ({ ...prev, [family.id]: "" }));
+    save({
+      key: `member:new:${family.id}:${label}`,
+      context: "Não foi possível criar o membro",
+      action: () =>
+        saveManualFamilyMember({
+          familyId: family.id,
+          label,
+          sortOrder: manualMembersOf(family.key, families, members).length,
+        }),
+    });
+  };
+
+  // A declaração chega COMPLETA à action (não é delta): é a lista que a tela
+  // edita, e reconciliar por diferença deixaria uma retirada sobreviver ao F5.
+  const toggleDeclaration = (seriesId: string, familyKey: string) => {
+    const current = declarations[seriesId] ?? [];
+    const next = current.includes(familyKey)
+      ? current.filter((k) => k !== familyKey)
+      : [...current, familyKey];
+    save({
+      key: `decl:${seriesId}:${familyKey}`,
+      context: "Não foi possível mudar as famílias do dado",
+      action: () => setManualSeriesFamilies(seriesId, next),
+    });
+  };
+
   return (
     <div className="flex flex-col gap-4">
       {!compact && series.length > 0 ? (
@@ -345,6 +460,159 @@ export function ManualBaseManager({
               </li>
             ))}
           </ul>
+        </section>
+      ) : null}
+
+      {!compact && series.length > 0 ? (
+        <section className="flex flex-col gap-3 rounded-md border p-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <h3 className="text-sm font-medium">Famílias</h3>
+            <HelpHint ariaLabel="O que é uma família da Base manual">
+              Uma família é uma maneira de repartir o MESMO número. O total não
+              soma com a repartição — ele É a repartição vista de longe. Você
+              pode lançar o total, a divisão por uma família, a divisão por
+              outra e até o cruzamento das duas: cada uma é uma leitura, e elas
+              nunca se somam entre si. Em um gráfico, a família vira a dimensão
+              e o número vira a métrica.
+            </HelpHint>
+          </div>
+
+          <ul className="flex flex-col gap-2">
+            {families.map((fam) => (
+              <li key={fam.id} className="flex flex-wrap items-center gap-2">
+                <span className="text-sm font-medium">{fam.label}</span>
+                <code className="text-muted-foreground text-xs">
+                  manualdim:{fam.key}
+                </code>
+                {manualMembersOf(fam.key, families, members).map((m) => (
+                  <span
+                    key={m.id}
+                    className="bg-muted/50 flex items-center gap-1 rounded-md border px-2 py-0.5 text-xs"
+                  >
+                    {m.label}
+                    {canEdit ? (
+                      <button
+                        type="button"
+                        className="text-muted-foreground hover:text-destructive"
+                        aria-label={`Excluir ${m.label}`}
+                        onClick={() =>
+                          save({
+                            key: `member:del:${m.id}`,
+                            context: "Não foi possível excluir o membro",
+                            action: () => deleteManualFamilyMember(m.id),
+                          })
+                        }
+                      >
+                        ×
+                      </button>
+                    ) : null}
+                  </span>
+                ))}
+                {canEdit ? (
+                  <>
+                    <Input
+                      className="h-8 w-40"
+                      placeholder="Novo membro"
+                      value={newMemberLabel[fam.id] ?? ""}
+                      onChange={(ev) =>
+                        setNewMemberLabel((prev) => ({
+                          ...prev,
+                          [fam.id]: ev.target.value,
+                        }))
+                      }
+                      onKeyDown={(ev) => {
+                        if (ev.key === "Enter") {
+                          ev.preventDefault();
+                          addMember(fam);
+                        }
+                      }}
+                    />
+                    <button
+                      type="button"
+                      className="text-muted-foreground hover:text-destructive text-xs"
+                      aria-label={`Excluir a família ${fam.label}`}
+                      onClick={() => setConfirmFamily(fam)}
+                    >
+                      Excluir família
+                    </button>
+                  </>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+
+          {canEdit ? (
+            <div className="flex flex-wrap items-end gap-2">
+              <div className="flex flex-col gap-1">
+                <Label className="text-xs" htmlFor="mb-new-family">
+                  Nova família
+                </Label>
+                <Input
+                  id="mb-new-family"
+                  className="h-9 w-56"
+                  placeholder="Canal"
+                  value={newFamilyLabel}
+                  onChange={(ev) => setNewFamilyLabel(ev.target.value)}
+                  onKeyDown={(ev) => {
+                    if (ev.key === "Enter") {
+                      ev.preventDefault();
+                      addFamily();
+                    }
+                  }}
+                />
+              </div>
+              <Button type="button" variant="outline" onClick={addFamily}>
+                Criar família
+              </Button>
+            </div>
+          ) : null}
+
+          {/* A DECLARAÇÃO por dado. É o opt-in: sem ela, todo lançamento do dado
+              fica no total e a soma de antes continua valendo — inclusive para
+              quem já lançava com responsável. */}
+          <div className="flex flex-col gap-2 border-t pt-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs font-medium">Cada dado se reparte por…</span>
+              <HelpHint ariaLabel="Por que declarar as famílias de um dado">
+                Marque só as famílias em que você REALMENTE vai repartir aquele
+                número. Enquanto nada está marcado, todos os lançamentos do dado
+                somam entre si, exatamente como antes — é a marcação que liga a
+                regra dos níveis.
+              </HelpHint>
+            </div>
+            {series.map((s2) => (
+              <div key={s2.id} className="flex flex-wrap items-center gap-2">
+                <span className="text-muted-foreground w-44 truncate text-xs">
+                  {s2.label}
+                </span>
+                {allFamilyKeys.length === 0 ? (
+                  <span className="text-muted-foreground text-xs">
+                    Crie uma família acima.
+                  </span>
+                ) : (
+                  allFamilyKeys.map((key) => {
+                    const on = (declarations[s2.id] ?? []).includes(key);
+                    return (
+                      <button
+                        key={key}
+                        type="button"
+                        disabled={!canEdit}
+                        aria-pressed={on}
+                        className={`rounded-md border px-2 py-0.5 text-xs ${
+                          on
+                            ? "bg-primary text-primary-foreground border-primary"
+                            : "bg-muted/40 text-muted-foreground"
+                        }`}
+                        onClick={() => toggleDeclaration(s2.id, key)}
+                      >
+                        {familyLabelOfKey(key, families)}
+                      </button>
+                    );
+                  })
+                )}
+              </div>
+            ))}
+          </div>
         </section>
       ) : null}
 
@@ -452,6 +720,55 @@ export function ManualBaseManager({
                   </SelectContent>
                 </Select>
               </div>
+              {/* O NÍVEL da linha nova: um seletor por família declarada pelos
+                  dados em tela. "Não repartir" deixa a chave AUSENTE (o total);
+                  "Sem <Família>" é o RESIDUAL, que é um grupo de verdade. */}
+              {rowFamilyKeys.map((key) => {
+                const famLabel = familyLabelOfKey(key, families);
+                const builtin = isBuiltinManualFamily(key);
+                const opts = builtin
+                  ? key === "responsavel"
+                    ? responsibles
+                    : operations
+                  : manualMembersOf(key, families, members).map((m) => ({
+                      id: m.key,
+                      name: m.label,
+                    }));
+                const current = coordDeclares(newCoords, key)
+                  ? (coordMember(newCoords, key) ?? RESIDUAL)
+                  : NONE;
+                return (
+                  <div key={key} className="flex flex-col gap-1">
+                    <Label className="text-xs">{famLabel}</Label>
+                    <Select
+                      value={current}
+                      onValueChange={(v) =>
+                        setNewCoords((prev) => {
+                          const next = { ...prev };
+                          if (v === NONE) delete next[key];
+                          else next[key] = v === RESIDUAL ? null : v;
+                          return next;
+                        })
+                      }
+                    >
+                      <SelectTrigger className="h-9 w-44">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value={NONE}>Não repartir</SelectItem>
+                        <SelectItem value={RESIDUAL}>
+                          {manualResidualLabel(famLabel)}
+                        </SelectItem>
+                        {opts.map((o) => (
+                          <SelectItem key={o.id} value={o.id}>
+                            {o.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                );
+              })}
               <Button type="button" onClick={addRow}>
                 Nova linha
               </Button>
@@ -465,6 +782,7 @@ export function ManualBaseManager({
                   <TableHead>Período</TableHead>
                   <TableHead>Operação</TableHead>
                   <TableHead>Responsável</TableHead>
+                  {rowFamilyKeys.length > 0 ? <TableHead>Reparte</TableHead> : null}
                   <TableHead>Como conta</TableHead>
                   {columns.map((s) => (
                     <TableHead key={s.id} className="text-right">
@@ -478,7 +796,12 @@ export function ManualBaseManager({
                 {allRows.length === 0 ? (
                   <TableRow>
                     <TableCell
-                      colSpan={4 + columns.length + (canEdit ? 1 : 0)}
+                      colSpan={
+                        4 +
+                        columns.length +
+                        (canEdit ? 1 : 0) +
+                        (rowFamilyKeys.length > 0 ? 1 : 0)
+                      }
                       className="text-muted-foreground"
                     >
                       Nenhum lançamento ainda.
@@ -492,6 +815,44 @@ export function ManualBaseManager({
                     </TableCell>
                     <TableCell>{nameOf(operations, row.operationId)}</TableCell>
                     <TableCell>{nameOf(responsibles, row.responsibleId)}</TableCell>
+                    {rowFamilyKeys.length > 0 ? (
+                      <TableCell>
+                        {Object.keys(row.coords).length === 0 ? (
+                          <span className="text-muted-foreground text-xs">
+                            Total
+                          </span>
+                        ) : (
+                          <span className="flex flex-wrap gap-1">
+                            {rowFamilyKeys
+                              .filter((k) => coordDeclares(row.coords, k))
+                              .map((k) => {
+                                const famLabel = familyLabelOfKey(k, families);
+                                const member = coordMember(row.coords, k);
+                                const builtin = isBuiltinManualFamily(k);
+                                const text =
+                                  member == null
+                                    ? manualResidualLabel(famLabel)
+                                    : builtin
+                                      ? nameOf(
+                                          k === "responsavel" ? responsibles : operations,
+                                          member
+                                        )
+                                      : (manualMembersOf(k, families, members).find(
+                                          (m) => m.key === member
+                                        )?.label ?? member);
+                                return (
+                                  <span
+                                    key={k}
+                                    className="bg-muted/50 rounded border px-1.5 py-0.5 text-xs"
+                                  >
+                                    {famLabel}: {text}
+                                  </span>
+                                );
+                              })}
+                          </span>
+                        )}
+                      </TableCell>
+                    ) : null}
                     <TableCell>
                       {canEdit ? (
                         <Select
@@ -558,6 +919,59 @@ export function ManualBaseManager({
         </>
       )}
 
+      {!compact &&
+      conference.some((c) => c.conf.levels.length > 1 || c.conf.mixedAttributionAtRoot) ? (
+        <section className="flex flex-col gap-2 rounded-md border p-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <h3 className="text-sm font-medium">
+              Conferência de {manualPeriodLabel(`${newMonth}-01`, monthEnd(newMonth))}
+            </h3>
+            <HelpHint ariaLabel="Para que serve a conferência">
+              Cada linha é uma leitura do mesmo número. Se a soma de uma
+              repartição não fecha com o total, o gráfico mostra a repartição —
+              ele não inventa o resto. Aqui você vê o que falta lançar.
+            </HelpHint>
+          </div>
+          {conference.map(({ series: col, conf }) => (
+            <div key={col.id} className="flex flex-col gap-1">
+              {conf.levels.length > 1 ? (
+                <>
+                  <span className="text-xs font-medium">{col.label}</span>
+                  <ul className="flex flex-wrap gap-2">
+                    {conf.levels.map((lv) => (
+                      <li
+                        key={lv.label}
+                        className={`rounded-md border px-2 py-0.5 text-xs ${
+                          lv.delta != null && lv.delta !== 0
+                            ? "border-destructive/60 text-destructive"
+                            : "bg-muted/40"
+                        }`}
+                      >
+                        {lv.label}: {formatNumber(lv.total)}
+                        {lv.delta != null && lv.delta !== 0
+                          ? ` (faltam ${formatNumber(Math.abs(lv.delta))})`
+                          : lv.delta === 0
+                            ? " ✔"
+                            : ""}
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              ) : null}
+              {conf.mixedAttributionAtRoot ? (
+                <p className="text-muted-foreground text-xs">
+                  Em <strong>{col.label}</strong> há lançamentos com responsável
+                  ou operação convivendo com lançamentos sem — e eles{" "}
+                  <strong>somam</strong>. Para um ser a subdivisão do outro,
+                  marque a família “Responsável” (ou “Operação”) para este dado
+                  acima.
+                </p>
+              ) : null}
+            </div>
+          ))}
+        </section>
+      ) : null}
+
       <ConfirmDialog
         open={confirmSeries != null}
         onOpenChange={(v) => {
@@ -578,6 +992,27 @@ export function ManualBaseManager({
           });
         }}
       />
+      <ConfirmDialog
+        open={confirmFamily != null}
+        onOpenChange={(v) => {
+          if (!v) setConfirmFamily(null);
+        }}
+        title={`Excluir a família “${confirmFamily?.label ?? ""}”?`}
+        description="Os membros dela somem junto. Widgets que usam essa família como dimensão passam a exibir “—”. Se algum lançamento ainda a usa, a exclusão é recusada — renomeie a família, ou apague esses lançamentos primeiro."
+        actionLabel="Excluir"
+        destructive
+        onConfirm={() => {
+          const f = confirmFamily;
+          setConfirmFamily(null);
+          if (!f) return;
+          save({
+            key: `family:del:${f.id}`,
+            context: "Não foi possível excluir a família",
+            action: () => deleteManualFamily(f.id),
+          });
+        }}
+      />
+
       <ConfirmDialog
         open={confirmRow != null}
         onOpenChange={(v) => {

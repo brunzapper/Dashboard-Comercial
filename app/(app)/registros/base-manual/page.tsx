@@ -13,7 +13,7 @@
 import { requireSettingsArea } from "@/lib/auth/access";
 import { getActiveOrgId } from "@/lib/auth/org";
 import { createClient } from "@/lib/supabase/server";
-import { loadManualBase } from "@/lib/manual-base/load";
+import { loadManualBase, loadManualDeclarations } from "@/lib/manual-base/load";
 import { ManualBaseManager } from "@/components/manual-base/manual-base-manager";
 import { ManualBaseAssistant } from "@/components/manual-base/manual-base-assistant";
 import { BackLink } from "@/components/ui/back-link";
@@ -26,8 +26,10 @@ export default async function BaseManualPage() {
   const supabase = await createClient();
   const orgId = await getActiveOrgId();
 
-  const [base, { data: respData }, { data: opData }] = await Promise.all([
+  const [base, declarations, { data: respData }, { data: opData }] =
+    await Promise.all([
     loadManualBase(supabase, orgId),
+    loadManualDeclarations(supabase, orgId),
     supabase
       .from("responsibles")
       .select("id, display_name")
@@ -64,6 +66,9 @@ export default async function BaseManualPage() {
         entries={base.entries}
         responsibles={responsibles}
         operations={operations}
+        families={base.families}
+        members={base.members}
+        declarations={declarations}
         canEdit={canEdit}
         assistant={canEdit ? <ManualBaseAssistant /> : null}
       />

@@ -55,6 +55,9 @@ export function ManualBaseWidget({ settings }: { settings?: BaseManualSettings }
         entries={state.entries}
         responsibles={state.responsibles}
         operations={state.operations}
+        families={state.families}
+        members={state.members}
+        declarations={state.declarations}
         canEdit={state.canEdit}
         compact
         onlySeries={settings?.series}
