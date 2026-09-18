@@ -6,6 +6,7 @@
 // um JSON colado que traga a chave de OUTRO board sobrescreveria o board de
 // origem se ela atravessasse. Isso nunca foi testado porque, até 17/09/2026,
 // a sequência vivia dentro do núcleo server-only da IA.
+import { EMPTY_MANUAL_AXIS_CATALOG } from "@/lib/manual-base/families";
 import { describe, expect, it } from "vitest";
 
 import { checkDashboardJson } from "@/lib/import/dashboard/check";
@@ -21,6 +22,7 @@ const importCtx: DashboardImportContext = {
   operationNames: [],
   goalMetrics: BUILTIN_GOAL_METRICS,
   manualSeries: [],
+  manualAxes: EMPTY_MANUAL_AXIS_CATALOG,
 };
 
 const doc = (over: Record<string, unknown> = {}) =>

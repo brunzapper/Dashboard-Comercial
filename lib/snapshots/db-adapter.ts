@@ -1,4 +1,8 @@
-// Versão: 1.2 | Data: 17/09/2026
+// Versão: 1.3 | Data: 18/09/2026
+// v1.3 (18/09/2026): as três tabelas de FAMÍLIA da Base manual (0143) entram no
+//   redirecionamento congelado, num mapa em vez do ternário de duas entradas —
+//   com cinco tabelas o ternário viraria escada. Sem elas, um eixo de família
+//   num link já compartilhado ficaria sem catálogo e degradaria para "—".
 // v1.2 (17/09/2026): BASE MANUAL (0142) — `manual_series`/`manual_entries`
 //   redirecionam para os ESPELHOS congelados, como `records`. Não são
 //   passthrough: a decisão de produto é que o link compartilhado é um RETRATO
@@ -30,6 +34,15 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 // Tabelas de apoio permitidas como estão: nomes/valores de entidades e metas.
 // Os ids pesquisados vêm das linhas congeladas; ler o rótulo/meta AO VIVO é
 // desejável (renomear um responsável não exige refresh do snapshot).
+/** Base manual → espelho congelado (0142/0143). */
+const FROZEN_MANUAL_TABLES: Record<string, string | undefined> = {
+  manual_series: "snapshot_manual_series",
+  manual_entries: "snapshot_manual_entries",
+  manual_families: "snapshot_manual_families",
+  manual_family_members: "snapshot_manual_family_members",
+  manual_series_families: "snapshot_manual_series_families",
+};
+
 const PASSTHROUGH_TABLES = new Set([
   "responsibles",
   "operations",
@@ -91,15 +104,18 @@ export function snapshotClient(
               .eq("snapshot_id", snapshotId),
         };
       }
-      // Base manual congelada na captura (0142).
-      if (table === "manual_series" || table === "manual_entries") {
-        const frozen =
-          table === "manual_series"
-            ? "snapshot_manual_series"
-            : "snapshot_manual_entries";
+      // Base manual congelada na captura (0142; famílias na 0143). NÃO é
+      // passthrough, ao contrário de metas e feriados: o link compartilhado é
+      // um RETRATO. Consequência aceita: snapshot capturado antes da 0143 tem
+      // famílias vazias, então um eixo de família nele degrada para "—".
+      const frozenManual = FROZEN_MANUAL_TABLES[table];
+      if (frozenManual) {
         return {
           select: (cols: string) =>
-            service.from(frozen).select(cols).eq("snapshot_id", snapshotId),
+            service
+              .from(frozenManual)
+              .select(cols)
+              .eq("snapshot_id", snapshotId),
         };
       }
       if (PASSTHROUGH_TABLES.has(table)) {

@@ -1,4 +1,17 @@
-// Versão: 1.0 | Data: 17/09/2026
+// Versão: 1.2 | Data: 18/09/2026
+// v1.2 (18/09/2026): os mapas passam a guardar REFS, não chaves de dado — é o
+//   que faz o ESCOPO DE MEMBRO (`manual:x@canal=ligacao`) sobreviver até aqui.
+//   Dois refs do MESMO dado com escopos diferentes são operandos DIFERENTES, e
+//   por isso o slot da tupla passa a ser chaveado pelo ref (chaveá-lo por
+//   `series_id`, como na 0142, faria um sobrescrever o outro).
+// v1.1 (18/09/2026): FAMÍLIAS e NÍVEIS (0143). Três mudanças de forma:
+//   * a escolha de nível é POR DADO, não por widget — `manual:vendas` e
+//     `manual:interacoes` no mesmo card podem cair em níveis diferentes, e um
+//     dado que não tem a família pedida degrada SÓ ele (antes era tudo-ou-nada
+//     via `plans === null`);
+//   * os FILTROS de coordenada entram aqui, não no payload do RPC;
+//   * com eixo de família, as métricas de REGISTRO valem `null` e não 0 —
+//     "não há como atribuir" não é "nenhum registro casou".
 // A costura entre a Base manual e as linhas de um widget. Módulo PURO: recebe
 // as linhas já computadas (e já fundidas por bucket) e devolve as linhas com
 // os números digitados somados.
@@ -37,8 +50,12 @@ import {
   type ManualDimPlan,
   type ManualDimValue,
 } from "./buckets";
+import { resolveManualLevel, type ManualCoordFilter } from "./levels";
 import type { ManualWindow } from "./spread";
-import { manualRef, type ManualBaseData } from "./types";
+import { parseManualOperand, type ManualBaseData } from "./types";
+
+/** As famílias que cada DADO declara: `series_id` → chaves. */
+export type ManualDeclarationMap = Record<string, string[]>;
 
 export interface ManualApplyInput {
   rows: WidgetRow[];
@@ -49,9 +66,10 @@ export interface ManualApplyInput {
   period: ManualWindow;
   /** Agrupamento de responsáveis (0101) — apelido → principal. */
   canonicalById?: ReadonlyMap<string, string> | null;
-  /** Métrica PLANA da Base manual: índice em config.metrics → chave do dado. */
+  /** Métrica PLANA da Base manual: índice em config.metrics → REF (com escopo,
+   *  se houver). */
   manualMetricKeys: Map<number, string>;
-  /** Métrica CALCULADA que cita a Base manual: índice → chaves citadas. */
+  /** Métrica CALCULADA que cita a Base manual: índice → REFS citados. */
   calcManualKeys: Map<number, string[]>;
   /** Reavalia a métrica calculada `idx` sobre a basis já com os valores
    *  manuais injetados. O engine fecha sobre a fórmula e a meta de moeda. */
@@ -61,6 +79,17 @@ export interface ManualApplyInput {
   /** Agregação de cada métrica, para decidir o valor de uma linha sintética:
    *  contagem sem registro é 0; soma/média/min/máx sem registro é "—". */
   metricIsCount: (idx: number) => boolean;
+  /** Filtros de COORDENADA do widget (0143). Nunca descem ao RPC: eles entram
+   *  no conjunto pedido do nível e recortam os membros. */
+  coordFilters?: readonly ManualCoordFilter[];
+  /** As famílias que cada dado DECLARA (0143) — é o que faz uma família
+   *  EMBUTIDA (`responsavel`/`operacao`) participar do nível. Sem declaração o
+   *  dado fica no nível ∅ e a soma da 0142 continua valendo, mesmo com
+   *  `responsible_id` preenchido. */
+  declarations?: ManualDeclarationMap;
+  /** Há eixo de FAMÍLIA no widget ⇒ métrica de REGISTRO vale `null`, nunca 0:
+   *  nenhum registro é atribuível a um membro de família. */
+  recordMetricsDegrade?: boolean;
 }
 
 /** O widget referencia a Base manual de alguma forma? Gate barato: sem isto,
@@ -108,36 +137,106 @@ export function applyManualBase(input: ManualApplyInput): WidgetRow[] {
     ...manualMetricKeys.values(),
     ...[...calcManualKeys.values()].flat(),
   ]);
-  const seriesById = new Map(base.series.map((s) => [s.id, s]));
   const idByKey = new Map(base.series.map((s) => [s.key, s.id]));
-  const entries = base.entries.filter((e) => {
-    const s = seriesById.get(e.series_id);
-    return s != null && wanted.has(s.key);
-  });
 
-  const { byTuple } = projectManualEntries(entries, {
-    plans,
-    period,
-    canonicalById,
-  });
+  // Os eixos que a RODADA pede. Um eixo de família pedido por DIMENSÃO vira
+  // coluna na linha; um pedido só por FILTRO recorta e depois some (o card de
+  // "ligações" não tem eixo nenhum na tela, mas precisa cair no nível do canal).
+  const coordFilters = input.coordFilters ?? [];
+  const dimAxes: string[] = [];
+  // Dimensão de registro que uma família EMBUTIDA endereça. Ela só entra no
+  // nível se o dado DECLARAR a família — é esse opt-in que mantém byte-idêntico
+  // o comportamento de quem já lançava com responsável antes da 0143.
+  const builtinAxes: string[] = [];
+  for (const p of plans) {
+    if (p.kind === "family") dimAxes.push(p.axis);
+    else if (p.kind === "responsible") builtinAxes.push("responsavel");
+    else if (p.kind === "operation") builtinAxes.push("operacao");
+  }
+  const declarations = input.declarations ?? {};
+
+  // A escolha de nível é POR DADO, e é aqui que a projeção deixa de ser uma
+  // rodada só: cada dado projeta OS LANÇAMENTOS DO NÍVEL DELE. As tuplas se
+  // fundem naturalmente, porque o slot guarda o valor por `series_id`.
+  const byTuple: ReturnType<typeof projectManualEntries>["byTuple"] = new Map();
+  const degraded = new Set<string>();
+
+  for (const ref of wanted) {
+    const operand = parseManualOperand(ref);
+    const seriesId = operand ? idByKey.get(operand.key) : undefined;
+    if (!operand || !seriesId) {
+      degraded.add(ref);
+      continue;
+    }
+    const declared = new Set(declarations[seriesId] ?? []);
+    // O ESCOPO do operando é um filtro de coordenada a mais — o mesmo mecanismo
+    // do filtro do widget, e é ele que faz o eixo escopado entrar no conjunto
+    // PEDIDO e depois somar embora.
+    const filters: readonly ManualCoordFilter[] = operand.axis
+      ? [...coordFilters, { axis: operand.axis, members: [operand.member] }]
+      : coordFilters;
+    const requested = [
+      ...dimAxes,
+      ...builtinAxes.filter((a) => declared.has(a)),
+    ];
+    const seriesEntries = base.entries.filter((e) => e.series_id === seriesId);
+    const res = resolveManualLevel(seriesEntries, {
+      dimAxes: requested,
+      // Filtro de família NÃO declarada pelo dado não some em silêncio: ele
+      // entra no pedido e o dado degrada para "—". Recortar por um eixo que o
+      // dado não tem e mostrar o total cheio seria pior.
+      filters,
+    });
+    if (!res) {
+      degraded.add(ref);
+      continue;
+    }
+    const projected = projectManualEntries(res.entries, {
+      plans,
+      period,
+      canonicalById,
+    });
+    for (const [tupleKey, slot] of projected.byTuple) {
+      // A projeção chaveia o valor por `series_id`; aqui ele é RE-CHAVEADO pelo
+      // REF, porque dois operandos do mesmo dado com escopos diferentes têm de
+      // conviver na mesma tupla.
+      const value = [...slot.bySeries.values()].reduce((a, b) => a + b, 0);
+      const target = byTuple.get(tupleKey);
+      if (!target) {
+        byTuple.set(tupleKey, {
+          dims: slot.dims,
+          bySeries: new Map([[ref, value]]),
+        });
+        continue;
+      }
+      target.bySeries.set(ref, (target.bySeries.get(ref) ?? 0) + value);
+    }
+  }
 
   // Valor de um dado numa tupla. Ausente = 0: um mês sem lançamento é zero
-  // mensagem, não "não sei". (Dado inexistente também dá 0 — o ref só chega
-  // aqui porque o catálogo o ofertou.)
+  // mensagem, não "não sei". Dado DEGRADADO (pediram uma família que ele não
+  // tem) é `null` — "não sei" de verdade, nunca um zero que lê como fato.
   const valueOf = (
     slot: { bySeries: Map<string, number> } | undefined,
-    key: string
-  ): number => {
-    const id = idByKey.get(key);
-    if (!id || !slot) return 0;
-    return slot.bySeries.get(id) ?? 0;
+    ref: string
+  ): number | null => {
+    if (degraded.has(ref)) return null;
+    if (!slot) return 0;
+    return slot.bySeries.get(ref) ?? 0;
   };
 
   const injectInto = (basis: BasisValues | undefined, keys: string[], slot: {
     bySeries: Map<string, number>;
   } | undefined) => {
     if (!basis) return;
-    for (const key of keys) basis[manualRef(key)] = valueOf(slot, key);
+    for (const ref of keys) {
+      const v = valueOf(slot, ref);
+      // Operando degradado: a chave fica AUSENTE da basis, não em 0 — é a
+      // ausência que faz a fórmula render "—" em vez de dividir por zero e
+      // mentir. A chave de basis é o REF INTEIRO (com escopo).
+      if (v == null) delete basis[ref];
+      else basis[ref] = v;
+    }
   };
 
   const seen = new Set<string>();
@@ -169,6 +268,7 @@ export function applyManualBase(input: ManualApplyInput): WidgetRow[] {
       calcManualKeys,
       valueOf: (key) => valueOf(slot, key),
       evalCalc,
+      recordMetricsDegrade: input.recordMetricsDegrade === true,
     });
     rows.push(row);
   }
@@ -183,8 +283,9 @@ function syntheticRow(
     metricIsCount: (idx: number) => boolean;
     manualMetricKeys: Map<number, string>;
     calcManualKeys: Map<number, string[]>;
-    valueOf: (key: string) => number;
+    valueOf: (key: string) => number | null;
     evalCalc: (idx: number, basis: BasisValues) => number | null;
+    recordMetricsDegrade?: boolean;
   }
 ): WidgetRow {
   const row: WidgetRow = {};
@@ -192,7 +293,11 @@ function syntheticRow(
     row[`dim_${i + 1}`] = v;
   });
   for (let i = 0; i < o.metricCount; i++) {
-    row[`metric_${i + 1}`] = o.metricIsCount(i) ? 0 : null;
+    // Contagem sem registro no grupo é 0 — mas num eixo de FAMÍLIA nem essa
+    // leitura existe: nenhum registro é atribuível a "Ligação", então 0 seria
+    // uma afirmação falsa e o valor certo é "—".
+    row[`metric_${i + 1}`] =
+      o.metricIsCount(i) && !o.recordMetricsDegrade ? 0 : null;
   }
   for (const [idx, key] of o.manualMetricKeys) {
     row[`metric_${idx + 1}`] = o.valueOf(key);
@@ -204,7 +309,10 @@ function syntheticRow(
     // de evalCalc; aqui entram só as manuais.
     const basis: BasisValues = {};
     for (const [idx, keys] of o.calcManualKeys) {
-      for (const key of keys) basis[manualRef(key)] = o.valueOf(key);
+      for (const ref of keys) {
+        const v = o.valueOf(ref);
+        if (v != null) basis[ref] = v;
+      }
       row[`metric_${idx + 1}`] = o.evalCalc(idx, basis);
     }
     row.__calcOps = basis;

@@ -12,6 +12,7 @@
 // inexistente é ERRO amigável (senão viraria resultado vazio silencioso);
 // UUID legado passa. Recorte de SUB-BASE compara a coluna crua — nome lá é
 // erro dedicado. Puro (sem banco): contexto sintético sobre BUILTIN_SOURCES.
+import { EMPTY_MANUAL_AXIS_CATALOG } from "@/lib/manual-base/families";
 import { describe, expect, it } from "vitest";
 
 import { BUILTIN_GOAL_METRICS } from "@/lib/metas/metrics";
@@ -29,6 +30,7 @@ const ctx: DashboardImportContext = {
   operationNames: ["Comercial", "Parcerias"],
   goalMetrics: BUILTIN_GOAL_METRICS,
   manualSeries: [],
+  manualAxes: EMPTY_MANUAL_AXIS_CATALOG,
 };
 
 function docWith(over: {

@@ -16,6 +16,8 @@ const RESP = new Map([["r1", "Maria Silva"]]);
 const OPS = new Map([["o1", "Outbound"]]);
 
 const base = (over: Partial<ManualBaseData> = {}): ManualBaseData => ({
+  families: [],
+  members: [],
   series: [
     {
       id: "s1",
@@ -36,6 +38,7 @@ const base = (over: Partial<ManualBaseData> = {}): ManualBaseData => ({
       operation_id: "o1",
       spread: "diario",
       note: null,
+    coords: {},
     },
   ],
   ...over,
@@ -122,7 +125,7 @@ describe("manualBaseModelBlock", () => {
 
   it("base vazia devolve listas vazias, nunca quebra", () => {
     const block = manualBaseModelBlock(
-      { series: [], entries: [] },
+      { series: [], entries: [], families: [], members: [] },
       { respById: RESP, opById: OPS }
     );
     expect(block).toEqual({ dados: [], lancamentos: [] });

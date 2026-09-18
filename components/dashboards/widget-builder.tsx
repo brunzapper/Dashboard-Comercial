@@ -189,7 +189,7 @@ import {
 } from "@/lib/source-folders";
 import { useSources } from "@/components/sources-context";
 import { useGoalMetrics } from "@/components/goal-metrics-context";
-import { useManualSeries } from "@/components/manual-series-context";
+import { useManualAxes, useManualSeries } from "@/components/manual-series-context";
 import {
   MANUAL_GROUP,
   manualRef,
@@ -1049,6 +1049,9 @@ export function WidgetBuilder({
   const sourceLabels = useSourceLabels();
   const goalMetrics = useGoalMetrics();
   const manualSeries = useManualSeries();
+  // 0143: os EIXOS vêm do MESMO provider — um segundo contexto divergiria
+  // do primeiro sítio que esquecesse de consumi-lo.
+  const manualAxes = useManualAxes();
   const fieldSourceChips = sourceChips(sourceLabels);
   // v1.27: o dropdown de MÉTRICA é o único que oferta a Base manual, então é o
   // único que ganha o chip dela — e só com dado lançado (chip vazio engana).
@@ -1116,13 +1119,22 @@ export function WidgetBuilder({
             catalog,
             goalMetrics,
             manualSeries,
+            manualAxes,
             { withNested: true }
           )
         ),
         available,
         sourceLabels
       ),
-    [available, fields, sourceLabels, catalog, goalMetrics, manualSeries]
+    [
+      available,
+      fields,
+      sourceLabels,
+      catalog,
+      goalMetrics,
+      manualSeries,
+      manualAxes,
+    ]
   );
   // Campos "Calculado (totais)" salvos em /campos: entram SÓ como métrica.
   const aggCalcFields = available.filter((f) => f.aggCalc);

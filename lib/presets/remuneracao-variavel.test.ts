@@ -13,6 +13,7 @@
 // convenções estruturais do preset engine: prefixo/unicidade dos presetKeys
 // de widget (GC por prefixo), pais de operação declarados antes dos filhos
 // (resolve sequencial) e chaves de métrica no formato do registry.
+import { EMPTY_MANUAL_AXIS_CATALOG } from "@/lib/manual-base/families";
 import { describe, expect, it } from "vitest";
 
 import { parseCompPlanConfig } from "@/lib/comp/model";
@@ -88,7 +89,7 @@ const DEFS: AggCatalogDefRow[] = [
   },
 ];
 
-const catalog = buildAggOperandCatalog(defsAggCatalogInput(DEFS, SOURCES, [], []));
+const catalog = buildAggOperandCatalog(defsAggCatalogInput(DEFS, SOURCES, [], [], EMPTY_MANUAL_AXIS_CATALOG));
 
 describe("preset remuneracao_variavel — planos", () => {
   it("todo plano passa pelo parse fail-closed com a MESMA injeção do apply", () => {

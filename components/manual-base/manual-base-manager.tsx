@@ -39,6 +39,10 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { HelpHint } from "@/components/ui/help-hint";
 import { useBackgroundSave } from "@/lib/feedback/use-background-save";
 import {
+  EMPTY_MANUAL_COORDS,
+  type ManualCoords,
+} from "@/lib/manual-base/families";
+import {
   DEFAULT_MANUAL_SPREAD,
   MANUAL_SPREADS,
   MANUAL_SPREAD_HINTS,
@@ -132,6 +136,9 @@ export function ManualBaseManager({
   const [newResponsible, setNewResponsible] = useState<string>(NONE);
   const [newSpread, setNewSpread] = useState<ManualSpread>(DEFAULT_MANUAL_SPREAD);
   const [newSeriesLabel, setNewSeriesLabel] = useState("");
+  // 0143: o NÍVEL da linha nova. `{}` é o nível ∅ (o total) — é o padrão, e é
+  // o que toda linha era antes das famílias existirem.
+  const [newCoords, setNewCoords] = useState<ManualCoords>(EMPTY_MANUAL_COORDS);
   const [pendingRows, setPendingRows] = useState<ManualGridRow[]>([]);
   const [confirmSeries, setConfirmSeries] = useState<ManualSeries | null>(null);
   const [confirmRow, setConfirmRow] = useState<ManualGridRow | null>(null);
@@ -143,7 +150,8 @@ export function ManualBaseManager({
     const end = monthEnd(newMonth);
     const responsibleId = newResponsible === NONE ? null : newResponsible;
     const operationId = newOperation === NONE ? null : newOperation;
-    const key = manualRowKey(start, end, responsibleId, operationId);
+    const coords = newCoords;
+    const key = manualRowKey(start, end, responsibleId, operationId, coords);
     if (allRows.some((r) => r.key === key)) return; // a linha já está na tela
     setPendingRows((prev) => [
       {
@@ -152,6 +160,7 @@ export function ManualBaseManager({
         periodEnd: end,
         responsibleId,
         operationId,
+        coords,
         spread: newSpread,
         bySeries: new Map(),
       },
@@ -191,6 +200,10 @@ export function ManualBaseManager({
         {
           id: optimisticId,
           series_id: seriesId,
+          // 0143: a linha da grade É a coordenada — o otimista tem de carregar
+          // as MESMAS coords, senão ele cai no nível ∅ e a reconciliação o
+          // troca por outra célula.
+          coords: row.coords,
           period_start: row.periodStart,
           period_end: row.periodEnd,
           value,

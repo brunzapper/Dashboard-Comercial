@@ -11,6 +11,7 @@
 // O PLANO e o MÊS vêm SEMPRE da UI. O validador do contrato só TRADUZ nomes e
 // texto de fórmula para um config completo; a régua de validade é o módulo
 // compartilhado com o savePlan — nunca uma cópia aqui.
+import { EMPTY_MANUAL_AXIS_CATALOG } from "@/lib/manual-base/families";
 import "server-only";
 
 import { randomUUID } from "node:crypto";
@@ -166,6 +167,7 @@ async function loadCompEditContext(
       // operando não resolvido aqui viraria dinheiro a menos na folha, sem
       // erro nenhum.
       [],
+      EMPTY_MANUAL_AXIS_CATALOG,
       {
       withNested: true,
     })

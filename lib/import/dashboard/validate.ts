@@ -383,6 +383,7 @@ export function validateDashboardImport(
         workingSources,
         ctx.goalMetrics,
         ctx.manualSeries,
+        ctx.manualAxes,
         excludeKey ? new Set([excludeKey]) : new Set()
       )
     );

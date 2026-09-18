@@ -1,4 +1,9 @@
-// Versão: 1.0 | Data: 17/09/2026
+// Versão: 1.1 | Data: 18/09/2026
+// v1.1 (18/09/2026): o 4º plano, `family` (0143). Ele é o ÚNICO que não passa
+//   por `bucketCanonicalValue` — a invariante 7 é sobre espelhar o
+//   `date_trunc`/`extract` do RPC, e um eixo de família nem chega ao RPC: o
+//   valor é a chave do membro, crua, e `null` é o RESIDUAL declarado (um grupo,
+//   não uma ausência).
 // Projeção dos lançamentos nas DIMENSÕES de um widget — módulo PURO.
 //
 // O problema: as linhas do widget vêm agrupadas pelo RPC, e um lançamento
@@ -33,6 +38,7 @@ import {
 import type { WeekMode, WeekStart } from "@/lib/widgets/date-buckets";
 import type { Dimension, Transform } from "@/lib/widgets/types";
 
+import { coordMember, parseManualAxisRef } from "./families";
 import { dayIso, dayNum, type ManualWindow } from "./spread";
 import type { ManualEntry } from "./types";
 
@@ -45,7 +51,11 @@ export type ManualDimPlan =
       weekStart: WeekStart;
     }
   | { kind: "responsible" }
-  | { kind: "operation" };
+  | { kind: "operation" }
+  // 0143: eixo de FAMÍLIA. O valor sai das `coords` do lançamento e não tem
+  // contraparte no RPC — é o que obriga o widget a curto-circuitar a consulta
+  // de registros (ver o cabeçalho de `resolve.ts`).
+  | { kind: "family"; axis: string };
 
 /** Valor normalizado de uma célula de dimensão (o que entra na tupla). */
 export type ManualDimValue = string | number | null;
@@ -65,6 +75,11 @@ export function normalizeManualDimValue(
   raw: unknown,
   plan: ManualDimPlan
 ): ManualDimValue {
+  if (plan.kind === "family") {
+    // Chave de membro, crua. `null` é o RESIDUAL e precisa sobreviver como
+    // valor distinto — normalizar para "" o fundiria com um membro sem chave.
+    return raw == null ? null : String(raw);
+  }
   if (plan.kind !== "date") {
     return raw == null || raw === "" ? null : String(raw);
   }
@@ -124,6 +139,9 @@ function staticDims(
   return plans.map((p) => {
     if (p.kind === "responsible") return canonResp(entry.responsible_id, canonicalById);
     if (p.kind === "operation") return entry.operation_id ?? null;
+    // 0143: constante por lançamento, como responsável/operação — a coordenada
+    // não varia por dia, então o caminhamento de dias não muda em nada.
+    if (p.kind === "family") return coordMember(entry.coords, p.axis);
     return undefined; // data: resolvida por dia
   });
 }
@@ -274,15 +292,28 @@ export function manualRowTuple(
  *    reclassifica valores de registro, que um lançamento não tem;
  *  - dimensão com "Agrupar período" (`dateAgg`), que leva o widget inteiro
  *    para `runWidgetByPeriod` (agregação POR REGISTRO no app) — outro caminho,
- *    onde a métrica manual degrada para "—".
+ *    onde a métrica manual degrada para "—";
+ *  - eixo de FAMÍLIA cuja chave não está em `familyKeys` (família excluída
+ *    depois do save do widget).
  */
 export function manualDimPlans(
   dims: readonly Dimension[],
-  isDateField: (field: string) => boolean
+  isDateField: (field: string) => boolean,
+  familyKeys?: ReadonlySet<string> | null
 ): ManualDimPlan[] | null {
   const out: ManualDimPlan[] = [];
   for (const d of dims) {
     if (caseDimActive(d) || d.dateAgg != null) return null;
+    // 0143: eixo de família. Chave DESCONHECIDA derruba o plano (⇒ "—"), pela
+    // mesma régua de "dimensão não projetável": a família pode ter sido
+    // excluída depois que o widget foi salvo, e inventar um agrupamento seria
+    // pior que dizer "não sei".
+    const axis = parseManualAxisRef(d.field);
+    if (axis != null) {
+      if (!familyKeys?.has(axis)) return null;
+      out.push({ kind: "family", axis });
+      continue;
+    }
     if (d.field === "responsible_id") {
       out.push({ kind: "responsible" });
       continue;

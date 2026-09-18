@@ -40,6 +40,7 @@
 // gatilho/base zera o select (erro inline até escolher outro).
 "use client";
 
+import { EMPTY_MANUAL_AXIS_CATALOG } from "@/lib/manual-base/families";
 import { useMemo, useState, useTransition } from "react";
 import { Plus, Trash2 } from "lucide-react";
 
@@ -346,6 +347,7 @@ export function PlanEditor(props: PlanEditorProps) {
             // Quando a Remuneração souber ler a Base manual, esta lista deixa
             // de ser vazia — e o save passa a aceitar o operando junto.
             [],
+            EMPTY_MANUAL_AXIS_CATALOG,
             { withNested: true }
           )
         ),

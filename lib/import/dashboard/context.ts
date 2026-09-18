@@ -11,7 +11,7 @@ import "server-only";
 
 import { loadSources } from "@/lib/config/sources";
 import { loadGoalMetrics } from "@/lib/config/goal-metrics";
-import { loadManualSeries } from "@/lib/manual-base/load";
+import { loadManualAxes, loadManualSeries } from "@/lib/manual-base/load";
 import type { createClient } from "@/lib/supabase/server";
 import type {
   DashboardImportContext,
@@ -23,8 +23,16 @@ type ServerClient = Awaited<ReturnType<typeof createClient>>;
 export async function loadImportContext(
   supabase: ServerClient
 ): Promise<DashboardImportContext> {
-  const [sources, defsRes, corrRes, respRes, opRes, goalMetrics, manualSeries] =
-    await Promise.all([
+  const [
+    sources,
+    defsRes,
+    corrRes,
+    respRes,
+    opRes,
+    goalMetrics,
+    manualSeries,
+    manualAxes,
+  ] = await Promise.all([
       loadSources(supabase),
       supabase
         .from("field_definitions")
@@ -34,10 +42,12 @@ export async function loadImportContext(
       supabase.from("operations").select("name"),
       loadGoalMetrics(supabase),
       loadManualSeries(supabase),
+      loadManualAxes(supabase),
     ]);
   return {
     sources,
     manualSeries,
+    manualAxes,
     defs: ((defsRes.data ?? []) as Record<string, unknown>[]).map((d) => ({
       id: String(d.id),
       field_key: String(d.field_key),

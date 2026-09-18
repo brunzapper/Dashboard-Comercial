@@ -124,6 +124,7 @@ describe("sumManualEntries", () => {
     operation_id: null,
     spread,
     note: null,
+    coords: {},
   });
 
   it("vários lançamentos do mesmo dado SOMAM", () => {

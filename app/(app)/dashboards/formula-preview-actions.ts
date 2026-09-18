@@ -14,7 +14,7 @@ import { getSessionInfo } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
 import { loadSources } from "@/lib/config/sources";
 import { loadGoalMetrics } from "@/lib/config/goal-metrics";
-import { loadManualSeries } from "@/lib/manual-base/load";
+import { loadManualAxes, loadManualSeries } from "@/lib/manual-base/load";
 import { loadCorrespondences } from "@/lib/correspondences";
 import { validateFormulaForContext } from "@/lib/records/formula-validate";
 import type { Formula } from "@/lib/records/formulas";
@@ -73,6 +73,7 @@ export async function previewAggregateFormula(
     rates,
     goalMetrics,
     manualSeries,
+    manualAxes,
   ] = await Promise.all([
       supabase
         .from("field_definitions")
@@ -84,6 +85,7 @@ export async function previewAggregateFormula(
       loadCurrencyRates(supabase),
       loadGoalMetrics(supabase),
       loadManualSeries(supabase),
+      loadManualAxes(supabase),
     ]);
   const allFields = (fieldsData ?? []) as FieldDefinition[];
   const available = buildAvailableFields(allFields, correspondences, sources);
@@ -97,6 +99,7 @@ export async function previewAggregateFormula(
       sources,
       goalMetrics,
       manualSeries,
+      manualAxes,
       { withNested: true }
     )
   );

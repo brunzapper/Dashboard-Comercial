@@ -25,6 +25,7 @@ const e = (over: Partial<ManualEntry>): ManualEntry => ({
   operation_id: null,
   spread: "ancora",
   note: null,
+    coords: {},
   ...over,
 });
 

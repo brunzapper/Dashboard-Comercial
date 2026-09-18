@@ -21,7 +21,7 @@ import { loadOrgAiConfig } from "@/lib/ai/config";
 import { aiSection, runJsonGenerationLoop } from "@/lib/ai/json-loop";
 import { loadSources } from "@/lib/config/sources";
 import { loadGoalMetrics } from "@/lib/config/goal-metrics";
-import { loadManualSeries } from "@/lib/manual-base/load";
+import { loadManualAxes, loadManualSeries } from "@/lib/manual-base/load";
 import { DATA_TYPE_LABELS } from "@/lib/records/types";
 import { isCoreDef } from "@/lib/records/core-defs";
 import {
@@ -117,10 +117,11 @@ async function validateBatchFormulas(
 ): Promise<string[]> {
   const errors: string[] = [];
   const withBatch = [...rows, ...syntheticRows(fields)];
-  const [sources, goalMetrics, manualSeries] = await Promise.all([
+  const [sources, goalMetrics, manualSeries, manualAxes] = await Promise.all([
     loadSources(supabase),
     loadGoalMetrics(supabase),
     loadManualSeries(supabase),
+    loadManualAxes(supabase),
   ]);
   for (let i = 0; i < fields.length; i++) {
     const f = fields[i];
@@ -129,7 +130,14 @@ async function validateBatchFormulas(
     const isAgg = f.tipo === "calculado_agg";
     const forbidden = forbiddenOperandKeys(withBatch, f.fieldKey);
     const catalog = isAgg
-      ? aggOperandCatalog(withBatch, forbidden, sources, goalMetrics, manualSeries)
+      ? aggOperandCatalog(
+          withBatch,
+          forbidden,
+          sources,
+          goalMetrics,
+          manualSeries,
+          manualAxes
+        )
       : serverOperandCatalog(withBatch, forbidden, sources);
     const tok = tokenizeFormulaText(f.formulaTexto, catalog);
     if (!tok.ok) {
@@ -194,11 +202,12 @@ export async function generateFieldsCore(
   }
 
   const supabase = await createClient();
-  const [rows, sources, goalMetrics, manualSeries] = await Promise.all([
+  const [rows, sources, goalMetrics, manualSeries, manualAxes] = await Promise.all([
     loadDefRows(supabase),
     loadSources(supabase),
     loadGoalMetrics(supabase),
     loadManualSeries(supabase),
+    loadManualAxes(supabase),
   ]);
   const ctx = fieldsCreateContext(rows);
 
@@ -224,7 +233,14 @@ export async function generateFieldsCore(
   const operandsJson = JSON.stringify(
     {
       por_registro: serverOperandCatalog(rows, none, sources).map((o) => o.label),
-      agregacao: aggOperandCatalog(rows, none, sources, goalMetrics, manualSeries).map(
+      agregacao: aggOperandCatalog(
+        rows,
+        none,
+        sources,
+        goalMetrics,
+        manualSeries,
+        manualAxes
+      ).map(
         (o) => o.label
       ),
     },
