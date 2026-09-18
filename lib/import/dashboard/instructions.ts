@@ -1,3 +1,10 @@
+// Versão: 1.13 | Data: 18/09/2026
+// v1.13 (18/09/2026): a seção de FAMÍLIAS ganha as duas frases que faltavam —
+//   o valor de um filtro de coordenada é a CHAVE do membro (rótulo passa na
+//   validação e não casa com nada), e conferir "reparte_por" ANTES de escolher
+//   o eixo, porque um widget cujas métricas não se repartem por ele não fica só
+//   com "—": fica VAZIO (num eixo de família nenhuma consulta de registros
+//   roda). Prosa nova, sem enum novo: as contagens do §16.2 não mudam.
 // Versão: 1.12 | Data: 17/09/2026
 // v1.12 (17/09/2026): o SPEC passa a dizer que os VALORES da Base manual estão
 //   no modelo (manual_lancamentos) e ganha a seção "Base manual e PERÍODO" — a
@@ -364,9 +371,16 @@ promovida a tipo próprio).
 - Filtro de família só aceita os operadores eq, neq e in, e ele recorta SÓ as
   métricas da Base manual (a métrica de registro do mesmo widget não é afetada).
   É assim que se faz um card de UM membro: métrica "manual:<chave>" + filtro
-  "manualdim:canal" eq "ligacao".
-- Cada dado se reparte só pelas famílias que estão em "reparte_por" dele
-  (manual_series do modelo). Pedir outra família faz o número virar "—".
+  "manualdim:canal" eq "ligacao". O valor é a CHAVE do membro
+  (manual_familias[].membros[].chave), nunca o rótulo — rótulo passa na
+  validação e não casa com nada.
+- CONFIRA ANTES DE USAR UM EIXO: cada dado se reparte só pelas famílias listadas
+  em "reparte_por" dele (manual_series do modelo, por CHAVE). Pedir outra
+  família faz aquele número virar "—" — e se NENHUMA métrica do widget se
+  repartir pelo eixo escolhido, o widget inteiro aparece VAZIO, porque num eixo
+  de família nenhuma consulta de registros roda. Escolha as métricas OLHANDO o
+  "reparte_por"; se o dado que você quer não tem a família, use o dado que tem
+  (costuma existir um equivalente repartido) ou monte o widget sem a dimensão.
 - Para cruzar duas famílias (uma tabela "Canal × Vendedor"), use as DUAS como
   dimensões. Se o cruzamento não estiver lançado por inteiro, a tabela mostra o
   que existe — não é para inventar o resto.

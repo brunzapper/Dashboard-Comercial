@@ -1,4 +1,9 @@
-// Versão: 1.3 | Data: 18/09/2026
+// Versão: 1.4 | Data: 18/09/2026
+// v1.4 (18/09/2026): a FORMA DO EIXO quando não sobra tupla. Um eixo de família
+//   curto-circuita a consulta de registros, então "todo dado degradou" devolvia
+//   `[]` e o widget saía MUDO — sem o "—" que o módulo promete. Dois casos
+//   pinados, e a diferença entre eles é a feature: dado que não tem a família
+//   vale "—" ("não sei"), dado que tem mas nada caiu na janela vale 0 (verdade).
 // v1.3 (18/09/2026): FAMÍLIAS (0143). O caso de resiliência POR METADE é o que
 //   pegou um defeito real: um `Promise.all` no loader fazia a ausência das
 //   tabelas de família (mais novas que as de número) rejeitar a rodada inteira,
@@ -622,6 +627,56 @@ describe("eixo de família (0143)", () => {
     // 0 leria como "nenhum registro nesse canal", que é uma afirmação falsa:
     // nenhum registro é atribuível a um canal.
     expect(data.rows.every((r) => r.metric_2 === null)).toBe(true);
+  });
+
+  // O caso que motivou a v1.3 de resolve.ts: um board real pediu
+  // `manualdim:canal` sobre dados que só têm o nível ∅. Cada métrica degrada
+  // para "—" — mas como o eixo de família curto-circuita a consulta de
+  // registros, não sobrava linha nenhuma e o widget saía MUDO, sem pista.
+  it("dado SEM a família pedida devolve a forma do eixo com '—', nunca nada", async () => {
+    const { db } = fakeSupabase({
+      rpc: {},
+      tables: famTables({
+        manual_series: [
+          ...INTER,
+          {
+            id: "s-mail",
+            key: "emails",
+            label: "E-mails enviados",
+            default_spread: "ancora",
+            sort_order: 1,
+          },
+        ],
+        // O dado novo só tem o TOTAL: nenhum lançamento dele endereça `canal`.
+        manual_entries: [...NIVEIS, { ...ent(880, {}, "mail0"), series_id: "s-mail" }],
+      }),
+    });
+    const data = await runWidget(
+      db,
+      config({
+        dimensions: [{ field: "manualdim:canal" }],
+        metrics: [{ field: "manual:emails", agg: "sum" as const }],
+      }),
+      AVAILABLE,
+      AGOSTO
+    );
+    // O eixo aparece inteiro, na ordem do sort_order, dizendo "não sei".
+    expect(data.rows.map((r) => r.dim_1)).toEqual(["Ligação", "E-mail"]);
+    expect(data.rows.map((r) => r.metric_1)).toEqual([null, null]);
+  });
+
+  it("dado COM a família mas sem lançamento na janela devolve o eixo em 0", async () => {
+    const { db } = fakeSupabase({ rpc: {}, tables: famTables() });
+    const data = await runWidget(
+      db,
+      config({ dimensions: [{ field: "manualdim:canal" }], metrics: [INT_METRIC] }),
+      AVAILABLE,
+      // Janela sem lançamento nenhum: aqui 0 é VERDADE (o dado se reparte por
+      // canal, só não houve nada no mês), e por isso não é "—".
+      { field: "closed_at", from: "2026-01-01", to: "2026-01-31" }
+    );
+    expect(data.rows.map((r) => r.dim_1)).toEqual(["Ligação", "E-mail"]);
+    expect(data.rows.map((r) => r.metric_1)).toEqual([0, 0]);
   });
 
   it("eixo de família DESCONHECIDO degrada para '—' em vez de inventar grupo", async () => {

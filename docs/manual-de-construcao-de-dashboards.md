@@ -1,4 +1,7 @@
-<!-- Versão: 1.36 | Data: 12/09/2026 -->
+<!-- Versão: 1.37 | Data: 18/09/2026 -->
+<!-- v1.37 (18/09/2026): §5 (Base manual → famílias) — como escolher as
+     métricas de um eixo de família, e o que se vê quando nenhuma delas se
+     reparte por ele: o eixo montado com todos os valores em "—". -->
 <!-- v1.36 (12/09/2026): §3.6 — o fundo do dashboard virou DUAS superfícies:
      a interna (a caixa do grid, como sempre foi) e a externa (cabeçalho,
      abas, barra de período e as margens), com a opção "Igual ao interno"
@@ -568,8 +571,16 @@ Uma **família** é uma dessas maneiras de repartir ("Canal", "Vendedor"), e os
   próprio — `[Total de interações · Canal: Ligação]` —, o que permite escrever
   "ligações ÷ e-mails" num card só.
 
-**Três coisas que valem saber antes:**
+**Quatro coisas que valem saber antes:**
 
+- **Escolha as métricas olhando quem se reparte por aquela família.** Um dado só
+  se destrincha pelas famílias marcadas em "Cada dado se reparte por…" — pedir
+  outra faz aquele número virar "—". E se NENHUMA métrica do widget se repartir
+  pelo eixo escolhido, o widget aparece com o eixo montado e todos os valores em
+  "—": as barras existem, mas não há número nelas. Quando isso acontecer, o
+  caminho costuma ser trocar a métrica por um dado equivalente que tenha a
+  família (num funil por canal, o dado "Prospects" repartido por Canal no lugar
+  de um "Prospects e-mail" que já nasce achatado), ou tirar a dimensão.
 - Num widget com dimensão de família, **só os números da Base manual aparecem**.
   Uma contagem de registros ao lado exibe "—", e não zero: nenhum registro
   pertence a "Ligação", e inventar um rateio seria pior que dizer "não sei".

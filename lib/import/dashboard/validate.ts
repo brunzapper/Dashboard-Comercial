@@ -1,4 +1,13 @@
-// Versão: 1.7 | Data: 17/09/2026
+// Versão: 1.8 | Data: 18/09/2026
+// v1.8 (18/09/2026): cruzamento DADO × FAMÍLIA da Base manual (0143). Os ramos
+//   da 1.7 e da 0143 conferiam, cada um por si, que a família existe (dimensão/
+//   filtro) e que o dado existe (métrica) — e nunca que ESTE dado se reparte
+//   por AQUELA família, que é o que decide se o número aparece. Um board real
+//   pediu `manualdim:canal` sobre cinco dados de nível ∅: cada métrica degrada
+//   para "—" e, como o eixo de família curto-circuita a consulta de registros,
+//   o widget saiu VAZIO, sem nenhuma pista na prévia. Agora sai AVISO por
+//   métrica (nomeando os dados que TÊM aquele eixo) e um aviso próprio para o
+//   widget que vai ficar mudo. Nunca erro: o board segue aplicável.
 // v1.7 (17/09/2026): métrica da BASE MANUAL — `"field": "manual:<chave>"`
 //   passa a ser aceita no ramo de métrica NÃO-calculada. O prefixo NÃO entra
 //   no `checkRef`, que também valida dimensão/filtro/coluna: a Base manual não
@@ -76,10 +85,16 @@ import {
 import { PERIOD_PRESETS, PERIOD_ALL } from "@/lib/widgets/period";
 import { FILTER_OPS } from "@/lib/widgets/filter-ops";
 import { CORE_FIELDS } from "@/lib/widgets/fields";
-import { parseManualRef } from "@/lib/manual-base/types";
-import { parseManualAxisRef } from "@/lib/manual-base/families";
+import { parseManualOperand, parseManualRef } from "@/lib/manual-base/types";
+import {
+  familyLabelOfKey,
+  parseManualAxisRef,
+} from "@/lib/manual-base/families";
 import { MANUAL_COORD_OPS } from "@/lib/manual-base/coord-filters";
-import { CALC_METRIC_FIELD } from "@/lib/widgets/calc-metrics";
+import {
+  CALC_METRIC_FIELD,
+  manualOperandKeys,
+} from "@/lib/widgets/calc-metrics";
 import { isClosedWeekTransform } from "@/lib/widgets/closed-week";
 import { DEFAULT_WIDGET_SIZE } from "@/lib/widgets/widget-defaults";
 import {
@@ -270,6 +285,9 @@ export function validateDashboardImport(
   const manualKeys = new Set(ctx.manualSeries.map((m) => m.key));
   // 0143: as famílias, para o ramo de dimensão/filtro `manualdim:<chave>`.
   const manualFamilyKeys = new Set(ctx.manualAxes.families.map((f) => f.key));
+  // v1.8: `series_id` → famílias declaradas. É o que permite cruzar o dado de
+  // uma métrica com o eixo pedido pelo widget (ver o bloco no fim do laço).
+  const manualDeclarations = ctx.manualAxes.declarations;
   // Refs `match:` só aceitam Bases RAIZ: sub-base compartilha o record_type da
   // pai e nunca casa (buildMatchFields/helpers 0104 seguem a mesma regra).
   const rootSourceKeySet = () =>
@@ -1259,6 +1277,93 @@ export function validateDashboardImport(
         sources: fSources.length > 0 ? fSources : undefined,
       });
     });
+
+    // BASE MANUAL × FAMÍLIAS (v1.8): o dado REALMENTE se reparte pelo eixo
+    // pedido? O validador já conferia, em ramos separados, que a família existe
+    // (dimensão/filtro) e que o dado existe (métrica) — mas nunca cruzava os
+    // dois, e é o cruzamento que decide se o número aparece. Pedir uma família
+    // que o dado não declara faz `resolveManualLevel` devolver null e a métrica
+    // virar "—"; e quando TODO dado do widget degrada num eixo de família o
+    // curto-circuito de computeRows (nenhuma consulta de registros roda) não
+    // deixa linha nenhuma, então o widget sai MUDO — sem "—", sem pista.
+    // AVISO, nunca erro: o board segue válido e quem decide é quem lê.
+    //
+    // O sinal é a DECLARAÇÃO (`manual_series_families`), não as `coords` dos
+    // lançamentos — que o contexto nem carrega. As duas concordam por
+    // construção: o validador do `base-manual-edit` recusa coordenada de
+    // família que o dado não declara, e o SPEC daqui já dizia que o dado se
+    // reparte só pelo que está em `reparte_por`. Onde elas poderiam divergir é
+    // num dado com ZERO declarações e coordenadas gravadas antes da regra — e
+    // aí o aviso erra para o lado seguro (aparece sem precisar), nunca cala.
+    {
+      const axesAsked = new Set<string>();
+      for (const d of dimensions) {
+        const a = parseManualAxisRef(d.field);
+        if (a != null) axesAsked.add(a);
+      }
+      const axesFromDims = new Set(axesAsked);
+      for (const f of filters) {
+        const a = parseManualAxisRef(f.field);
+        if (a != null) axesAsked.add(a);
+      }
+      // Dados que se repartem por um eixo — é a metade ACIONÁVEL do aviso: sem
+      // ela o usuário sabe que errou, não por onde sair.
+      const seriesSharingAxis = (axis: string): string[] =>
+        ctx.manualSeries
+          .filter((s) => (manualDeclarations[s.id] ?? []).includes(axis))
+          .map((s) => s.label);
+      let manualMetrics = 0;
+      let degradedMetrics = 0;
+      metrics.forEach((m, j) => {
+        // Uma métrica cita a Base manual como campo DIRETO ou como operando de
+        // fórmula (inclusive com ESCOPO DE MEMBRO, que é um eixo pedido a mais).
+        const refs = m.formula
+          ? manualOperandKeys(m.formula)
+          : parseManualRef(m.field)
+            ? [m.field]
+            : [];
+        if (refs.length === 0) return;
+        manualMetrics += 1;
+        const mw = `${where}.metrics[${j}]`;
+        let degraded = false;
+        for (const ref of refs) {
+          const operand = parseManualOperand(ref);
+          if (!operand) continue;
+          const serie = ctx.manualSeries.find((s) => s.key === operand.key);
+          if (!serie) continue; // chave inexistente já é ERRO no ramo da métrica
+          const declared = new Set(manualDeclarations[serie.id] ?? []);
+          const asked = new Set(axesAsked);
+          if (operand.axis != null) asked.add(operand.axis);
+          const missing = [...asked].filter((a) => !declared.has(a));
+          if (missing.length === 0) continue;
+          degraded = true;
+          for (const axis of missing) {
+            const famLabel = familyLabelOfKey(axis, ctx.manualAxes.families);
+            const alt = seriesSharingAxis(axis);
+            warnings.push(
+              `${mw}: o dado "${serie.label}" (${ref}) não se reparte por "${famLabel}" — esta métrica vai exibir "—". ${
+                alt.length > 0
+                  ? `Dados que se repartem por "${famLabel}": ${alt.join(", ")}.`
+                  : `Nenhum dado se reparte por "${famLabel}" ainda.`
+              }`
+            );
+          }
+        }
+        if (degraded) degradedMetrics += 1;
+      });
+      // O caso que deixa a tela em branco: eixo de família na DIMENSÃO e todas
+      // as métricas manuais degradadas. Vale uma linha própria — os avisos por
+      // métrica explicam cada "—", este explica o widget vazio.
+      if (
+        axesFromDims.size > 0 &&
+        manualMetrics > 0 &&
+        degradedMetrics === manualMetrics
+      ) {
+        warnings.push(
+          `${where}: nenhuma métrica deste widget se reparte pelo eixo de família escolhido — ele vai aparecer VAZIO (num eixo de família nenhuma consulta de registros roda). Troque as métricas pelos dados que se repartem por esse eixo, ou tire a dimensão.`
+        );
+      }
+    }
 
     // Settings do widget: aba válida + saneamento de imagem; identidade é nossa.
     const wSettings: WidgetSettings = isRecord(w.settings)

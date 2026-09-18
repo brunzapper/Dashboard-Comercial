@@ -1,4 +1,4 @@
-// Versão: 1.0 | Data: 17/09/2026
+// Versão: 1.1 | Data: 18/09/2026
 // O serializador dos lançamentos para prompt. O que estes testes protegem:
 //  1. O VOCABULÁRIO — `dado`/`periodo`/`valor`/`operacao`/`responsavel` são as
 //     palavras que o contrato base-manual-edit já usa; mudá-las aqui faria a IA
@@ -7,6 +7,10 @@
 //  3. `includeSpread` é OPT-IN: sem ele a saída fica byte-idêntica à do
 //     assistente da Base manual, que não pediu a mudança.
 //  4. O truncamento corta os mais ANTIGOS, nunca ao acaso.
+//  5. (v1.1) O que a IA precisa ESCREVER sai por CHAVE: `reparte_por` e a
+//     chave de cada membro. Rótulo sozinho a obriga a adivinhar a chave — e um
+//     `manualdim:` ou um filtro de coordenada adivinhado errado não casa com
+//     nada em runtime, em silêncio.
 import { describe, expect, it } from "vitest";
 
 import { manualBaseModelBlock } from "@/lib/manual-base/model";
@@ -121,6 +125,62 @@ describe("manualBaseModelBlock", () => {
     const block = manualBaseModelBlock(base(), { respById: RESP, opById: OPS });
     expect(block.truncado).toBeUndefined();
     expect("truncado" in block).toBe(false);
+  });
+
+  it("reparte_por e os membros saem por CHAVE (é o que a IA escreve)", () => {
+    const b = base({
+      families: [{ id: "f1", key: "canal", label: "Canal", sort_order: 0 }],
+      members: [
+        { id: "m2", family_id: "f1", key: "e_mail", label: "E-mail", sort_order: 1 },
+        {
+          id: "m1",
+          family_id: "f1",
+          key: "ligacoes_frias",
+          label: "Ligações Frias",
+          sort_order: 0,
+        },
+      ],
+    });
+    const block = manualBaseModelBlock(b, {
+      respById: RESP,
+      opById: OPS,
+      declarations: { s1: ["canal"] },
+    });
+    // A chave da família, nunca o rótulo: é ela que vira `manualdim:canal`.
+    expect(block.dados[0].reparte_por).toEqual(["canal"]);
+    // E o membro sai com as duas metades, em sort_order — a chave é o valor de
+    // um filtro de coordenada, o rótulo é o que se lê.
+    expect(block.familias).toEqual([
+      {
+        chave: "canal",
+        rotulo: "Canal",
+        membros: [
+          { chave: "ligacoes_frias", rotulo: "Ligações Frias" },
+          { chave: "e_mail", rotulo: "E-mail" },
+        ],
+      },
+    ]);
+  });
+
+  it("dado sem declaração não ganha reparte_por", () => {
+    const b = base({
+      families: [{ id: "f1", key: "canal", label: "Canal", sort_order: 0 }],
+      members: [],
+    });
+    const block = manualBaseModelBlock(b, { respById: RESP, opById: OPS });
+    expect("reparte_por" in block.dados[0]).toBe(false);
+  });
+
+  it("coordenadas seguem por RÓTULO — leitura, e o prompt da Base manual as usa", () => {
+    const b = base({
+      families: [{ id: "f1", key: "canal", label: "Canal", sort_order: 0 }],
+      members: [
+        { id: "m1", family_id: "f1", key: "e_mail", label: "E-mail", sort_order: 0 },
+      ],
+      entries: [{ ...base().entries[0], coords: { canal: "e_mail" } }],
+    });
+    const block = manualBaseModelBlock(b, { respById: RESP, opById: OPS });
+    expect(block.lancamentos[0].coordenadas).toEqual({ Canal: "E-mail" });
   });
 
   it("base vazia devolve listas vazias, nunca quebra", () => {

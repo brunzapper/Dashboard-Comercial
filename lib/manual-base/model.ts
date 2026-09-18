@@ -1,4 +1,12 @@
-// Versão: 1.1 | Data: 18/09/2026
+// Versão: 1.2 | Data: 18/09/2026
+// v1.2 (18/09/2026): `reparte_por` passa a sair por CHAVE e cada membro de
+//   `familias` ganha a CHAVE ao lado do rótulo. As duas coisas que a IA precisa
+//   ESCREVER a partir deste bloco são `manualdim:<chave da família>` e o valor
+//   de um filtro de coordenada (a chave do MEMBRO); o bloco só expunha rótulos,
+//   e um filtro com rótulo passa no validador e não casa com nada em runtime.
+//   `coordenadas` segue por rótulo de propósito: ela é LEITURA, é compartilhada
+//   com o prompt do assistente da Base manual (que funciona como está) e agora
+//   é mapeável por `familias`.
 // v1.1 (18/09/2026): as FAMÍLIAS (0143) entram no bloco — o catálogo dos eixos
 //   e a `coordenadas` de cada lançamento. Mesma razão do resto do módulo: sem
 //   elas a IA de dashboards veria "1000", "500" e "500" do mesmo dado no mesmo
@@ -53,11 +61,19 @@ export interface ManualModelBlock {
     chave: string;
     rotulo: string;
     distribuicao_padrao?: string;
-    /** As famílias em que ESTE dado se reparte (0143). Ausente = nenhuma. */
+    /** As famílias em que ESTE dado se reparte (0143), por CHAVE — é a chave
+     *  que a IA precisa escrever em `manualdim:<chave>`. Ausente = nenhuma. */
     reparte_por?: string[];
   }[];
-  /** O catálogo dos eixos (0143). Ausente quando a org não tem família. */
-  familias?: { chave: string; rotulo: string; membros: string[] }[];
+  /** O catálogo dos eixos (0143). Ausente quando a org não tem família.
+   *  O membro sai com CHAVE e rótulo: o valor de um filtro de coordenada é a
+   *  CHAVE, e um filtro escrito com o rótulo passa no validador e não casa com
+   *  nada em runtime (as `coords` guardam chaves). */
+  familias?: {
+    chave: string;
+    rotulo: string;
+    membros: { chave: string; rotulo: string }[];
+  }[];
   lancamentos: ManualModelEntry[];
   /** Quantos lançamentos ficaram de fora do teto. Ausente = nenhum. */
   truncado?: number;
@@ -95,7 +111,10 @@ export function manualBaseModelBlock(
 ): ManualModelBlock {
   const { respById, opById, includeSpread, limit } = opts;
   const declarations = opts.declarations ?? {};
-  const membersOfFamily = new Map<string, string[]>();
+  const membersOfFamily = new Map<
+    string,
+    { chave: string; rotulo: string }[]
+  >();
   for (const f of base.families) {
     membersOfFamily.set(
       f.key,
@@ -103,7 +122,7 @@ export function manualBaseModelBlock(
         .filter((m) => m.family_id === f.id)
         .slice()
         .sort((a, b) => a.sort_order - b.sort_order)
-        .map((m) => m.label)
+        .map((m) => ({ chave: m.key, rotulo: m.label }))
     );
   }
   const memberLabel = (famKey: string, member: string | null): string | null => {
@@ -159,13 +178,12 @@ export function manualBaseModelBlock(
         ...(includeSpread
           ? { distribuicao_padrao: MANUAL_SPREAD_LABELS[s.default_spread] }
           : {}),
-        ...(declared.length > 0
-          ? {
-              reparte_por: declared.map((k) =>
-                familyLabelOfKey(k, base.families)
-              ),
-            }
-          : {}),
+        // Por CHAVE, não por rótulo (18/09/2026): a dimensão que a IA tem de
+        // escrever é `manualdim:<chave>`, e emitir "Canal" aqui a obrigava a
+        // adivinhar a chave "canal" — foi assim que um board real pediu a
+        // família sobre cinco dados que não a declaram e saiu vazio. O rótulo
+        // legível segue em `familias[].rotulo`.
+        ...(declared.length > 0 ? { reparte_por: [...declared] } : {}),
       };
     }),
     ...(base.families.length > 0
