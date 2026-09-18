@@ -1,4 +1,7 @@
-// Versão: 1.2 | Data: 18/09/2026
+// Versão: 1.3 | Data: 18/09/2026
+// v1.3 (18/09/2026): eixo de família sem tupla nenhuma passa a emitir a FORMA
+//   do eixo (uma linha por membro, métricas em "—"/0) em vez de devolver `[]`
+//   e deixar o widget mudo. Ver o bloco no fim de `applyManualBase`.
 // v1.2 (18/09/2026): os mapas passam a guardar REFS, não chaves de dado — é o
 //   que faz o ESCOPO DE MEMBRO (`manual:x@canal=ligacao`) sobreviver até aqui.
 //   Dois refs do MESMO dado com escopos diferentes são operandos DIFERENTES, e
@@ -271,6 +274,53 @@ export function applyManualBase(input: ManualApplyInput): WidgetRow[] {
       recordMetricsDegrade: input.recordMetricsDegrade === true,
     });
     rows.push(row);
+  }
+
+  // v1.3 (18/09/2026): A FORMA DO EIXO quando não sobrou tupla nenhuma.
+  //
+  // Num eixo de família o widget é manual-only e `computeRows` não roda
+  // consulta de registros — chega aqui com `rows` vazio. Se, além disso, todo
+  // dado citado degradou (pediram uma família que ele não declara) ou
+  // simplesmente não há lançamento na janela, `byTuple` fica vazio e esta
+  // função devolvia `[]`: o widget saía MUDO, enquanto o contrato do módulo é
+  // dizer "não sei" em voz alta — o "—". Um board real caiu exatamente aí, com
+  // cinco métricas de nível ∅ sob uma dimensão de família.
+  //
+  // Então emite o eixo: uma linha por MEMBRO declarado, com o valor que cada
+  // ref merece — `null` ("—") se degradou, `0` se o dado tem a família mas
+  // nada caiu na janela. A ordem/rotulagem vêm de graça em runWidget, que
+  // ordena por `sort_order` e troca a chave pelo rótulo.
+  //
+  // Só com UM eixo: em duas famílias cruzadas, quais células existem é
+  // exatamente o que não se sabe, e o produto cartesiano inventaria a
+  // resposta — o mesmo motivo pelo qual não há rateio.
+  const soleAxis =
+    rows.length === 0 && byTuple.size === 0 && plans.length === 1 && plans[0].kind === "family"
+      ? plans[0].axis
+      : null;
+  if (soleAxis != null) {
+    const fam = base.families.find((f) => f.key === soleAxis);
+    const members = fam
+      ? base.members
+          .filter((m) => m.family_id === fam.id)
+          .slice()
+          .sort((a, b) => a.sort_order - b.sort_order)
+      : [];
+    for (const m of members) {
+      rows.push(
+        syntheticRow([m.key], {
+          metricCount,
+          metricIsCount,
+          manualMetricKeys,
+          calcManualKeys,
+          // `undefined` como slot: ref degradado vira null, ref resolvido sem
+          // lançamento na janela vira 0 — a MESMA régua do resto da função.
+          valueOf: (key) => valueOf(undefined, key),
+          evalCalc,
+          recordMetricsDegrade: input.recordMetricsDegrade === true,
+        })
+      );
+    }
   }
 
   return rows;

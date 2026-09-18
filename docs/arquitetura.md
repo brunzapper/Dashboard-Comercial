@@ -6214,6 +6214,20 @@ excluída: "—". Snapshot capturado ANTES da 0143 tem famílias vazias, então 
 eixo nele degrada — consequência correta de "o link compartilhado é um RETRATO";
 passthrough contradiria a decisão de produto da 0142.
 
+**A forma do eixo quando não sobra tupla (18/09/2026).** Degradar é dizer "não
+sei" em voz alta, e o "—" só existe se houver uma linha onde escrevê-lo. Num
+eixo de família não há: o curto-circuito acima entrega `rows = []`, e se TODO
+dado citado degradar (pediram uma família que ele não declara) o `byTuple` fica
+vazio e `applyManualBase` devolvia `[]` — o widget saía MUDO, sem "—" e sem
+pista. Um board real caiu exatamente aí, com cinco métricas de nível ∅ sob uma
+dimensão de família. Hoje, nesse caso, a função emite a FORMA do eixo: uma linha
+por membro declarado, com o valor que cada ref merece — `null` ("—") se
+degradou, `0` se o dado TEM a família e só não houve lançamento na janela (ali 0
+é verdade). A ordem e o rótulo vêm de graça do bloco pós-`computeRows`. Vale só
+para o eixo ÚNICO: em duas famílias cruzadas, quais células existem é
+exatamente o que não se sabe, e o produto cartesiano inventaria a resposta —
+o mesmo motivo pelo qual não há rateio.
+
 #### No contrato da IA
 
 O ALVO de um lançamento passou a ser a TRIPLA dado + período + COORDENADAS: sem
@@ -6225,6 +6239,25 @@ calada se o número tivesse mudado entre a prévia e o Aplicar. No import de
 dashboards, `manualdim:` é aceito como dimensão e filtro em ramo PRÓPRIO: o
 `checkRef` é compartilhado com coluna do modo lista, campo de kanban e barra de
 período, e afrouxá-lo abriria os três.
+
+**O cruzamento dado × família (18/09/2026).** Os dois ramos acima estavam certos
+cada um por si — a família existe, o dado existe — e nenhum conferia se AQUELE
+dado se reparte por AQUELA família, que é o que decide se o número aparece. O
+validador cruza os dois (o contexto já carrega `manualAxes.declarations`) e
+emite AVISO por métrica, nomeando os dados que TÊM o eixo (a metade acionável:
+sem ela o usuário sabe que errou, não por onde sair), mais um aviso próprio
+quando nenhuma métrica se reparte pelo eixo da dimensão — o widget que vai
+ficar mudo. Nunca erro: o board segue aplicável e quem decide é quem lê.
+
+**O dump emite CHAVE onde a IA escreve chave (18/09/2026).**
+`manualBaseModelBlock` mandava `reparte_por` e os membros de `familias` por
+RÓTULO, enquanto o que a IA tem de escrever é `manualdim:<chave da família>` e,
+no filtro de coordenada, a chave do MEMBRO — e um filtro com rótulo passa no
+validador (o valor é passthrough) e não casa com nada em runtime, porque
+`coords` guarda chaves. Hoje `reparte_por` sai por chave e cada membro sai como
+`{ chave, rotulo }`. `coordenadas` segue por rótulo de propósito: ela é LEITURA,
+é compartilhada com o prompt do assistente da Base manual (que funciona como
+está) e agora é mapeável pelo catálogo de `familias`.
 
 #### O assistente (contrato `base-manual-edit` v1)
 
@@ -6947,6 +6980,14 @@ principalmente — para mantenedores humanos.
     registro é atribuível a um membro de família, então repetir a contagem por
     membro dobraria o subtotal — métrica de registro vale `null`, nunca 0. Sem
     linha do RPC não há `dim_*` a reindexar, e os RPCs seguem INTOCADOS.
+    Como o "—" precisa de uma linha onde caber e o curto-circuito não deixa
+    nenhuma, um eixo ÚNICO em que todo dado degradou emite a FORMA do eixo
+    (uma linha por membro: `null` se degradou, `0` se o dado tem a família e
+    nada caiu na janela) em vez de devolver `[]` e deixar o widget mudo;
+    com duas famílias cruzadas, não — quais células existem é justamente o que
+    não se sabe. E o cruzamento dado × família é conferido no VALIDADOR de
+    import (aviso, nunca erro), porque "a família existe" e "o dado existe",
+    checados em separado, deixavam passar o widget que nasce vazio.
 
 ## 6. Convenções do projeto
 

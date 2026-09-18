@@ -1,3 +1,9 @@
+// Versão: 1.3 | Data: 18/09/2026
+// v1.3 (18/09/2026): bloco do CRUZAMENTO dado × família. Os dois ramos já
+//   testados aqui — a família existe, o dado existe — passavam sozinhos num
+//   board que saiu VAZIO, porque ninguém conferia se AQUELE dado se reparte por
+//   AQUELA família. Aviso por métrica (com os dados que têm o eixo) e aviso
+//   próprio para o widget que vai ficar mudo; nunca erro.
 // Versão: 1.2 | Data: 17/09/2026
 // v1.2 (17/09/2026): bloco da métrica da BASE MANUAL — `manual:<chave>` aceita
 //   como métrica (agg forçada a sum), chave desconhecida como ERRO e o prefixo
@@ -749,5 +755,104 @@ describe("manualdim: como dimensão e filtro (0143)", () => {
       ctxAxes
     );
     expect(res.ok).toBe(false);
+  });
+});
+
+// O defeito que estes testes fecham é de BOARD REAL: a IA pediu
+// `manualdim:canal` sobre cinco dados que não se repartem por canal. Cada ramo
+// do validador estava certo sozinho — a família existe, os dados existem — e
+// o cruzamento, que é o que decide se o número aparece, não era conferido.
+describe("cruzamento dado × família (v1.8)", () => {
+  // Um segundo dado, sem declaração nenhuma: é o caso do board real.
+  const ctxMisto: DashboardImportContext = {
+    ...ctxAxes,
+    manualSeries: [
+      ...ctxAxes.manualSeries,
+      {
+        id: "s2",
+        key: "emails",
+        label: "E-mails enviados",
+        default_spread: "ancora",
+        sort_order: 1,
+      },
+    ],
+  };
+
+  it("dado que NÃO se reparte pelo eixo vira AVISO, nunca erro", () => {
+    const res = validateDashboardImport(
+      axisDoc({
+        dimensions: [{ field: "manualdim:canal" }],
+        metrics: [{ field: "manual:emails" }],
+      }),
+      ctxMisto
+    );
+    // O board segue aplicável — quem decide é quem lê.
+    expect(res.ok).toBe(true);
+    expect(res.errors).toEqual([]);
+    const w = res.warnings.join(" ");
+    expect(w).toContain("E-mails enviados");
+    expect(w).toContain("Canal");
+    // A metade ACIONÁVEL: por onde sair.
+    expect(w).toContain("Total de interações");
+  });
+
+  it("e avisa que o widget vai ficar VAZIO quando nenhuma métrica se reparte", () => {
+    const res = validateDashboardImport(
+      axisDoc({
+        dimensions: [{ field: "manualdim:canal" }],
+        metrics: [{ field: "manual:emails" }],
+      }),
+      ctxMisto
+    );
+    expect(res.warnings.join(" ")).toContain("VAZIO");
+  });
+
+  it("com UMA métrica boa o widget não é dado como vazio", () => {
+    const res = validateDashboardImport(
+      axisDoc({
+        dimensions: [{ field: "manualdim:canal" }],
+        metrics: [{ field: "manual:emails" }, { field: "manual:interacoes" }],
+      }),
+      ctxMisto
+    );
+    // A métrica ruim segue avisada; o widget, não — ele vai desenhar.
+    expect(res.warnings.join(" ")).toContain("E-mails enviados");
+    expect(res.warnings.join(" ")).not.toContain("VAZIO");
+  });
+
+  it("o eixo pedido por FILTRO conta igual (ele entra no nível)", () => {
+    const res = validateDashboardImport(
+      axisDoc({
+        metrics: [{ field: "manual:emails" }],
+        filters: [{ field: "manualdim:canal", op: "eq", value: "ligacao" }],
+      }),
+      ctxMisto
+    );
+    expect(res.ok).toBe(true);
+    expect(res.warnings.join(" ")).toContain("E-mails enviados");
+    // Sem eixo na DIMENSÃO o widget não fica vazio: ele é um card, e o card
+    // exibe "—" numa linha que existe.
+    expect(res.warnings.join(" ")).not.toContain("VAZIO");
+  });
+
+  it("dado que SE reparte pelo eixo não gera aviso (não-regressão)", () => {
+    const res = validateDashboardImport(
+      axisDoc({
+        dimensions: [{ field: "manualdim:canal" }],
+        metrics: [{ field: "manual:interacoes" }],
+      }),
+      ctxMisto
+    );
+    expect(res.ok).toBe(true);
+    expect(res.warnings.join(" ")).not.toContain("não se reparte");
+  });
+
+  it("sem eixo nenhum, métrica manual segue sem aviso", () => {
+    const res = validateDashboardImport(
+      axisDoc({ metrics: [{ field: "manual:emails" }] }),
+      ctxMisto
+    );
+    expect(res.ok).toBe(true);
+    expect(res.warnings.join(" ")).not.toContain("não se reparte");
   });
 });
