@@ -1,94 +1,88 @@
-import { schedulePreviewIdle } from "./queue";
-
-/** Remove execução e recorta widgets fora da janela antes de guardar o DOM. */
-export function snapshotDocument(source: Document, width: number, height: number): string {
-  const copyVisible = (node: Node): Node | null => {
-    // O documento é de outro realm: instanceof Element não funciona aqui.
+/** Captura apenas o main já renderizado. Não abre páginas nem dispara consultas. */
+export async function snapshotMain(source: HTMLElement, signal: AbortSignal): Promise<string> {
+  const doc = source.ownerDocument;
+  const viewport = source.getBoundingClientRect();
+  let nodes = 0;
+  const copyVisible = async (node: Node): Promise<Node | null> => {
+    if (signal.aborted) throw new DOMException("Prévia cancelada", "AbortError");
+    if (++nodes % 150 === 0) {
+      // Cede a thread entre blocos: cliques e navegação podem abortar a captura.
+      await new Promise(resolve => setTimeout(resolve, 0));
+      if (signal.aborted) throw new DOMException("Prévia cancelada", "AbortError");
+    }
+    if (nodes > 12_000) throw new Error("Prévia excede o limite de complexidade");
     const element = node.nodeType === 1 ? node as Element : null;
-    if (element?.matches("script,noscript,iframe,object,embed,base,meta[http-equiv],link:not([rel='stylesheet'])")) return null;
+    if (element?.matches("script,noscript,iframe,object,embed,base,meta,link,style,[data-preview-exclude]")) return null;
     if (element?.classList.contains("react-grid-item")) {
       const rect = element.getBoundingClientRect();
-      if (rect.top >= height || rect.left >= width || rect.bottom <= 0 || rect.right <= 0) return null;
+      if (rect.top >= viewport.bottom || rect.left >= viewport.right || rect.bottom <= viewport.top || rect.right <= viewport.left) return null;
     }
-    // Descarta widgets fora da janela ANTES de copiar tabelas e árvores grandes.
     const copy = node.cloneNode(false);
     if (element) for (const attr of [...element.attributes]) {
       if (/^on/i.test(attr.name) || /^(?:javascript|vbscript):/i.test(attr.value.trim())) (copy as Element).removeAttribute(attr.name);
     }
     for (const child of node.childNodes) {
-      const cloned = copyVisible(child);
+      const cloned = await copyVisible(child);
       if (cloned) copy.appendChild(cloned);
     }
     return copy;
   };
-  const clone = copyVisible(source.documentElement) as HTMLElement;
-  const head = clone.querySelector("head")!;
-  const base = source.createElement("base");
-  base.href = source.baseURI;
-  head.prepend(base);
-  const style = source.createElement("style");
-  style.textContent = "html,body{margin:0;overflow:hidden!important}*,*::before,*::after{animation:none!important;transition:none!important;caret-color:transparent!important}";
-  head.append(style);
-  clone.querySelector("body")?.setAttribute("inert", "");
-  return "<!doctype html>" + clone.outerHTML;
+  const main = await copyVisible(source) as HTMLElement;
+  main.style.cssText += `;position:relative;flex:none;width:${source.clientWidth}px;height:${source.clientHeight}px;overflow:hidden;`;
+  const root = doc.documentElement.cloneNode(false) as HTMLElement;
+  const head = doc.createElement("head"), body = doc.createElement("body");
+  // CSS inline: a captura sobrevive a novos deploys sem solicitar chunks antigos.
+  const styles: string[] = [];
+  for (const sheet of doc.styleSheets) {
+    try { styles.push([...sheet.cssRules].map(rule => rule.cssText).join("\n")); }
+    catch { /* CSS cross-origin não é copiado. O app usa folhas same-origin. */ }
+  }
+  const style = doc.createElement("style");
+  style.textContent = styles.join("\n") + "\nhtml,body{margin:0;display:block;overflow:hidden!important}*,*::before,*::after{animation:none!important;transition:none!important;caret-color:transparent!important}";
+  const base = doc.createElement("base"); base.href = doc.baseURI;
+  head.append(base, style);
+  body.setAttribute("inert", ""); body.append(main); root.append(head, body);
+  return "<!doctype html>" + root.outerHTML;
 }
 
-/** Iframe temporário: a captura estática não hidrata React nem executa actions. */
-export function capturePreview(host: HTMLElement, url: string, width: number, height: number, signal: AbortSignal): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const frame = document.createElement("iframe");
-    frame.title = "Preparando prévia";
-    frame.tabIndex = -1;
-    frame.setAttribute("aria-hidden", "true");
-    frame.style.cssText = `position:absolute;left:0;top:0;width:${width}px;height:${height}px;border:0;opacity:0;pointer-events:none;`;
-    let observer: MutationObserver | undefined;
-    let poll: ReturnType<typeof setInterval> | undefined;
-    let cancelIdle: (() => void) | undefined;
-    let done = false;
-    const cleanup = () => {
-      done = true;
-      observer?.disconnect();
-      clearInterval(poll);
-      clearTimeout(timeout);
-      cancelIdle?.();
-      signal.removeEventListener("abort", abort);
-      frame.remove();
-    };
-    const fail = (error: Error) => { if (!done) { cleanup(); reject(error); } };
-    const abort = () => fail(new DOMException("Prévia cancelada", "AbortError"));
-    const timeout = setTimeout(() => fail(new Error("Prévia indisponível")), 25_000);
-    if (signal.aborted) { abort(); return; }
-    signal.addEventListener("abort", abort, { once: true });
-    frame.onerror = () => fail(new Error("Prévia indisponível"));
-    frame.onload = () => {
-      if (done) return;
-      const doc = frame.contentDocument;
-      if (!doc) { fail(new Error("Prévia indisponível")); return; }
-      if (doc.location.pathname !== new URL(url, location.href).pathname) {
-        fail(new Error("Prévia indisponível")); return;
-      }
-      let changedAt = performance.now();
-      observer = new MutationObserver(() => { changedAt = performance.now(); });
-      observer.observe(doc.documentElement, { subtree: true, childList: true, attributes: true, characterData: true });
-      poll = setInterval(() => {
-        if (done || cancelIdle || !doc.querySelector('[data-preview-ready="true"]') ||
-          doc.querySelector('[aria-busy="true"], .animate-spin') ||
-          doc.fonts?.status === "loading" || performance.now() - changedAt < 400) return;
-        cancelIdle = schedulePreviewIdle(() => {
-          if (done || signal.aborted) return;
-          if (performance.now() - changedAt < 400 || doc.querySelector('[aria-busy="true"], .animate-spin')) {
-            cancelIdle = undefined;
-            return;
-          }
-          try {
-            const html = snapshotDocument(doc, width, height);
-            cleanup();
-            resolve(html);
-          } catch { fail(new Error("Prévia indisponível")); }
-        });
-      }, 150);
-    };
-    frame.src = url;
-    host.append(frame);
-  });
+/** Rasterização nativa: cópia do recorte inicial vira uma WebP de até 40 KB.
+ * Sem clone de estilos computados por nó, iframe vivo ou engine adicional. */
+export async function thumbnail(main: HTMLElement, signal: AbortSignal): Promise<string> {
+  const width = main.clientWidth, height = main.clientHeight;
+  const html = await snapshotMain(main, signal);
+  const doc = new DOMParser().parseFromString(html, "text/html");
+  doc.querySelector("base")?.remove();
+  // Recursos de imagem devem estar prontos e embutidos: SVG usado como imagem
+  // não pode buscar sub-recursos. Falha conserva a captura anterior.
+  for (const image of doc.querySelectorAll("img")) {
+    const url = new URL(image.getAttribute("src") ?? "", main.ownerDocument.baseURI);
+    if (url.protocol === "data:") continue;
+    const response = await fetch(url, { signal, priority: "low" });
+    if (!response.ok) throw new Error("Imagem incompleta");
+    const blob = await response.blob();
+    image.src = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader(); reader.onload = () => resolve(reader.result as string);
+      reader.onerror = reject; reader.readAsDataURL(blob);
+    });
+    image.removeAttribute("srcset");
+  }
+  // Fontes externas não são necessárias à identificação dos widgets. Os
+  // tamanhos/posições permanecem; evita baixar/embutir centenas de KB de fontes.
+  const style = doc.createElement("style");
+  style.textContent = "*{font-family:Arial,sans-serif!important}.react-resizable-handle,[data-preview-exclude]{visibility:hidden!important}";
+  doc.head.append(style);
+  const xml = new XMLSerializer().serializeToString(doc.documentElement);
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}"><foreignObject width="100%" height="100%">${xml}</foreignObject></svg>`;
+  const image = new Image(); image.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+  await image.decode();
+  if (signal.aborted) throw new DOMException("Cancelado", "AbortError");
+  const canvas = document.createElement("canvas");
+  canvas.width = 560; canvas.height = Math.round(560 * height / width);
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("Canvas indisponível");
+  ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+  let result = canvas.toDataURL("image/webp", 0.45);
+  if (result.length > 53_356) result = canvas.toDataURL("image/webp", 0.25);
+  if (!result.startsWith("data:image/webp;") || result.length > 53_356) throw new Error("Imagem excede limite");
+  return result;
 }

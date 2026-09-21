@@ -1,94 +1,77 @@
 "use client";
-
+/* Miniaturas já comprimidas e privadas: não passam pelo otimizador público do Next. */
+/* eslint-disable @next/next/no-img-element */
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
-import { previewCache, previewCacheKey } from "@/lib/dashboard-preview/cache";
-import { capturePreview } from "@/lib/dashboard-preview/capture";
+import { cacheImage, imageKey, readLocalImage } from "@/lib/dashboard-preview/store";
 import { usePreviewQueue } from "./preview-queue-context";
 
-/** Reutiliza uma captura inerte; só uma prévia ausente monta o dashboard real. */
-export function DashboardPreview({ id, name, revision, scope }: {
-  id: string; name: string; revision: string; scope: string;
+export interface PreviewImage { version: string; width: number; height: number; access_version: number }
+type RefreshedPreview = { scopeKey: string; base?: string; meta: PreviewImage };
+// Apenas referências, sem pixels: conserva uma publicação recebida depois do
+// RSC ao alternar Lista/Prévia. Epoch diferente nunca reaproveita a referência.
+const published = new Map<string, RefreshedPreview>();
+/** Apenas lê a miniatura pronta; jamais monta dashboard/engine. */
+export function DashboardPreview({ id, name, scope, preview }: {
+  id: string; name: string; scope: string; preview?: PreviewImage;
 }) {
-  const container = useRef<HTMLAnchorElement>(null);
-  const worker = useRef<HTMLSpanElement>(null);
-  const queue = usePreviewQueue();
+  const ref = useRef<HTMLAnchorElement>(null), queue = usePreviewQueue();
   const [visible, setVisible] = useState(false);
-  const [size, setSize] = useState({ width: 1440, height: 900, scale: 0.25, measured: false, theme: "" });
-  const [result, setResult] = useState<{ key: string; html?: string; failed?: boolean } | null>(null);
-  const key = previewCacheKey(scope, id, revision, size.width, size.height, size.theme);
+  const scopeKey = JSON.stringify([scope,id]);
+  const [fresh, setFresh] = useState<RefreshedPreview | undefined>(() => published.get(scopeKey));
+  const [result, setResult] = useState<{key: string; image: string; scope: string; id: string; meta: PreviewImage}>();
+  const validFresh = fresh?.scopeKey === scopeKey &&
+    (fresh.base === preview?.version || fresh.meta.version === preview?.version) &&
+    (!preview || fresh.meta.access_version === preview.access_version);
+  const meta = validFresh ? fresh?.meta : preview;
+  const key = meta ? imageKey(scope,id,meta.version) : "";
   useEffect(() => {
-    const element = container.current;
-    if (!element) return;
-    const measure = () => {
-      const width = Math.max(320, document.querySelector("main[data-app-main]")?.clientWidth || window.innerWidth);
-      const height = window.innerHeight, scale = element.clientWidth / width;
-      const root = document.documentElement;
-      const theme = root.className + root.style.cssText;
-      setSize((prev) => prev.width === width && prev.height === height && prev.scale === scale && prev.theme === theme && prev.measured
-        ? prev : { width, height, scale, measured: true, theme });
-    };
-    const resize = new ResizeObserver(measure);
-    resize.observe(element);
-    const theme = new MutationObserver(measure);
-    theme.observe(document.documentElement, { attributes: true, attributeFilter: ["class", "style"] });
-    window.addEventListener("resize", measure);
-    measure();
     const observer = new IntersectionObserver(([entry]) => setVisible(entry.isIntersecting));
-    observer.observe(element);
-    return () => {
-      resize.disconnect();
-      theme.disconnect();
-      observer.disconnect();
-      window.removeEventListener("resize", measure);
-    };
+    if (ref.current) observer.observe(ref.current);
+    return () => observer.disconnect();
   }, []);
-
   useEffect(() => {
-    const element = container.current, host = worker.current;
-    if (!visible || !size.measured || !element || !host) return;
-    return queue.enqueue({
-      bounds: () => (element.closest("[data-hub-card]") ?? element).getBoundingClientRect(),
-      run: async (signal) => {
-        try {
-          const cached = previewCache.get(key);
-          const html = cached ?? await capturePreview(host, `/dashboards/${id}/preview`, size.width, size.height, signal);
-          if (signal.aborted) return;
-          if (!cached) previewCache.set(key, html);
-          setResult({ key, html });
-        } catch {
-          if (!signal.aborted) setResult({ key, failed: true });
-        }
-      },
-    });
-  }, [id, key, queue, visible, size.measured, size.width, size.height]);
-
-  const current = result?.key === key ? result : null;
-  return (
-    <Link
-      ref={container}
-      href={`/dashboards/${id}`}
-      prefetch={false}
-      aria-label={`Abrir dashboard ${name}`}
-      className="bg-muted relative mx-3 block overflow-hidden rounded-md border focus-visible:ring-2 focus-visible:ring-ring"
-      style={{ aspectRatio: `${size.width} / ${size.height}` }}
-    >
-      <span className="text-muted-foreground absolute inset-0 flex items-center justify-center text-xs" aria-hidden>
-        {current?.failed ? "Abra o dashboard para visualizar" : "Preparando prévia…"}
-      </span>
-      <span ref={worker} aria-hidden />
-      {visible && current?.html ? (
-        <iframe
-          title={`Prévia de ${name}`}
-          srcDoc={current.html}
-          sandbox="allow-same-origin"
-          data-preview-static
-          tabIndex={-1}
-          aria-hidden
-          className="bg-background pointer-events-none absolute top-0 left-0 origin-top-left border-0"
-          style={{ width: size.width, height: size.height, transform: `scale(${size.scale})` }}
-        />
-      ) : null}
-    </Link>
-  );
+    const changed = (event: Event) => {
+      if ((event as CustomEvent).detail !== id) return;
+      void fetch(`/api/dashboard-previews/${id}?metadata`, {cache:"no-store",priority:"low"})
+        .then(r => r.ok ? r.json() : null).then(m => {
+          if(!m?.preview) return;
+          const entry={scopeKey,base:preview?.version,meta:m.preview};
+          // Não reusar uma antiga captura quando o RSC não autorizou nenhuma.
+          if(preview) { published.set(scopeKey,entry); if(published.size>200)published.delete(published.keys().next().value!); }
+          setFresh(entry);
+        }).catch(() => {});
+    };
+    window.addEventListener("dashboard-preview-published", changed);
+    return () => window.removeEventListener("dashboard-preview-published", changed);
+  }, [id,scopeKey,preview]);
+  useEffect(() => {
+    if (!key || !visible || !ref.current || !meta) return;
+    return queue.enqueue({ bounds: () => ref.current!.getBoundingClientRect(), run: async signal => {
+      let image = (await readLocalImage(key))?.image;
+      if (!image) {
+        const response = await fetch(`/api/dashboard-previews/${id}?v=${meta.version}`, {signal, priority:"low"});
+        if (!response.ok) return;
+        const blob = await response.blob();
+        image = await new Promise<string>((resolve,reject) => {
+          const reader = new FileReader(); reader.onload=()=>resolve(reader.result as string); reader.onerror=reject; reader.readAsDataURL(blob);
+        });
+        if (signal.aborted) return;
+        await cacheImage(key,image);
+      }
+      const decoded = new Image(); decoded.src=image; await decoded.decode();
+      if (!signal.aborted) setResult({key,image,scope,id,meta});
+    }});
+  }, [id,key,meta,queue,visible,scope]);
+  const shown = result?.scope === scope && result.id === id && result.meta.access_version === meta?.access_version ? result : undefined;
+  const dimensions = shown?.meta ?? meta;
+  return <Link ref={ref} href={`/dashboards/${id}`} prefetch={false} aria-label={`Abrir dashboard ${name}`}
+    className="bg-muted relative mx-3 block overflow-hidden rounded-md border focus-visible:ring-2 focus-visible:ring-ring"
+    style={{aspectRatio:dimensions ? `${dimensions.width} / ${dimensions.height}` : "16 / 9"}}>
+    <span className="text-muted-foreground absolute inset-0 flex items-center justify-center text-xs" aria-hidden>
+      {meta ? "" : "Prévia ainda não preparada"}
+    </span>
+    {shown ? <img src={shown.image} alt="" aria-hidden decoding="async"
+      className="pointer-events-none absolute inset-0 h-full w-full object-cover" /> : null}
+  </Link>;
 }

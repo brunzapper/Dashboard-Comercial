@@ -3,7 +3,7 @@ export interface PreviewJob {
   run: (signal: AbortSignal) => Promise<void>;
 }
 
-/** Uma captura por vez, linhas de cima para baixo, da esquerda para a direita.
+/** Uma leitura de captura por vez, linhas de cima para baixo, da esquerda para a direita.
  * O agendador é injetado para testar a fila sem relógio/DOM reais.
  */
 export class PreviewQueue {
@@ -67,17 +67,10 @@ export class PreviewQueue {
   }
 }
 
-/** Não usa timeout no idle callback: trabalho do usuário sempre tem precedência. */
-export function schedulePreviewIdle(callback: () => void): () => void {
-  let idle: number | undefined;
-  let fallback: ReturnType<typeof setTimeout> | undefined;
-  const timer = setTimeout(() => {
-    if (window.requestIdleCallback) idle = window.requestIdleCallback(callback);
-    else fallback = setTimeout(callback, 100);
-  }, 150);
-  return () => {
-    clearTimeout(timer);
-    if (idle !== undefined) window.cancelIdleCallback(idle);
-    if (fallback !== undefined) clearTimeout(fallback);
-  };
+/** Cede a thread sem depender de requestIdleCallback: ele pode nunca executar
+ * durante animações/atividade contínua. Consumidores pausam na interação e
+ * debouncam a preparação; leituras de miniaturas prontas são apenas IO. */
+export function schedulePreviewTask(callback: () => void): () => void {
+  const timer = setTimeout(callback, 0);
+  return () => clearTimeout(timer);
 }

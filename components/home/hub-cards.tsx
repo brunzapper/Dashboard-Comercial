@@ -50,12 +50,13 @@ import {
 import { CardGrid } from "@/components/ui/card-grid";
 import { PinButton } from "./pin-button";
 import { useHubDisplay } from "./hub-display-context";
-import { DashboardPreview } from "./dashboard-preview";
+import { DashboardPreview, type PreviewImage } from "./dashboard-preview";
 import { sortHubItems, type HubSortDates } from "@/lib/config/hub-sort";
 
 export const TRASH_TTL_MS = 14 * 86_400_000; // purga em 14 dias (0087)
 
 export interface DashboardRow extends HubSortDates {
+  preview?: PreviewImage;
   id: string;
   name: string;
   description: string | null;
@@ -154,7 +155,7 @@ export function BoardCard({
         {access ? <CardDescription>{access}</CardDescription> : null}
       </CardHeader>
       {display.layout === "preview" && !kanban && !trashed ? (
-        <DashboardPreview id={row.id} name={row.name} revision={row.updated_at ?? row.created_at ?? ""} scope={previewScope} />
+        <DashboardPreview id={row.id} name={row.name} preview={row.preview} scope={previewScope} />
       ) : null}
       <div className="absolute top-3 right-3 flex items-center">
         {trashed ? null : (

@@ -67,6 +67,8 @@
 // (siblings ao builder).
 "use client";
 
+import { PreviewRecorder } from "./preview-recorder";
+
 import { RecordFocusProvider } from "./record-focus-context";
 import { AiSuggestionsProvider } from "./ai-suggestions-context";
 import { AiSuggestionsDock } from "./ai-suggestions-dock";
@@ -199,6 +201,7 @@ function rebuildTabsFromWidgets(
 }
 
 export function DashboardClient({
+  previewCapture,
   dashboardId,
   dashboardName,
   historySeed,
@@ -246,6 +249,7 @@ export function DashboardClient({
   focusWidgetId,
   laserColor,
 }: {
+  previewCapture?: { scope: string };
   dashboardId: string;
   dashboardName: string;
   historySeed: DashboardSnapshot;
@@ -1068,6 +1072,8 @@ export function DashboardClient({
         clique da tabela) e some ao trocar de aba — com o estado lá dentro, a
         análise em curso morria junto. */}
     <AiSuggestionsProvider>
+    {previewCapture ? <PreviewRecorder id={dashboardId} {...previewCapture}
+      ready={!renaming && activeTabId === firstTabId && !engineLoading && (engineIds.length === 0 || engineData !== null)} /> : null}
     <div className="flex flex-col gap-4" data-preview-ready={!engineLoading && (engineIds.length === 0 || engineData !== null)}>
       {/* data-board-chrome = cabeçalho + abas. O marcador NÃO pode envolver o
           grid: a regra de texto secundário (globals.css) alcança descendentes e

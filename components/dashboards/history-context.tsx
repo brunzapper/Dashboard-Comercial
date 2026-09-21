@@ -96,6 +96,7 @@ export function DashboardHistoryProvider({
     baselineRef.current = snap;
     baselineJsonRef.current = j;
     syncFlags();
+    window.dispatchEvent(new CustomEvent("dashboard-structure-saved", { detail: dashboardId }));
   }
 
   // Observer: só re-executa quando o CONTEÚDO do seed muda (dep = string), então
@@ -131,7 +132,10 @@ export function DashboardHistoryProvider({
         restoreDashboardSnapshot(dashboardId, target),
         "Não foi possível desfazer"
       );
-      if (res?.ok) router.refresh();
+      if (res?.ok) {
+        window.dispatchEvent(new CustomEvent("dashboard-structure-saved", { detail: dashboardId }));
+        router.refresh();
+      }
     } finally {
       setIsRestoring(false);
     }

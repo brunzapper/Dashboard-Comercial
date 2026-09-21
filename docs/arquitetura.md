@@ -1337,22 +1337,33 @@ RLS ligado com **zero políticas de escrita** — escrita só via service role.
   `TrackLastView` registra só montagem real, nunca prefetch/prévia. Alterar,
   inserir ou excluir widgets carimba `dashboards.updated_at` via trigger.
   A lista tem largura intrínseca compartilhada pelo maior card, limitada à tela.
-  A prévia usa uma captura DOM estática (incluindo os gráficos SVG), sem
-  scripts/hidratação/actions, exibida em iframe `srcDoc` com sandbox SEM
-  `allow-scripts`. O cache LRU privado em memória (12 MiB, máximo 30 minutos,
-  sem disco) é chaveado por usuário, dashboard, `updated_at`, viewport e tema.
-  Abrir novamente no Workspace reusa a captura; mudar a estrutura invalida a
-  chave. A janela renderiza em tamanho normal e só a miniatura é escalada.
-  Widgets fora do recorte superior esquerdo são removidos da captura.
-  Uma captura ausente usa TEMPORARIAMENTE `/dashboards/[id]/preview`, com o
-  mesmo loader/ACL do dashboard e sem interação (`inert`). A fila é única por
-  Workspace: só cards visíveis, de cima para baixo e da ESQUERDA para a DIREITA,
-  uma captura por vez em idle. Espera hidratação/dados deferidos e estabilização
-  do DOM; ao concluir, remove o iframe vivo. Interações pausam e navegação
-  cancela o iframe ativo e a fila sem await; requests já recebidos pelo servidor
-  podem terminar lá, mas o cliente não espera por eles. Não grava visitas nem
-  abre realtime. Só a rota de captura permite embedding SAMEORIGIN/`frame-ancestors
-  'self'`; as demais mantêm DENY. Kanbans continuam como cards nesse formato.
+  Prévias (0145) são WebP de 560px e até 40 KB, guardadas no bucket PRIVADO
+  `dashboard-previews`. Postgres mantém só metadados em
+  `dashboard_preview_images`, sem base64/HTML. O Workspace lê esses metadados
+  em lote e carrega imagens prontas, esquerda→direita; nunca roda engine,
+  actions de gráficos ou iframe vivo. Cache local IndexedDB de 8 MiB evita
+  novo download após reload e troca de visualização. Chave = usuário/id/versão.
+  `PreviewRecorder` usa o DOM já renderizado na primeira aba, sem rolagem,
+  após estabilização e fim do carregamento. Cópia cede a thread em blocos e
+  é cancelável; rasterização nativa reduz resolução/qualidade, priorizando a
+  disposição dos widgets. Sem dependência de captura externa/fontes grandes.
+  A candidata completa entra numa outbox IndexedDB separada (8 MiB).
+  `PreviewPublisher` no layout só publica após sair do dashboard, em idle,
+  via POST de baixa prioridade independente das server actions de navegação.
+  Falha mantém a anterior; outbox permite retentar após reload/online.
+  `publish_dashboard_preview` compara revisão e epoch de acesso em transação;
+  upload é de nome único, pointer swap atômico, cleanup do objeto substituído.
+  O cliente só troca depois de decodificar a nova imagem. Não invalida por
+  tamanho/tema do Workspace nem por tempo (é uma captura estrutural).
+  RLS revalida board/org/usuário; não basta o papel, pois responsáveis,
+  overrides e traduções de operação são pessoais. Alterações de ACL invalidam
+  imagens antigas (`dashboard_preview_access_epoch`); sync de nomes/datas não.
+  `/preparar-previas` oferece carga inicial explícita ou importação de miniaturas
+  da mesma conta. Só essa preparação usa `/dashboards/[id]/preview`; nenhuma
+  captura inicial roda automaticamente ao entrar no Workspace. Kanbans seguem
+  como cards. Imagens não disponíveis mostram estado estático, nunca spinner
+  aguardando gráficos. A rota de preparação viva mantém SAMEORIGIN; o restante
+  permanece DENY, e não registra visitas/realtime/edições.
   As sub-abas de **Configurações** seguem sendo ABAS (a navegação focada de
   `/operacao` foi tentada ali e revertida: são poucas áreas, relacionadas e
   visitadas em sequência). O botão de voltar leva à tela ANTERIOR, não a um

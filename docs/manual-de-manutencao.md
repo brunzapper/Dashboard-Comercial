@@ -2,15 +2,33 @@
 
 ### Atualização do Workspace (0144)
 
-**Otimização das prévias (sem migração adicional):** a captura estática fica
-em cache LRU em memória por usuário/dashboard/alteração/viewport/tema, até
-12 MiB e 30 minutos. Voltar ao Workspace ou alternar Cartão/Prévia reaproveita
-o DOM sem executar novamente o dashboard. Recarregar a aba limpa a memória;
-mudança de estrutura, tema ou tamanho da janela pode exigir nova captura.
-Conferir no Network: uma rota `/preview` por vez, na ordem visual da esquerda
-para a direita; após capturar, só iframe `srcDoc` sem scripts. Navegar deve
-remover o iframe ativo imediatamente e descartar os próximos. Falha/timeout
-de um card não bloqueia os demais; o link normal do dashboard continua ativo.
+**Prévias prontas (0145):** aplicar `0145_dashboard_preview_images.sql` antes
+ do frontend. Ela cria metadados, epoch de acesso, RPC de publicação e bucket
+ privado WebP. Nenhum binário vai para a tabela da aplicação. Não tornar o
+ bucket público nem criar policy anon. O cleanup de arquivos substituídos usa
+ service role SOMENTE para caminhos derivados do usuário autenticado.
+
+Carga inicial: entrar em `/preparar-previas` com a conta cujo acesso aos dados
+será capturado e usar **Preparar capturas iniciais**. Também aceita JSON de
+miniaturas prontas (`viewerEmail`, `capturedAt`, `previews` com dashboardId,
+image WebP data URL, width, height). Não importar captura de administrador
+para vendedor. Import rejeita conta diferente e dashboard alterado depois da
+captura. Repetir por contexto de acesso; o escopo conservador é por usuário,
+porque papéis iguais não garantem os mesmos registros/overrides.
+
+Após isso, Workspace só lê imagens de até 40 KB. Cache IndexedDB de 8 MiB
+reusa por usuário/id/versão; outbox separada de 8 MiB retenta publicação depois
+de sair do dashboard. Uma revisão nova só substitui a imagem anterior quando
+completa; erro, quota, offline ou saída antes de estabilizar conservam a anterior.
+Captura incompleta é tentada ao reabrir o dashboard. Alteração de ACL oculta
+capturas antigas; é necessário preparar uma nova visão autorizada.
+
+Verificar Network: ZERO `/dashboards/*/preview` ao abrir Workspace, mesmo
+sem cache. Imagens chegam esquerda→direita; voltar/recarregar usa IndexedDB.
+Editar um dashboard, aguardar estabilização, sair e confirmar publicação em
+baixa prioridade sem bloquear navegação. Durante upload/download, a imagem
+anterior deve permanecer. Testar revisão concorrente (409), RLS entre usuários
+/orgs, revogação de campo/base e offline seguido de online.
 
 Aplicar `supabase/migrations/0144_workspace_display.sql` antes de publicar o
 frontend: ela cria `patch_user_ui_prefs`, `workspace_visits` e o trigger de
