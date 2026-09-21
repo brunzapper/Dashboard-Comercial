@@ -1,3 +1,4 @@
+// v2.0 | 21/09/2026 — testes ajustados para concorrência limitada (até 3 jobs)
 import { describe, expect, it, vi } from "vitest";
 import { PreviewQueue, type PreviewJob } from "./queue";
 
@@ -8,34 +9,40 @@ function setup() {
   return { queue, tick, idle };
 }
 describe("fila de prévias", () => {
-  it("carrega uma por vez, esquerda→direita e depois a linha seguinte, não na ordem de inscrição", async () => {
+  it("carrega até 3 em paralelo, esquerda→direita e depois a linha seguinte", async () => {
     const { queue, tick } = setup();
     const order: string[] = [];
-    let release!: () => void;
-    for (const [name, top, left] of [["third", 200, 0], ["second", 0, 200], ["first", 0, 0]] as const) {
+    const releases: (() => void)[] = [];
+    for (const [name, top, left] of [["fourth", 200, 0], ["third", 0, 300], ["second", 0, 200], ["first", 0, 0]] as const) {
       queue.enqueue({ bounds: () => ({ top, left }), run: async () => {
         order.push(name);
-        if (name === "first") await new Promise<void>((resolve) => { release = resolve; });
+        await new Promise<void>((resolve) => { releases.push(resolve); });
       } });
     }
+    // v2.0: primeiro tick inicia os 3 primeiros jobs de uma vez (ordenados)
     await tick(); await tick();
-    expect(order).toEqual(["first"]);
-    release(); await tick(); await tick(); await tick();
     expect(order).toEqual(["first", "second", "third"]);
+    // Libera o primeiro; o quarto deve iniciar
+    releases[0](); await tick(); await tick();
+    expect(order).toEqual(["first", "second", "third", "fourth"]);
   });
-  it("navegação cancela o ativo e descarta os próximos imediatamente", async () => {
+  it("navegação cancela os ativos e descarta os pendentes", async () => {
     const { queue, tick } = setup();
-    let active!: AbortSignal;
-    const next = vi.fn();
-    queue.enqueue({ bounds: () => ({ top: 0, left: 0 }), run: (signal) => new Promise((resolve) => {
-      active = signal;
-      signal.addEventListener("abort", () => resolve());
-    }) });
-    queue.enqueue({ bounds: () => ({ top: 0, left: 100 }), run: next });
-    await tick(); queue.stop();
-    expect(active.aborted).toBe(true);
+    const signals: AbortSignal[] = [];
+    const pending = vi.fn();
+    // 3 jobs ativos + 1 pendente
+    for (let i = 0; i < 3; i++) {
+      queue.enqueue({ bounds: () => ({ top: 0, left: i * 100 }), run: (signal) => new Promise((resolve) => {
+        signals.push(signal);
+        signal.addEventListener("abort", () => resolve());
+      }) });
+    }
+    queue.enqueue({ bounds: () => ({ top: 100, left: 0 }), run: pending });
+    await tick();
+    queue.stop();
+    for (const signal of signals) expect(signal.aborted).toBe(true);
     await tick(); await tick();
-    expect(next).not.toHaveBeenCalled();
+    expect(pending).not.toHaveBeenCalled();
   });
   it("uma falha libera a fila e desmontar remove o job pendente", async () => {
     const { queue, tick } = setup();

@@ -1,3 +1,5 @@
+// v2.0 | 21/09/2026 — removida pausa em interação (pointerdown/keydown);
+// rolar e clicar dentro do hub NÃO interrompem o carregamento das prévias.
 "use client";
 
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
@@ -10,18 +12,9 @@ export function PreviewQueueProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     queue.start();
     let navigating = false;
-    let resume: ReturnType<typeof setTimeout> | undefined;
-    // Pausa imediatamente; o cleanup descarta a fila ao desmontar. Manter os
-    // descritores até lá permite restaurar a página pelo BFCache do browser.
-    const stop = () => { navigating = true; clearTimeout(resume); queue.pause(); };
+    const stop = () => { navigating = true; queue.pause(); };
     const restore = (event: PageTransitionEvent) => {
       if (event.persisted) { navigating = false; queue.start(); }
-    };
-    const interact = () => {
-      if (navigating) return;
-      clearTimeout(resume);
-      queue.pause();
-      resume = setTimeout(() => { if (!document.hidden) queue.start(); }, 300);
     };
     const visibility = () => {
       if (navigating) return;
@@ -35,20 +28,14 @@ export function PreviewQueueProvider({ children }: { children: ReactNode }) {
       const url = new URL(anchor.href, location.href);
       if (url.origin !== location.origin || url.pathname !== location.pathname || url.search !== location.search) stop();
     };
-    // Capture roda antes do Link/Router; não preventDefault e não await.
     document.addEventListener("click", navigate, true);
-    document.addEventListener("pointerdown", interact, true);
-    document.addEventListener("keydown", interact, true);
     document.addEventListener("visibilitychange", visibility);
     window.addEventListener("pagehide", stop);
     window.addEventListener("pageshow", restore);
     window.addEventListener("popstate", stop);
     return () => {
       document.removeEventListener("click", navigate, true);
-      document.removeEventListener("pointerdown", interact, true);
-      document.removeEventListener("keydown", interact, true);
       document.removeEventListener("visibilitychange", visibility);
-      clearTimeout(resume);
       window.removeEventListener("pagehide", stop);
       window.removeEventListener("pageshow", restore);
       window.removeEventListener("popstate", stop);
