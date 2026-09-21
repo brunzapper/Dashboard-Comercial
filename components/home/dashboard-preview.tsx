@@ -6,10 +6,10 @@ import { useEffect, useRef, useState } from "react";
 import { cacheImage, imageKey, readLocalImage } from "@/lib/dashboard-preview/store";
 import { usePreviewQueue } from "./preview-queue-context";
 
+// v2.0 | 21/09/2026 — prévia stale (access_version < epoch) é EXIBIDA
+// normalmente; a recaptura é automática na próxima visita ao dashboard.
 export interface PreviewImage { version: string; width: number; height: number; access_version: number }
 type RefreshedPreview = { scopeKey: string; base?: string; meta: PreviewImage };
-// Apenas referências, sem pixels: conserva uma publicação recebida depois do
-// RSC ao alternar Lista/Prévia. Epoch diferente nunca reaproveita a referência.
 const published = new Map<string, RefreshedPreview>();
 /** Apenas lê a miniatura pronta; jamais monta dashboard/engine. */
 export function DashboardPreview({ id, name, scope, preview }: {
@@ -20,9 +20,10 @@ export function DashboardPreview({ id, name, scope, preview }: {
   const scopeKey = JSON.stringify([scope,id]);
   const [fresh, setFresh] = useState<RefreshedPreview | undefined>(() => published.get(scopeKey));
   const [result, setResult] = useState<{key: string; image: string; scope: string; id: string; meta: PreviewImage}>();
+  // v2.0: epoch não é mais gate na RLS — prévia stale é exibida e recapturada
+  // na próxima visita ao dashboard; validação não compara access_version.
   const validFresh = fresh?.scopeKey === scopeKey &&
-    (fresh.base === preview?.version || fresh.meta.version === preview?.version) &&
-    (!preview || fresh.meta.access_version === preview.access_version);
+    (fresh.base === preview?.version || fresh.meta.version === preview?.version);
   const meta = validFresh ? fresh?.meta : preview;
   const key = meta ? imageKey(scope,id,meta.version) : "";
   useEffect(() => {
@@ -63,7 +64,8 @@ export function DashboardPreview({ id, name, scope, preview }: {
       if (!signal.aborted) setResult({key,image,scope,id,meta});
     }});
   }, [id,key,meta,queue,visible,scope]);
-  const shown = result?.scope === scope && result.id === id && result.meta.access_version === meta?.access_version ? result : undefined;
+  // v2.0: sem comparação de access_version — prévia stale é exibida
+  const shown = result?.scope === scope && result.id === id ? result : undefined;
   const dimensions = shown?.meta ?? meta;
   return <Link ref={ref} href={`/dashboards/${id}`} prefetch={false} aria-label={`Abrir dashboard ${name}`}
     className="bg-muted relative mx-3 block overflow-hidden rounded-md border focus-visible:ring-2 focus-visible:ring-ring"

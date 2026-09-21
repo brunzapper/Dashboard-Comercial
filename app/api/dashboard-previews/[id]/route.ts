@@ -1,28 +1,41 @@
+// v2.0 | 21/09/2026 — cache HTTP para imagens versionadas + query otimizada
+// (removida query separada de dashboards no GET de imagem — a RLS de
+// dashboard_preview_images já garante auth_board_visible + status <> 'trashed')
 import { createServiceClient } from "@/lib/supabase/service";
 import { createClient } from "@/lib/supabase/server";
 import { getSessionInfo } from "@/lib/auth/session";
 import { validPreviewUpload } from "@/lib/dashboard-preview/validation";
 
 const BUCKET = "dashboard-previews";
-const headers = { "Cache-Control": "private, no-store" };
+const noStore = { "Cache-Control": "private, no-store" };
 type Context = { params: Promise<{ id: string }> };
 
 export async function GET(request: Request, context: Context) {
   const { id } = await context.params;
+  const url = new URL(request.url);
   const supabase = await createClient();
-  const { data: dashboard } = await supabase.from("dashboards").select("updated_at, status").eq("id", id).maybeSingle();
-  if (!dashboard || dashboard.status === "trashed") return new Response(null, { status: 404, headers });
-  const { data: preview } = await supabase.from("dashboard_preview_images")
-    .select("version, revision, object_path, width, height, access_version").eq("dashboard_id", id).maybeSingle();
-  if (new URL(request.url).searchParams.has("metadata")) {
+  // v2.0: ?metadata ainda precisa de dashboards.updated_at para o recorder
+  if (url.searchParams.has("metadata")) {
+    const { data: dashboard } = await supabase.from("dashboards").select("updated_at, status").eq("id", id).maybeSingle();
+    if (!dashboard || dashboard.status === "trashed") return new Response(null, { status: 404, headers: noStore });
+    const { data: preview } = await supabase.from("dashboard_preview_images")
+      .select("version, revision, object_path, width, height, access_version").eq("dashboard_id", id).maybeSingle();
     const { data: epoch } = await supabase.from("dashboard_preview_access_epoch").select("version").single();
-    if (!epoch) return new Response(null, { status: 503, headers });
-    return Response.json({ revision: dashboard.updated_at, accessVersion: epoch.version, preview }, { headers });
+    if (!epoch) return new Response(null, { status: 503, headers: noStore });
+    return Response.json({ revision: dashboard.updated_at, accessVersion: epoch.version, preview }, { headers: noStore });
   }
-  if (!preview || preview.version !== new URL(request.url).searchParams.get("v")) return new Response(null, { status: 404, headers });
+  // v2.0: GET de imagem — RLS de dashboard_preview_images já filtra por
+  // auth_board_visible + status <> 'trashed'; sem query extra de dashboards
+  const { data: preview } = await supabase.from("dashboard_preview_images")
+    .select("version, object_path").eq("dashboard_id", id).maybeSingle();
+  if (!preview || preview.version !== url.searchParams.get("v")) return new Response(null, { status: 404, headers: noStore });
   const { data, error } = await supabase.storage.from(BUCKET).download(preview.object_path);
-  if (error || !data) return new Response(null, { status: 404, headers });
-  return new Response(data, { headers: { ...headers, "Content-Type": "image/webp", "X-Content-Type-Options": "nosniff" } });
+  if (error || !data) return new Response(null, { status: 404, headers: noStore });
+  // v2.0: imagem versionada por UUID — cache privado de 24h, imutável
+  return new Response(data, { headers: {
+    "Cache-Control": "private, max-age=86400, immutable",
+    "Content-Type": "image/webp", "X-Content-Type-Options": "nosniff",
+  } });
 }
 
 export async function POST(request: Request, context: Context) {
