@@ -21,6 +21,7 @@ export function RouteTracker() {
   const pathname = usePathname();
 
   useEffect(() => {
+    if (window.self !== window.top) return;
     trackRoute(pathname + window.location.search);
   }, [pathname]);
 

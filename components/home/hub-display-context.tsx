@@ -19,16 +19,18 @@ import {
   useCallback,
   useContext,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
 
 import { useBackgroundSave } from "@/lib/feedback/use-background-save";
 import { saveUiPrefs } from "@/app/(app)/dashboards/actions";
-import type { HubLayout, UiPrefKey, UiPrefs } from "@/lib/config/ui-prefs";
+import type { HubLayout, HubSort, UiPrefKey, UiPrefs } from "@/lib/config/ui-prefs";
 
 export interface HubDisplay {
   layout: HubLayout;
+  sort?: HubSort;
   columns: number;
   /** Altura mínima do card em px; 0 = automática. */
   cardHeight: number;
@@ -39,6 +41,7 @@ export interface HubDisplay {
 /** Em qual chave de preferência cada campo desta família é gravado. */
 export interface HubDisplayKeys {
   layout: UiPrefKey;
+  sort?: UiPrefKey;
   columns: UiPrefKey;
   cardHeight: UiPrefKey;
   showDescription: UiPrefKey;
@@ -55,6 +58,9 @@ interface HubDisplayValue {
 }
 
 const Ctx = createContext<HubDisplayValue | null>(null);
+
+// Serializa também trocas rápidas entre as famílias do hub.
+let writes: Promise<unknown> = Promise.resolve();
 
 export function useHubDisplay(): HubDisplayValue {
   const ctx = useContext(Ctx);
@@ -76,11 +82,14 @@ export function HubDisplayProvider({
   children: ReactNode;
 }) {
   const [display, setDisplay] = useState(initial);
+  const current = useRef(initial);
+  const confirmed = useRef(initial);
+  const revisions = useRef<Partial<Record<keyof HubDisplay, number>>>({});
   const { save, pendingKeys } = useBackgroundSave();
   const lockedSet = useMemo(() => new Set(locked), [locked]);
 
   const isLocked = useCallback(
-    (field: keyof HubDisplay) => lockedSet.has(keys[field]),
+    (field: keyof HubDisplay) => !keys[field] || lockedSet.has(keys[field]!),
     [lockedSet, keys]
   );
 
@@ -89,29 +98,47 @@ export function HubDisplayProvider({
       const entries = (Object.keys(patch) as (keyof HubDisplay)[]).filter(
         // Chave travada pela organização não é gravada nem aplicada: o
         // controle já vem desabilitado, isto é o cinto de segurança.
-        (field) => !lockedSet.has(keys[field]) && patch[field] !== undefined
+        (field) => keys[field] && !lockedSet.has(keys[field]!) && patch[field] !== undefined
       );
       if (entries.length === 0) return;
 
-      const before = { ...display };
-      setDisplay((prev) => ({ ...prev, ...patch }));
-
+      const accepted = Object.fromEntries(entries.map((field) => [field, patch[field]]));
+      current.current = { ...current.current, ...accepted };
+      setDisplay(current.current);
+      const versions = Object.fromEntries(entries.map((field) => {
+        const version = (revisions.current[field] ?? 0) + 1;
+        revisions.current[field] = version;
+        return [field, version];
+      }));
       const prefPatch: UiPrefs = {};
       for (const field of entries) {
-        (prefPatch as Record<string, unknown>)[keys[field]] = patch[field];
+        (prefPatch as Record<string, unknown>)[keys[field]!] = patch[field];
       }
       save({
         key: entries.map((f) => keys[f]).join(","),
         context: "Não foi possível salvar a preferência de exibição",
-        action: () => saveUiPrefs(prefPatch),
-        revert: () => setDisplay(before),
+        action: () => {
+          const write = writes.then(() => saveUiPrefs(prefPatch));
+          writes = write.catch(() => {});
+          return write.then((result) => {
+            if (result.ok) confirmed.current = { ...confirmed.current, ...accepted };
+            return result;
+          });
+        },
+        revert: () => {
+          const rollback = Object.fromEntries(entries
+            .filter((field) => revisions.current[field] === versions[field])
+            .map((field) => [field, confirmed.current[field]]));
+          current.current = { ...current.current, ...rollback };
+          setDisplay(current.current);
+        },
         // SEM refresh: o recorte já está aplicado no cliente, e um
         // router.refresh() aqui reentregaria o valor antigo do servidor por
         // cima do que a pessoa acabou de escolher.
         reconcile: false,
       });
     },
-    [display, keys, lockedSet, save]
+    [keys, lockedSet, save]
   );
 
   const value = useMemo<HubDisplayValue>(

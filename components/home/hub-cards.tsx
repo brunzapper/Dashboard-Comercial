@@ -50,10 +50,12 @@ import {
 import { CardGrid } from "@/components/ui/card-grid";
 import { PinButton } from "./pin-button";
 import { useHubDisplay } from "./hub-display-context";
+import { DashboardPreview } from "./dashboard-preview";
+import { sortHubItems, type HubSortDates } from "@/lib/config/hub-sort";
 
 export const TRASH_TTL_MS = 14 * 86_400_000; // purga em 14 dias (0087)
 
-export interface DashboardRow {
+export interface DashboardRow extends HubSortDates {
   id: string;
   name: string;
   description: string | null;
@@ -92,7 +94,7 @@ export function boardAccessLabel(row: DashboardRow): string {
 // altura mínima vem de --hub-card-h (data-hub-card + regra em globals.css).
 function shellClass(layout: HubLayout, extra?: string): string {
   return cn(
-    "relative justify-center",
+    "relative min-w-0 justify-center break-words",
     layout === "list" && "gap-0 py-4",
     extra
   );
@@ -101,7 +103,7 @@ function shellClass(layout: HubLayout, extra?: string): string {
 function headerClass(layout: HubLayout): string {
   return layout === "list"
     ? "flex flex-row flex-wrap items-baseline gap-x-3 gap-y-0.5 pr-20"
-    : "pr-8";
+    : "pr-20";
 }
 
 export function BoardCard({
@@ -149,6 +151,9 @@ export function BoardCard({
         {description ? <CardDescription>{description}</CardDescription> : null}
         {access ? <CardDescription>{access}</CardDescription> : null}
       </CardHeader>
+      {display.layout === "preview" && !kanban && !trashed ? (
+        <DashboardPreview id={row.id} name={row.name} />
+      ) : null}
       <div className="absolute top-3 right-3 flex items-center">
         {trashed ? null : (
           <PinButton
@@ -289,6 +294,27 @@ export function WidgetKanbanCard({
 }
 
 /** Grade/lista do hub ligada ao contexto de exibição. */
+export function BoardGrid({ rows, canCreate, userId, isAdmin, pins }: {
+  rows: DashboardRow[];
+  canCreate: boolean;
+  userId?: string;
+  isAdmin: boolean;
+  pins: string[];
+}) {
+  const { display } = useHubDisplay();
+  return <HubGrid>{sortHubItems(rows, display.sort ?? "created_desc").map((row) => (
+    <BoardCard key={row.id} row={row} canManage={isAdmin || row.owner_user_id === userId}
+      canDuplicate={canCreate} pinned={pins.includes(row.id)} />
+  ))}</HubGrid>;
+}
+
+export function WidgetKanbanGrid({ items, pins }: { items: (WidgetKanbanHubItem & HubSortDates)[]; pins: string[] }) {
+  const { display } = useHubDisplay();
+  return <HubGrid>{sortHubItems(items, display.sort ?? "created_desc").map((item) => (
+    <WidgetKanbanCard key={item.widgetId} item={item} pinned={pins.includes(item.widgetId)} />
+  ))}</HubGrid>;
+}
+
 export function HubGrid({ children }: { children: ReactNode }) {
   const { display } = useHubDisplay();
   return (

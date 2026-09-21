@@ -1,4 +1,21 @@
-<!-- Versão: 1.44 | Data: 12/09/2026 -->
+<!-- Versão: 1.45 | Data: 21/09/2026 -->
+
+### Atualização do Workspace (0144)
+
+Aplicar `supabase/migrations/0144_workspace_display.sql` antes de publicar o
+frontend: ela cria `patch_user_ui_prefs`, `workspace_visits` e o trigger de
+alteração de widgets. Sem a RPC, os controles informam falha e revertem a
+mudança; não há fallback que esconda a ausência da migração.
+
+Verificar Cartão/Lista/Prévia, as seis ordenações e uma troca rápida de
+descrição/colunas sem recarregar. A lista deve acompanhar o maior conteúdo,
+sem passar da viewport. Abrir um dashboard real deve atualizar a ordem de
+abertura ao retornar; carregar uma prévia não deve atualizá-la. Datas de
+abertura não possuem histórico anterior à migração. A prévia precisa permitir
+iframe SAMEORIGIN somente em `/dashboards/:id/preview`; as outras páginas
+continuam com DENY. Validar autenticado, inclusive com usuário sem acesso a
+um dashboard; a prévia deve manter o mesmo 404 da página original.
+
 <!-- v1.44 (12/09/2026): §4.17 — os controles de exibição do hub viraram
      engrenagem admin-only (não-admin fica com cartão↔lista) e passaram a valer
      sem recarregar. -->

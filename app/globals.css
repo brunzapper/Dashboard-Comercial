@@ -204,6 +204,17 @@ main[data-app-main] {
   min-height: var(--hub-card-h, auto);
 }
 
+/* CardHeader usa container queries, que isolam sua largura intrínseca.
+   Na lista precisamos medir o TEXTO, não apenas o padding do container. */
+[data-hub-list] [data-slot="card-header"] {
+  container-type: normal;
+}
+[data-hub-list] [data-slot="card-title"],
+[data-hub-list] [data-slot="card-description"] {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 /* Pulso de destaque de um widget focado por atalho/link (lib/widgets/focus.ts):
    anel na cor da marca que some ao final. Aplicado no wrapper do item do grid. */
 .widget-focus {

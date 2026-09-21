@@ -38,6 +38,8 @@ export function RealtimeRefresher() {
   const router = useRouter();
 
   useEffect(() => {
+    // Miniaturas carregam uma vez; não abrem um websocket por card.
+    if (window.self !== window.top) return;
     // Falha SUAVE: realtime é aprimoramento — se o client não puder ser criado
     // (ex.: env pública ausente no build), o app segue funcionando sem ele.
     let supabase: ReturnType<typeof createClient>;

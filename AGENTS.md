@@ -1968,8 +1968,17 @@ This version has breaking changes — APIs, conventions, and file structure may 
   nunca props de exibição. Por isso os cards são Client Components e o
   `accessLabel` dos cards de Operação desce PRONTO do servidor —
   `areaAccessLabel` mora em `lib/auth/access.ts`, que é server-only.
-  Só o alternador cartão↔lista é de todo mundo; colunas, altura do card,
+  O alternador cartão↔lista↔prévia e a ordenação são de todo mundo; colunas, altura do card,
   descrição e nível de acesso ficam atrás da ENGRENAGEM, visível só ao admin.
+  **0144 (21/09/2026):** `saveUiPrefs` DEVE retornar `{ok:true}` no sucesso:
+  `void` é interpretado como falha por `useBackgroundSave` e desfaz a tela.
+  O merge é atômico em `patch_user_ui_prefs` (SECURITY INVOKER). O provider
+  serializa writes e reverte só campos da revisão que falhou. A prévia usa a
+  MESMA page/ACL do dashboard, em `/dashboards/[id]/preview`, sem edição,
+  navegação interativa, visitas ou realtime; só essa rota aceita iframe do
+  próprio origin. Nunca torne a prévia pública nem conte seu mount como
+  abertura. Histórico pessoal em `workspace_visits`, datas ausentes por último
+  nas duas direções. Alterações em widgets carimbam o dashboard via trigger.
   Ver `docs/arquitetura.md` §4.7.
 - **Token de tema é WHITELIST, e a superfície externa do dashboard é variável
   CSS (12/09/2026):** além de `--brand-base`, um conjunto CURADO

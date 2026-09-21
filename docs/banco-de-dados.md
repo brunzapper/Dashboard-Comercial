@@ -458,6 +458,18 @@ manual; botão "Gerar agora" em Registros → Bases).
 **`user_preferences`** (0024) — por usuário × dashboard (ex.: último período usado).
 **`user_settings`** (0027) — jsonb livre por usuário (layout/aparência).
 
+**Workspace (0144):** `patch_user_ui_prefs(jsonb)` faz merge atômico somente
+em `user_settings.settings.uiPrefs`, com `auth.uid()` e SECURITY INVOKER;
+sem executar como anon. As novas chaves são `hubLayout: "preview"` e `hubSort`
+(`created_asc|created_desc|updated_asc|updated_desc|opened_asc|opened_desc`).
+`workspace_visits(user_id, path, last_opened_at)` tem PK `(user_id,path)`, FK
+para `auth.users` com cascade e RLS own-row. Guarda a última abertura real de
+dashboard, kanban ou kanban de widget por usuário; não há backfill de visitas.
+O trigger `trg_widgets_touch_dashboard` carimba `dashboards.updated_at` após
+INSERT/UPDATE/DELETE de widgets. A função de trigger é SECURITY DEFINER,
+com search_path fixo e EXECUTE revogado de public/anon/authenticated; só roda
+após uma escrita de widget autorizada. RPCs de consulta/snapshot inalteradas.
+
 ### 3.3 Dashboards e visualização
 
 **`dashboards`** (0008) — `name`, `owner_user_id`, `visible_to_roles` text[],

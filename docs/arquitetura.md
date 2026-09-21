@@ -1322,8 +1322,27 @@ RLS ligado com **zero políticas de escrita** — escrita só via service role.
   escolha recém-feita. O provider é semeado do servidor e persiste com
   `reconcile: false`; os cards viraram Client Components e o `accessLabel` dos
   cards de Operação desce PRONTO (o derivador é server-only). Na tela, só o
-  alternador cartão↔lista é de todo mundo: colunas, altura do card, descrição e
+  alternador cartão↔lista↔prévia e a ordenação são de todo mundo: colunas, altura do card, descrição e
   nível de acesso ficam atrás de uma ENGRENAGEM visível apenas ao admin.
+  **Workspace (0144):** `saveUiPrefs` retorna `{ok:true}` no sucesso e
+  `{ok:false,message}` em erro; retorno vazio era interpretado como falha pelo
+  `useBackgroundSave`, revertendo a tela apesar de ter gravado. O merge de
+  `uiPrefs` é atômico na RPC `patch_user_ui_prefs` (security invoker/own-row).
+  O provider serializa gravações e reverte só os campos da revisão que falhou,
+  sem desfazer escolhas posteriores. Providers das abas têm keys diferentes.
+  `hubSort` oferece criação/alteração/abertura, ascendente ou descendente;
+  `sortHubItems` ordena no cliente sem modificar os dados e coloca datas
+  ausentes (inclusive nunca aberto) no fim em ambas as direções.
+  `workspace_visits` guarda a última abertura por usuário e pathname, sem aba;
+  `TrackLastView` registra só montagem real, nunca prefetch/prévia. Alterar,
+  inserir ou excluir widgets carimba `dashboards.updated_at` via trigger.
+  A lista tem largura intrínseca compartilhada pelo maior card, limitada à tela.
+  A prévia é um iframe da rota autenticada `/dashboards/[id]/preview`, com o
+  mesmo loader/ACL do dashboard, sem edição ou interação (`inert`). A janela
+  renderiza em tamanho normal e só a miniatura é escalada, recortada no topo
+  esquerdo. Monta apenas perto da viewport; não grava visitas/histórico nem abre
+  conexão realtime. Só essa rota permite embedding SAMEORIGIN/`frame-ancestors
+  'self'`; as demais mantêm DENY. Kanbans continuam como cards nesse formato.
   As sub-abas de **Configurações** seguem sendo ABAS (a navegação focada de
   `/operacao` foi tentada ali e revertida: são poucas áreas, relacionadas e
   visitadas em sequência). O botão de voltar leva à tela ANTERIOR, não a um

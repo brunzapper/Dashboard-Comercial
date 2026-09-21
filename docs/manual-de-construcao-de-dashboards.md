@@ -659,6 +659,20 @@ um dashboard completo gerado por uma IA externa a partir de um JSON (ver
 
 ### 3.2 Cabeçalho e modos
 
+No Workspace, **Cartão**, **Lista** e **Prévia** mudam a apresentação na hora.
+A Lista usa a largura necessária ao card com mais conteúdo, limitada à tela.
+A Prévia mostra a janela inicial do dashboard em zoom normal, reduzida para
+caber no card e recortada no canto superior esquerdo; clique nela para abrir.
+Kanbans continuam com seus cards. As prévias preservam suas permissões e não
+contam como abertura do dashboard.
+
+Em **Ordenar por**, escolha os criados, alterados ou abertos mais recentemente
+ou há mais tempo. A abertura é pessoal; itens sem histórico ficam no fim nas
+duas direções. O histórico começa a ser registrado após a atualização 0144.
+Edições de widgets também contam como alteração do dashboard após essa atualização.
+A engrenagem dos administradores controla colunas, altura, descrição e nível
+de acesso. Preferências travadas pela organização permanecem desabilitadas.
+
 No topo da página do dashboard:
 
 - **Título** editável inline (clique no texto).

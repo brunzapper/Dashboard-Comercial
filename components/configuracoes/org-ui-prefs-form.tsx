@@ -39,6 +39,7 @@ import {
   UI_PREF_DEFAULTS,
   UI_PREF_KEYS,
   UI_PREF_LABELS,
+  HUB_SORT_OPTIONS,
   type UiPrefKey,
   type UiPrefs,
 } from "@/lib/config/ui-prefs";
@@ -155,6 +156,17 @@ export function OrgUiPrefsForm({
                     <option value="">Sem padrão</option>
                     <option value="grid">Grade</option>
                     <option value="list">Lista</option>
+                    {key === "hubLayout" ? <option value="preview">Prévia</option> : null}
+                  </select>
+                ) : key === "hubSort" ? (
+                  <select
+                    aria-label={UI_PREF_LABELS[key]}
+                    value={values.hubSort ?? ""}
+                    onChange={(event) => setValue("hubSort", event.target.value === "" ? undefined : event.target.value as UiPrefs["hubSort"])}
+                    className="border-input h-8 w-full rounded-md border bg-transparent px-2 text-sm"
+                  >
+                    <option value="">Sem padrão</option>
+                    {HUB_SORT_OPTIONS.map(({ value, label }) => <option key={value} value={value}>{label}</option>)}
                   </select>
                 ) : COLUMN_KEYS.has(key) ? (
                   <select
