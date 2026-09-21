@@ -1979,6 +1979,12 @@ This version has breaking changes — APIs, conventions, and file structure may 
   próprio origin. Nunca torne a prévia pública nem conte seu mount como
   abertura. Histórico pessoal em `workspace_visits`, datas ausentes por último
   nas duas direções. Alterações em widgets carimbam o dashboard via trigger.
+  **Cache de prévias (21/09/2026):** o iframe vivo só existe durante UMA
+  captura, em fila idle (linhas de cima para baixo, ESQUERDA → DIREITA).
+  A exibição usa DOM estático sem scripts, sandbox sem `allow-scripts`, cache
+  LRU em memória privado por usuário/revisão/viewport/tema. Não persista esse
+  HTML no disco nem compartilhe entre usuários. Navegação cancela fila e
+  iframe ativo antes do Link, sem aguardar captura/action. Interações pausam.
   Ver `docs/arquitetura.md` §4.7.
 - **Token de tema é WHITELIST, e a superfície externa do dashboard é variável
   CSS (12/09/2026):** além de `--brand-base`, um conjunto CURADO

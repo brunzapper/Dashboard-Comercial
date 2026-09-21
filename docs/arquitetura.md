@@ -1337,11 +1337,21 @@ RLS ligado com **zero políticas de escrita** — escrita só via service role.
   `TrackLastView` registra só montagem real, nunca prefetch/prévia. Alterar,
   inserir ou excluir widgets carimba `dashboards.updated_at` via trigger.
   A lista tem largura intrínseca compartilhada pelo maior card, limitada à tela.
-  A prévia é um iframe da rota autenticada `/dashboards/[id]/preview`, com o
-  mesmo loader/ACL do dashboard, sem edição ou interação (`inert`). A janela
-  renderiza em tamanho normal e só a miniatura é escalada, recortada no topo
-  esquerdo. Monta apenas perto da viewport; não grava visitas/histórico nem abre
-  conexão realtime. Só essa rota permite embedding SAMEORIGIN/`frame-ancestors
+  A prévia usa uma captura DOM estática (incluindo os gráficos SVG), sem
+  scripts/hidratação/actions, exibida em iframe `srcDoc` com sandbox SEM
+  `allow-scripts`. O cache LRU privado em memória (12 MiB, máximo 30 minutos,
+  sem disco) é chaveado por usuário, dashboard, `updated_at`, viewport e tema.
+  Abrir novamente no Workspace reusa a captura; mudar a estrutura invalida a
+  chave. A janela renderiza em tamanho normal e só a miniatura é escalada.
+  Widgets fora do recorte superior esquerdo são removidos da captura.
+  Uma captura ausente usa TEMPORARIAMENTE `/dashboards/[id]/preview`, com o
+  mesmo loader/ACL do dashboard e sem interação (`inert`). A fila é única por
+  Workspace: só cards visíveis, de cima para baixo e da ESQUERDA para a DIREITA,
+  uma captura por vez em idle. Espera hidratação/dados deferidos e estabilização
+  do DOM; ao concluir, remove o iframe vivo. Interações pausam e navegação
+  cancela o iframe ativo e a fila sem await; requests já recebidos pelo servidor
+  podem terminar lá, mas o cliente não espera por eles. Não grava visitas nem
+  abre realtime. Só a rota de captura permite embedding SAMEORIGIN/`frame-ancestors
   'self'`; as demais mantêm DENY. Kanbans continuam como cards nesse formato.
   As sub-abas de **Configurações** seguem sendo ABAS (a navegação focada de
   `/operacao` foi tentada ali e revertida: são poucas áreas, relacionadas e
