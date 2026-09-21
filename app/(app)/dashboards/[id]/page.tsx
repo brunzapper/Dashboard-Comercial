@@ -237,7 +237,7 @@ export default async function DashboardPage({
     supabase
       .from("dashboards")
       .select(
-        "id, name, owner_user_id, visible_to_roles, settings, status, organization_id"
+        "id, name, owner_user_id, visible_to_roles, settings, status, organization_id, updated_at"
       )
       .eq("id", id)
       .maybeSingle(),
@@ -297,7 +297,7 @@ export default async function DashboardPage({
     supabase
       .from("widgets")
       .select(
-        "id, dashboard_id, title, visual_type, source, sources, split_by_source, dimensions, metrics, filters, settings, grid_position, sort_order"
+        "id, dashboard_id, title, visual_type, source, sources, split_by_source, dimensions, metrics, filters, settings, grid_position, sort_order, updated_at"
       )
       .eq("dashboard_id", id)
       .order("sort_order", { ascending: true }),
@@ -1548,6 +1548,7 @@ export default async function DashboardPage({
       {/* Grava a view (com ?tab=) p/ restauração ao reabrir o app. */}
       {preview ? null : <TrackLastView />}
       <DashboardClient
+        previewCapture={preview || !session ? undefined : { scope: session.user.id }}
         dashboardId={dash.id as string}
         dashboardName={dash.name as string}
         historySeed={historySeed}

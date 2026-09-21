@@ -1,12 +1,12 @@
 "use client";
 
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
-import { PreviewQueue, schedulePreviewIdle } from "@/lib/dashboard-preview/queue";
+import { PreviewQueue, schedulePreviewTask } from "@/lib/dashboard-preview/queue";
 
 const Context = createContext<PreviewQueue | null>(null);
 
 export function PreviewQueueProvider({ children }: { children: ReactNode }) {
-  const [queue] = useState(() => new PreviewQueue(schedulePreviewIdle));
+  const [queue] = useState(() => new PreviewQueue(schedulePreviewTask));
   useEffect(() => {
     queue.start();
     let navigating = false;

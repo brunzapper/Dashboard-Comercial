@@ -57,6 +57,7 @@ import { loadManualAxes, loadManualSeries } from "@/lib/manual-base/load";
 import { resolveTheme, resolveThemeTokens } from "@/lib/theme";
 import { ROLE_LABELS, type RoleKey } from "@/lib/auth/roles";
 import { ThemeSync } from "@/components/layout/theme-sync";
+import { PreviewPublisher } from "@/components/layout/preview-publisher";
 import { LogoutButton } from "@/components/layout/logout-button";
 import { SidebarNav, type NavItem } from "@/components/layout/sidebar-nav";
 import { AppShell } from "@/components/layout/app-shell";
@@ -235,6 +236,7 @@ export default async function AppLayout({
         {/* Sinal realtime (records/tasks/comments) → event bus + refresh
             coalescido; só no app autenticado (o viewer /s/ fica fora). */}
         <RealtimeRefresher />
+        <PreviewPublisher scope={session.user.id} />
         {/* Rastro de navegação: alimenta o destino do botão "voltar" (ele leva
             à tela anterior, não a um lugar fixo). */}
         <RouteTracker />

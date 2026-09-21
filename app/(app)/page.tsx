@@ -143,6 +143,11 @@ export default async function HomePage({
       Date.parse(widget.updated_at) > Date.parse(latest) ? widget.updated_at : latest,
     row.updated_at),
   })) as DashboardRow[];
+  // Só metadados (arquivos privados são buscados depois, fora do RSC).
+  const { data: savedPreviews } = session && rows.length ? await supabase.from("dashboard_preview_images")
+    .select("dashboard_id, version, width, height, access_version").in("dashboard_id", rows.map(r => r.id)) : { data: null };
+  const previewById = new Map((savedPreviews ?? []).map(p => [p.dashboard_id, p]));
+  for (const row of rows) row.preview = previewById.get(row.id);
   const { data: visits } = session ? await supabase.from("workspace_visits")
     .select("path, last_opened_at").eq("user_id", session.user.id) : { data: null };
   const openedAt = new Map((visits ?? []).map((visit) => [visit.path, visit.last_opened_at as string]));

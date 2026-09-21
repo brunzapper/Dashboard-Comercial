@@ -18,7 +18,8 @@ enabled = false
 enabled = false
 
 [storage]
-enabled = false
+# Prévias privadas (0145) precisam do schema e da API Storage também no CI.
+enabled = true
 
 [analytics]
 enabled = false
