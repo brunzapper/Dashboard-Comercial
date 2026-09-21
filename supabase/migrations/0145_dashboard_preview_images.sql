@@ -78,7 +78,7 @@ grant execute on function public.publish_dashboard_preview(uuid,timestamptz,bigi
 create function public.invalidate_dashboard_preview_access()
 returns trigger language plpgsql security definer set search_path = '' as $$
 begin
-  update public.dashboard_preview_access_epoch set version = version + 1;
+  update public.dashboard_preview_access_epoch set version = version + 1 where singleton;
   return null;
 end;
 $$;
