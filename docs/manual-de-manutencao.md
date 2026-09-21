@@ -2,6 +2,16 @@
 
 ### Atualização do Workspace (0144)
 
+**Otimização das prévias (sem migração adicional):** a captura estática fica
+em cache LRU em memória por usuário/dashboard/alteração/viewport/tema, até
+12 MiB e 30 minutos. Voltar ao Workspace ou alternar Cartão/Prévia reaproveita
+o DOM sem executar novamente o dashboard. Recarregar a aba limpa a memória;
+mudança de estrutura, tema ou tamanho da janela pode exigir nova captura.
+Conferir no Network: uma rota `/preview` por vez, na ordem visual da esquerda
+para a direita; após capturar, só iframe `srcDoc` sem scripts. Navegar deve
+remover o iframe ativo imediatamente e descartar os próximos. Falha/timeout
+de um card não bloqueia os demais; o link normal do dashboard continua ativo.
+
 Aplicar `supabase/migrations/0144_workspace_display.sql` antes de publicar o
 frontend: ela cria `patch_user_ui_prefs`, `workspace_visits` e o trigger de
 alteração de widgets. Sem a RPC, os controles informam falha e revertem a

@@ -664,7 +664,10 @@ A Lista usa a largura necessária ao card com mais conteúdo, limitada à tela.
 A Prévia mostra a janela inicial do dashboard em zoom normal, reduzida para
 caber no card e recortada no canto superior esquerdo; clique nela para abrir.
 Kanbans continuam com seus cards. As prévias preservam suas permissões e não
-contam como abertura do dashboard.
+contam como abertura do dashboard. São capturas reutilizadas na sessão, sem
+atualização contínua dos dados. Alterar a estrutura do dashboard gera uma nova
+prévia. As capturas carregam uma por vez, da esquerda para a direita e depois
+na linha seguinte; navegar para outra tela cancela o trabalho pendente.
 
 Em **Ordenar por**, escolha os criados, alterados ou abertos mais recentemente
 ou há mais tempo. A abertura é pessoal; itens sem histórico ficam no fim nas

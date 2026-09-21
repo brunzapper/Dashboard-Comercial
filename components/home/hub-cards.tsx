@@ -111,11 +111,13 @@ export function BoardCard({
   canManage,
   canDuplicate,
   pinned,
+  previewScope,
 }: {
   row: DashboardRow;
   canManage: boolean;
   canDuplicate: boolean;
   pinned: boolean;
+  previewScope: string;
 }) {
   const { display } = useHubDisplay();
   const kanban = row.kind === "kanban";
@@ -152,7 +154,7 @@ export function BoardCard({
         {access ? <CardDescription>{access}</CardDescription> : null}
       </CardHeader>
       {display.layout === "preview" && !kanban && !trashed ? (
-        <DashboardPreview id={row.id} name={row.name} />
+        <DashboardPreview id={row.id} name={row.name} revision={row.updated_at ?? row.created_at ?? ""} scope={previewScope} />
       ) : null}
       <div className="absolute top-3 right-3 flex items-center">
         {trashed ? null : (
@@ -303,7 +305,7 @@ export function BoardGrid({ rows, canCreate, userId, isAdmin, pins }: {
 }) {
   const { display } = useHubDisplay();
   return <HubGrid>{sortHubItems(rows, display.sort ?? "created_desc").map((row) => (
-    <BoardCard key={row.id} row={row} canManage={isAdmin || row.owner_user_id === userId}
+    <BoardCard key={row.id} row={row} previewScope={userId ?? "anonymous"} canManage={isAdmin || row.owner_user_id === userId}
       canDuplicate={canCreate} pinned={pins.includes(row.id)} />
   ))}</HubGrid>;
 }

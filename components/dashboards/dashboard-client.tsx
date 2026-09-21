@@ -1068,7 +1068,7 @@ export function DashboardClient({
         clique da tabela) e some ao trocar de aba — com o estado lá dentro, a
         análise em curso morria junto. */}
     <AiSuggestionsProvider>
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-4" data-preview-ready={!engineLoading && (engineIds.length === 0 || engineData !== null)}>
       {/* data-board-chrome = cabeçalho + abas. O marcador NÃO pode envolver o
           grid: a regra de texto secundário (globals.css) alcança descendentes e
           recoloriria rótulo de gráfico, eixo e célula de tabela — era o que

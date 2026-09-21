@@ -27,6 +27,7 @@ import {
 import { useBackgroundSave } from "@/lib/feedback/use-background-save";
 import { saveUiPrefs } from "@/app/(app)/dashboards/actions";
 import type { HubLayout, HubSort, UiPrefKey, UiPrefs } from "@/lib/config/ui-prefs";
+import { PreviewQueueProvider } from "./preview-queue-context";
 
 export interface HubDisplay {
   layout: HubLayout;
@@ -153,5 +154,5 @@ export function HubDisplayProvider({
     [display, keys, lockedSet, isLocked, set, pendingKeys]
   );
 
-  return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
+  return <Ctx.Provider value={value}><PreviewQueueProvider>{children}</PreviewQueueProvider></Ctx.Provider>;
 }
