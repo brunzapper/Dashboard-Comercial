@@ -54,6 +54,7 @@ import { cn } from "@/lib/utils";
 import { markAppSessionActive } from "@/lib/app-session";
 import { notifyOnError } from "@/lib/feedback/notify";
 import { saveUiPrefs } from "@/app/(app)/dashboards/actions";
+import { usePathname } from "next/navigation";
 
 interface AppChrome {
   chromeHidden: boolean;
@@ -89,6 +90,7 @@ export function AppShell({
   topRight?: ReactNode;
   children: ReactNode;
 }) {
+  const preview = /^\/dashboards\/[^/]+\/preview$/.test(usePathname());
   const [pinned, setPinned] = useState(initialPinned);
   const [hoverEdge, setHoverEdge] = useState(initialHoverEdge);
   const [hovering, setHovering] = useState(false);
@@ -104,8 +106,8 @@ export function AppShell({
   // redirecionar. Filhos rodam efeitos antes (React), então na entrada pela
   // própria Home o RestoreLastView ainda lê a flag ausente e restaura.
   useEffect(() => {
-    markAppSessionActive();
-  }, []);
+    if (!preview) markAppSessionActive();
+  }, [preview]);
 
   const togglePin = useCallback(() => {
     setPinned((prev) => {
@@ -180,6 +182,9 @@ export function AppShell({
 
   return (
     <AppChromeContext.Provider value={chromeValue}>
+      {preview ? (
+        <main data-app-main className="h-screen overflow-hidden p-6" inert>{children}</main>
+      ) : (
       <div className="flex min-h-screen">
         {!chromeHidden ? (
           <aside
@@ -311,6 +316,7 @@ export function AppShell({
           {children}
         </main>
       </div>
+      )}
     </AppChromeContext.Provider>
   );
 }

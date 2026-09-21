@@ -57,7 +57,14 @@ const nextConfig: NextConfig = {
     "/": ["./docs/manual-de-construcao-de-dashboards.md"],
   },
   async headers() {
-    return [{ source: "/:path*", headers: securityHeaders }];
+    return [
+      { source: "/:path*", headers: securityHeaders },
+      // Apenas a prévia autenticada pode ser embutida, somente pelo próprio app.
+      { source: "/dashboards/:id/preview", headers: [
+        { key: "Content-Security-Policy", value: csp.replace("frame-ancestors 'none'", "frame-ancestors 'self'") },
+        { key: "X-Frame-Options", value: "SAMEORIGIN" },
+      ] },
+    ];
   },
 };
 

@@ -20,11 +20,21 @@
 // (Fase 10). normalizeUiPrefs a ACEITA na raiz e a promove — a linha antiga
 // nunca é reescrita às cegas (mesmo trato do lastView "/agenda" na Home).
 
-export type HubLayout = "grid" | "list";
+export type HubLayout = "grid" | "list" | "preview";
+export const HUB_SORT_OPTIONS = [
+  { value: "created_desc", label: "Criados mais recentemente" },
+  { value: "created_asc", label: "Criados há mais tempo" },
+  { value: "updated_desc", label: "Alterados mais recentemente" },
+  { value: "updated_asc", label: "Alterados há mais tempo" },
+  { value: "opened_desc", label: "Abertos mais recentemente" },
+  { value: "opened_asc", label: "Abertos há mais tempo" },
+] as const;
+export type HubSort = (typeof HUB_SORT_OPTIONS)[number]["value"];
 
 export interface UiPrefs {
   // ----- hub: dashboards e kanbans -----
   hubLayout?: HubLayout;
+  hubSort?: HubSort;
   /** Teto de colunas em telas largas (1..MAX_HUB_COLUMNS). */
   hubColumns?: number;
   hubShowDescription?: boolean;
@@ -32,7 +42,7 @@ export interface UiPrefs {
   /** Altura MÍNIMA do card em px; 0 = automática (altura natural). */
   hubCardHeight?: number;
   // ----- hub/painel: cards de Operação -----
-  operacaoLayout?: HubLayout;
+  operacaoLayout?: Exclude<HubLayout, "preview">;
   operacaoColumns?: number;
   operacaoShowDescription?: boolean;
   operacaoShowAccess?: boolean;
@@ -60,6 +70,7 @@ export const CARD_HEIGHT_STEP = 8;
  */
 export const UI_PREF_DEFAULTS: Required<UiPrefs> = {
   hubLayout: "grid",
+  hubSort: "created_desc",
   hubColumns: 3,
   hubShowDescription: false,
   hubShowAccess: true,
@@ -81,7 +92,8 @@ export type UiPrefKey = keyof UiPrefs;
 
 /** Rótulos pt-BR das chaves — donos únicos do texto da UI de trava. */
 export const UI_PREF_LABELS: Record<UiPrefKey, string> = {
-  hubLayout: "Painéis: formato (grade/lista)",
+  hubLayout: "Painéis: formato (cartão/lista/prévia)",
+  hubSort: "Painéis: ordenação",
   hubColumns: "Painéis: número de colunas",
   hubShowDescription: "Painéis: exibir descrição",
   hubShowAccess: "Painéis: exibir nível de acesso",
@@ -100,7 +112,7 @@ function boolOrUndef(v: unknown): boolean | undefined {
   return typeof v === "boolean" ? v : undefined;
 }
 
-function layoutOrUndef(v: unknown): HubLayout | undefined {
+function layoutOrUndef(v: unknown): Exclude<HubLayout, "preview"> | undefined {
   return v === "grid" || v === "list" ? v : undefined;
 }
 
@@ -135,7 +147,8 @@ export function normalizeUiPrefs(
   const put = <K extends UiPrefKey>(k: K, val: UiPrefs[K]) => {
     if (val !== undefined) out[k] = val;
   };
-  put("hubLayout", layoutOrUndef(raw.hubLayout));
+  put("hubLayout", raw.hubLayout === "preview" ? "preview" : layoutOrUndef(raw.hubLayout));
+  put("hubSort", HUB_SORT_OPTIONS.find((option) => option.value === raw.hubSort)?.value);
   put("hubColumns", clampColumns(raw.hubColumns));
   put("hubShowDescription", boolOrUndef(raw.hubShowDescription));
   put("hubShowAccess", boolOrUndef(raw.hubShowAccess));

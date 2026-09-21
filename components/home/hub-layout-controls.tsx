@@ -12,7 +12,7 @@
 // aparecia depois de recarregar, e o refresh ainda desmarcava a caixa.
 "use client";
 
-import { LayoutGrid, List, Minus, Plus, Settings2 } from "lucide-react";
+import { LayoutGrid, List, Minus, Plus, Settings2, PanelsTopLeft } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -29,6 +29,8 @@ import {
   MAX_HUB_COLUMNS,
   MIN_CARD_HEIGHT,
   MIN_HUB_COLUMNS,
+  HUB_SORT_OPTIONS,
+  type HubSort,
   type HubLayout,
 } from "@/lib/config/ui-prefs";
 import { useHubDisplay } from "./hub-display-context";
@@ -43,11 +45,12 @@ export function HubLayoutControls({
   isAdmin: boolean;
   accessLabel?: string;
 }) {
-  const { display, isLocked, set, saving } = useHubDisplay();
+  const { display, keys, isLocked, set, saving } = useHubDisplay();
 
   const layoutOptions = [
     { value: "grid", Icon: LayoutGrid, label: "Cartão" },
     { value: "list", Icon: List, label: "Lista" },
+    ...(keys.layout === "hubLayout" ? [{ value: "preview", Icon: PanelsTopLeft, label: "Prévia" }] : []),
   ] as const;
 
   return (
@@ -78,6 +81,22 @@ export function HubLayoutControls({
         ))}
       </div>
 
+      {keys.sort ? (
+        <label className="flex items-center gap-2 text-sm">
+          Ordenar por
+          <select
+            aria-label="Ordenar cards"
+            className="border-input h-8 max-w-full rounded-md border bg-background px-2 text-sm"
+            value={display.sort ?? "created_desc"}
+            disabled={isLocked("sort")}
+            title={isLocked("sort") ? LOCKED_HINT : undefined}
+            onChange={(event) => set({ sort: event.target.value as HubSort })}
+          >
+            {HUB_SORT_OPTIONS.map(({ value, label }) => <option key={value} value={value}>{label}</option>)}
+          </select>
+        </label>
+      ) : null}
+
       {isAdmin ? (
         <Popover>
           <PopoverTrigger asChild>
@@ -100,7 +119,7 @@ export function HubLayoutControls({
               </p>
             </div>
 
-            {display.layout === "grid" ? (
+            {display.layout !== "list" ? (
               <Stepper
                 label="Colunas"
                 value={display.columns}
@@ -133,9 +152,9 @@ export function HubLayoutControls({
                 disabled={isLocked("showDescription")}
                 onCheckedChange={(v) => set({ showDescription: v === true })}
               />
-              <Label className="cursor-pointer text-sm font-normal">
+              <span className="cursor-pointer text-sm font-normal">
                 Exibir descrição
-              </Label>
+              </span>
             </label>
 
             <label
@@ -147,9 +166,9 @@ export function HubLayoutControls({
                 disabled={isLocked("showAccess")}
                 onCheckedChange={(v) => set({ showAccess: v === true })}
               />
-              <Label className="cursor-pointer text-sm font-normal">
+              <span className="cursor-pointer text-sm font-normal">
                 Exibir {accessLabel.toLowerCase()}
-              </Label>
+              </span>
             </label>
           </PopoverContent>
         </Popover>

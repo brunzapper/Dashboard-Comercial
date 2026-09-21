@@ -11,6 +11,7 @@ import { Suspense, useEffect, useRef } from "react";
 import { usePathname, useSearchParams } from "next/navigation";
 
 import { updateUserSettings } from "@/app/(app)/dashboards/actions";
+import { recordWorkspaceVisit } from "@/app/(app)/dashboards/visit-actions";
 
 function TrackLastViewInner() {
   const pathname = usePathname();
@@ -20,12 +21,20 @@ function TrackLastViewInner() {
     ? `${pathname}?${new URLSearchParams({ tab }).toString()}`
     : pathname;
   const lastSaved = useRef<string | null>(null);
+  const lastOpened = useRef<string | null>(null);
 
   useEffect(() => {
+    if (window.self !== window.top) return;
     if (!view || view === lastSaved.current) return;
     lastSaved.current = view;
     void updateUserSettings({ lastView: view });
   }, [view]);
+
+  useEffect(() => {
+    if (window.self !== window.top || pathname === lastOpened.current) return;
+    lastOpened.current = pathname;
+    void recordWorkspaceVisit(pathname).catch(() => {});
+  }, [pathname]);
 
   return null;
 }

@@ -71,6 +71,7 @@ import { getActiveOrgId } from "@/lib/auth/org";
 import { loadOrgFeatures } from "@/lib/config/org-features";
 import {
   normalizeSidebarPins,
+  normalizeUiPrefs,
   toggleSidebarPin,
   userSidebarPins,
   type SidebarPin,
@@ -975,30 +976,20 @@ export async function updateUserSettings(
 }
 
 // Patch das preferências de INTERFACE do usuário (camada 3 — ver
-// lib/config/ui-prefs.ts). Read-modify-write do bloco `uiPrefs`, preservando as
+// lib/config/ui-prefs.ts). Merge atômico do bloco `uiPrefs`, preservando as
 // demais chaves de user_settings. A TRAVA da org não é verificada aqui de
 // propósito: o valor gravado é a escolha pessoal, que volta a valer se a org
 // destravar — o resolver é quem ignora o override enquanto a trava existe.
-export async function saveUiPrefs(patch: UiPrefs): Promise<void> {
+export async function saveUiPrefs(patch: UiPrefs): Promise<ActionState> {
   const session = await getSessionInfo();
-  if (!session) return;
+  if (!session) return { ok: false, message: "Sessão expirada." };
   const supabase = await createClient();
-  const { data } = await supabase
-    .from("user_settings")
-    .select("settings")
-    .eq("user_id", session.user.id)
-    .maybeSingle();
-  const current = (data?.settings as UserAppSettings | null) ?? {};
-  await supabase.from("user_settings").upsert(
-    {
-      user_id: session.user.id,
-      settings: {
-        ...current,
-        uiPrefs: { ...(current.uiPrefs ?? {}), ...patch },
-      },
-    },
-    { onConflict: "user_id" }
-  );
+  const { error } = await supabase.rpc("patch_user_ui_prefs", {
+    p_patch: normalizeUiPrefs(patch),
+  });
+  return error
+    ? { ok: false, message: "Não foi possível salvar a preferência de exibição." }
+    : { ok: true };
 }
 
 /**

@@ -66,10 +66,10 @@ import {
   userUiPrefs,
 } from "@/lib/config/ui-prefs";
 import {
-  BoardCard,
+  BoardGrid,
   HubGrid,
   OperacaoCardItem,
-  WidgetKanbanCard,
+  WidgetKanbanGrid,
   withinTrashTtl,
   type DashboardRow,
   type OperacaoCardView,
@@ -131,12 +131,24 @@ export default async function HomePage({
   let boardsQuery = supabase
     .from("dashboards")
     .select(
-      "id, name, description, owner_user_id, visible_to_roles, kind, status, trashed_at, settings"
+      "id, name, description, owner_user_id, visible_to_roles, kind, status, trashed_at, settings, created_at, updated_at, widgets(updated_at)"
     )
     .order("created_at", { ascending: false });
   if (orgId) boardsQuery = boardsQuery.eq("organization_id", orgId);
   const { data } = await boardsQuery;
-  const rows = (data ?? []) as DashboardRow[];
+  // Inclui edições anteriores à 0144; o trigger cobre também exclusões futuras.
+  const rows = (data ?? []).map(({ widgets, ...row }) => ({
+    ...row,
+    updated_at: (widgets ?? []).reduce((latest, widget) =>
+      Date.parse(widget.updated_at) > Date.parse(latest) ? widget.updated_at : latest,
+    row.updated_at),
+  })) as DashboardRow[];
+  const { data: visits } = session ? await supabase.from("workspace_visits")
+    .select("path, last_opened_at").eq("user_id", session.user.id) : { data: null };
+  const openedAt = new Map((visits ?? []).map((visit) => [visit.path, visit.last_opened_at as string]));
+  for (const row of rows) {
+    row.last_opened_at = openedAt.get(`/${row.kind === "kanban" ? "kanbans" : "dashboards"}/${row.id}`) ?? null;
+  }
 
   // Widgets kanban dos dashboards ativos: entram na seção Kanbans como acesso
   // à página cheia (/kanbans/w/[widgetId]) do MESMO kanban do widget. A RLS de
@@ -145,7 +157,7 @@ export default async function HomePage({
   let widgetKanbanQuery = supabase
     .from("widgets")
     .select(
-      "id, title, dashboard_id, settings, dashboards!inner(id, name, kind, status, organization_id)"
+      "id, title, dashboard_id, settings, created_at, updated_at, dashboards!inner(id, name, kind, status, organization_id)"
     )
     .eq("visual_type", "kanban")
     .eq("dashboards.kind", "dashboard")
@@ -159,7 +171,11 @@ export default async function HomePage({
   const { data: widgetKanbanRows } = await widgetKanbanQuery;
   const widgetKanbans = mapWidgetKanbanRows(
     (widgetKanbanRows ?? []) as unknown as WidgetKanbanHubRow[]
-  );
+  ).map((item) => {
+    const source = widgetKanbanRows?.find((row) => row.id === item.widgetId);
+    return { ...item, created_at: source?.created_at, updated_at: source?.updated_at,
+      last_opened_at: openedAt.get(item.href) ?? null };
+  });
   const canManageRow = (r: DashboardRow) =>
     isAdmin || r.owner_user_id === session?.user.id;
 
@@ -247,17 +263,8 @@ export default async function HomePage({
   }
 
   const cardGrid = (list: DashboardRow[]) => (
-    <HubGrid>
-      {list.map((r) => (
-        <BoardCard
-          key={r.id}
-          row={r}
-          canManage={canManageRow(r)}
-          canDuplicate={canCreate}
-          pinned={isPinned(r.kind === "kanban" ? "kanban" : "dashboard", r.id)}
-        />
-      ))}
-    </HubGrid>
+    <BoardGrid rows={list} canCreate={canCreate} isAdmin={isAdmin} userId={session?.user.id}
+      pins={pins.filter((pin) => pin.kind === "dashboard" || pin.kind === "kanban").map((pin) => pin.id)} />
   );
 
   return (
@@ -311,6 +318,7 @@ export default async function HomePage({
 
       {aba === "operacao" ? (
         <HubDisplayProvider
+          key="operacao"
           keys={{
             layout: "operacaoLayout",
             columns: "operacaoColumns",
@@ -342,8 +350,10 @@ export default async function HomePage({
         </HubDisplayProvider>
       ) : (
         <HubDisplayProvider
+          key="paineis"
           keys={{
             layout: "hubLayout",
+            sort: "hubSort",
             columns: "hubColumns",
             cardHeight: "hubCardHeight",
             showDescription: "hubShowDescription",
@@ -351,6 +361,7 @@ export default async function HomePage({
           }}
           initial={{
             layout: prefs.values.hubLayout,
+            sort: prefs.values.hubSort,
             columns: prefs.values.hubColumns,
             cardHeight: prefs.values.hubCardHeight,
             showDescription: prefs.values.hubShowDescription,
@@ -381,15 +392,8 @@ export default async function HomePage({
               </div>
               {kanbans.length > 0 ? cardGrid(kanbans) : null}
               {widgetKanbans.length > 0 ? (
-                <HubGrid>
-                  {widgetKanbans.map((w) => (
-                    <WidgetKanbanCard
-                      key={w.widgetId}
-                      item={w}
-                      pinned={isPinned("widget-kanban", w.widgetId)}
-                    />
-                  ))}
-                </HubGrid>
+                <WidgetKanbanGrid items={widgetKanbans}
+                  pins={pins.filter((pin) => pin.kind === "widget-kanban").map((pin) => pin.id)} />
               ) : null}
             </>
           ) : null}

@@ -40,7 +40,8 @@ export function CardGrid({
   if (layout === "list") {
     return (
       <div
-        className={cn("flex flex-col gap-2", className)}
+        data-hub-list
+        className={cn("flex w-max max-w-full flex-col gap-2 self-start", className)}
         style={heightVar as unknown as CSSProperties}
       >
         {children}

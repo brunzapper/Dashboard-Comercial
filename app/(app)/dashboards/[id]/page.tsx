@@ -225,6 +225,7 @@ export default async function DashboardPage({
 }) {
   const { id } = await params;
   const sp = await searchParams;
+  const preview = sp.workspacePreview === "1";
   // Instrumentação: início do render (o resumo [dashboard:timing] sai no fim).
   const timing = startDashboardLoadTiming();
   const supabase = await createClient();
@@ -1545,7 +1546,7 @@ export default async function DashboardPage({
           IA ou por outra pessoa. */}
       <ManualBaseStampProvider stamp={manualStamp}>
       {/* Grava a view (com ?tab=) p/ restauração ao reabrir o app. */}
-      <TrackLastView />
+      {preview ? null : <TrackLastView />}
       <DashboardClient
         dashboardId={dash.id as string}
         dashboardName={dash.name as string}
@@ -1567,12 +1568,12 @@ export default async function DashboardPage({
         respCanon={respCanonForTables}
         responsibleOptions={responsibleOptions}
         userRoles={userRoles}
-        canEditValues={canEditValues}
+        canEditValues={!preview && canEditValues}
         available={available}
         availableForBuilder={availableForBuilder}
-        canEdit={canEdit}
-        canManageFields={canManageFields}
-        canAiEdit={canAiEdit}
+        canEdit={!preview && canEdit}
+        canManageFields={!preview && canManageFields}
+        canAiEdit={!preview && canAiEdit}
         aiEdit={aiEdit}
         currencyOptions={currencyOptions}
         currencyRates={currencyRates}
