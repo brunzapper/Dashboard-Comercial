@@ -1,7 +1,8 @@
 import { previewIsReady } from "./readiness";
 import { thumbnail } from "./capture";
+import { PREVIEW_SIZE } from "./geometry";
 
-/** Exclusivo da preparação inicial explícita; nunca importado pelo Workspace. */
+/** Preparação inicial autenticada, automática ou pela tela de manutenção. */
 export async function prepareInitialPreview(host: HTMLElement, id: string, signal: AbortSignal) {
   const frame = document.createElement("iframe");
   frame.style.cssText = "position:fixed;left:-10000px;top:0;width:1440px;height:900px;border:0";
@@ -33,6 +34,6 @@ export async function prepareInitialPreview(host: HTMLElement, id: string, signa
     });
     observer?.disconnect(); clearInterval(poll);
     const main = frame.contentDocument!.querySelector<HTMLElement>("main[data-app-main]")!;
-    return { image: await thumbnail(main,signal), width:main.clientWidth, height:main.clientHeight };
+    return { image: await thumbnail(main,signal), width:PREVIEW_SIZE, height:PREVIEW_SIZE };
   } finally { observer?.disconnect(); clearInterval(poll); clearTimeout(timeout); if(abort)signal.removeEventListener("abort",abort); frame.remove(); }
 }

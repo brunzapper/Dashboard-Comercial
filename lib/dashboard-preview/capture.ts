@@ -1,7 +1,9 @@
+import { PREVIEW_SIZE, previewCrop } from "./geometry";
+
 /** Captura apenas o main já renderizado. Não abre páginas nem dispara consultas. */
 export async function snapshotMain(source: HTMLElement, signal: AbortSignal): Promise<string> {
   const doc = source.ownerDocument;
-  const viewport = source.getBoundingClientRect();
+  const viewport = previewCrop(source);
   let nodes = 0;
   const copyVisible = async (node: Node): Promise<Node | null> => {
     if (signal.aborted) throw new DOMException("Prévia cancelada", "AbortError");
@@ -28,7 +30,7 @@ export async function snapshotMain(source: HTMLElement, signal: AbortSignal): Pr
     return copy;
   };
   const main = await copyVisible(source) as HTMLElement;
-  main.style.cssText += `;position:relative;flex:none;width:${source.clientWidth}px;height:${source.clientHeight}px;overflow:hidden;`;
+  main.style.cssText += `;position:relative;flex:none;width:${viewport.width}px;height:${viewport.side}px;overflow:hidden;`;
   const root = doc.documentElement.cloneNode(false) as HTMLElement;
   const head = doc.createElement("head"), body = doc.createElement("body");
   // CSS inline: a captura sobrevive a novos deploys sem solicitar chunks antigos.
@@ -41,6 +43,7 @@ export async function snapshotMain(source: HTMLElement, signal: AbortSignal): Pr
   style.textContent = styles.join("\n") + "\nhtml,body{margin:0;display:block;overflow:hidden!important}*,*::before,*::after{animation:none!important;transition:none!important;caret-color:transparent!important}";
   const base = doc.createElement("base"); base.href = doc.baseURI;
   head.append(base, style);
+  body.style.width = `${viewport.width}px`;
   body.setAttribute("inert", ""); body.append(main); root.append(head, body);
   return "<!doctype html>" + root.outerHTML;
 }
@@ -48,7 +51,8 @@ export async function snapshotMain(source: HTMLElement, signal: AbortSignal): Pr
 /** Rasterização nativa: cópia do recorte inicial vira uma WebP de até 40 KB.
  * Sem clone de estilos computados por nó, iframe vivo ou engine adicional. */
 export async function thumbnail(main: HTMLElement, signal: AbortSignal): Promise<string> {
-  const width = main.clientWidth, height = main.clientHeight;
+  const { width, side } = previewCrop(main);
+  if (side <= 0) throw new Error("Área de captura vazia");
   const html = await snapshotMain(main, signal);
   const doc = new DOMParser().parseFromString(html, "text/html");
   doc.querySelector("base")?.remove();
@@ -72,15 +76,15 @@ export async function thumbnail(main: HTMLElement, signal: AbortSignal): Promise
   style.textContent = "*{font-family:Arial,sans-serif!important}.react-resizable-handle,[data-preview-exclude]{visibility:hidden!important}";
   doc.head.append(style);
   const xml = new XMLSerializer().serializeToString(doc.documentElement);
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}"><foreignObject width="100%" height="100%">${xml}</foreignObject></svg>`;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${side}"><foreignObject width="100%" height="100%">${xml}</foreignObject></svg>`;
   const image = new Image(); image.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
   await image.decode();
   if (signal.aborted) throw new DOMException("Cancelado", "AbortError");
   const canvas = document.createElement("canvas");
-  canvas.width = 560; canvas.height = Math.round(560 * height / width);
+  canvas.width = PREVIEW_SIZE; canvas.height = PREVIEW_SIZE;
   const ctx = canvas.getContext("2d");
   if (!ctx) throw new Error("Canvas indisponível");
-  ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+  ctx.drawImage(image, 0, 0, side, side, 0, 0, PREVIEW_SIZE, PREVIEW_SIZE);
   let result = canvas.toDataURL("image/webp", 0.45);
   if (result.length > 53_356) result = canvas.toDataURL("image/webp", 0.25);
   if (!result.startsWith("data:image/webp;") || result.length > 53_356) throw new Error("Imagem excede limite");

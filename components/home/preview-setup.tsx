@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { prepareInitialPreview } from "@/lib/dashboard-preview/bootstrap";
+import { previewNeedsUpdate } from "@/lib/dashboard-preview/geometry";
 import { Button } from "@/components/ui/button";
 
 /** Manutenção inicial explícita. Cada conta prepara só o que sua RLS permite. */
@@ -21,7 +22,7 @@ export function PreviewSetup({ rows, email }: { rows: {id:string;name:string;upd
           const response=await fetch(`/api/dashboard-previews/${row.id}?metadata`,{signal:abort.signal,cache:"no-store",priority:"low"});
           if(!response.ok) throw new Error("Armazenamento indisponível. Confira a migração 0145.");
           const meta=await response.json();
-          if(meta.preview?.revision===meta.revision) {mark(row.id,"Já preparada");continue;}
+          if(!previewNeedsUpdate(meta)) {mark(row.id,"Já preparada");continue;}
           mark(row.id,"Preparando captura inicial…");
           const saved=bundle?.previews.find(p=>p.dashboardId===row.id);
           if(bundle && (!saved || Date.parse(meta.revision)>Date.parse(bundle.capturedAt))) {mark(row.id,"Capture novamente: dashboard alterado ou imagem ausente.");continue;}

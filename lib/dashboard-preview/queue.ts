@@ -14,7 +14,7 @@ export class PreviewQueue {
   private active = new Map<PreviewJob, AbortController>();
   private cancelIdle: (() => void) | null = null;
   private stopped = false;
-  constructor(private schedule: (callback: () => void) => () => void) {}
+  constructor(private schedule: (callback: () => void) => () => void, private concurrency = MAX_CONCURRENT) {}
 
   enqueue(job: PreviewJob) {
     this.pending.add(job);
@@ -48,7 +48,7 @@ export class PreviewQueue {
   }
 
   private pump() {
-    if (this.stopped || this.active.size >= MAX_CONCURRENT || this.cancelIdle || !this.pending.size) return;
+    if (this.stopped || this.active.size >= this.concurrency || this.cancelIdle || !this.pending.size) return;
     this.cancelIdle = this.schedule(() => {
       this.cancelIdle = null;
       if (this.stopped) return;
@@ -57,7 +57,7 @@ export class PreviewQueue {
         return Math.abs(x.top - y.top) > 4 ? x.top - y.top : x.left - y.left;
       });
       // v2.0: inicia até MAX_CONCURRENT jobs de uma vez
-      const slots = MAX_CONCURRENT - this.active.size;
+      const slots = this.concurrency - this.active.size;
       const batch = sorted.slice(0, slots);
       for (const job of batch) {
         this.pending.delete(job);

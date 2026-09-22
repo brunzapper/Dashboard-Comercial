@@ -9,6 +9,19 @@ function setup() {
   return { queue, tick, idle };
 }
 describe("fila de prévias", () => {
+  it("preparação serial nunca abre dois dashboards ao mesmo tempo", async () => {
+    const callbacks: (() => void)[] = [];
+    const queue = new PreviewQueue(fn => { callbacks.push(fn); return () => {}; }, 1);
+    let release!: () => void;
+    const second = vi.fn();
+    queue.enqueue({ bounds: () => ({ top: 0, left: 0 }), run: () => new Promise<void>(resolve => { release = resolve; }) });
+    queue.enqueue({ bounds: () => ({ top: 0, left: 100 }), run: second });
+    callbacks.shift()?.(); await Promise.resolve();
+    expect(second).not.toHaveBeenCalled();
+    release(); await new Promise(resolve => setTimeout(resolve, 0));
+    callbacks.shift()?.(); await Promise.resolve();
+    expect(second).toHaveBeenCalledOnce();
+  });
   it("carrega até 3 em paralelo, esquerda→direita e depois a linha seguinte", async () => {
     const { queue, tick } = setup();
     const order: string[] = [];

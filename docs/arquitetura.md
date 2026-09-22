@@ -1337,16 +1337,21 @@ RLS ligado com **zero políticas de escrita** — escrita só via service role.
   `TrackLastView` registra só montagem real, nunca prefetch/prévia. Alterar,
   inserir ou excluir widgets carimba `dashboards.updated_at` via trigger.
   A lista tem largura intrínseca compartilhada pelo maior card, limitada à tela.
-  Prévias (0145) são WebP de 560px e até 40 KB, guardadas no bucket PRIVADO
+  Prévias (0145) são WebP de 560×560 e até 40 KB, guardadas no bucket PRIVADO
   `dashboard-previews`. Postgres mantém só metadados em
   `dashboard_preview_images`, sem base64/HTML. O Workspace lê esses metadados
-  em lote e carrega imagens prontas, esquerda→direita; nunca roda engine,
-  actions de gráficos ou iframe vivo. Cache local IndexedDB de 8 MiB evita
+  em lote e carrega imagens prontas, esquerda→direita. Ausentes, desatualizadas
+  ou em formato legado são preparadas automaticamente por conta numa fila
+  serial separada, usando a rota autenticada de prévia. Imagens prontas não
+  aguardam essa fila nem dependem de edição/evento. Cache local IndexedDB de 8 MiB evita
   novo download após reload e troca de visualização. Chave = usuário/id/versão.
   `PreviewRecorder` usa o DOM já renderizado na primeira aba, sem rolagem,
   após estabilização e fim do carregamento. Cópia cede a thread em blocos e
   é cancelável; rasterização nativa reduz resolução/qualidade, priorizando a
-  disposição dos widgets. Sem dependência de captura externa/fontes grandes.
+  disposição dos widgets. Recorte quadrado no canto superior esquerdo, limitado
+  pela altura da janela; largura original preserva o layout em zoom normal.
+  Nunca escala a altura inteira da página para dentro da miniatura.
+  Sem dependência de captura externa/fontes grandes.
   A candidata completa entra numa outbox IndexedDB separada (8 MiB).
   `PreviewPublisher` no layout só publica após sair do dashboard, em idle,
   via POST de baixa prioridade independente das server actions de navegação.
@@ -1358,11 +1363,13 @@ RLS ligado com **zero políticas de escrita** — escrita só via service role.
   RLS revalida board/org/usuário; não basta o papel, pois responsáveis,
   overrides e traduções de operação são pessoais. Alterações de ACL invalidam
   imagens antigas (`dashboard_preview_access_epoch`); sync de nomes/datas não.
-  `/preparar-previas` oferece carga inicial explícita ou importação de miniaturas
-  da mesma conta. Só essa preparação usa `/dashboards/[id]/preview`; nenhuma
-  captura inicial roda automaticamente ao entrar no Workspace. Kanbans seguem
-  como cards. Imagens não disponíveis mostram estado estático, nunca spinner
-  aguardando gráficos. A rota de preparação viva mantém SAMEORIGIN; o restante
+  `/preparar-previas` oferece manutenção/importação opcional da mesma conta.
+  O Workspace usa a mesma `/dashboards/[id]/preview`, próximo da área visível,
+  uma captura por vez. Metadados frescos decidem atualização por revisão,
+  epoch ou formato; o primeiro carregamento independe de edição. Cache ausente
+  ou corrompido recai na rede; falhas transitórias retentam com atraso e online.
+  Kanbans seguem como cards. A imagem anterior permanece enquanto prepara a
+  nova. A rota de preparação viva mantém SAMEORIGIN; o restante
   permanece DENY, e não registra visitas/realtime/edições.
   As sub-abas de **Configurações** seguem sendo ABAS (a navegação focada de
   `/operacao` foi tentada ali e revertida: são poucas áreas, relacionadas e

@@ -1979,9 +1979,11 @@ This version has breaking changes — APIs, conventions, and file structure may 
   próprio origin. Nunca torne a prévia pública nem conte seu mount como
   abertura. Histórico pessoal em `workspace_visits`, datas ausentes por último
   nas duas direções. Alterações em widgets carimbam o dashboard via trigger.
-  **Prévias persistentes (0145):** Workspace só lê WebP pronta; NUNCA gera
-  captura nem monta dashboard oculto. Bucket privado `dashboard-previews`
-  guarda binários de até 40 KB (560px); `dashboard_preview_images` guarda só
+  **Prévias persistentes (0145):** Workspace prioriza WebP pronta. Ausentes,
+  desatualizadas ou em formato legado são preparadas automaticamente para a
+  conta autenticada, em fila serial separada das leituras. Bucket privado
+  `dashboard-previews` guarda binários de até 40 KB (560×560, recorte superior
+  esquerdo da janela a 100%, nunca a página inteira); `dashboard_preview_images` guarda só
   referência/revisão/dimensões. RLS isola org + usuário (responsáveis/overrides
   tornam insuficiente separar apenas por papel). Mudanças de ACL invalidam
   capturas pelo epoch. Cache IndexedDB por usuário/versão, 8 MiB, sem HTML.
@@ -1989,8 +1991,10 @@ This version has breaking changes — APIs, conventions, and file structure may 
   de sair. CAS no banco rejeita revisão/epoch obsoletos; só troca a imagem
   completa e validada. Nunca remova a anterior enquanto prepara/baixa a nova.
   Leitura ordenada ESQUERDA → DIREITA; navegação/interação têm precedência.
-  `/preparar-previas` é a preparação inicial EXPLÍCITA (ou import de WebP),
-  único consumidor permitido da rota viva `/dashboards/[id]/preview`.
+  `/preparar-previas` é manutenção/import opcional. O Workspace também usa
+  `/dashboards/[id]/preview` para completar as imagens, sem exigir edição;
+  cancelar navegação desmonta a captura. Imagens atuais nunca são recapturadas
+  só por carregar o Workspace. Leitura independe do gatilho de atualização.
   Ver `docs/arquitetura.md` §4.7.
 - **Token de tema é WHITELIST, e a superfície externa do dashboard é variável
   CSS (12/09/2026):** além de `--brand-base`, um conjunto CURADO
