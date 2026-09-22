@@ -30,6 +30,15 @@ baixa prioridade sem bloquear navegação. Durante upload/download, a imagem
 anterior deve permanecer. Testar revisão concorrente (409), RLS entre usuários
 /orgs, revogação de campo/base e offline seguido de online.
 
+Aplicar `supabase/migrations/0147_fix_preview_object_insert.sql` (22/09/2026)
+em qualquer ambiente que já tenha rodado a 0145: a policy de INSERT dos
+binários criada lá comparava o id/org do dashboard com os "diretórios" do NOME
+do dashboard (dentro do `exists`, o `name` não qualificado resolvia para
+`dashboards.name`), então o Storage rejeitava TODO upload com 400 e nenhuma
+prévia chegava a existir. Depois de aplicar, basta abrir um dashboard e sair:
+a outbox republica sozinha. Sintoma de que falta aplicar: `dashboard-previews`
+sem objetos e `dashboard_preview_images` sem linhas, com 400 nos storage logs.
+
 Aplicar `supabase/migrations/0144_workspace_display.sql` antes de publicar o
 frontend: ela cria `patch_user_ui_prefs`, `workspace_visits` e o trigger de
 alteração de widgets. Sem a RPC, os controles informam falha e revertem a

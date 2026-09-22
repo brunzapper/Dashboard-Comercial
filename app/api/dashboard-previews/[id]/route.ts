@@ -1,3 +1,5 @@
+// v2.1 | 22/09/2026 — falha de upload deixa de ser silenciosa (console.error):
+// a policy quebrada da 0145 rejeitava TODO upload e o 503 mudo escondeu isso.
 // v2.0 | 21/09/2026 — cache HTTP para imagens versionadas + query otimizada
 // (removida query separada de dashboards no GET de imagem — a RLS de
 // dashboard_preview_images já garante auth_board_visible + status <> 'trashed')
@@ -69,7 +71,12 @@ export async function POST(request: Request, context: Context) {
   const path = `${dashboard.organization_id}/${session.user.id}/${id}/${crypto.randomUUID()}.webp`;
   const bytes = Buffer.from(entry.image.slice("data:image/webp;base64,".length), "base64");
   const { error: uploadError } = await supabase.storage.from(BUCKET).upload(path, bytes, { contentType: "image/webp", upsert: false });
-  if (uploadError) return new Response(null, { status: 503 });
+  if (uploadError) {
+    // v2.1: sem isto, uma rejeição do Storage (RLS, mime, tamanho) vira um 503
+    // indistinguível de indisponibilidade e a prévia nunca aparece.
+    console.error("[dashboard-previews] upload rejeitado", { dashboard: id, path, bytes: bytes.length, error: uploadError.message });
+    return new Response(null, { status: 503 });
+  }
   const { data: published, error } = await supabase.rpc("publish_dashboard_preview", {
     p_dashboard: id, p_revision: entry.revision, p_access_version: entry.accessVersion,
     p_path: path, p_bytes: bytes.length, p_width: entry.width, p_height: entry.height,
