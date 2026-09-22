@@ -106,8 +106,7 @@ export function DashboardPreview({ id, name, scope, preview }: {
   }, [id, scope, preview, visible, queue, preparation, attempt]);
   const shown = result?.scope === scope && result.id === id ? result : undefined;
   return <Link ref={ref} href={`/dashboards/${id}`} prefetch={false} aria-label={`Abrir dashboard ${name}`}
-    className="bg-muted relative mx-3 block overflow-hidden rounded-md border focus-visible:ring-2 focus-visible:ring-ring"
-    style={{ aspectRatio: "1 / 1" }}>
+    className="bg-muted relative mx-3 block min-h-0 overflow-hidden rounded-md border focus-visible:ring-2 focus-visible:ring-ring">
     {!shown ? <span className="text-muted-foreground absolute inset-0 flex items-center justify-center text-xs" aria-hidden>
       {error ?? "Carregando prévia…"}
     </span> : <img src={shown.image} alt="" aria-hidden decoding="async"

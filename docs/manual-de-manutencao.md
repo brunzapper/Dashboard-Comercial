@@ -13,13 +13,15 @@ ausentes são preparadas pela conta autenticada, uma por vez, perto da área
 visível. Não exige edição nem visita ao dashboard. `/preparar-previas`
 continua opcional para manutenção da própria conta. Também aceita JSON de
 miniaturas prontas (`viewerEmail`, `capturedAt`, `previews` com dashboardId,
-image WebP data URL, width, height). Não importar captura de administrador
+image WebP data URL, width, height e format: `tabs-v2`). Não importar captura de administrador
 para vendedor. Import rejeita conta diferente e dashboard alterado depois da
 captura. Repetir por contexto de acesso; o escopo conservador é por usuário,
 porque papéis iguais não garantem os mesmos registros/overrides.
 
 Imagens prontas são quadradas (560×560), com recorte superior esquerdo da
-janela inicial em zoom normal, até 40 KB. Capturas legadas são substituídas
+janela inicial a partir das abas, sem título/voltar, em zoom normal, até 40 KB.
+O card inteiro também é quadrado. O formato `tabs-v2` é exigido no upload e
+identificado no nome do objeto privado (sem migração nova). Capturas legadas são substituídas
 automaticamente mesmo sem mudança de revisão. Cache IndexedDB de 8 MiB
 reusa por usuário/id/versão; outbox separada de 8 MiB retenta publicação depois
 de sair do dashboard. Uma revisão nova só substitui a imagem anterior quando

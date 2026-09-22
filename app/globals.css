@@ -204,6 +204,28 @@ main[data-app-main] {
   min-height: var(--hub-card-h, auto);
 }
 
+/* O quadrado inclui título, descrição e margens, não só a imagem interna. */
+[data-hub-card][data-hub-preview] {
+  aspect-ratio: 1;
+  min-height: 0;
+  align-self: start;
+  display: grid;
+  grid-template-rows: minmax(0, auto) minmax(0, 1fr);
+  gap: 0.75rem;
+  padding-block: 0.75rem;
+  overflow: hidden;
+}
+[data-hub-preview] [data-slot="card-header"] {
+  overflow: hidden;
+}
+[data-hub-preview] [data-slot="card-title"],
+[data-hub-preview] [data-slot="card-description"] {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+
 /* CardHeader usa container queries, que isolam sua largura intrínseca.
    Na lista precisamos medir o TEXTO, não apenas o padding do container. */
 [data-hub-list] [data-slot="card-header"] {

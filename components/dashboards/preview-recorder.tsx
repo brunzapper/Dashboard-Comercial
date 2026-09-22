@@ -4,7 +4,7 @@ import { previewIsReady } from "@/lib/dashboard-preview/readiness";
 import { thumbnail } from "@/lib/dashboard-preview/capture";
 import { stagePreview } from "@/lib/dashboard-preview/store";
 import { schedulePreviewTask } from "@/lib/dashboard-preview/queue";
-import { PREVIEW_SIZE, previewNeedsUpdate } from "@/lib/dashboard-preview/geometry";
+import { PREVIEW_SIZE, PREVIEW_FORMAT, previewNeedsUpdate } from "@/lib/dashboard-preview/geometry";
 
 /** Prepara uma candidata; publicação acontece só depois de sair do dashboard. */
 export function PreviewRecorder({ id, scope, ready }: { id: string; scope: string; ready: boolean }) {
@@ -31,7 +31,7 @@ export function PreviewRecorder({ id, scope, ready }: { id: string; scope: strin
             const image = await thumbnail(main, signal);
             if (signal.aborted) return;
             await stagePreview({ key: `${scope}:${id}`, scope, id, image, revision: meta.revision,
-              accessVersion: meta.accessVersion, width: PREVIEW_SIZE, height: PREVIEW_SIZE, at: Date.now() });
+              accessVersion: meta.accessVersion, width: PREVIEW_SIZE, height: PREVIEW_SIZE, format: PREVIEW_FORMAT, at: Date.now() });
             dirty = false;
             window.dispatchEvent(new Event("dashboard-preview-staged"));
           })().catch(error => { if (error?.name !== "AbortError") dirty = false; })

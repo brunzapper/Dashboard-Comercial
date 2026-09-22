@@ -1,7 +1,7 @@
 import { cacheImage, imageKey, readLocalImage } from "./store";
 
 export interface PreviewImage {
-  version: string; width: number; height: number; access_version: number;
+  version: string; width: number; height: number; access_version: number; format?: string | null;
 }
 export interface PreviewMetadata {
   revision: string; accessVersion: number;

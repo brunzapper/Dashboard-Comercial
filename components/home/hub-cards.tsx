@@ -135,6 +135,7 @@ export function BoardCard({
   return (
     <Card
       data-hub-card
+      data-hub-preview={display.layout === "preview" && !kanban && !trashed ? "true" : undefined}
       className={shellClass(display.layout, trashed ? "opacity-70" : undefined)}
     >
       <CardHeader className={headerClass(display.layout)}>

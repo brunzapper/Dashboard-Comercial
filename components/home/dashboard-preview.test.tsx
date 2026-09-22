@@ -12,7 +12,7 @@ vi.mock("@/lib/dashboard-preview/load", async importOriginal => ({
   loadPreviewImage: vi.fn(), loadPreviewMetadata: vi.fn(),
 }));
 vi.mock("@/lib/dashboard-preview/bootstrap", () => ({ prepareInitialPreview: vi.fn() }));
-const meta = { version: "one", width: 560, height: 560, access_version: 1, revision: "unchanged" };
+const meta = { version: "one", width: 560, height: 560, access_version: 1, format: "tabs-v2", revision: "unchanged" };
 const metadata = { revision: "unchanged", accessVersion: 1, preview: meta };
 function ui(preview: typeof meta | null = meta, scope = "user") {
   return <PreviewQueueProvider><DashboardPreview id="board" name="Vendas" scope={scope} preview={preview ?? undefined}/></PreviewQueueProvider>;
@@ -27,7 +27,7 @@ beforeEach(() => {
   vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true }));
   vi.mocked(loadPreviewImage).mockResolvedValue("data:image/webp;base64,old");
   vi.mocked(loadPreviewMetadata).mockResolvedValue(metadata);
-  vi.mocked(prepareInitialPreview).mockResolvedValue({ image: "data:image/webp;base64,new", width: 560, height: 560 });
+  vi.mocked(prepareInitialPreview).mockResolvedValue({ image: "data:image/webp;base64,new", width: 560, height: 560, format: "tabs-v2" });
 });
 it("carrega a imagem salva sem edição, evento ou nova captura", async () => {
   const view = render(ui());
@@ -35,7 +35,7 @@ it("carrega a imagem salva sem edição, evento ou nova captura", async () => {
   await waitFor(() => expect(loadPreviewMetadata).toHaveBeenCalled());
   expect(prepareInitialPreview).not.toHaveBeenCalled();
   expect(fetch).not.toHaveBeenCalled();
-  expect(view.container.querySelector("a")?.style.aspectRatio).toBe("1 / 1");
+  expect(view.container.querySelector("a")?.style.aspectRatio).toBe("");
 });
 it("descobre imagem já publicada quando o RSC ainda não a informou", async () => {
   const view = render(ui(null));
@@ -58,18 +58,19 @@ it.each(["user", "viewer", "other-org-user"])("prepara ausente automaticamente p
 });
 it.each([
   { ...meta, width: 1440, height: 900 },
+  { ...meta, format: "legacy" },
   { ...meta, revision: "older" },
   { ...meta, access_version: 0 },
 ])("mantém a antiga enquanto prepara o formato/revisão/epoch novo", async previous => {
   vi.mocked(loadPreviewMetadata).mockResolvedValue({ ...metadata, preview: previous });
-  let release!: (value: { image: string; width: number; height: number }) => void;
+  let release!: (value: { image: string; width: number; height: number; format: string }) => void;
   vi.mocked(prepareInitialPreview).mockImplementation(() => new Promise(resolve => { release = resolve; }));
   const view = render(ui(previous));
   await waitFor(() => expect(prepareInitialPreview).toHaveBeenCalled());
   expect(view.container.querySelector("img")?.src).toContain("old");
   vi.mocked(loadPreviewMetadata).mockResolvedValue({ ...metadata, preview: { ...meta, version: "two" } });
   vi.mocked(loadPreviewImage).mockResolvedValue("data:image/webp;base64,new");
-  await act(async () => release({ image: "data:image/webp;base64,new", width: 560, height: 560 }));
+  await act(async () => release({ image: "data:image/webp;base64,new", width: 560, height: 560, format: "tabs-v2" }));
   await waitFor(() => expect(view.container.querySelector("img")?.src).toContain("new"));
 });
 it("trocar usuário não mostra a captura anterior enquanto a nova carrega", async () => {

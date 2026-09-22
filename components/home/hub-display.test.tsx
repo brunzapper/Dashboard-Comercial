@@ -34,6 +34,17 @@ function setup(locked: UiPrefKey[] = []) {
 }
 beforeEach(() => { vi.clearAllMocks(); save.mockResolvedValue({ ok: true }); });
 describe("exibição imediata dos cards", () => {
+  it("aplica o quadrado ao card inteiro somente no modo prévia", () => {
+    const { container } = setup();
+    expect(container.querySelector("[data-hub-preview]")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Prévia" }));
+    const cards = container.querySelectorAll("[data-hub-preview]");
+    expect(cards).toHaveLength(2);
+    expect(cards[0].querySelector('[data-slot="card-header"]')).not.toBeNull();
+    expect(cards[0].textContent).toContain("Prévia:");
+    fireEvent.click(screen.getByRole("button", { name: "Lista" }));
+    expect(container.querySelector("[data-hub-preview]")).toBeNull();
+  });
   it("clicar no texto da opção da engrenagem alterna a descrição", async () => {
     setup();
     fireEvent.click(screen.getByRole("button", { name: "Configurar exibição dos cards" }));
