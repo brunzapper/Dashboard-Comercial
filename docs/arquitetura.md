@@ -1348,9 +1348,16 @@ RLS ligado com **zero políticas de escrita** — escrita só via service role.
   `PreviewRecorder` usa o DOM já renderizado na primeira aba, sem rolagem,
   após estabilização e fim do carregamento. Cópia cede a thread em blocos e
   é cancelável; rasterização nativa reduz resolução/qualidade, priorizando a
-  disposição dos widgets. Recorte quadrado no canto superior esquerdo, limitado
+  disposição dos widgets. Recorte quadrado a partir da linha das abas
+  (`data-preview-start`), ou do conteúdo (`data-preview-content`) sem abas;
+  título e voltar ficam fora. O card inteiro inclui cabeçalho no quadrado,
+  independentemente da preferência de altura mínima. O recorte é limitado
   pela altura da janela; largura original preserva o layout em zoom normal.
   Nunca escala a altura inteira da página para dentro da miniatura.
+  A receita é versionada como `tabs-v2` no nome privado do arquivo. O GET
+  deriva `preview.format` desse nome; capturas antigas renovam sem edição.
+  O POST exige o formato atual para outboxes antigas não sobrescreverem a
+  captura corrigida. Sem mudança de schema ou de permissões.
   Sem dependência de captura externa/fontes grandes.
   A candidata completa entra numa outbox IndexedDB separada (8 MiB).
   `PreviewPublisher` no layout só publica após sair do dashboard, em idle,

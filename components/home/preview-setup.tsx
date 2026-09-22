@@ -2,7 +2,7 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { prepareInitialPreview } from "@/lib/dashboard-preview/bootstrap";
-import { previewNeedsUpdate } from "@/lib/dashboard-preview/geometry";
+import { PREVIEW_FORMAT, previewNeedsUpdate } from "@/lib/dashboard-preview/geometry";
 import { Button } from "@/components/ui/button";
 
 /** Manutenção inicial explícita. Cada conta prepara só o que sua RLS permite. */
@@ -11,7 +11,7 @@ export function PreviewSetup({ rows, email }: { rows: {id:string;name:string;upd
   const [running,setRunning]=useState(false), [status,setStatus]=useState<Record<string,string>>({});
   useEffect(()=>()=>controller.current?.abort(),[]);
   const mark=(id:string,message:string)=>setStatus(prev=>({...prev,[id]:message}));
-  async function prepare(bundle?: {viewerEmail:string;capturedAt:string;previews:{dashboardId:string;image:string;width:number;height:number}[]}) {
+  async function prepare(bundle?: {viewerEmail:string;capturedAt:string;previews:{dashboardId:string;image:string;width:number;height:number;format?:string}[]}) {
     if(running || !host.current) return;
     if(bundle && bundle.viewerEmail.toLowerCase()!==email.toLowerCase()) { setStatus({error:"Entre com a conta que gerou as capturas."}); return; }
     setRunning(true); const abort=new AbortController(); controller.current=abort;
@@ -25,12 +25,12 @@ export function PreviewSetup({ rows, email }: { rows: {id:string;name:string;upd
           if(!previewNeedsUpdate(meta)) {mark(row.id,"Já preparada");continue;}
           mark(row.id,"Preparando captura inicial…");
           const saved=bundle?.previews.find(p=>p.dashboardId===row.id);
-          if(bundle && (!saved || Date.parse(meta.revision)>Date.parse(bundle.capturedAt))) {mark(row.id,"Capture novamente: dashboard alterado ou imagem ausente.");continue;}
+          if(bundle && (!saved || saved.format !== PREVIEW_FORMAT || Date.parse(meta.revision)>Date.parse(bundle.capturedAt))) {mark(row.id,"Capture novamente: dashboard alterado ou imagem ausente.");continue;}
           const image=saved ?? await prepareInitialPreview(host.current,row.id,abort.signal);
           // Decodificação completa antes da publicação; falha mantém a anterior.
           const decoded=new Image();decoded.src=image.image;await decoded.decode();
           const result=await fetch(`/api/dashboard-previews/${row.id}`,{method:"POST",headers:{"Content-Type":"application/json"},signal:abort.signal,priority:"low",
-            body:JSON.stringify({image:image.image,width:image.width,height:image.height,revision:meta.revision,accessVersion:meta.accessVersion})});
+            body:JSON.stringify({image:image.image,width:image.width,height:image.height,format:PREVIEW_FORMAT,revision:meta.revision,accessVersion:meta.accessVersion})});
           if(!result.ok) throw new Error("Não foi possível publicar; a imagem anterior foi preservada.");
           mark(row.id,"Pronta e salva");
         } catch(error) {if(!abort.signal.aborted) mark(row.id,error instanceof Error?error.message:"Falha ao preparar");}

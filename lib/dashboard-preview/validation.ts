@@ -1,8 +1,10 @@
-export interface PreviewUpload { revision: string; accessVersion: number; image: string; width: number; height: number }
+import { PREVIEW_FORMAT, PREVIEW_SIZE } from "./geometry";
+export interface PreviewUpload { revision: string; accessVersion: number; image: string; width: number; height: number; format: string }
 
 export function validPreviewUpload(value: unknown): PreviewUpload | null {
   if (!value || typeof value !== "object") return null;
   const v = value as PreviewUpload;
+  if (v.format !== PREVIEW_FORMAT || v.width !== PREVIEW_SIZE || v.height !== PREVIEW_SIZE) return null;
   if (typeof v.revision !== "string" || !Number.isFinite(Date.parse(v.revision)) ||
     !Number.isSafeInteger(v.accessVersion) || v.accessVersion < 1 ||
     !Number.isInteger(v.width) || v.width < 320 || v.width > 5120 ||

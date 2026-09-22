@@ -1983,7 +1983,10 @@ This version has breaking changes — APIs, conventions, and file structure may 
   desatualizadas ou em formato legado são preparadas automaticamente para a
   conta autenticada, em fila serial separada das leituras. Bucket privado
   `dashboard-previews` guarda binários de até 40 KB (560×560, recorte superior
-  esquerdo da janela a 100%, nunca a página inteira); `dashboard_preview_images` guarda só
+  esquerdo a partir das abas, sem título/voltar; sem abas começa no conteúdo).
+  O card INTEIRO é quadrado, incluindo seu cabeçalho. Formato `tabs-v2` no
+  nome privado do objeto permite renovar capturas antigas sem edição; upload
+  rejeita formato antigo da outbox. `dashboard_preview_images` guarda só
   referência/revisão/dimensões. RLS isola org + usuário (responsáveis/overrides
   tornam insuficiente separar apenas por papel). Mudanças de ACL invalidam
   capturas pelo epoch. Cache IndexedDB por usuário/versão, 8 MiB, sem HTML.

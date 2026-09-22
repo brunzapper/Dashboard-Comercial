@@ -1234,7 +1234,7 @@ export function DashboardClient({
       <DashboardPendingProvider>
         {/* Segundo trecho de cromo: a barra de período e o aviso de posição
             ficam sobre a superfície externa; o grid, logo abaixo, fica FORA. */}
-        <div className="flex flex-col gap-4" data-board-chrome>
+        <div className="flex flex-col gap-4" data-board-chrome data-preview-content>
         {barEnabled ? (
           <PeriodFilter
             available={availableForBuilder}

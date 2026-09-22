@@ -7,6 +7,7 @@ import { createServiceClient } from "@/lib/supabase/service";
 import { createClient } from "@/lib/supabase/server";
 import { getSessionInfo } from "@/lib/auth/session";
 import { validPreviewUpload } from "@/lib/dashboard-preview/validation";
+import { PREVIEW_FORMAT, previewFormat } from "@/lib/dashboard-preview/geometry";
 
 const BUCKET = "dashboard-previews";
 const noStore = { "Cache-Control": "private, no-store" };
@@ -24,7 +25,8 @@ export async function GET(request: Request, context: Context) {
       .select("version, revision, object_path, width, height, access_version").eq("dashboard_id", id).maybeSingle();
     const { data: epoch } = await supabase.from("dashboard_preview_access_epoch").select("version").single();
     if (!epoch) return new Response(null, { status: 503, headers: noStore });
-    return Response.json({ revision: dashboard.updated_at, accessVersion: epoch.version, preview }, { headers: noStore });
+    return Response.json({ revision: dashboard.updated_at, accessVersion: epoch.version,
+      preview: preview ? { ...preview, format: previewFormat(preview.object_path) } : null }, { headers: noStore });
   }
   // v2.0: GET de imagem — RLS de dashboard_preview_images já filtra por
   // auth_board_visible + status <> 'trashed'; sem query extra de dashboards
@@ -68,7 +70,7 @@ export async function POST(request: Request, context: Context) {
   // para limpar o arquivo substituído, nunca para entregá-lo ao cliente.
   const { data: previous } = await createServiceClient().from("dashboard_preview_images")
     .select("object_path").eq("dashboard_id", id).eq("user_id", session.user.id).maybeSingle();
-  const path = `${dashboard.organization_id}/${session.user.id}/${id}/${crypto.randomUUID()}.webp`;
+  const path = `${dashboard.organization_id}/${session.user.id}/${id}/${PREVIEW_FORMAT}-${crypto.randomUUID()}.webp`;
   const bytes = Buffer.from(entry.image.slice("data:image/webp;base64,".length), "base64");
   const { error: uploadError } = await supabase.storage.from(BUCKET).upload(path, bytes, { contentType: "image/webp", upsert: false });
   if (uploadError) {

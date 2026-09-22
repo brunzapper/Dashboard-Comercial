@@ -14,8 +14,10 @@ it("copia só o main, inline CSS e SVG; exclui scripts, portals e widgets fora d
   for (const value of ["Receita", "Visível", "color: red", "inert"]) expect(html).toContain(value);
   for (const value of ["Fora da janela", "<script", "onclick", "<iframe", "SEGREDO"]) expect(html).not.toContain(value);
 });
-it("recorta o quadrado superior esquerdo sem reduzir a página inteira", async () => {
+it.each([0, 160])("recorta o quadrado a partir de y=%i sem reduzir a página inteira", async offset => {
   const main = document.createElement("main");
+  const tabs = document.createElement("div"); tabs.setAttribute("data-preview-start", ""); main.append(tabs);
+  tabs.getBoundingClientRect = () => ({ top: offset }) as DOMRect;
   Object.defineProperties(main, { clientWidth: { value: 1440 }, clientHeight: { value: 6000 } });
   vi.stubGlobal("innerHeight", 900);
   vi.stubGlobal("Image", class { src = ""; async decode() {} });
@@ -27,7 +29,7 @@ it("recorta o quadrado superior esquerdo sem reduzir a página inteira", async (
   });
   try {
     await thumbnail(main, new AbortController().signal);
-    expect(drawImage).toHaveBeenCalledWith(expect.anything(), 0, 0, 900, 900, 0, 0, 560, 560);
+    expect(drawImage).toHaveBeenCalledWith(expect.anything(), 0, offset, 900 - offset, 900 - offset, 0, 0, 560, 560);
   } finally { context.mockRestore(); encode.mockRestore(); vi.unstubAllGlobals(); }
 });
 it("cede a thread durante a cópia e obedece cancelamento", async () => {

@@ -79,7 +79,7 @@ export function DashboardTabs({
   if (tabs.length === 0 && !editMode) return null;
 
   return (
-    <div className="flex flex-wrap items-center gap-2">
+    <div className="flex flex-wrap items-center gap-2" data-preview-start>
       {tabs.map((tab) => {
         const active = tab.id === activeId;
         const textColor = readableText(tab.color);

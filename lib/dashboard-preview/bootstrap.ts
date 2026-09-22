@@ -1,6 +1,6 @@
 import { previewIsReady } from "./readiness";
 import { thumbnail } from "./capture";
-import { PREVIEW_SIZE } from "./geometry";
+import { PREVIEW_SIZE, PREVIEW_FORMAT } from "./geometry";
 
 /** Preparação inicial autenticada, automática ou pela tela de manutenção. */
 export async function prepareInitialPreview(host: HTMLElement, id: string, signal: AbortSignal) {
@@ -34,6 +34,6 @@ export async function prepareInitialPreview(host: HTMLElement, id: string, signa
     });
     observer?.disconnect(); clearInterval(poll);
     const main = frame.contentDocument!.querySelector<HTMLElement>("main[data-app-main]")!;
-    return { image: await thumbnail(main,signal), width:PREVIEW_SIZE, height:PREVIEW_SIZE };
+    return { image: await thumbnail(main,signal), width:PREVIEW_SIZE, height:PREVIEW_SIZE, format:PREVIEW_FORMAT };
   } finally { observer?.disconnect(); clearInterval(poll); clearTimeout(timeout); if(abort)signal.removeEventListener("abort",abort); frame.remove(); }
 }

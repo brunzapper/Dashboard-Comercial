@@ -661,8 +661,10 @@ um dashboard completo gerado por uma IA externa a partir de um JSON (ver
 
 No Workspace, **Cartão**, **Lista** e **Prévia** mudam a apresentação na hora.
 A Lista usa a largura necessária ao card com mais conteúdo, limitada à tela.
-A Prévia mostra um recorte quadrado do canto superior esquerdo da janela
-inicial em zoom normal, reduzido para caber no card; clique nela para abrir.
+A Prévia usa um card quadrado, incluindo o título e a descrição do card.
+A imagem começa no nome das abas, sem repetir o título do dashboard nem o
+botão de voltar. Sem abas, começa no conteúdo logo abaixo do cabeçalho.
+O recorte mantém o zoom normal, reduzido para caber no card; clique para abrir.
 Kanbans continuam com seus cards. As prévias preservam suas permissões e não
 contam como abertura do dashboard. São miniaturas leves, sem atualização
 contínua dos dados; textos podem ficar pequenos, priorizando a identificação
