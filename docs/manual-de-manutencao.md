@@ -2,6 +2,17 @@
 
 ### Atualização do Workspace (0144)
 
+**Regressão de layout das prévias:** `tests/preview-layout.browser.test.tsx`
+renderiza BoardGrid/Card/CardHeader/DashboardPreview reais com imagens de teste
+e compila `app/globals.css` via Tailwind. Valida largura da imagem, títulos e
+cards quadrados em 1335, 1024 e 390px. O CI executa no job e2e após instalar
+Chromium (`PREVIEW_BROWSER_TEST=1`). Localmente, defina
+`PREVIEW_BROWSER_EXECUTABLE` com o caminho do Chrome e rode
+`npx vitest run tests/preview-layout.browser.test.tsx --maxWorkers=1`.
+`PREVIEW_BROWSER_OUTPUT` opcional salva screenshot e medidas. A coluna do grid
+deve ser explícita: `justify-center` com coluna auto encolhe a imagem e zera
+a largura do título por causa do containment do CardHeader.
+
 **Prévias prontas (0145):** aplicar `0145_dashboard_preview_images.sql` antes
  do frontend. Ela cria metadados, epoch de acesso, RPC de publicação e bucket
  privado WebP. Nenhum binário vai para a tabela da aplicação. Não tornar o

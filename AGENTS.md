@@ -1984,7 +1984,12 @@ This version has breaking changes — APIs, conventions, and file structure may 
   conta autenticada, em fila serial separada das leituras. Bucket privado
   `dashboard-previews` guarda binários de até 40 KB (560×560, recorte superior
   esquerdo a partir das abas, sem título/voltar; sem abas começa no conteúdo).
-  O card INTEIRO é quadrado, incluindo seu cabeçalho. Formato `tabs-v2` no
+  O card INTEIRO é quadrado, incluindo seu cabeçalho. O grid interno exige
+  coluna explícita `minmax(0,1fr)` e `justify-content: stretch`: `justify-center`
+  herdado + coluna auto + container queries do CardHeader colapsam o título
+  e deixam a imagem numa faixa central. Regressores devem renderizar BoardGrid
+  e Tailwind reais (`tests/preview-layout.browser.test.tsx`), não CSS aproximado.
+  Formato `tabs-v2` no
   nome privado do objeto permite renovar capturas antigas sem edição; upload
   rejeita formato antigo da outbox. `dashboard_preview_images` guarda só
   referência/revisão/dimensões. RLS isola org + usuário (responsáveis/overrides
