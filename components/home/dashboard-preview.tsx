@@ -1,79 +1,116 @@
 "use client";
-/* Miniaturas já comprimidas e privadas: não passam pelo otimizador público do Next. */
+/* Miniaturas privadas já comprimidas: não passam pelo otimizador público. */
 /* eslint-disable @next/next/no-img-element */
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
-import { cacheImage, imageKey, readLocalImage } from "@/lib/dashboard-preview/store";
-import { usePreviewQueue } from "./preview-queue-context";
+import { loadPreviewImage, loadPreviewMetadata, PreviewUnavailable, type PreviewImage } from "@/lib/dashboard-preview/load";
+import { previewNeedsUpdate } from "@/lib/dashboard-preview/geometry";
+import { usePreviewPreparationQueue, usePreviewQueue } from "./preview-queue-context";
 
-// v2.0 | 21/09/2026 — prévia stale (access_version < epoch) é EXIBIDA
-// normalmente; a recaptura é automática na próxima visita ao dashboard.
-export interface PreviewImage { version: string; width: number; height: number; access_version: number }
-type RefreshedPreview = { scopeKey: string; base?: string; meta: PreviewImage };
-const published = new Map<string, RefreshedPreview>();
-/** Apenas lê a miniatura pronta; jamais monta dashboard/engine. */
+export type { PreviewImage } from "@/lib/dashboard-preview/load";
+
+/** Always read saved images. Missing/obsolete captures are prepared once per user. */
 export function DashboardPreview({ id, name, scope, preview }: {
   id: string; name: string; scope: string; preview?: PreviewImage;
 }) {
-  const ref = useRef<HTMLAnchorElement>(null), queue = usePreviewQueue();
+  const ref = useRef<HTMLAnchorElement>(null);
+  const displayed = useRef<{ scope: string; id: string; version: string } | undefined>(undefined);
+  const queue = usePreviewQueue(), preparation = usePreviewPreparationQueue();
   const [visible, setVisible] = useState(false);
-  const scopeKey = JSON.stringify([scope,id]);
-  const [fresh, setFresh] = useState<RefreshedPreview | undefined>(() => published.get(scopeKey));
-  const [result, setResult] = useState<{key: string; image: string; scope: string; id: string; meta: PreviewImage}>();
-  // v2.0: epoch não é mais gate na RLS — prévia stale é exibida e recapturada
-  // na próxima visita ao dashboard; validação não compara access_version.
-  const validFresh = fresh?.scopeKey === scopeKey &&
-    (fresh.base === preview?.version || fresh.meta.version === preview?.version);
-  const meta = validFresh ? fresh?.meta : preview;
-  const key = meta ? imageKey(scope,id,meta.version) : "";
+  const [attempt, setAttempt] = useState(0);
+  const [result, setResult] = useState<{ image: string; scope: string; id: string }>();
+  const [error, setError] = useState<string>();
   useEffect(() => {
-    const observer = new IntersectionObserver(([entry]) => setVisible(entry.isIntersecting));
+    const observer = new IntersectionObserver(([entry]) => setVisible(entry.isIntersecting), { rootMargin: "150px" });
     if (ref.current) observer.observe(ref.current);
     return () => observer.disconnect();
   }, []);
   useEffect(() => {
-    const changed = (event: Event) => {
-      if ((event as CustomEvent).detail !== id) return;
-      void fetch(`/api/dashboard-previews/${id}?metadata`, {cache:"no-store",priority:"low"})
-        .then(r => r.ok ? r.json() : null).then(m => {
-          if(!m?.preview) return;
-          const entry={scopeKey,base:preview?.version,meta:m.preview};
-          // Não reusar uma antiga captura quando o RSC não autorizou nenhuma.
-          if(preview) { published.set(scopeKey,entry); if(published.size>200)published.delete(published.keys().next().value!); }
-          setFresh(entry);
-        }).catch(() => {});
-    };
+    const reload = () => setAttempt(n => n + 1);
+    const changed = (event: Event) => { if ((event as CustomEvent).detail === id) reload(); };
     window.addEventListener("dashboard-preview-published", changed);
-    return () => window.removeEventListener("dashboard-preview-published", changed);
-  }, [id,scopeKey,preview]);
+    window.addEventListener("online", reload);
+    return () => {
+      window.removeEventListener("dashboard-preview-published", changed);
+      window.removeEventListener("online", reload);
+    };
+  }, [id]);
   useEffect(() => {
-    if (!key || !visible || !ref.current || !meta) return;
-    return queue.enqueue({ bounds: () => ref.current!.getBoundingClientRect(), run: async signal => {
-      let image = (await readLocalImage(key))?.image;
-      if (!image) {
-        const response = await fetch(`/api/dashboard-previews/${id}?v=${meta.version}`, {signal, priority:"low"});
-        if (!response.ok) return;
-        const blob = await response.blob();
-        image = await new Promise<string>((resolve,reject) => {
-          const reader = new FileReader(); reader.onload=()=>resolve(reader.result as string); reader.onerror=reject; reader.readAsDataURL(blob);
-        });
-        if (signal.aborted) return;
-        await cacheImage(key,image);
+    if (!visible || !ref.current) return;
+    let disposed = false, cancelPreparation: (() => void) | undefined;
+    let retry: ReturnType<typeof setTimeout> | undefined;
+    const bounds = () => ref.current?.getBoundingClientRect() ?? { top: 0, left: 0 };
+    const show = async (meta: PreviewImage, signal: AbortSignal) => {
+      if (displayed.current?.scope === scope && displayed.current.id === id && displayed.current.version === meta.version) return;
+      const image = await loadPreviewImage(scope, id, meta, signal);
+      if (!disposed && !signal.aborted) {
+        displayed.current = { scope, id, version: meta.version };
+        setResult({ image, scope, id }); setError(undefined);
       }
-      const decoded = new Image(); decoded.src=image; await decoded.decode();
-      if (!signal.aborted) setResult({key,image,scope,id,meta});
+    };
+    const failed = (error: unknown, signal: AbortSignal) => {
+      if (disposed || signal.aborted) return;
+      if (error instanceof PreviewUnavailable && [401, 403, 404].includes(error.status)) {
+        displayed.current = undefined;
+        setResult(undefined); setError("Prévia indisponível"); return;
+      }
+      setError("Tentando carregar a prévia novamente…");
+      retry = setTimeout(() => setAttempt(n => n + 1), Math.min(30_000, 2000 * 2 ** Math.min(attempt, 4)));
+    };
+    const cancelRead = queue.enqueue({ bounds, run: async signal => {
+      try {
+        // The RSC's authorized image can appear immediately, before metadata IO.
+        if (preview && (displayed.current?.scope !== scope || displayed.current.id !== id)) {
+          await show(preview, signal).catch(() => { signal.throwIfAborted(); });
+        }
+        const meta = await loadPreviewMetadata(id, signal);
+        let missingImage = false;
+        if (meta.preview) {
+          try { await show(meta.preview, signal); }
+          catch (error) {
+            signal.throwIfAborted();
+            if (!(error instanceof PreviewUnavailable) || error.status !== 404) throw error;
+            missingImage = true;
+          }
+        }
+        if (disposed || signal.aborted || (!missingImage && !previewNeedsUpdate(meta))) return;
+        // Separate serial queue: heavy initial captures never delay ready images.
+        cancelPreparation?.();
+        cancelPreparation = preparation.enqueue({ bounds, run: async captureSignal => {
+          const host = document.createElement("div");
+          host.setAttribute("aria-hidden", "true");
+          try {
+            const latest = await loadPreviewMetadata(id, captureSignal);
+            if (!missingImage && !previewNeedsUpdate(latest) && latest.preview) {
+              await show(latest.preview, captureSignal); return;
+            }
+            const { prepareInitialPreview } = await import("@/lib/dashboard-preview/bootstrap");
+            captureSignal.throwIfAborted();
+            document.body.append(host);
+            const image = await prepareInitialPreview(host, id, captureSignal);
+            const response = await fetch(`/api/dashboard-previews/${id}`, {
+              method: "POST", headers: { "Content-Type": "application/json" },
+              signal: captureSignal, priority: "low",
+              body: JSON.stringify({ ...image, revision: latest.revision, accessVersion: latest.accessVersion }),
+            });
+            if (!response.ok) throw new PreviewUnavailable(response.status);
+            const published = await loadPreviewMetadata(id, captureSignal);
+            if (!published.preview) throw new Error("Prévia ainda não publicada");
+            await show(published.preview, captureSignal);
+          } catch (error) { failed(error, captureSignal); }
+          finally { host.remove(); }
+        }});
+      } catch (error) { failed(error, signal); }
     }});
-  }, [id,key,meta,queue,visible,scope]);
-  // v2.0: sem comparação de access_version — prévia stale é exibida
+    return () => { disposed = true; clearTimeout(retry); cancelRead(); cancelPreparation?.(); };
+  }, [id, scope, preview, visible, queue, preparation, attempt]);
   const shown = result?.scope === scope && result.id === id ? result : undefined;
-  const dimensions = shown?.meta ?? meta;
   return <Link ref={ref} href={`/dashboards/${id}`} prefetch={false} aria-label={`Abrir dashboard ${name}`}
     className="bg-muted relative mx-3 block overflow-hidden rounded-md border focus-visible:ring-2 focus-visible:ring-ring"
-    style={{aspectRatio:dimensions ? `${dimensions.width} / ${dimensions.height}` : "16 / 9"}}>
-    <span className="text-muted-foreground absolute inset-0 flex items-center justify-center text-xs" aria-hidden>
-      {meta ? "" : "Prévia ainda não preparada"}
-    </span>
-    {shown ? <img src={shown.image} alt="" aria-hidden decoding="async"
-      className="pointer-events-none absolute inset-0 h-full w-full object-cover" /> : null}
+    style={{ aspectRatio: "1 / 1" }}>
+    {!shown ? <span className="text-muted-foreground absolute inset-0 flex items-center justify-center text-xs" aria-hidden>
+      {error ?? "Carregando prévia…"}
+    </span> : <img src={shown.image} alt="" aria-hidden decoding="async"
+      className="pointer-events-none absolute inset-0 h-full w-full object-cover object-left-top" />}
   </Link>;
 }

@@ -661,18 +661,20 @@ um dashboard completo gerado por uma IA externa a partir de um JSON (ver
 
 No Workspace, **Cartão**, **Lista** e **Prévia** mudam a apresentação na hora.
 A Lista usa a largura necessária ao card com mais conteúdo, limitada à tela.
-A Prévia mostra a janela inicial do dashboard em zoom normal, reduzida para
-caber no card e recortada no canto superior esquerdo; clique nela para abrir.
+A Prévia mostra um recorte quadrado do canto superior esquerdo da janela
+inicial em zoom normal, reduzido para caber no card; clique nela para abrir.
 Kanbans continuam com seus cards. As prévias preservam suas permissões e não
 contam como abertura do dashboard. São miniaturas leves, sem atualização
 contínua dos dados; textos podem ficar pequenos, priorizando a identificação
-dos widgets. Depois da preparação inicial, ficam salvas na organização,
+dos widgets. A preparação inicial é automática por usuário. Ficam salvas na organização,
 separadas conforme o acesso aos dados, e também em cache no navegador.
 Ao alterar um dashboard, uma nova captura é preparada quando a tela estabiliza
 e publicada em baixa prioridade após sair. A imagem anterior continua visível
 até a substituta estar pronta. As imagens carregam da esquerda para a direita,
-sem executar os gráficos no Workspace. Se ainda não houver uma imagem, use
-`/preparar-previas` para a preparação inicial da sua conta.
+priorizando as imagens prontas. Se faltar uma imagem, ela é preparada
+automaticamente, sem editar o dashboard. Alterações apenas atualizam a
+captura; abrir o Workspace sempre carrega as prévias. `/preparar-previas`
+continua disponível como ferramenta opcional de manutenção.
 
 Em **Ordenar por**, escolha os criados, alterados ou abertos mais recentemente
 ou há mais tempo. A abertura é pessoal; itens sem histórico ficam no fim nas

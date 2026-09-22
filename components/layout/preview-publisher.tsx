@@ -8,6 +8,7 @@ import { schedulePreviewTask } from "@/lib/dashboard-preview/queue";
 export function PreviewPublisher({ scope }: { scope: string }) {
   const path = usePathname();
   useEffect(() => {
+    if (window.self !== window.top) return;
     let stopped = false, busy = false;
     let timer: ReturnType<typeof setTimeout> | undefined, idle: (() => void) | undefined;
     const controller = new AbortController();

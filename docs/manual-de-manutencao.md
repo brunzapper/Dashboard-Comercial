@@ -8,23 +8,30 @@
  bucket público nem criar policy anon. O cleanup de arquivos substituídos usa
  service role SOMENTE para caminhos derivados do usuário autenticado.
 
-Carga inicial: entrar em `/preparar-previas` com a conta cujo acesso aos dados
-será capturado e usar **Preparar capturas iniciais**. Também aceita JSON de
+Carga inicial automática: abrir a visualização Prévia do Workspace. Imagens
+ausentes são preparadas pela conta autenticada, uma por vez, perto da área
+visível. Não exige edição nem visita ao dashboard. `/preparar-previas`
+continua opcional para manutenção da própria conta. Também aceita JSON de
 miniaturas prontas (`viewerEmail`, `capturedAt`, `previews` com dashboardId,
 image WebP data URL, width, height). Não importar captura de administrador
 para vendedor. Import rejeita conta diferente e dashboard alterado depois da
 captura. Repetir por contexto de acesso; o escopo conservador é por usuário,
 porque papéis iguais não garantem os mesmos registros/overrides.
 
-Após isso, Workspace só lê imagens de até 40 KB. Cache IndexedDB de 8 MiB
+Imagens prontas são quadradas (560×560), com recorte superior esquerdo da
+janela inicial em zoom normal, até 40 KB. Capturas legadas são substituídas
+automaticamente mesmo sem mudança de revisão. Cache IndexedDB de 8 MiB
 reusa por usuário/id/versão; outbox separada de 8 MiB retenta publicação depois
 de sair do dashboard. Uma revisão nova só substitui a imagem anterior quando
 completa; erro, quota, offline ou saída antes de estabilizar conservam a anterior.
 Captura incompleta é tentada ao reabrir o dashboard. Alteração de ACL oculta
 capturas antigas; é necessário preparar uma nova visão autorizada.
 
-Verificar Network: ZERO `/dashboards/*/preview` ao abrir Workspace, mesmo
-sem cache. Imagens chegam esquerda→direita; voltar/recarregar usa IndexedDB.
+Verificar Network: ZERO `/dashboards/*/preview` quando as imagens salvas
+estão atuais, inclusive sem cache local. Ausentes/desatualizadas/legadas
+usam no máximo uma preparação viva por vez, separada das leituras prontas.
+Testar primeiro acesso sem edição, cache ausente/corrompido e retorno ao
+Workspace sem alterações. Imagens chegam esquerda→direita.
 Editar um dashboard, aguardar estabilização, sair e confirmar publicação em
 baixa prioridade sem bloquear navegação. Durante upload/download, a imagem
 anterior deve permanecer. Testar revisão concorrente (409), RLS entre usuários

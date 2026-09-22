@@ -1,7 +1,9 @@
+import { previewCrop } from "./geometry";
+
 /** Só o recorte inicial precisa estar pronto; widgets lazy fora dele não bloqueiam. */
 export function previewIsReady(main: HTMLElement) {
   if (main.scrollTop || main.scrollLeft || main.ownerDocument.defaultView?.scrollY) return false;
-  const viewport = main.getBoundingClientRect();
+  const viewport = previewCrop(main);
   const visible = (element: Element) => {
     const r = element.getBoundingClientRect();
     return r.width > 0 && r.height > 0 && r.top < viewport.bottom && r.bottom > viewport.top && r.left < viewport.right && r.right > viewport.left;
