@@ -210,6 +210,10 @@ main[data-app-main] {
   min-height: 0;
   align-self: start;
   display: grid;
+  /* Card herda justify-center; coluna auto + container queries do cabeçalho
+     colapsavam a largura do título e da imagem para uma faixa central. */
+  grid-template-columns: minmax(0, 1fr);
+  justify-content: stretch;
   grid-template-rows: minmax(0, auto) minmax(0, 1fr);
   gap: 0.75rem;
   padding-block: 0.75rem;
