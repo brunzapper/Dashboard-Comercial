@@ -1,3 +1,6 @@
+// Versão: 1.1 | Data: 28/09/2026
+// v1.1: memberCredit (critério de crédito por membro) entra na lista do que o
+// merge preserva — a config é mutada in place, então ele já sobrevivia.
 // Versão: 1.0 | Data: 08/09/2026
 // Validador do contrato `remuneracao-edit` (padrão §4.17). PURO — recebe o
 // contexto FRESCO e os catálogos já carregados pelo core.
@@ -141,7 +144,8 @@ export function validateCompEdit(
   }
 
   // Começa da config ATUAL: tudo que a IA não mencionar sobrevive — inclusive
-  // `presetKey`, `detailGrouping`, `memberTeams` e os `filters` do recorte,
+  // `presetKey`, `detailGrouping`, `memberTeams`, `memberCredit` (v1.1) e os
+  // `filters` do recorte,
   // que o save do plan-editor também re-emite (sem isso o round-trip os
   // destruiria no primeiro apply).
   const config: CompPlanConfig = JSON.parse(

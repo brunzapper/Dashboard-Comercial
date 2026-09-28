@@ -1,3 +1,9 @@
+// Versão: 1.10 | Data: 28/09/2026
+// v1.10: CRITÉRIO DE CRÉDITO POR MEMBRO (factor.memberCredit). O recorte do
+// membro sai de memberScopeFor — o MESMO do engine — como alternativas
+// DISJUNTAS; operandRecordQuery devolve uma config por alternativa (`configs`)
+// e loadOperandRecords junta as listas e soma as contagens. O aviso do
+// critério (detailCreditNote) vai junto; o de equipe só nos modos que a usam.
 // Versão: 1.9 | Data: 29/08/2026
 // v1.9: VAZAMENTO DE PLANO entre pessoas. A matriz do detalhe enumerava
 // membro × plano pela presença de LANÇAMENTO, enquanto a Visão geral enumera
@@ -49,6 +55,7 @@ import {
   DETAIL_UNSUPPORTED_FIELD_NOTE,
   detailAggNote,
   detailMergedAggNote,
+  detailCreditNote,
   detailTeamNote,
   detailTruncatedNote,
   factorPayoutFormula,
@@ -108,7 +115,8 @@ import {
 
 import {
   loadTargetsByMember,
-  memberFilterFor,
+  memberCreditField,
+  memberScopeFor,
   operationMembersFromScopes,
   resolveTargetRates,
   type CompEntryRow,
@@ -619,7 +627,14 @@ function nonEmptyFilters(field: string): WidgetFilter[] {
 }
 
 export type FactorQuery =
-  | { ok: true; config: WidgetConfig; period: DashboardPeriod; warnings: string[] }
+  | {
+      ok: true;
+      // Uma config por alternativa DISJUNTA do recorte de membro (v1.10): a
+      // união é o recorte. No caso clássico, exatamente uma.
+      configs: WidgetConfig[];
+      period: DashboardPeriod;
+      warnings: string[];
+    }
   | { ok: false; error: string };
 
 /**
@@ -638,13 +653,27 @@ export function operandRecordQuery(
   operand: FactorOperand,
   memberId: string
 ): FactorQuery {
-  const memberFilter = memberFilterFor(factor, memberId, ctx.canon, ctx.nameById);
-  if ("error" in memberFilter) return { ok: false, error: memberFilter.error };
+  const scope = memberScopeFor(factor, memberId, ctx.canon, ctx.nameById);
+  if ("error" in scope) return { ok: false, error: scope.error };
 
   const warnings: string[] = [];
+  const memberKey = canonicalOf(memberId, ctx.canon) ?? memberId;
+  const credit = factor.memberCredit?.[memberKey];
+  if (credit) {
+    const field = memberCreditField(factor);
+    const fieldLabel =
+      field === "responsible_id"
+        ? "Responsável"
+        : (ctx.available.find((a) => a.field === field)?.label ?? field);
+    warnings.push(detailCreditNote(credit, fieldLabel));
+  }
   // Com crédito de equipe, a lista traz registros em nome de outras pessoas —
-  // dizer de quem evita que o líder leia isso como erro de cálculo.
-  const team = factor.memberTeams?.[canonicalOf(memberId, ctx.canon) ?? memberId];
+  // dizer de quem evita que o líder leia isso como erro de cálculo. Só nos
+  // critérios que usam o próprio membro (os outros ignoram a equipe).
+  const team =
+    credit === "all" || credit === "unassigned"
+      ? undefined
+      : factor.memberTeams?.[memberKey];
   if (team && team.length > 0) {
     const nomes = team
       .map((id) => ctx.nameById.get(id))
@@ -672,20 +701,20 @@ export function operandRecordQuery(
     ok: true,
     warnings,
     period,
-    config: {
+    configs: scope.alternatives.map((memberFilters) => ({
       source: "records",
       sources,
       dimensions: [],
       metrics: [],
       filters: [
         ...(factor.filters ?? []),
-        memberFilter,
+        ...memberFilters,
         ...listCondFilters(operand.conds),
         ...nonEmptyFilters(operand.field),
       ],
       visual_type: "tabela",
       settings: { rowMode: "records" },
-    },
+    })),
   };
 }
 
@@ -794,14 +823,18 @@ async function loadOperandRecords(
   }
 
   const maxRows = Math.max(0, Math.min(MAX_DETAIL_ROWS_PER_FACTOR, rowBudget));
-  const { rows, total } = await runRecordListWindow(
-    supabase,
-    query.config,
-    query.period,
-    ctx.available,
-    ctx.sources,
-    { offset: 0, maxRows: maxRows + 1 }
+  // Alternativas DISJUNTAS (v1.10): as listas se juntam sem duplicar e as
+  // contagens exatas somam. Caso clássico = uma consulta só, como antes.
+  const windows = await Promise.all(
+    query.configs.map((config) =>
+      runRecordListWindow(supabase, config, query.period, ctx.available, ctx.sources, {
+        offset: 0,
+        maxRows: maxRows + 1,
+      })
+    )
   );
+  const rows = windows.flatMap((w) => w.rows);
+  const total = windows.reduce((a, w) => a + w.total, 0);
   const kept = rows.slice(0, maxRows);
   const detailRows = kept.map((r) =>
     toDetailRow(r, ctx, operand, ctx.fkLabels, query.period, perUnit)

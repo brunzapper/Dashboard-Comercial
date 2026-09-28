@@ -1,3 +1,5 @@
+// Versão: 1.2 | Data: 28/09/2026 (v1.2: filterAlternatives — basis dobrada
+// por alternativa disjunta; divisão sai Σ/Σ; perna nula anula a chave)
 // Versão: 1.1 | Data: 01/08/2026 (v1.1: perna escopada VAZIA no modo moeda
 // soma como 0 — a aux monetária sem linhas não pode derrubar a fórmula)
 // Versão: 1.0 | Data: 24/07/2026
@@ -317,5 +319,81 @@ describe("operando @sub que ignora o período (ignore_period, 0116)", () => {
       op: "in",
       value: ["lead"],
     });
+  });
+});
+
+// v1.2 (28/09/2026): recorte como UNIÃO de alternativas disjuntas.
+describe("filterAlternatives (união disjunta)", () => {
+  const hasFilter = (args: Record<string, unknown>, op: string) =>
+    ((args.p_filters ?? []) as WidgetFilter[]).some(
+      (x) => x.field === "custom:canal" && x.op === op
+    );
+  // Perna "própria" (canal = A) e perna "vazia" (canal is_null): cada uma
+  // devolve [sum, count] diferentes.
+  const rpc = (args: Record<string, unknown>) => ({
+    data: [
+      hasFilter(args, "eq")
+        ? { metric_1: 100, metric_2: 4 }
+        : { metric_1: 50, metric_2: 1 },
+    ],
+    error: null,
+  });
+  const alternatives: WidgetFilter[][] = [
+    [{ field: "custom:canal", op: "eq", value: "A" }],
+    [{ field: "custom:canal", op: "is_null" }],
+  ];
+
+  it("divisão usa Σ/Σ da basis, não a soma das razões", async () => {
+    const { db, rpcCalls } = fakeSupabase({ rpc: { run_widget_query: rpc } });
+    const out = await runCalculatedWidget(db, {
+      formula: {
+        tokens: [
+          { kind: "field", ref: "agg:sum:value" },
+          { kind: "op", op: "/" },
+          { kind: "field", ref: "agg:count:*" },
+        ],
+      },
+      sources: ["deals"],
+      filters: [{ field: "stage", op: "eq", value: "ganho" }],
+      filterAlternatives: alternatives,
+    });
+    // (100 + 50) / (4 + 1) = 30 — somar as razões daria 25 + 50 = 75.
+    expect(out.value).toBe(30);
+    expect(rpcCalls).toHaveLength(2);
+    // Cada perna leva os filtros comuns E os dela.
+    for (const call of rpcCalls)
+      expect(call.args.p_filters).toContainEqual({
+        field: "stage",
+        op: "eq",
+        value: "ganho",
+      });
+  });
+
+  it("sem alternativas: uma consulta só, como antes", async () => {
+    const { db, rpcCalls } = fakeSupabase({ rpc: { run_widget_query: rpc } });
+    const out = await runCalculatedWidget(db, {
+      formula: f("agg:sum:value"),
+      sources: ["deals"],
+      filterAlternatives: [],
+    });
+    expect(out.value).toBe(50);
+    expect(rpcCalls).toHaveLength(1);
+  });
+
+  it("perna condicional que falha anula a chave (nunca soma parcial)", async () => {
+    const { db } = fakeSupabase({
+      rpc: {
+        run_widget_query: (args: Record<string, unknown>) =>
+          hasFilter(args, "is_null")
+            ? { data: null, error: { message: "boom" } }
+            : { data: [{ metric_1: 3 }], error: null },
+      },
+    });
+    const out = await runCalculatedWidget(db, {
+      formula: f('aggif:["count","*",[["stage","=","ganho"]]]'),
+      sources: ["deals"],
+      filterAlternatives: alternatives,
+    });
+    expect(out.value).toBeNull();
   });
 });

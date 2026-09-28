@@ -1,3 +1,10 @@
+<!-- Versão: 1.96 | Data: 28/09/2026 -->
+<!-- v1.96 (28/09/2026): §4.18 — CRITÉRIO DE CRÉDITO POR MEMBRO
+     (factor.memberCredit): "todo o recorte", "só sem responsável" e "próprio +
+     sem responsável", por membro dentro do indicador. A união é resolvida no
+     engine: memberScopeFor devolve alternativas DISJUNTAS e o
+     runCalculatedWidget dobra a basis por alternativa (filterAlternatives) —
+     RPCs intocados. -->
 <!-- Versão: 1.95 | Data: 17/09/2026 -->
 <!-- v1.95 (17/09/2026): §4.17 — o Gemini REBAIXA de modelo quando o degrau
      atual satura (escada cronológica em lib/ai/models.ts, até 3 modelos,
@@ -4138,6 +4145,28 @@ total opcional por plano.
   de um script que só existe publicado) + `lib/export/comp-sheet.test.ts` +
   `lib/export/comp-detail-sheet.test.ts` + os pinos do CSV em
   `lib/export/comp.test.ts` + casos de botão/gatilho nos testes das telas.
+- **Critério de crédito por membro (28/09/2026).** O recorte de membro de um
+  fator deixou de ser sempre "os registros do membro": `factor.memberCredit`
+  (id CANÔNICO → modo; ausente = próprio + equipe, byte-idêntico) escolhe,
+  POR MEMBRO dentro do indicador, entre `all` (sem filtro de membro — valem só
+  `factor.sources`/`factor.filters`; ex.: gestor que ganha sobre 100% do que
+  qualquer pessoa ou canal vendeu), `unassigned` (só registros com o campo de
+  crédito — Responsável ou `memberField` — vazio) e `own_and_unassigned`
+  (próprio + equipe SOMADO aos vazios). `memberScopeFor`
+  (`lib/comp/engine.ts`) devolve o recorte como ALTERNATIVAS DISJUNTAS de
+  filtros; o vazio é `is_null` e, em `custom:`, também `eq ""` (o texto vazio
+  do jsonb). Como o filtro do RPC só faz E, a UNIÃO é resolvida no choke
+  point: `runCalculatedWidget` aceita `filterAlternatives`, resolve a basis
+  (principal e de comparação) uma vez por alternativa e a dobra com
+  `foldBasis`. A basis só tem chaves `sum:`/`count:`/`aggif:` (MÉDIA vira
+  sum+count), todas aditivas, então o resultado é exato até em fórmula com
+  divisão (Σnum/Σden — somar os resultados por alternativa daria a soma das
+  razões, errado); chave nula em qualquer perna anula a chave. Base manual é
+  preenchida uma vez, depois do fold. O detalhamento usa o MESMO
+  `memberScopeFor`: `operandRecordQuery` devolve uma config por alternativa,
+  as listas se juntam e as contagens somam, com o aviso `detailCreditNote`
+  (o de equipe só nos critérios que a usam). O plan-editor mostra
+  "Crédito por membro" (critério + equipe) e RE-EMITE `memberCredit`.
 - **Match de membro por campo, alvo padrão e alvo em moeda (31/07/2026).**
   Três extensões POR FATOR, todas resolvidas no engine/modelo (RPCs
   intocados): (a) `factor.memberField` (ref de campo texto/seleção, ex.
