@@ -1,3 +1,9 @@
+// Versão: 1.6 | Data: 30/09/2026
+// v1.6 (30/09/2026): visualização ROOT e fonte LIVRE. (a) o parse das linhas
+//   de `tree_nodes` saiu para `rows.ts` (puro, testado) e passou a devolver a
+//   GEOMETRIA da Root e o pai da própria anotação; (b) `loadMapTreeFacts` — o
+//   mapa livre (escopo `livre`, sem registro), que a 0133 previa e nenhum
+//   loader lia: anotações + tarefas penduradas, hidratadas pela RLS de tasks.
 // Versão: 1.5 | Data: 10/09/2026
 // v1.5 (10/09/2026): VÁRIAS séries por registro. `ruleId` virou `ruleIds`, e o
 //   tronco passa a ser um bloco por regra. O motivo é estrutural: o atributo é
@@ -53,7 +59,8 @@ import type { AvailableField } from "@/lib/widgets/fields";
 import type { RecordRow } from "@/lib/records/types";
 
 import { TREE_WINDOW_STEP } from "./model";
-import type { TreeFact, TreeParentOverride } from "./model";
+import type { TreeFact, TreeNodeGeometry, TreeParentOverride } from "./model";
+import { parseTreeNodeRows, TREE_NODE_COLUMNS, type TreeNodeRow } from "./rows";
 
 export { TREE_WINDOW_STEP };
 
@@ -89,6 +96,8 @@ export interface TreeSeriesInfo {
 export interface TreeFacts {
   facts: TreeFact[];
   overrides: TreeParentOverride[];
+  /** v1.6: a geometria da Root (offset e direção por nó). */
+  geometry: TreeNodeGeometry[];
   /** Há ocorrência (ou fato) fora da janela na direção corrente. */
   hasMore: boolean;
   /**
@@ -300,9 +309,7 @@ export async function loadRecordTreeFacts(
       // Nós livres e exceções de parentesco: independentes dos fatos acima.
       db
         .from("tree_nodes")
-        .select(
-          "id, kind, ref_id, node_ref, parent_ref, label, body, position, created_at"
-        )
+        .select(TREE_NODE_COLUMNS)
         .eq("scope_kind", "record")
         .eq("scope_id", recordId),
     ]);
@@ -375,27 +382,11 @@ export async function loadRecordTreeFacts(
   }
 
   // --- nós livres e exceções de parentesco (vieram no lote acima) ---
-  const overrides: TreeParentOverride[] = [];
-  for (const n of nodes ?? []) {
-    const nodeRef = n.node_ref as string | null;
-    if (nodeRef) {
-      overrides.push({
-        nodeRef,
-        // "-" é o "soltar na raiz": distingue de "sem exceção" (null).
-        parentRef: n.parent_ref === "-" ? null : ((n.parent_ref as string) ?? null),
-        position: (n.position as number) ?? null,
-      });
-      continue;
-    }
-    facts.push({
-      id: `note:${n.id as string}`,
-      kind: "note",
-      at: day(n.created_at),
-      label: (n.label as string) ?? "Nota",
-      body: (n.body as string | null) ?? null,
-      refId: n.id as string,
-    });
-  }
+  // v1.6: o parse é de `rows.ts` — o mesmo do mapa livre.
+  const parsed = parseTreeNodeRows((nodes ?? []) as unknown as TreeNodeRow[]);
+  facts.push(...parsed.facts);
+  const overrides: TreeParentOverride[] = parsed.overrides;
+  const geometry = parsed.geometry;
 
   // Sem tronco (registro fora de série), a janela recorta os PRÓPRIOS fatos:
   // não há ocorrência para agrupá-los, e a linha do tempo crua é o que existe.
@@ -412,11 +403,77 @@ export async function loadRecordTreeFacts(
       return {
         facts: facts.filter((f) => keep.has(f.id)),
         overrides,
+        geometry,
         hasMore,
         series,
       };
     }
   }
 
-  return { facts, overrides, hasMore, series };
+  return { facts, overrides, geometry, hasMore, series };
+}
+
+/** v1.6: os fatos de um MAPA livre (escopo `livre`). */
+export interface TreeMapFacts {
+  facts: TreeFact[];
+  overrides: TreeParentOverride[];
+  geometry: TreeNodeGeometry[];
+  /** Ids das tarefas penduradas que a RLS deixou ver (o editor as hidrata). */
+  taskIds: string[];
+}
+
+/**
+ * Fatos de um mapa livre: as anotações e as tarefas penduradas nele.
+ *
+ * Não há série, comentário nem alteração — tudo isso é de um REGISTRO. A
+ * tarefa que sumiu (excluída, ou fora da RLS de quem olha) some do mapa em
+ * silêncio, e os filhos dela sobem para a raiz: `deriveTree` já trata pai
+ * inexistente assim. Leitura com o client RLS do usuário.
+ */
+export async function loadMapTreeFacts(
+  db: SupabaseClient,
+  input: { mapKey: string; orgId: string | null }
+): Promise<TreeMapFacts> {
+  let q = db
+    .from("tree_nodes")
+    .select(TREE_NODE_COLUMNS)
+    .eq("scope_kind", "livre")
+    .eq("scope_id", input.mapKey)
+    .limit(FACT_FETCH_CAP);
+  // Escopo EXPLÍCITO por org: a chave do mapa é do usuário, e duas orgs podem
+  // escolher a mesma. A RLS já recorta; o filtro evita depender só dela.
+  if (input.orgId) q = q.eq("organization_id", input.orgId);
+  const { data: rows } = await q;
+  const parsed = parseTreeNodeRows((rows ?? []) as unknown as TreeNodeRow[], {
+    allowMapTasks: true,
+  });
+
+  const facts: TreeFact[] = [...parsed.facts];
+  const overrides: TreeParentOverride[] = [...parsed.overrides];
+  const taskIds: string[] = [];
+  const wanted = [...new Set(parsed.mapTasks.map((t) => t.taskId))];
+  if (wanted.length > 0) {
+    const { data: tasks } = await db
+      .from("tasks")
+      .select("id, title, description, due_date, completed_at, created_at")
+      .in("id", wanted);
+    const byId = new Map((tasks ?? []).map((t) => [t.id as string, t]));
+    for (const ref of parsed.mapTasks) {
+      const t = byId.get(ref.taskId);
+      if (!t || taskIds.includes(ref.taskId)) continue;
+      taskIds.push(ref.taskId);
+      const id = `task:${ref.taskId}`;
+      facts.push({
+        id,
+        kind: "task",
+        at: day(t.due_date) || day(t.created_at),
+        label: (t.title as string) || "Tarefa",
+        body: (t.description as string | null) ?? null,
+        status: t.completed_at ? "concluída" : "aberta",
+        refId: ref.taskId,
+      });
+      overrides.push({ nodeRef: id, parentRef: ref.parentRef });
+    }
+  }
+  return { facts, overrides, geometry: parsed.geometry, taskIds };
 }

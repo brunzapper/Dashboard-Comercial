@@ -1,4 +1,8 @@
-<!-- Versão: 1.37 | Data: 18/09/2026 -->
+<!-- Versão: 1.38 | Data: 30/09/2026 -->
+<!-- v1.38 (30/09/2026): §5.14 — visualização ROOT da Tree (canvas de galhos
+     arrastáveis, colapsáveis, para o lado ou para baixo; galho novo de
+     qualquer nó; caminho até o Resultado) e a fonte Livre, que agora existe:
+     mapa por chave, sem registro. -->
 <!-- v1.37 (18/09/2026): §5 (Base manual → famílias) — como escolher as
      métricas de um eixo de família, e o que se vê quando nenhuma delas se
      reparte por ele: o eixo montado com todos os valores em "—". -->
@@ -1443,8 +1447,12 @@ e as alterações de campo, cada uma na ocorrência em cuja janela caiu.
   painel. Com uma Tree no painel seguindo o foco, o clique da linha **foca o
   widget** em vez de abrir a barra lateral — não faz sentido abrir um painel
   por cima de um widget que já ia mostrar a mesma coisa.
-- **Livre** — nós digitados por você (e, opcionalmente, campos de um ou vários
-  registros). É o mapa mental: não depende de automação nenhuma.
+- **Livre** — um **mapa** identificado por uma chave, sem registro nenhum: as
+  anotações e tarefas que você pendura nele. É onde mora um planejamento ou
+  uma rotina — não depende de automação. Dois widgets com a mesma chave
+  mostram o mesmo mapa; deixando a chave vazia, uma nova é gerada ao salvar.
+  (Comentário não existe no mapa: ele é do feed de um registro — a opção
+  aparece desabilitada, com o motivo.)
 
 **Três formas de organizar** (`layout`), sobre os mesmos fatos:
 
@@ -1456,8 +1464,38 @@ e as alterações de campo, cada uma na ocorrência em cuja janela caiu.
 
 Trocar a forma **não perde nada**: os nós são fatos que já existem, e a forma
 só decide de quem cada um pendura. E as formas se misturam — arrastar um nó
-para outro pai grava só essa **exceção**, que passa a valer em qualquer forma;
-desfazer é soltá-lo de volta.
+para outro pai (na visualização Root) grava só essa **exceção**, que passa a
+valer em qualquer forma; desfazer é soltá-lo na raiz ou de volta no pai.
+No mapa Livre a forma não se aplica: ele é sempre o parentesco desenhado.
+
+**Duas visualizações** (`view`), sobre a mesma árvore:
+
+- **Lista** (padrão) — os galhos recuados, com a seleção múltipla.
+- **Root** — a árvore num **canvas**, feita para mostrar *o que depende de
+  quê*: o caminho que um planejamento precisa seguir até o resultado, ou as
+  etapas de uma rotina. A convenção: **um galho depende dos filhos** — o
+  resultado fica no alto, o que precisa acontecer antes pendura embaixo, e as
+  folhas são os primeiros passos.
+  - **Arrastar** um cartão para o vazio muda o lugar dele (o subgalho vai
+    junto); soltar **sobre outro nó** o pendura ali — ele passa a depender
+    daquele. Um galho nunca pode ser solto dentro de si mesmo.
+  - Cada galho **recolhe** (mostrando quantos ficaram escondidos) e abre
+    **para o lado ou para baixo** — por galho, então uma rotina pode descer
+    enquanto uma das etapas se abre para o lado. O que está recolhido é
+    preferência de quem olha; posição e direção valem para todos.
+  - O **"+"** de qualquer nó puxa um galho novo: **anotação** (pertence à
+    Tree), **tarefa** (o editor de tarefa de sempre — ela aparece também em
+    Tarefas, kanbans e agenda) ou **comentário** (feed do registro). E de
+    qualquer um deles saem outros.
+  - A **anotação** pode ser **texto livre** ou **etapa** (com Concluir), e
+    qualquer uma pode ser marcada como **Resultado esperado**.
+  - Cada galho mostra o **progresso** do que está abaixo dele (tarefas e
+    etapas concluídas / total). **Selecionar** um nó ilumina o caminho dele
+    até o Resultado (ou até a raiz), mostra "Serve a: …" e quanto falta, e
+    abre a barra com as ações do nó (as mesmas da Lista), a edição da anotação,
+    a direção, "Soltar na raiz" e "Voltar ao lugar".
+  - Zoom (Ctrl + roda, ou os botões), arrastar o fundo para navegar,
+    **Ajustar** para encaixar tudo na janela e **Tela cheia**.
 
 **O que se faz dentro da árvore** (respeitando as permissões de sempre):
 
@@ -1539,9 +1577,10 @@ acompanhamento: eles aconteceram num dia, e o dia cai na janela de todas.
 quando atrasada, âmbar quando vence em breve, e "sem prazo" quando não há —
 nunca em branco.
 
-**Onde se configura:** seção **Tree** do editor do widget — a fonte dos nós, a
-forma, o registro fixo (ou vazio, para seguir o clique), a chave do mapa livre
-e quais tipos de nó exibir (nada marcado = tudo).
+**Onde se configura:** seção **Tree** do editor do widget — a fonte dos nós,
+a visualização (Lista | Root) e, na Root, para onde os galhos abrem por padrão,
+a forma, o registro fixo (ou vazio, para seguir o clique), a chave do mapa
+livre e quais tipos de nó exibir (nada marcado = tudo).
 
 **A troca de registro é imediata.** Clicando noutra linha, a árvore anterior sai
 na hora e o **nome do registro clicado** já aparece no cabeçalho, com o

@@ -698,7 +698,16 @@ This version has breaking changes — APIs, conventions, and file structure may 
   linha** é `RecordListSettings.rowAction` (ausente = `none`, tabela existente
   byte-idêntica), e o modo `detalhe` é SOMENTE LEITURA — editar segue em
   /registros (um segundo editor seria a régua paralela da invariante 25). As
-  RPCs de widget seguem INTOCADAS. Ver `docs/arquitetura.md` §4.24 e
+  RPCs de widget seguem INTOCADAS. **Visualização ROOT (0148, 30/09/2026):**
+  canvas da MESMA árvore (galhos arrastáveis/colapsáveis, direção por galho,
+  galho novo de qualquer nó, caminho até o Resultado). Geometria é MAIS
+  exceção em `tree_nodes` (offset RELATIVO ao slot + `direction`;
+  `parent_ref` null numa exceção = "sem exceção de pai"), layout puro em
+  `lib/tree/root-layout.ts`, re-pendurar SÓ por `setTreeNodeParent`, e
+  `deriveTree` quebra ciclo. Nós seguem HTML e só os conectores da Root são
+  SVG; as ações do nó vivem em `tree-node-parts.tsx` para as duas
+  visualizações. A fonte Livre (mapa por chave) é `loadMapTree`; comentário
+  nela fica desabilitado com motivo. Ver `docs/arquitetura.md` §4.24 e
   invariantes 33/34/35.
 - **O adaptador do Gemini TRANSMITE SEMPRE, falha de transporte REPETE e
   modelo saturado REBAIXA (10/09/2026; rebaixamento 17/09/2026):** o

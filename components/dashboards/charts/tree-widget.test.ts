@@ -1,4 +1,10 @@
-// Versão: 1.5 | Data: 11/09/2026
+// Versão: 1.6 | Data: 30/09/2026
+// v1.6 (30/09/2026): as peças do nó saíram para `tree-node-parts.tsx`,
+//   compartilhadas pela Lista e pela ROOT. As guardas de "o nó conclui/exclui
+//   sem régua paralela" passam a ler a SUPERFÍCIE do nó (widget + peças) — o
+//   que elas pinam continua igual. Entram as guardas da Root: o escopo do
+//   payload inclui o mapa livre, a Root usa as MESMAS ações da lista, e a
+//   tarefa/anotação/comentário nascem pelos choke points de sempre.
 // v1.5 (11/09/2026): a guarda de que o TURNO da IA não é Server Action. O Next
 //   as despacha uma de cada vez por cliente, então um turno de até 240s segurava
 //   `loadRecordTree` atrás dele — com a análise rodando, clicar noutra linha
@@ -98,11 +104,16 @@ describe("Tree: o nome vem do clique, não do payload", () => {
 // ---------------------------------------------------------------------------
 // v1.1 — o editor do nó é o do app, e o nó acha a tarefa pelo refId.
 // ---------------------------------------------------------------------------
+/**
+ * v1.6: a SUPERFÍCIE do nó — o widget e as peças extraídas para a Lista e a
+ * Root. As guardas abaixo valem para as duas juntas.
+ */
+const nodeSurface = () =>
+  readFileSync("components/dashboards/charts/tree-widget.tsx", "utf8") +
+  readFileSync("components/dashboards/charts/tree-node-parts.tsx", "utf8");
+
 describe("o nó abre a tarefa inteira", () => {
-  const widget = readFileSync(
-    "components/dashboards/charts/tree-widget.tsx",
-    "utf8"
-  );
+  const widget = nodeSurface();
 
   it("usa o editor de tarefa do app, não um formulário próprio", () => {
     expect(widget).toContain('from "@/components/tarefas/task-sheet"');
@@ -163,10 +174,7 @@ describe("refId → tarefa", () => {
  * tarefas e os mesmos choke points de anotação e de nó livre.
  */
 describe("o nó conclui e exclui, sem régua paralela", () => {
-  const widget = readFileSync(
-    "components/dashboards/charts/tree-widget.tsx",
-    "utf8"
-  );
+  const widget = nodeSurface();
 
   it("concluir/reabrir e excluir vêm do hook da LISTA de tarefas", () => {
     expect(widget).toContain("useTaskRowActions");
@@ -347,5 +355,73 @@ describe("os fatos de alteração saem da coluna certa", () => {
     expect(auditBlock).toContain('select("id, field, new_value, changed_at');
     expect(auditBlock).toContain('.order("changed_at"');
     expect(auditBlock).not.toContain("created_at");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// v1.6 (30/09/2026): visualização ROOT e mapa LIVRE.
+describe("Root: o escopo do payload inclui o mapa", () => {
+  // Espelho da chave do widget: registro → o id; mapa → "mapa:<chave>".
+  const scopeKeyOf = (scopeId: string, layout = "livre") =>
+    `${scopeId}|${layout}|desc|12`;
+
+  it("trocar de mapa descarta a árvore do anterior no mesmo render", () => {
+    const a = scopeKeyOf("mapa:planejamento");
+    const b = scopeKeyOf("mapa:rotina");
+    expect(visible({ scope: a, data: { nodes: [] } }, b)).toBeNull();
+  });
+
+  it("um mapa e um registro nunca colidem na chave", () => {
+    expect(scopeKeyOf("mapa:x")).not.toBe(scopeKeyOf("x"));
+  });
+});
+
+describe("Root: sem régua paralela", () => {
+  const widget = readFileSync(
+    "components/dashboards/charts/tree-widget.tsx",
+    "utf8"
+  );
+  const root = readFileSync(
+    "components/dashboards/charts/tree-root-view.tsx",
+    "utf8"
+  );
+  const parts = readFileSync(
+    "components/dashboards/charts/tree-node-parts.tsx",
+    "utf8"
+  );
+
+  it("as ações do nó são as MESMAS nas duas visualizações", () => {
+    expect(widget).toContain("<NodeActions");
+    expect(root).toContain("<NodeActions");
+    expect(root).toContain('from "./tree-node-parts"');
+  });
+
+  it("a tarefa nova nasce pelo editor de sempre (TaskForm → createTask)", () => {
+    expect(parts).toContain("<TaskForm");
+    // Nada de inserir em `tasks` por aqui.
+    for (const surface of [widget, root, parts]) {
+      expect(surface).not.toMatch(/from\("tasks"\)/);
+      expect(surface).not.toMatch(/from\("comments"\)/);
+    }
+  });
+
+  it("o comentário segue pelo addTreeNote (feed + webhook)", () => {
+    expect(widget).toContain("addTreeNote(");
+  });
+
+  it("o layout é puro e o arrasto não usa o DnD nativo", () => {
+    expect(root).toContain('from "@/lib/tree/root-layout"');
+    expect(root).not.toContain("onDragStart");
+    expect(root).toContain("onPointerDown");
+  });
+
+  it("comentário num mapa livre fica DESABILITADO com motivo, não escondido", () => {
+    expect(parts).toContain("branchKindDisabledReason");
+    expect(parts).toMatch(/disabled=\{reason != null\}/);
+  });
+
+  it("o que está recolhido é de quem olha — e o storage nunca derruba a tela", () => {
+    expect(root).toContain("localStorage");
+    expect(root).toMatch(/try \{[\s\S]{0,120}localStorage/);
   });
 });

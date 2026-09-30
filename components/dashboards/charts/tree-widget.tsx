@@ -1,4 +1,16 @@
-// Versão: 1.8 | Data: 11/09/2026
+// Versão: 1.9 | Data: 30/09/2026
+// v1.9 (30/09/2026): visualização ROOT e mapa LIVRE.
+//   (a) `settings.view === "root"` desenha a MESMA árvore no canvas da Root
+//       (`tree-root-view.tsx`): galhos arrastáveis, colapsáveis, que abrem
+//       para o lado ou para baixo, e o caminho até o Resultado esperado;
+//   (b) a fonte LIVRE passou a existir — o mapa por chave, sem registro
+//       (`loadMapTree`). Antes escolhê-la mostrava o vazio para sempre;
+//   (c) de QUALQUER nó sai um galho novo — anotação (da Tree), tarefa (o
+//       editor de sempre, pendurada no nó) ou comentário (feed do registro),
+//       nas duas visualizações;
+//   (d) as peças do nó (ações, data, controles da série) saíram para
+//       `tree-node-parts.tsx`, compartilhadas com a Root — uma segunda cópia
+//       seria a régua paralela da invariante 25.
 // v1.8 (11/09/2026): a proposta da IA saiu daqui para o DOCK do painel.
 //   O bug que isso conserta primeiro é o mais bobo: `submitDraft` fechava o
 //   compositor ANTES de disparar a análise, e o compositor era o único lugar
@@ -76,14 +88,7 @@
 // cada minuto e uma árvore que pisca sozinha lê como defeito.
 "use client";
 
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  useTransition,
-} from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ChevronDown,
   ChevronRight,
@@ -92,7 +97,7 @@ import {
   Pause,
   Play,
   Sparkles,
-  Trash2,
+  Star,
 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -101,29 +106,21 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { TaskSheet, type TaskFormContext } from "@/components/tarefas/task-sheet";
 import {
-  TaskCompleteButton,
-  TaskDeleteButton,
-  TaskSeriesPrompt,
-  useTaskRowActions,
-} from "@/components/tarefas/task-list";
-import { deleteComment } from "@/lib/comments/actions";
-import {
   useAiSuggestions,
   useHasAiSuggestions,
 } from "@/components/dashboards/ai-suggestions-context";
-import { classifyDue, DUE_STATUS_LABELS } from "@/lib/tasks/alerts";
-import { DEFAULT_DATE_FORMAT, formatDateValue } from "@/lib/widgets/format";
-import type { TaskRow } from "@/lib/tasks/types";
-import { cn } from "@/lib/utils";
 import {
   addTreeNote,
-
-  deleteTreeNode,
+  attachTaskToMap,
+  createTreeNote,
+  loadMapTree,
   loadRecordTree,
-  setRecordCadence,
+  setTreeNodeGeometry,
+  setTreeNodeParent,
+  updateTreeNote,
   type TreeData,
+  type TreeNoteStatus,
 } from "@/app/(app)/dashboards/tree-actions";
-import { resumeRecordSeries } from "@/lib/tasks/actions";
 import { TreeSeriesSheet } from "./tree-series-sheet";
 import { useRecordFocus } from "../record-focus-context";
 import { setRecordAttributeStatus } from "@/lib/attributes/actions";
@@ -141,288 +138,57 @@ import {
   partitionSelection,
   selectableRefs,
 } from "@/lib/tree/selection";
+import { moveSubtree } from "@/lib/tree/path";
 import { TreeBulkBar } from "./tree-bulk-bar";
-import type { TreeSeriesInfo } from "@/lib/tree/load";
 import {
+  normalizeMapKey,
   TREE_COMMENT_VERB,
   TREE_NODE_KIND_LABELS,
   TREE_WINDOW_STEP,
+  type TreeBranchKind,
+  type TreeDirection,
   type TreeFilterableKind,
   type TreeNode,
+  type TreeScope,
 } from "@/lib/tree/model";
 import type { TreeSettings } from "@/lib/widgets/types";
-
-const KIND_TONE: Record<string, string> = {
-  series: "border-primary bg-primary/10",
-  occurrence: "border-primary/50 bg-primary/5",
-  task: "border-amber-500/40",
-  comment: "border-emerald-500/40",
-  change: "border-muted",
-  note: "border-sky-500/40",
-};
-
-/**
- * A data do nó, com a mesma leitura de prazo do resto do app.
- *
- * v1.3 (09/09/2026): antes era uma data crua, e vazio virava string vazia —
- * indistinguível de "carregando". Reusa `classifyDue`/`formatDateValue`, os
- * mesmos do `DueBadge` da lista de tarefas: atrasada em vermelho, em breve em
- * âmbar. Quando o nó É uma tarefa, a data mostrada é o prazo DELA.
- */
-function NodeDate({ node, task }: { node: TreeNode; task: TaskRow | null }) {
-  if (task?.due_date) {
-    const status = classifyDue(task);
-    const text = `${formatDateValue(task.due_date, DEFAULT_DATE_FORMAT)}${
-      task.due_time ? ` ${task.due_time.slice(0, 5)}` : ""
-    }`;
-    return (
-      <span
-        className={cn(
-          "shrink-0 rounded px-1.5 py-0.5 text-[11px] whitespace-nowrap",
-          status === "atrasada" &&
-            "bg-destructive/10 text-destructive font-medium",
-          status === "em_breve" &&
-            "bg-amber-500/15 font-medium text-amber-700 dark:text-amber-400",
-          !status && "text-muted-foreground bg-muted"
-        )}
-        title={status ? DUE_STATUS_LABELS[status] : undefined}
-      >
-        {text}
-      </span>
-    );
-  }
-  if (!node.at) {
-    // "sem prazo" é informação; a string vazia de antes parecia defeito.
-    return <span className="text-muted-foreground shrink-0 text-xs">sem prazo</span>;
-  }
-  return (
-    <span className="text-muted-foreground shrink-0 text-xs">
-      {formatDateValue(node.at, DEFAULT_DATE_FORMAT)}
-    </span>
-  );
-}
-
-/**
- * Concluir/reabrir e excluir a tarefa DO NÓ.
- *
- * Componente próprio porque o hook não pode ser condicional e nem todo nó tem
- * tarefa. A regra (quais actions, o evento do bus, a mensagem de RLS) é a
- * MESMA da lista — `useTaskRowActions` é o dono único (invariante 25).
- */
-function TaskNodeActions({
-  task,
-  onChanged,
-}: {
-  task: TaskRow;
-  onChanged: () => void;
-}) {
-  const { done, pending, error, toggle, remove, seriesPrompt } =
-    useTaskRowActions(task, onChanged);
-  return (
-    <>
-      {/* v1.6: a pergunta "e as demais da sequência?" mora no hook, que é o
-          dono único de concluir e excluir; aqui só o lugar de renderizá-la. */}
-      <TaskSeriesPrompt prompt={seriesPrompt} pending={pending} />
-      <TaskCompleteButton done={done} pending={pending} onToggle={toggle} />
-      <TaskDeleteButton
-        pending={pending}
-        onRemove={() => {
-          // Ocorrência de série já tem o diálogo da sequência como
-          // confirmação — um `confirm()` antes dele seriam duas perguntas
-          // seguidas para a mesma decisão.
-          if (task.series_occurrence != null && task.series_key) return remove();
-          if (confirm(`Excluir a tarefa "${task.title}"?`)) remove();
-        }}
-      />
-      {error ? (
-        <span className="text-destructive text-xs" role="status">
-          {error}
-        </span>
-      ) : null}
-    </>
-  );
-}
-
-/**
- * Excluir um nó que NÃO é tarefa — o comentário (`comments`, 0066) e a nota
- * livre (`tree_nodes`). Cada uma pelo choke point que já é dono dela.
- */
-function NodeDeleteButton({
-  label,
-  confirmText,
-  onDelete,
-  onChanged,
-}: {
-  label: string;
-  confirmText: string;
-  onDelete: () => Promise<{ ok?: boolean; message?: string }>;
-  onChanged: () => void;
-}) {
-  const [pending, startTransition] = useTransition();
-  const [error, setError] = useState<string | null>(null);
-  return (
-    <>
-      <Button
-        type="button"
-        variant="ghost"
-        size="icon"
-        className="size-6"
-        disabled={pending}
-        aria-label={label}
-        title={label}
-        onClick={() => {
-          if (!confirm(confirmText)) return;
-          setError(null);
-          startTransition(async () => {
-            const res = await onDelete();
-            if (res.ok) onChanged();
-            else setError(res.message ?? "Falha ao excluir.");
-          });
-        }}
-      >
-        <Trash2 className="size-3.5" />
-      </Button>
-      {error ? (
-        <span className="text-destructive text-xs" role="status">
-          {error}
-        </span>
-      ) : null}
-    </>
-  );
-}
-
-/**
- * Os controles de UMA sequência: cadência deste registro, encerrar/retomar e o
- * construtor da automação.
- *
- * v1.6: eram do cabeçalho, quando a árvore tinha um tronco só. Com vários, o
- * lugar deles é o NÓ da sequência — cadência é por série, e um controle no topo
- * não teria como dizer de qual.
- */
-function SeriesControls({
-  series,
-  recordId,
-  canConfigure,
-  sourceKey,
-  onChanged,
-}: {
-  series: TreeSeriesInfo;
-  recordId: string;
-  canConfigure: boolean;
-  sourceKey: string | null;
-  onChanged: () => void;
-}) {
-  const { save } = useBackgroundSave();
-  return (
-    <span className="flex shrink-0 flex-wrap items-center gap-1">
-      <span className="text-muted-foreground text-xs">a cada</span>
-      <Input
-        type="number"
-        min={1}
-        max={365}
-        defaultValue={series.cadenceDays}
-        className="h-7 w-16 text-xs"
-        aria-label={`Cadência de "${series.ruleName}" neste registro, em dias`}
-        title="Cadência só deste registro. Vazio volta ao padrão do esquema."
-        onBlur={(e) => {
-          const raw = e.target.value.trim();
-          const days = raw === "" ? null : Number(raw);
-          if (days != null && (!Number.isFinite(days) || days < 1)) return;
-          if (days === series.cadenceDays) return;
-          save({
-            key: `tree-cadence:${series.key}`,
-            context: "Não foi possível alterar a cadência",
-            action: () =>
-              setRecordCadence(series.key, recordId, days, { revalidate: false }),
-          });
-          onChanged();
-        }}
-      />
-      <span className="text-muted-foreground text-xs">dia(s)</span>
-      {series.active ? null : (
-        <>
-          <Badge variant="secondary" className="text-xs">
-            encerrada para este registro
-          </Badge>
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            className="h-7 text-xs"
-            title="A sequência volta a valer para este registro. As ocorrências já apagadas não voltam."
-            onClick={() => {
-              save({
-                key: `tree-resume:${series.key}`,
-                context: "Não foi possível retomar a sequência",
-                action: () =>
-                  resumeRecordSeries(series.key, recordId, { revalidate: false }),
-              });
-              onChanged();
-            }}
-          >
-            Retomar
-          </Button>
-        </>
-      )}
-      {canConfigure && sourceKey ? (
-        <TreeSeriesSheet
-          sourceKey={sourceKey}
-          ruleId={series.ruleId}
-          onSaved={onChanged}
-        />
-      ) : null}
-    </span>
-  );
-}
+import {
+  AddBranchMenu,
+  KIND_TONE,
+  NodeActions,
+  NodeDate,
+  TreeTaskComposer,
+  type NodeActionsContext,
+} from "./tree-node-parts";
+import { TreeRootView } from "./tree-root-view";
 
 /** O que o NodeCard precisa saber sobre a seleção (v1.5). */
 interface NodeSelection {
   selected: Set<string>;
   /** Aplica a cascata: o nó e o galho dele acompanham o clique. */
   onToggle: (node: TreeNode) => void;
+  /** v1.9: puxar um galho novo deste nó. */
+  onAddBranch?: (kind: TreeBranchKind, parent: TreeNode | null) => void;
 }
 
 function NodeCard({
   node,
-  onNote,
-  taskById,
-  ctx,
-  recordId,
-  recordTitle,
-  onChanged,
+  actx,
   selection,
-  seriesByKey,
-  canConfigure,
-  sourceKey,
 }: {
   node: TreeNode;
-  onNote: (node: TreeNode) => void;
-  /** Tarefas do registro por id — o nó guarda só o `refId`. */
-  taskById: Map<string, TaskRow>;
-  ctx: TaskFormContext;
-  recordId: string;
-  recordTitle: string;
-  onChanged: () => void;
+  /** v1.9: as ações do nó — as MESMAS da Root (`NodeActions`). */
+  actx: NodeActionsContext;
   selection: NodeSelection;
-  /** v1.6: os controles do nó de sequência saem daqui. */
-  seriesByKey: Map<string, TreeSeriesInfo>;
-  canConfigure: boolean;
-  sourceKey: string | null;
 }) {
   const [open, setOpen] = useState(true);
   const hasChildren = node.children.length > 0;
   // O nó de tarefa E a ocorrência já fundida com uma tarefa carregam o id.
-  const task = node.refId ? (taskById.get(node.refId) ?? null) : null;
+  const task = node.refId ? (actx.taskById.get(node.refId) ?? null) : null;
   // DERIVADO dos descendentes: é o que faz desmarcar um filho deixar o pai
   // parcial. Nó sem nada selecionável abaixo não mostra caixa nenhuma.
   const checkState = nodeCheckState(selection.selected, node);
   const selectable = selectableRefs(node).length > 0;
-  // v1.6: o nó de SEQUÊNCIA é sintético — não é fato de ninguém, então não tem
-  // tarefa, não tem exclusão e não entra na seleção; o que ele tem são os
-  // controles da série.
-  const series = node.kind === "series" && node.seriesKey
-    ? (seriesByKey.get(node.seriesKey) ?? null)
-    : null;
 
   return (
     <div className="flex flex-col">
@@ -459,6 +225,11 @@ function NodeCard({
         <Badge variant="outline" className="shrink-0 text-xs">
           {TREE_NODE_KIND_LABELS[node.kind]}
         </Badge>
+        {node.goal ? (
+          <Badge className="shrink-0 bg-amber-500 text-xs text-white">
+            Resultado
+          </Badge>
+        ) : null}
         <span className="min-w-0 flex-1 truncate text-sm" title={node.label}>
           {node.label}
         </span>
@@ -467,94 +238,24 @@ function NodeCard({
         ) : null}
         <NodeDate node={node} task={task} />
 
-        <span className="flex shrink-0 items-center gap-1">
-          {series ? (
-            <SeriesControls
-              series={series}
-              recordId={recordId}
-              canConfigure={canConfigure}
-              sourceKey={sourceKey}
-              onChanged={onChanged}
-            />
-          ) : null}
-
-          {node.kind === "occurrence" ? (
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              className="size-6"
-              title={`${TREE_COMMENT_VERB} aqui`}
-              aria-label={`${TREE_COMMENT_VERB} aqui`}
-              onClick={() => onNote(node)}
-            >
-              <MessageSquarePlus className="size-3.5" />
-            </Button>
-          ) : null}
-
-          {/* v1.3: o nó com tarefa abre a tarefa INTEIRA para editar. O
-              `refId` sempre carregou o id — só não havia para onde levá-lo.
-              v1.4: e agora conclui e exclui, que o editor não faz. */}
-          {task ? (
-            <>
-              <TaskNodeActions task={task} onChanged={onChanged} />
-              <TaskSheet task={task} ctx={ctx} editTrigger onDone={onChanged} />
-            </>
-          ) : node.kind === "occurrence" ? (
-            // A ocorrência PREVISTA que ninguém abriu: agendar com o dia dela.
-            // É o campo de data que faltava — antes a tarefa nascia sem prazo.
-            <TaskSheet
-              ctx={ctx}
-              iconTrigger
-              triggerLabel="Agendar esta tarefa"
-              defaults={{
-                recordId,
-                recordTitle,
-                dueDate: node.at || null,
-              }}
-              onDone={onChanged}
-            />
-          ) : null}
-
-          {/* v1.4: comentário e nota livre passam a ter exclusão. Nó de
-              "Alteração" fica de fora de propósito: é fato do audit_log. */}
-          {node.kind === "comment" && node.refId ? (
-            <NodeDeleteButton
-              label={`Excluir ${TREE_NODE_KIND_LABELS.comment.toLowerCase()}`}
-              confirmText={`Excluir este ${TREE_NODE_KIND_LABELS.comment.toLowerCase()}?`}
-              onDelete={() => deleteComment(node.refId!)}
-              onChanged={onChanged}
-            />
-          ) : null}
-          {node.kind === "note" && node.refId ? (
-            <NodeDeleteButton
-              label="Excluir nó"
-              confirmText="Excluir este nó da árvore?"
-              onDelete={() => deleteTreeNode(node.refId!)}
-              onChanged={onChanged}
-            />
-          ) : null}
-        </span>
+        {/* v1.9: o miolo de ações saiu para `NodeActions` (tree-node-parts),
+            compartilhado com a Root — e o "+" puxa um galho de QUALQUER nó. */}
+        <NodeActions node={node} actx={actx} />
+        {selection.onAddBranch ? (
+          <AddBranchMenu
+            parent={node}
+            scopeKind={actx.scope.kind}
+            onPick={selection.onAddBranch}
+            compact
+          />
+        ) : null}
       </div>
 
       {open && hasChildren ? (
         // A linha de conexão é a borda esquerda: o galho é visual, não SVG.
         <div className="border-muted ml-4 flex flex-col gap-1.5 border-l pt-1.5 pl-3">
           {node.children.map((c) => (
-            <NodeCard
-              key={c.id}
-              node={c}
-              onNote={onNote}
-              taskById={taskById}
-              ctx={ctx}
-              recordId={recordId}
-              recordTitle={recordTitle}
-              onChanged={onChanged}
-              selection={selection}
-              seriesByKey={seriesByKey}
-              canConfigure={canConfigure}
-              sourceKey={sourceKey}
-            />
+            <NodeCard key={c.id} node={c} actx={actx} selection={selection} />
           ))}
         </div>
       ) : null}
@@ -597,11 +298,14 @@ export function TreeWidget({
   /** Carimbo do event bus — muda quando um registro mudou. */
   dataChangedAt?: number;
 }) {
+  // v1.9: a fonte LIVRE é um mapa por chave, sem registro nenhum.
+  const isMap = settings?.source === "livre";
+  const mapKey = isMap ? normalizeMapKey(settings?.mapKey) : null;
   // v1.1 (09/09/2026): sem registro fixo, o widget SEGUE o foco do painel (o
   // clique da tabela). Antes ele só lia o settings e ficava eternamente vazio.
   const focus = useRecordFocus();
-  const follows = recordId == null && (settings?.source ?? "registro") === "registro";
-  const effectiveRecordId = recordId ?? (follows ? focus.recordId : null);
+  const follows = !isMap && recordId == null;
+  const effectiveRecordId = isMap ? null : (recordId ?? (follows ? focus.recordId : null));
   const { registerFollower } = focus;
 
   // A tabela precisa saber se há uma Tree para focar: sem seguidor, o clique
@@ -613,30 +317,49 @@ export function TreeWidget({
 
   const [order, setOrder] = useState<"asc" | "desc">("desc");
   const [limit, setLimit] = useState(TREE_WINDOW_STEP);
-  // v1.3: só o COMENTÁRIO tem rascunho inline. Tarefa passou a abrir o editor
-  // de verdade — o Input de título só era o que fazia a tarefa nascer sem prazo.
-  // v1.6: o rascunho guarda o NÓ em que a pessoa clicou. Antes o nó era
-  // recebido e jogado fora, e "Comentar aqui" na 3ª ocorrência era idêntico ao
-  // "Comentar" do cabeçalho.
-  const [draft, setDraft] = useState<{ text: string; nodeId: string | null } | null>(
+  // O compositor inline guarda o NÓ em que a pessoa clicou (v1.6). v1.9: e o
+  // TIPO do galho — comentário (feed do registro) ou anotação (da Tree), com o
+  // estado da anotação (texto livre / etapa) e o marcador de Resultado.
+  const [draft, setDraft] = useState<{
+    kind: "comment" | "note";
+    text: string;
+    nodeId: string | null;
+    noteStatus?: TreeNoteStatus;
+    goal?: boolean;
+  } | null>(null);
+  // v1.9: a tarefa nova pendurada num galho — o editor de sempre, por estado.
+  const [taskDraft, setTaskDraft] = useState<{ parentRef: string | null } | null>(
     null
   );
-  // v1.8: a proposta da IA NÃO mora mais aqui. Ela é uma conversa no dock do
-  // painel (ai-suggestions-context) — este widget só a ABRE. O estado tinha de
-  // sair daqui: o widget segue o registro em foco, então clicar na próxima
-  // linha da tabela o remonta, e a análise em curso ia junto.
+  // v1.8: a proposta da IA NÃO mora aqui. Ela é uma conversa no dock do
+  // painel (ai-suggestions-context) — este widget só a ABRE.
   const dock = useAiSuggestions();
   const hasDock = useHasAiSuggestions();
   const { save } = useBackgroundSave();
   const lastJson = useRef<string>("");
 
-  const layout = settings?.layout ?? "por_ocorrencia";
+  const layout = isMap ? "livre" : (settings?.layout ?? "por_ocorrencia");
+  const view = settings?.view ?? "lista";
+  const rootDirection: TreeDirection = settings?.rootDirection ?? "h";
+
+  const scope: TreeScope | null = isMap
+    ? mapKey
+      ? { kind: "livre", mapKey }
+      : null
+    : effectiveRecordId
+      ? { kind: "record", recordId: effectiveRecordId }
+      : null;
+  const scopeId = scope
+    ? scope.kind === "record"
+      ? scope.recordId
+      : `mapa:${scope.mapKey}`
+    : "";
 
   /**
    * O que o usuário escolheu ver. Trocar qualquer parte disto é ação DELE e
    * pede feedback; o tick do event bus não mexe aqui e por isso é silencioso.
    */
-  const scopeKey = `${effectiveRecordId ?? ""}|${layout}|${order}|${limit}`;
+  const scopeKey = `${scopeId}|${layout}|${order}|${limit}`;
 
   // O payload guarda o ESCOPO a que pertence. É isso que faz a árvore do
   // registro anterior sumir no mesmo instante do clique, sem `setState` dentro
@@ -670,20 +393,22 @@ export function TreeWidget({
   );
 
   const refresh = useCallback(async () => {
-    if (!effectiveRecordId) return;
-    const scope = scopeKey;
-    const next = await loadRecordTree(effectiveRecordId, layout, {
-      order,
-      limit,
-    });
+    if (!scope) return;
+    const scopeAtCall = scopeKey;
+    const next =
+      scope.kind === "livre"
+        ? await loadMapTree(scope.mapKey)
+        : await loadRecordTree(scope.recordId, layout, { order, limit });
     // Payload idêntico não re-renderiza: o tick do sync roda a cada minuto e
     // não pode fazer a árvore piscar para quem só está lendo.
-    const json = `${scope}::${JSON.stringify(next)}`;
+    const json = `${scopeAtCall}::${JSON.stringify(next)}`;
     if (json !== lastJson.current) {
       lastJson.current = json;
-      setPayload({ scope, data: next });
+      setPayload({ scope: scopeAtCall, data: next });
     }
-  }, [effectiveRecordId, layout, order, limit, scopeKey]);
+    // `scope` é derivado de `scopeKey` (que o carrega inteiro).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scopeKey, layout, order, limit]);
 
   const originOf = useRefetchOrigin(scopeKey);
 
@@ -699,19 +424,19 @@ export function TreeWidget({
     return () => window.clearTimeout(t);
   }, [refresh, dataChangedAt, originOf]);
 
-  if (!effectiveRecordId) {
+  if (!scope) {
     return (
       <div className="text-muted-foreground flex h-full items-center justify-center p-4 text-center text-sm">
-        Escolha um registro na configuração do widget, ou clique numa linha da
-        tabela configurada para abrir a Tree.
+        {isMap
+          ? "Dê uma chave a este mapa na configuração do widget."
+          : "Escolha um registro na configuração do widget, ou clique numa linha da tabela configurada para abrir a Tree."}
       </div>
     );
   }
 
   // Carregando: o nome do registro CLICADO já está aqui (veio no contexto de
   // foco, no mesmo instante do clique) — mostrá-lo agora é a diferença entre
-  // "o sistema me ouviu" e "o sistema travou". Antes, quem seguia o foco via a
-  // árvore do lead ANTERIOR até o payload novo chegar.
+  // "o sistema me ouviu" e "o sistema travou".
   if (!data) {
     return (
       <div className="flex h-full flex-col gap-2 p-3">
@@ -735,43 +460,193 @@ export function TreeWidget({
   }
 
   const visibleNodes = filterKinds(data.nodes, settings?.showKinds);
+  const recordScopeId = scope.kind === "record" ? scope.recordId : null;
+
+  // O editor de tarefa escreve pelos choke points de sempre; a árvore só
+  // precisa reler os fatos depois.
+  const reloadSoon = () => window.setTimeout(() => void refresh(), 400);
+
+  /** Otimista local: troca `data` no MESMO escopo (senão o render o descarta). */
+  const patchData = (next: TreeData) => setPayload({ scope: scopeKey, data: next });
 
   /**
-   * Salva o comentário. `analyze` = "Salvar e analisar": depois de gravado, a
-   * IA lê o texto e propõe (ou não) um próximo passo.
+   * Salva o compositor. Comentário vai pelo `addTreeNote` (feed do registro,
+   * webhook incluso); anotação pelo `createTreeNote` (da Tree). `analyze` =
+   * "Salvar e analisar", só do comentário.
    *
    * A gravação NÃO espera a IA: o comentário é do usuário e tem de existir
-   * mesmo que o provedor esteja fora do ar. A proposta chega depois, num
-   * cartão de um clique — a IA nunca escreve sozinha (invariante 25).
+   * mesmo que o provedor esteja fora do ar (invariante 25).
    */
   const submitDraft = (analyze = false) => {
     if (!draft || draft.text.trim() === "") return setDraft(null);
     const text = draft.text.trim();
     const parentRef = draft.nodeId;
+    const current = draft;
     setDraft(null);
+    if (current.kind === "note") {
+      save({
+        key: "tree-note-new",
+        context: "Não foi possível criar a anotação",
+        reconcile: false,
+        action: async () => {
+          const res = await createTreeNote(
+            scope,
+            {
+              parentRef,
+              label: text,
+              status: current.noteStatus ?? "texto",
+              goal: current.goal === true,
+            },
+            { revalidate: false }
+          );
+          if (res.ok) void refresh();
+          return res;
+        },
+      });
+      return;
+    }
+    if (!recordScopeId) return;
     save({
       key: "tree-note",
       context: "Não foi possível comentar",
       action: () =>
-        addTreeNote(effectiveRecordId, text, { revalidate: false, parentRef }),
+        addTreeNote(recordScopeId, text, { revalidate: false, parentRef }),
     });
     // A árvore recarrega depois da escrita: o nó novo é um FATO, e ela o lê.
     window.setTimeout(() => void refresh(), 600);
     if (!analyze) return;
-    // A partir daqui é o dock: ele abre a conversa (com o comentário já
-    // dentro), mostra que a IA está trabalhando e guarda a proposta até alguém
-    // confirmar. Fechar o compositor aqui deixou de esconder o feedback —
-    // ele não está mais neste componente.
     dock.start({
-      recordId: effectiveRecordId,
+      recordId: recordScopeId,
       recordTitle: data.recordTitle,
       comment: text,
     });
   };
 
-  // O editor de tarefa escreve pelos choke points de sempre; a árvore só
-  // precisa reler os fatos depois.
-  const reloadSoon = () => window.setTimeout(() => void refresh(), 400);
+  /** v1.9: "+" — o galho novo sai do nó escolhido (ou da raiz). */
+  const addBranch = (kind: TreeBranchKind, parent: TreeNode | null) => {
+    const parentRef = parent?.id ?? null;
+    if (kind === "task") return setTaskDraft({ parentRef });
+    if (kind === "comment") {
+      if (!recordScopeId) return;
+      return setDraft({ kind: "comment", text: "", nodeId: parentRef });
+    }
+    setDraft({ kind: "note", text: "", nodeId: parentRef, noteStatus: "texto" });
+  };
+
+  /** A tarefa que o editor acabou de criar vai para o galho escolhido. */
+  const hangTask = (taskId: string | null, parentRef: string | null) => {
+    if (!taskId) return reloadSoon();
+    save({
+      key: `tree-task-hang:${taskId}`,
+      context: "A tarefa foi criada, mas não foi possível pendurá-la no galho",
+      reconcile: false,
+      action: async () => {
+        const res =
+          scope.kind === "livre"
+            ? await attachTaskToMap(scope.mapKey, taskId, parentRef, {
+                revalidate: false,
+              })
+            : parentRef
+              ? await setTreeNodeParent(scope, `task:${taskId}`, parentRef, {
+                  revalidate: false,
+                })
+              : { ok: true };
+        void refresh();
+        return res;
+      },
+    });
+  };
+
+  // --- Root: arrasto, direção e edição da anotação (otimistas) ---
+  const reparent = (nodeId: string, parentId: string | null) => {
+    const before = data;
+    patchData({
+      ...data,
+      nodes: moveSubtree(data.nodes, nodeId, parentId),
+      // O slot mudou: o offset do pai antigo jogaria o nó num lugar qualquer.
+      geometry: data.geometry.map((g) =>
+        g.nodeRef === nodeId ? { ...g, offsetX: 0, offsetY: 0 } : g
+      ),
+    });
+    save({
+      key: `tree-parent:${nodeId}`,
+      context: "Não foi possível mover o galho",
+      reconcile: false,
+      action: async () => {
+        const res = await setTreeNodeParent(scope, nodeId, parentId, {
+          revalidate: false,
+        });
+        if (res.ok) void refresh();
+        return res;
+      },
+      revert: () => patchData(before),
+    });
+  };
+
+  const patchGeometry = (
+    nodeId: string,
+    patch: { offsetX?: number; offsetY?: number; direction?: TreeDirection }
+  ) => {
+    const before = data;
+    const exists = data.geometry.some((g) => g.nodeRef === nodeId);
+    const geometry = exists
+      ? data.geometry.map((g) => (g.nodeRef === nodeId ? { ...g, ...patch } : g))
+      : [
+          ...data.geometry,
+          {
+            nodeRef: nodeId,
+            offsetX: patch.offsetX ?? 0,
+            offsetY: patch.offsetY ?? 0,
+            direction: patch.direction ?? null,
+          },
+        ];
+    patchData({ ...data, geometry });
+    save({
+      key: `tree-geometry:${nodeId}`,
+      context: "Não foi possível guardar a posição do galho",
+      reconcile: false,
+      action: () =>
+        setTreeNodeGeometry(scope, nodeId, patch, { revalidate: false }),
+      revert: () => patchData(before),
+    });
+  };
+
+  const editNote = (
+    node: TreeNode,
+    patch: { label?: string; status?: TreeNoteStatus; goal?: boolean }
+  ) => {
+    if (!node.refId) return;
+    const before = data;
+    const apply = (list: TreeNode[]): TreeNode[] =>
+      list.map((n) =>
+        n.id === node.id
+          ? {
+              ...n,
+              ...(patch.label !== undefined ? { label: patch.label } : {}),
+              ...(patch.goal !== undefined ? { goal: patch.goal } : {}),
+              ...(patch.status !== undefined
+                ? {
+                    status:
+                      patch.status === "texto"
+                        ? null
+                        : patch.status === "concluida"
+                          ? "concluída"
+                          : "aberta",
+                  }
+                : {}),
+              children: apply(n.children),
+            }
+          : { ...n, children: apply(n.children) }
+      );
+    patchData({ ...data, nodes: apply(data.nodes) });
+    save({
+      key: `tree-note-edit:${node.refId}`,
+      context: "Não foi possível salvar a anotação",
+      reconcile: false,
+      action: () => updateTreeNote(node.refId!, patch, { revalidate: false }),
+      revert: () => patchData(before),
+    });
+  };
 
   const taskById = new Map(data.tasks.map((t) => [t.id, t]));
   const seriesByKey = new Map(data.series.map((x) => [x.key, x]));
@@ -780,159 +655,283 @@ export function TreeWidget({
     canAssignOthers: true,
     canLock: false,
   };
+  const actx: NodeActionsContext = {
+    scope,
+    ctx: taskCtx,
+    recordTitle: data.recordTitle,
+    taskById,
+    seriesByKey,
+    canConfigure: data.canConfigureSeries,
+    sourceKey: data.sourceKey,
+    // v1.6: o NÓ viaja. Antes ele chegava aqui e era descartado, e o
+    // comentário pendurava na ocorrência de hoje.
+    onNote: (target) => setDraft({ kind: "comment", text: "", nodeId: target.id }),
+    onChanged: reloadSoon,
+  };
+
+  const composer = draft ? (
+    <div className="flex flex-wrap items-center gap-2 rounded-md border p-2">
+      <Input
+        autoFocus
+        value={draft.text}
+        onChange={(e) => setDraft((d) => (d ? { ...d, text: e.target.value } : d))}
+        placeholder={
+          draft.kind === "note"
+            ? "O que é este galho? (uma etapa, uma condição, o resultado…)"
+            : "O que aconteceu?"
+        }
+        onKeyDown={(e) => {
+          if (e.key === "Enter") submitDraft();
+          if (e.key === "Escape") setDraft(null);
+        }}
+        aria-label={
+          draft.kind === "note"
+            ? TREE_NODE_KIND_LABELS.note
+            : TREE_NODE_KIND_LABELS.comment
+        }
+        className="min-w-48 flex-1"
+      />
+      {draft.kind === "note" ? (
+        <>
+          <select
+            className="border-input bg-background h-8 rounded-md border px-1 text-xs"
+            value={draft.noteStatus ?? "texto"}
+            aria-label="Tipo da anotação"
+            onChange={(e) =>
+              setDraft((d) =>
+                d ? { ...d, noteStatus: e.target.value as TreeNoteStatus } : d
+              )
+            }
+          >
+            <option value="texto">Texto livre</option>
+            <option value="pendente">Etapa (a concluir)</option>
+          </select>
+          <label className="flex items-center gap-1 text-xs">
+            <Checkbox
+              checked={draft.goal === true}
+              onCheckedChange={(v) =>
+                setDraft((d) => (d ? { ...d, goal: v === true } : d))
+              }
+            />
+            <Star className="size-3" /> Resultado esperado
+          </label>
+        </>
+      ) : null}
+      <Button type="button" size="sm" onClick={() => submitDraft()}>
+        Salvar
+      </Button>
+      {/* Salvar e analisar: a IA lê o texto e decide se ele pede um próximo
+          passo. Só do comentário, e só onde há dock. */}
+      {draft.kind === "comment" && hasDock ? (
+        <Button
+          type="button"
+          size="sm"
+          variant="secondary"
+          className="gap-1"
+          title="Salva o comentário e pede à IA que avalie o que ele muda nas tarefas deste registro. A conversa abre no canto da tela."
+          onClick={() => submitDraft(true)}
+        >
+          <Sparkles className="size-3.5" />
+          Salvar e analisar
+        </Button>
+      ) : null}
+      <Button type="button" variant="ghost" size="sm" onClick={() => setDraft(null)}>
+        Cancelar
+      </Button>
+    </div>
+  ) : null;
+
+  const orderButton = !isMap ? (
+    <Button
+      type="button"
+      variant="ghost"
+      size="sm"
+      className="h-7 text-xs"
+      title="Inverte a ordem; 'carregar mais' anda nessa direção"
+      onClick={() => {
+        // Trocar a ordem volta ao primeiro passo: a janela é das N
+        // ocorrências daquela ponta.
+        setLimit(TREE_WINDOW_STEP);
+        setOrder((o) => (o === "desc" ? "asc" : "desc"));
+      }}
+    >
+      {order === "desc" ? "Recentes ↓" : "Antigas ↑"}
+    </Button>
+  ) : null;
+
+  const loadMoreButton = data.hasMore ? (
+    <Button
+      type="button"
+      variant="outline"
+      size="sm"
+      className="h-7 self-start text-xs"
+      onClick={() => setLimit((n) => n + TREE_WINDOW_STEP)}
+    >
+      {order === "desc" ? "Carregar o que é mais antigo" : "Carregar o que é mais recente"}
+    </Button>
+  ) : null;
+
+  const taskComposer = (
+    <TreeTaskComposer
+      open={taskDraft != null}
+      ctx={taskCtx}
+      recordId={recordScopeId}
+      recordTitle={recordScopeId ? data.recordTitle : null}
+      onClose={() => setTaskDraft(null)}
+      onCreated={(taskId) => hangTask(taskId, taskDraft?.parentRef ?? null)}
+    />
+  );
+
+  const header = (
+    <div className="flex flex-wrap items-center gap-2">
+      <span className="truncate text-sm font-medium">
+        {isMap ? `Mapa · ${scope.kind === "livre" ? scope.mapKey : ""}` : data.recordTitle}
+      </span>
+      {/* v1.6: a cadência e o construtor da série moram no NÓ da sequência
+          (SeriesControls) — com vários troncos, um controle aqui não teria
+          como dizer de qual série ele é. */}
+      <span className="ml-auto" />
+      {view === "lista" ? orderButton : null}
+      {data.attribute ? (
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="gap-1"
+          onClick={() => {
+            const next = data.attribute!.status === "pausado" ? "ativo" : "pausado";
+            // Pausar NÃO remove o acompanhamento: o registro continua na
+            // funcionalidade e a árvore continua inteira.
+            patchData({ ...data, attribute: { ...data.attribute!, status: next } });
+            save({
+              key: "tree-status",
+              context: "Não foi possível alterar o acompanhamento",
+              action: () =>
+                setRecordAttributeStatus(data.attribute!.id, next, {
+                  revalidate: false,
+                }),
+              revert: () => patchData(data),
+            });
+          }}
+        >
+          {data.attribute.status === "pausado" ? (
+            <>
+              <Play className="size-3.5" /> Retomar
+            </>
+          ) : (
+            <>
+              <Pause className="size-3.5" /> Pausar
+            </>
+          )}
+        </Button>
+      ) : null}
+    </div>
+  );
+
+  const pausedNote =
+    data.attribute?.status === "pausado" ? (
+      <p className="text-muted-foreground text-xs">
+        Acompanhamento pausado: novas tarefas não são abertas. O registro
+        continua na automação e o histórico permanece.
+      </p>
+    ) : null;
+
+  // Ações do topo (fora do compositor): comentar/agendar no registro,
+  // anotar em qualquer árvore, e criar sequência.
+  const topActions = (
+    <div className="flex flex-wrap gap-2">
+      {recordScopeId ? (
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="gap-1"
+          onClick={() => setDraft({ kind: "comment", text: "", nodeId: null })}
+        >
+          <MessageSquarePlus className="size-3.5" /> {TREE_COMMENT_VERB}
+        </Button>
+      ) : null}
+      {recordScopeId ? (
+        <TaskSheet
+          ctx={taskCtx}
+          triggerLabel="Agendar tarefa"
+          defaults={{ recordId: recordScopeId, recordTitle: data.recordTitle }}
+          onDone={reloadSoon}
+        />
+      ) : null}
+      <AddBranchMenu
+        parent={null}
+        scopeKind={scope.kind}
+        onPick={addBranch}
+        label={isMap ? "Novo galho" : "Galho na raiz"}
+      />
+      {/* v1.6: criar OUTRA sequência. */}
+      {data.canConfigureSeries && data.sourceKey ? (
+        <TreeSeriesSheet
+          sourceKey={data.sourceKey}
+          suggestedName=""
+          onSaved={reloadSoon}
+        />
+      ) : null}
+    </div>
+  );
+
+  // --- ROOT (v1.9) ---
+  if (view === "root") {
+    return (
+      <div className="flex h-full min-h-0 flex-col gap-2 overflow-hidden p-3">
+        {header}
+        {pausedNote}
+        {composer}
+        <TreeRootView
+          key={scopeId}
+          nodes={visibleNodes}
+          geometry={data.geometry}
+          defaultDirection={rootDirection}
+          storageKey={`tree-root:collapsed:${scopeId}`}
+          scope={scope}
+          actx={actx}
+          onAddBranch={addBranch}
+          onReparent={reparent}
+          onMove={(id, offset) =>
+            patchGeometry(id, { offsetX: offset.x, offsetY: offset.y })
+          }
+          onDirection={(id, direction) => patchGeometry(id, { direction })}
+          onEditNote={editNote}
+          toolbarExtra={
+            <>
+              {recordScopeId ? (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 gap-1 text-xs"
+                  onClick={() => setDraft({ kind: "comment", text: "", nodeId: null })}
+                >
+                  <MessageSquarePlus className="size-3.5" /> {TREE_COMMENT_VERB}
+                </Button>
+              ) : null}
+              {orderButton}
+              {loadMoreButton}
+            </>
+          }
+        />
+        {taskComposer}
+      </div>
+    );
+  }
 
   return (
     <div className="flex h-full flex-col gap-2 overflow-auto p-3">
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="truncate text-sm font-medium">{data.recordTitle}</span>
-        {/* v1.6: a cadência e o construtor da série saíram daqui para o NÓ da
-            sequência (SeriesControls). Com vários troncos, um controle no
-            cabeçalho não teria como dizer de qual série ele é — e com um só
-            ele fica ali mesmo, um nível abaixo, ao lado do que ele governa. */}
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          className="ml-auto h-7 text-xs"
-          title="Inverte a ordem; 'carregar mais' anda nessa direção"
-          onClick={() => {
-            // Trocar a ordem volta ao primeiro passo: a janela é das N
-            // ocorrências daquela ponta, e manter o limite esticado mostraria
-            // um recorte que ninguém pediu.
-            setLimit(TREE_WINDOW_STEP);
-            setOrder((o) => (o === "desc" ? "asc" : "desc"));
-          }}
-        >
-          {order === "desc" ? "Recentes ↓" : "Antigas ↑"}
-        </Button>
-        {data.attribute ? (
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="gap-1"
-            onClick={() => {
-              const next =
-                data.attribute!.status === "pausado" ? "ativo" : "pausado";
-              // Pausar NÃO remove o acompanhamento: o registro continua na
-              // funcionalidade e a árvore continua inteira.
-              // O otimista carrega o MESMO escopo: sem isso ele nasceria
-              // "de outro recorte" e o render o descartaria na hora.
-              setPayload({
-                scope: scopeKey,
-                data: {
-                  ...data,
-                  attribute: { ...data.attribute!, status: next },
-                },
-              });
-              save({
-                key: "tree-status",
-                context: "Não foi possível alterar o acompanhamento",
-                action: () =>
-                  setRecordAttributeStatus(data.attribute!.id, next, {
-                    revalidate: false,
-                  }),
-                revert: () => setPayload({ scope: scopeKey, data }),
-              });
-            }}
-          >
-            {data.attribute.status === "pausado" ? (
-              <>
-                <Play className="size-3.5" /> Retomar
-              </>
-            ) : (
-              <>
-                <Pause className="size-3.5" /> Pausar
-              </>
-            )}
-          </Button>
-        ) : null}
-      </div>
-
-      {data.attribute?.status === "pausado" ? (
-        <p className="text-muted-foreground text-xs">
-          Acompanhamento pausado: novas tarefas não são abertas. O registro
-          continua na automação e o histórico permanece.
-        </p>
-      ) : null}
-
-      {draft ? (
-        <div className="flex flex-wrap items-center gap-2 rounded-md border p-2">
-          <Input
-            autoFocus
-            value={draft.text}
-            onChange={(e) =>
-              setDraft((d) => (d ? { ...d, text: e.target.value } : d))
-            }
-            placeholder="O que aconteceu?"
-            onKeyDown={(e) => {
-              if (e.key === "Enter") submitDraft();
-              if (e.key === "Escape") setDraft(null);
-            }}
-            aria-label={TREE_NODE_KIND_LABELS.comment}
-          />
-          <Button type="button" size="sm" onClick={() => submitDraft()}>
-            Salvar
-          </Button>
-          {/* Salvar e analisar: a IA lê o texto e decide se ele pede um próximo
-              passo. "Não pede" é resposta legítima — e é a mais comum.
-              v1.8: só onde há dock (no viewer público de snapshot não há). */}
-          {hasDock ? (
-            <Button
-              type="button"
-              size="sm"
-              variant="secondary"
-              className="gap-1"
-              title="Salva o comentário e pede à IA que avalie o que ele muda nas tarefas deste registro. A conversa abre no canto da tela."
-              onClick={() => submitDraft(true)}
-            >
-              <Sparkles className="size-3.5" />
-              Salvar e analisar
-            </Button>
-          ) : null}
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            onClick={() => setDraft(null)}
-          >
-            Cancelar
-          </Button>
-        </div>
-      ) : (
-        <div className="flex flex-wrap gap-2">
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="gap-1"
-            onClick={() => setDraft({ text: "", nodeId: null })}
-          >
-            <MessageSquarePlus className="size-3.5" /> {TREE_COMMENT_VERB}
-          </Button>
-          {/* v1.3: o editor de verdade, com prazo, hora, descrição e
-              responsável — não mais um Input de título. */}
-          <TaskSheet
-            ctx={taskCtx}
-            triggerLabel="Agendar tarefa"
-            defaults={{ recordId: effectiveRecordId, recordTitle: data.recordTitle }}
-            onDone={reloadSoon}
-          />
-          {/* v1.6: criar OUTRA sequência. Era o buraco do pedido: dava para
-              ajustar a que existia e não dava para abrir uma segunda. */}
-          {data.canConfigureSeries && data.sourceKey ? (
-            <TreeSeriesSheet
-              sourceKey={data.sourceKey}
-              suggestedName=""
-              onSaved={reloadSoon}
-            />
-          ) : null}
-        </div>
-      )}
+      {header}
+      {pausedNote}
+      {composer ?? topActions}
 
       {visibleNodes.length === 0 ? (
         <p className="text-muted-foreground text-sm">
-          Nada aconteceu com este registro ainda.
+          {isMap
+            ? "O mapa está vazio. Comece pelo resultado esperado."
+            : "Nada aconteceu com este registro ainda."}
         </p>
       ) : (
         <div className="flex flex-col gap-1.5">
@@ -940,19 +939,12 @@ export function TreeWidget({
             <NodeCard
               key={n.id}
               node={n}
-              // v1.6: o NÓ viaja. Antes ele chegava aqui e era descartado, e
-              // o comentário pendurava na ocorrência de hoje — o botão do nó
-              // fazia exatamente o mesmo que o do cabeçalho.
-              onNote={(target) => setDraft({ text: "", nodeId: target.id })}
-              taskById={taskById}
-              ctx={taskCtx}
-              recordId={effectiveRecordId}
-              recordTitle={data.recordTitle}
-              onChanged={reloadSoon}
-              selection={{ selected: bulk.selected, onToggle: toggleNode }}
-              seriesByKey={seriesByKey}
-              canConfigure={data.canConfigureSeries}
-              sourceKey={data.sourceKey}
+              actx={actx}
+              selection={{
+                selected: bulk.selected,
+                onToggle: toggleNode,
+                onAddBranch: addBranch,
+              }}
             />
           ))}
           <TreeBulkBar
@@ -968,19 +960,8 @@ export function TreeWidget({
         </div>
       )}
 
-      {data.hasMore ? (
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          className="self-start"
-          onClick={() => setLimit((n) => n + TREE_WINDOW_STEP)}
-        >
-          {order === "desc"
-            ? "Carregar o que é mais antigo"
-            : "Carregar o que é mais recente"}
-        </Button>
-      ) : null}
+      {loadMoreButton}
+      {taskComposer}
     </div>
   );
 }
