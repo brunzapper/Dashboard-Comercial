@@ -1,3 +1,13 @@
+// Versão: 1.3 | Data: 30/09/2026
+// v1.3 (30/09/2026): GUARDA DE CICLO. Com a Root, qualquer nó vira pai de
+//   qualquer outro por arrasto — e duas exceções cruzadas (A sob B, B sob A),
+//   ou uma exceção contra o parentesco DERIVADO (a ocorrência pendurada no
+//   comentário que caiu nela), faziam os dois sumirem: ninguém do ciclo chega
+//   à raiz. O parentesco agora é decidido INTEIRO antes de montar os filhos, e
+//   o ciclo é quebrado soltando na raiz o membro cuja exceção o fechou. A
+//   árvore sem ciclo sai byte-idêntica (o teste de série única segue pinado).
+//   Junto, o rótulo dos ramos de `por_tipo`: comentário é "Comentários" e a
+//   anotação da Tree é "Anotações" (antes os comentários saíam "Anotações").
 // Versão: 1.2 | Data: 10/09/2026
 // v1.2 (10/09/2026): VÁRIOS TRONCOS. Um registro pode participar de mais de uma
 //   série, e até aqui a árvore desenhava um só. Com duas ou mais, cada uma
@@ -151,32 +161,39 @@ export function deriveTree(input: DeriveInput): TreeNode[] {
     return branch;
   };
 
-  const attach = (child: TreeNode, parentId: string | null) => {
-    const parent = parentId ? nodes.get(parentId) : null;
-    if (!parent || parent.id === child.id) {
-      roots.push(child);
-      return;
-    }
-    parent.children.push(child);
+  // v1.3: o parentesco é decidido INTEIRO antes de pendurar alguém — só assim
+  // dá para enxergar um ciclo. `parentOf` guarda o pai de cada fato (null =
+  // raiz); os nós sintéticos (sequência, tipo) são sempre raiz e nunca fecham
+  // ciclo, porque não recebem exceção.
+  const parentOf = new Map<string, string | null>();
+  const syntheticChildren = new Map<TreeNode, TreeNode[]>();
+  const order: TreeNode[] = [];
+
+  const toSynthetic = (branch: TreeNode, node: TreeNode) => {
+    const list = syntheticChildren.get(branch) ?? [];
+    list.push(node);
+    syntheticChildren.set(branch, list);
   };
 
   for (const fact of facts) {
     const node = nodes.get(fact.id)!;
+    order.push(node);
 
     if (override.has(fact.id)) {
-      attach(node, override.get(fact.id) ?? null);
+      const parentId = override.get(fact.id) ?? null;
+      parentOf.set(fact.id, parentId && nodes.has(parentId) ? parentId : null);
       continue;
     }
 
     if (input.layout === "livre") {
       // Sem parentesco explícito, tudo é raiz — quem desenha é o usuário.
-      roots.push(node);
+      parentOf.set(fact.id, null);
       continue;
     }
 
     if (input.layout === "por_tipo") {
       if (fact.kind === "occurrence") {
-        roots.push(node);
+        parentOf.set(fact.id, null);
         continue;
       }
       let branch = kindRoots.get(fact.kind);
@@ -193,20 +210,50 @@ export function deriveTree(input: DeriveInput): TreeNode[] {
         kindRoots.set(fact.kind, branch);
         roots.push(branch);
       }
-      branch.children.push(node);
+      toSynthetic(branch, node);
       continue;
     }
 
     // por_ocorrencia
     if (fact.kind === "occurrence") {
       const key = fact.seriesKey ?? "";
-      if (grouped && key !== "") seriesBranch(key, fact.at).children.push(node);
-      else roots.push(node);
+      if (grouped && key !== "") toSynthetic(seriesBranch(key, fact.at), node);
+      else parentOf.set(fact.id, null);
       continue;
     }
     const occ = occurrenceFor(fact.at, primaryTrunk);
-    attach(node, occ ? occ.id : null);
+    parentOf.set(fact.id, occ ? occ.id : null);
   }
+
+  // v1.3: quebra de ciclo. Subindo do nó, voltar a ele é ciclo; quem é solto
+  // na raiz é o PRIMEIRO membro (em ordem de fato) que tem EXCEÇÃO — foi uma
+  // escolha manual que fechou o laço, e o parentesco derivado dos demais
+  // continua valendo. Sem exceção no ciclo (impossível hoje), o primeiro.
+  for (const node of order) {
+    const seen: string[] = [];
+    let cur: string | null | undefined = node.id;
+    while (cur != null && parentOf.has(cur) && !seen.includes(cur)) {
+      seen.push(cur);
+      cur = parentOf.get(cur);
+    }
+    if (cur == null || !seen.includes(cur)) continue;
+    const cycle = seen.slice(seen.indexOf(cur));
+    const breakAt =
+      order.find((n) => cycle.includes(n.id) && override.has(n.id)) ??
+      order.find((n) => cycle.includes(n.id))!;
+    parentOf.set(breakAt.id, null);
+  }
+
+  // Sintéticos entram com a raiz na ordem em que nasceram; os fatos seguem a
+  // ordem de data — a mesma sequência de inserção da v1.2.
+  for (const node of order) {
+    if (!parentOf.has(node.id)) continue;
+    const parentId = parentOf.get(node.id) ?? null;
+    const parent = parentId ? nodes.get(parentId) : null;
+    if (!parent || parent.id === node.id) roots.push(node);
+    else parent.children.push(node);
+  }
+  for (const [branch, list] of syntheticChildren) branch.children.push(...list);
 
   // Profundidade e ordem interna, já com os arrastados no lugar.
   const walk = (list: TreeNode[], depth: number) => {
@@ -233,9 +280,9 @@ const KIND_LABEL: Record<TreeNodeKind, string> = {
   series: "Sequências",
   occurrence: "Tarefas da série",
   task: "Tarefas",
-  comment: "Anotações",
+  comment: "Comentários",
   change: "Alterações",
-  note: "Notas",
+  note: "Anotações",
   record: "Registros",
   field: "Campos",
 };

@@ -1,4 +1,18 @@
-// Versão: 1.9 | Data: 11/09/2026
+// Versão: 1.10 | Data: 30/09/2026
+// v1.10 (30/09/2026): visualização ROOT e mapa LIVRE.
+//   (a) `loadRecordTree` devolve também a GEOMETRIA da Root, e `loadMapTree`
+//       carrega o mapa livre (escopo `livre`, sem registro) — a fonte que a
+//       0133 previa e nenhum loader lia;
+//   (b) `createTreeNote`/`updateTreeNote` — a ANOTAÇÃO da Tree (texto livre,
+//       etapa checável ou Resultado esperado), pendurada em qualquer nó;
+//   (c) `setTreeNodeParent` é o dono ÚNICO do re-pendurar, roteado pelo
+//       prefixo do nó: anotação e tarefa de mapa mudam a PRÓPRIA linha; fato
+//       derivado grava a exceção `node_ref`. `setTreeParent` virou casca dele;
+//   (d) `setTreeNodeGeometry` — o arrasto para o vazio e a direção do galho,
+//       mesmo roteamento, gravando SÓ as colunas de geometria (o pai escolhido
+//       antes sobrevive);
+//   (e) `attachTaskToMap` — a tarefa criada pelo editor de sempre (TaskSheet →
+//       createTask) pendurada num mapa livre.
 // v1.9 (11/09/2026): `runCommentThread` SAIU. Turno de IA não pode ser Server
 //   Action: o Next as despacha uma de cada vez por cliente, e um turno de até
 //   240s segurava a fila — com a análise rodando, `loadRecordTree` ficava atrás
@@ -91,10 +105,20 @@ import {
   type BulkItemResult,
 } from "@/lib/kanban/bulk-helpers";
 import { deriveTree } from "@/lib/tree/derive";
-import { loadRecordTreeFacts } from "@/lib/tree/load";
+import { loadMapTreeFacts, loadRecordTreeFacts } from "@/lib/tree/load";
 import { TREE_WINDOW_STEP, type TreeWindow } from "@/lib/tree/load";
 import type { TreeSeriesInfo } from "@/lib/tree/load";
-import type { TreeLayout, TreeNode } from "@/lib/tree/model";
+import {
+  isTreeNodeRef,
+  normalizeMapKey,
+  parseTreeScope,
+  refUuid,
+  type TreeDirection,
+  type TreeLayout,
+  type TreeNode,
+  type TreeNodeGeometry,
+  type TreeScope,
+} from "@/lib/tree/model";
 import { TASK_COLS_WITH_RECORD, type TaskRow } from "@/lib/tasks/types";
 import type { OptionItem } from "@/lib/records/types";
 
@@ -131,6 +155,8 @@ export interface TreeData {
   sourceKey: string | null;
   /** v1.7: o usuário pode configurar automação de Base? (o gate é admin.) */
   canConfigureSeries: boolean;
+  /** v1.10: a geometria da Root (offset e direção por nó). */
+  geometry: TreeNodeGeometry[];
   message?: string;
 }
 
@@ -144,6 +170,7 @@ const EMPTY: TreeData = {
   responsibles: [],
   sourceKey: null,
   canConfigureSeries: false,
+  geometry: [],
 };
 
 /** A árvore de um registro, já derivada na forma pedida. */
@@ -260,6 +287,55 @@ export async function loadRecordTree(
     // Espelho do gate de `saveAutomation` para dono de Base (a RLS da 0127
     // segue sendo a muralha). Esconder o botão é melhor que deixá-lo falhar.
     canConfigureSeries: session.roles.includes("admin"),
+    geometry: facts.geometry,
+  };
+}
+
+/**
+ * v1.10: um MAPA livre (escopo `livre`) — anotações e tarefas penduradas, sem
+ * registro. É onde um planejamento ou uma rotina mora. Sempre na forma
+ * `livre`: só o parentesco que alguém desenhou.
+ */
+export async function loadMapTree(mapKey: string): Promise<TreeData> {
+  const session = await getSessionInfo();
+  if (!session) return { ...EMPTY, message: "Sessão expirada." };
+  const key = normalizeMapKey(mapKey);
+  if (!key || key !== mapKey) {
+    return { ...EMPTY, message: "Chave de mapa inválida." };
+  }
+  const orgId = await getActiveOrgId();
+  const supabase = await createClient();
+
+  const [facts, { data: resps }] = await Promise.all([
+    loadMapTreeFacts(supabase, { mapKey: key, orgId }),
+    supabase
+      .from("responsibles")
+      .select("id, display_name")
+      .is("canonical_id", null)
+      .eq("active", true)
+      .order("display_name"),
+  ]);
+  const { data: taskRows } =
+    facts.taskIds.length > 0
+      ? await supabase
+          .from("tasks")
+          .select(TASK_COLS_WITH_RECORD)
+          .in("id", facts.taskIds)
+      : { data: [] };
+
+  return {
+    ...EMPTY,
+    nodes: deriveTree({
+      facts: facts.facts,
+      layout: "livre",
+      overrides: facts.overrides,
+    }),
+    tasks: (taskRows ?? []) as unknown as TaskRow[],
+    responsibles: (resps ?? []).map((r) => ({
+      id: r.id as string,
+      label: (r.display_name as string) ?? "",
+    })),
+    geometry: facts.geometry,
   };
 }
 
@@ -419,6 +495,9 @@ export async function deleteTreeNodesBulk(
 /**
  * Re-pendura um nó (ou o solta na raiz). Grava a EXCEÇÃO, não a árvore inteira:
  * o resto continua derivado, e desfazer é apagar a linha.
+ *
+ * v1.10: casca de `setTreeNodeParent` no escopo de registro — quem já chamava
+ * esta (o "Comentar aqui") segue igual.
  */
 export async function setTreeParent(
   recordId: string,
@@ -426,26 +505,357 @@ export async function setTreeParent(
   parentRef: string | null,
   opts: { revalidate?: boolean } = {}
 ): Promise<TreeActionState> {
+  return setTreeNodeParent({ kind: "record", recordId }, nodeRef, parentRef, opts);
+}
+
+/** Limites de texto da anotação. */
+const NOTE_LABEL_MAX = 200;
+const NOTE_BODY_MAX = 4000;
+/** Teto do offset gravado — muito além de qualquer canvas real. */
+const OFFSET_MAX = 100_000;
+
+/**
+ * O contexto comum das escritas em `tree_nodes`: sessão, org e o escopo
+ * validado. No escopo de REGISTRO confere que a pessoa VÊ o registro — o WITH
+ * CHECK da 0133 aceita `created_by = uid` em qualquer `scope_id`, e sem isto
+ * daria para pendurar nó na árvore de um registro invisível.
+ */
+async function treeWriteContext(scopeRaw: unknown): Promise<
+  | {
+      ok: true;
+      userId: string;
+      orgId: string;
+      scope: TreeScope;
+      supabase: Awaited<ReturnType<typeof createClient>>;
+    }
+  | { ok: false; message: string }
+> {
   const session = await getSessionInfo();
   if (!session) return { ok: false, message: "Sessão expirada." };
   const orgId = await getActiveOrgId();
   if (!orgId) return { ok: false, message: "Organização ativa não identificada." };
+  const scope = parseTreeScope(scopeRaw);
+  if (!scope) return { ok: false, message: "Árvore inválida." };
+  const supabase = await createClient();
+  if (scope.kind === "record") {
+    const { data } = await supabase
+      .from("records")
+      .select("id")
+      .eq("id", scope.recordId)
+      .maybeSingle();
+    if (!data) return { ok: false, message: "Registro não encontrado." };
+  }
+  return { ok: true, userId: session.user.id, orgId, scope, supabase };
+}
+
+function scopeColumns(scope: TreeScope): { scope_kind: string; scope_id: string } {
+  return scope.kind === "record"
+    ? { scope_kind: "record", scope_id: scope.recordId }
+    : { scope_kind: "livre", scope_id: scope.mapKey };
+}
+
+/**
+ * Onde mora a linha de um nó: a PRÓPRIA (anotação; tarefa de mapa) ou a
+ * EXCEÇÃO `node_ref` (fato derivado — só no escopo de registro).
+ */
+type NodeRowTarget =
+  | { kind: "note"; id: string }
+  | { kind: "map_task"; taskId: string }
+  | { kind: "override" }
+  | { kind: "invalid"; message: string };
+
+function nodeRowTarget(scope: TreeScope, nodeRef: string): NodeRowTarget {
+  const noteId = refUuid(nodeRef, "note");
+  if (noteId) return { kind: "note", id: noteId };
+  if (scope.kind === "livre") {
+    const taskId = refUuid(nodeRef, "task");
+    if (taskId) return { kind: "map_task", taskId };
+    return { kind: "invalid", message: "Este nó não pertence ao mapa." };
+  }
+  if (nodeRef.startsWith("series:") || nodeRef.startsWith("kind:")) {
+    // O agrupador é sintético: não é fato de ninguém, e pendurá-lo sob outro
+    // nó mudaria o desenho de todos os troncos de uma vez.
+    return { kind: "invalid", message: "O agrupador não pode ser movido." };
+  }
+  return { kind: "override" };
+}
+
+/**
+ * Aplica colunas à linha do nó. Na exceção, ATUALIZA quando existe e INSERE
+ * quando não — um upsert sobrescreveria o `created_by` de quem a criou (e a
+ * RLS do escopo livre é por autor). Sem linha devolvida = a RLS barrou.
+ */
+async function writeNodeRow(
+  ctx: {
+    userId: string;
+    orgId: string;
+    scope: TreeScope;
+    supabase: Awaited<ReturnType<typeof createClient>>;
+  },
+  nodeRef: string,
+  cols: Record<string, unknown>
+): Promise<TreeActionState> {
+  const target = nodeRowTarget(ctx.scope, nodeRef);
+  if (target.kind === "invalid") return { ok: false, message: target.message };
+  const where = scopeColumns(ctx.scope);
+  const denied = { ok: false, message: "Sem permissão para alterar este nó." };
+
+  if (target.kind === "note" || target.kind === "map_task") {
+    let q = ctx.supabase
+      .from("tree_nodes")
+      .update(cols)
+      .eq("scope_kind", where.scope_kind)
+      .eq("scope_id", where.scope_id)
+      .is("node_ref", null);
+    q =
+      target.kind === "note"
+        ? q.eq("id", target.id).eq("kind", "note")
+        : q.eq("ref_id", target.taskId).eq("kind", "task");
+    const { data, error } = await q.select("id");
+    if (error) return { ok: false, message: `Falha ao salvar: ${error.message}` };
+    return data && data.length > 0 ? { ok: true } : denied;
+  }
+
+  const { data: updated, error: updError } = await ctx.supabase
+    .from("tree_nodes")
+    .update(cols)
+    .eq("scope_kind", where.scope_kind)
+    .eq("scope_id", where.scope_id)
+    .eq("node_ref", nodeRef)
+    .select("id");
+  if (updError) return { ok: false, message: `Falha ao salvar: ${updError.message}` };
+  if (updated && updated.length > 0) return { ok: true };
+  const { error } = await ctx.supabase.from("tree_nodes").insert({
+    organization_id: ctx.orgId,
+    ...where,
+    kind: "note",
+    node_ref: nodeRef,
+    created_by: ctx.userId,
+    ...cols,
+  });
+  if (error) {
+    // 23505: a exceção existe e a RLS escondeu a linha do UPDATE acima.
+    return error.code === "23505"
+      ? denied
+      : { ok: false, message: `Falha ao salvar: ${error.message}` };
+  }
+  return { ok: true };
+}
+
+/**
+ * v1.10: re-pendura um nó — dono ÚNICO, nas duas árvores. Zera o offset: o
+ * slot mudou, e o deslocamento que fazia sentido no pai antigo jogaria o nó
+ * num lugar aleatório do novo.
+ */
+export async function setTreeNodeParent(
+  scopeRaw: TreeScope,
+  nodeRef: string,
+  parentRef: string | null,
+  opts: { revalidate?: boolean } = {}
+): Promise<TreeActionState> {
+  if (!isTreeNodeRef(nodeRef) || (parentRef != null && !isTreeNodeRef(parentRef))) {
+    return { ok: false, message: "Nó inválido." };
+  }
+  if (parentRef === nodeRef) {
+    return { ok: false, message: "Um nó não pode pender de si mesmo." };
+  }
+  if (parentRef?.startsWith("series:") || parentRef?.startsWith("kind:")) {
+    return { ok: false, message: "O agrupador não recebe galhos." };
+  }
+  const ctx = await treeWriteContext(scopeRaw);
+  if (!ctx.ok) return { ok: false, message: ctx.message };
+  const res = await writeNodeRow(ctx, nodeRef, {
+    parent_ref: parentRef ?? "-",
+    offset_x: null,
+    offset_y: null,
+  });
+  if (res.ok && opts.revalidate !== false) revalidatePath("/dashboards");
+  return res;
+}
+
+/**
+ * v1.10: a geometria de um nó na Root — o arrasto para o vazio (offset
+ * relativo ao slot) e/ou a direção em que o galho abre. Só as chaves
+ * PRESENTES são gravadas: mudar a direção não mexe no offset, e nenhuma das
+ * duas mexe no pai.
+ */
+export async function setTreeNodeGeometry(
+  scopeRaw: TreeScope,
+  nodeRef: string,
+  patch: {
+    offsetX?: number | null;
+    offsetY?: number | null;
+    direction?: TreeDirection | null;
+  },
+  opts: { revalidate?: boolean } = {}
+): Promise<TreeActionState> {
+  if (!isTreeNodeRef(nodeRef)) return { ok: false, message: "Nó inválido." };
+  const cols: Record<string, unknown> = {};
+  const offset = (v: number | null | undefined) => {
+    if (v == null) return null;
+    if (!Number.isFinite(v)) return undefined;
+    return Math.round(Math.max(-OFFSET_MAX, Math.min(OFFSET_MAX, v)) * 10) / 10;
+  };
+  for (const [key, col] of [
+    ["offsetX", "offset_x"],
+    ["offsetY", "offset_y"],
+  ] as const) {
+    if (!(key in patch)) continue;
+    const v = offset(patch[key]);
+    if (v === undefined) return { ok: false, message: "Posição inválida." };
+    cols[col] = v;
+  }
+  if ("direction" in patch) {
+    const d = patch.direction;
+    if (d != null && d !== "h" && d !== "v") {
+      return { ok: false, message: "Direção inválida." };
+    }
+    cols.direction = d ?? null;
+  }
+  if (Object.keys(cols).length === 0) return { ok: true };
+  const ctx = await treeWriteContext(scopeRaw);
+  if (!ctx.ok) return { ok: false, message: ctx.message };
+  const res = await writeNodeRow(ctx, nodeRef, cols);
+  if (res.ok && opts.revalidate !== false) revalidatePath("/dashboards");
+  return res;
+}
+
+/** O estado de uma anotação: texto livre, etapa aberta ou etapa concluída. */
+export type TreeNoteStatus = "texto" | "pendente" | "concluida";
+
+/**
+ * v1.10: cria uma ANOTAÇÃO — o galho que pertence à própria Tree (o
+ * comentário vai para o feed do registro; a anotação, não). `parentRef` null =
+ * raiz explícita ('-'), para ela não cair na ocorrência de hoje.
+ */
+export async function createTreeNote(
+  scopeRaw: TreeScope,
+  input: {
+    parentRef: string | null;
+    label: string;
+    body?: string | null;
+    status?: TreeNoteStatus;
+    goal?: boolean;
+  },
+  opts: { revalidate?: boolean } = {}
+): Promise<TreeActionState & { nodeId?: string }> {
+  const label = String(input.label ?? "").trim().slice(0, NOTE_LABEL_MAX);
+  if (!label) return { ok: false, message: "Escreva a anotação." };
+  if (input.parentRef != null && !isTreeNodeRef(input.parentRef)) {
+    return { ok: false, message: "Nó inválido." };
+  }
+  if (
+    input.parentRef?.startsWith("series:") ||
+    input.parentRef?.startsWith("kind:")
+  ) {
+    return { ok: false, message: "O agrupador não recebe galhos." };
+  }
+  const ctx = await treeWriteContext(scopeRaw);
+  if (!ctx.ok) return { ok: false, message: ctx.message };
+  const body = input.body ? String(input.body).slice(0, NOTE_BODY_MAX) : null;
+  const { data, error } = await ctx.supabase
+    .from("tree_nodes")
+    .insert({
+      organization_id: ctx.orgId,
+      ...scopeColumns(ctx.scope),
+      kind: "note",
+      parent_ref: input.parentRef ?? "-",
+      label,
+      body,
+      status:
+        input.status === "pendente" || input.status === "concluida"
+          ? input.status
+          : null,
+      is_goal: input.goal === true,
+      created_by: ctx.userId,
+    })
+    .select("id")
+    .single();
+  if (error || !data) {
+    return { ok: false, message: `Falha ao criar a anotação: ${error?.message ?? ""}` };
+  }
+  if (opts.revalidate !== false) revalidatePath("/dashboards");
+  return { ok: true, nodeId: `note:${data.id as string}` };
+}
+
+/** v1.10: edita a anotação — texto, estado (etapa) e o marcador de Resultado. */
+export async function updateTreeNote(
+  noteId: string,
+  patch: {
+    label?: string;
+    body?: string | null;
+    status?: TreeNoteStatus;
+    goal?: boolean;
+  },
+  opts: { revalidate?: boolean } = {}
+): Promise<TreeActionState> {
+  const session = await getSessionInfo();
+  if (!session) return { ok: false, message: "Sessão expirada." };
+  if (!refUuid(`note:${noteId}`, "note")) {
+    return { ok: false, message: "Anotação inválida." };
+  }
+  const cols: Record<string, unknown> = {};
+  if (patch.label !== undefined) {
+    const label = String(patch.label).trim().slice(0, NOTE_LABEL_MAX);
+    if (!label) return { ok: false, message: "A anotação não pode ficar vazia." };
+    cols.label = label;
+  }
+  if (patch.body !== undefined) {
+    cols.body = patch.body ? String(patch.body).slice(0, NOTE_BODY_MAX) : null;
+  }
+  if (patch.status !== undefined) {
+    cols.status = patch.status === "texto" ? null : patch.status;
+  }
+  if (patch.goal !== undefined) cols.is_goal = patch.goal === true;
+  if (Object.keys(cols).length === 0) return { ok: true };
 
   const supabase = await createClient();
-  const { error } = await supabase.from("tree_nodes").upsert(
-    {
-      organization_id: orgId,
-      scope_kind: "record",
-      scope_id: recordId,
-      kind: "note",
-      node_ref: nodeRef,
-      // "-" é o soltar na raiz; null seria "sem exceção".
-      parent_ref: parentRef ?? "-",
-      created_by: session.user.id,
-    },
-    { onConflict: "scope_kind,scope_id,node_ref" }
-  );
-  if (error) return { ok: false, message: `Falha ao mover: ${error.message}` };
+  const { data, error } = await supabase
+    .from("tree_nodes")
+    .update(cols)
+    .eq("id", noteId)
+    .eq("kind", "note")
+    .is("node_ref", null)
+    .select("id");
+  if (error) return { ok: false, message: `Falha ao salvar: ${error.message}` };
+  if (!data || data.length === 0) {
+    return { ok: false, message: "Sem permissão para alterar esta anotação." };
+  }
+  if (opts.revalidate !== false) revalidatePath("/dashboards");
+  return { ok: true };
+}
+
+/**
+ * v1.10: pendura num MAPA livre a tarefa que o editor de sempre acabou de
+ * criar (TaskSheet → createTask, o choke point). No registro não há o que
+ * fazer aqui: a tarefa já é fato dele, e quem a pendura é `setTreeNodeParent`.
+ * Repetir é no-op (uma vez por mapa — `uq_tree_nodes_map_task`).
+ */
+export async function attachTaskToMap(
+  mapKey: string,
+  taskId: string,
+  parentRef: string | null,
+  opts: { revalidate?: boolean } = {}
+): Promise<TreeActionState> {
+  if (!refUuid(`task:${taskId}`, "task")) {
+    return { ok: false, message: "Tarefa inválida." };
+  }
+  if (parentRef != null && !isTreeNodeRef(parentRef)) {
+    return { ok: false, message: "Nó inválido." };
+  }
+  const ctx = await treeWriteContext({ kind: "livre", mapKey });
+  if (!ctx.ok) return { ok: false, message: ctx.message };
+  const { error } = await ctx.supabase.from("tree_nodes").insert({
+    organization_id: ctx.orgId,
+    ...scopeColumns(ctx.scope),
+    kind: "task",
+    ref_id: taskId,
+    parent_ref: parentRef ?? "-",
+    created_by: ctx.userId,
+  });
+  if (error && error.code !== "23505") {
+    return { ok: false, message: `Falha ao pendurar a tarefa: ${error.message}` };
+  }
   if (opts.revalidate !== false) revalidatePath("/dashboards");
   return { ok: true };
 }

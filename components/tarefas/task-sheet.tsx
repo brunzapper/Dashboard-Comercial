@@ -1,4 +1,8 @@
-// Versão: 1.4 | Data: 10/09/2026
+// Versão: 1.5 | Data: 30/09/2026
+// v1.5 (30/09/2026): `onDone` recebe o id da tarefa (criada ou editada). A
+//   Root da Tree precisa dele para pendurar a tarefa nova no galho em que a
+//   pessoa clicou; `createTask` já o devolvia e o formulário o descartava.
+//   Quem passa `() => void` segue igual.
 // v1.4 (10/09/2026): tarefa de SÉRIE ganha o campo "Como chamar esta"
 //   (occurrence_noun, 0137) — o nível mais específico do substantivo, acima do
 //   que a automação definiu. Só aparece em tarefa de série: numa tarefa avulsa
@@ -97,7 +101,7 @@ export function TaskForm({
   task?: TaskRow;
   defaults?: TaskDefaults;
   ctx: TaskFormContext;
-  onDone?: () => void;
+  onDone?: (taskId?: string | null) => void;
 }) {
   const isEdit = Boolean(task);
   const [state, formAction, pending] = useActionState(
@@ -123,7 +127,7 @@ export function TaskForm({
         recordId: task?.record_id ?? defaults?.recordId ?? null,
         boardId: task?.board_id ?? defaults?.boardId ?? null,
       });
-      if (onDone) onDone();
+      if (onDone) onDone(task?.id ?? state.id ?? null);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.ok]);
@@ -353,7 +357,7 @@ export function TaskSheet({
   task?: TaskRow;
   defaults?: TaskDefaults;
   ctx: TaskFormContext;
-  onDone?: () => void;
+  onDone?: (taskId?: string | null) => void;
   triggerLabel?: string;
   iconTrigger?: boolean;
   editTrigger?: boolean;
@@ -428,9 +432,9 @@ export function TaskSheet({
           task={task}
           defaults={defaults}
           ctx={ctx}
-          onDone={() => {
+          onDone={(taskId) => {
             setOpen(false);
-            if (onDone) onDone();
+            if (onDone) onDone(taskId);
           }}
         />
       </ResizableSheetContent>

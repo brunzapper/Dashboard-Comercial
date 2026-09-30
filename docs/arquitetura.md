@@ -1,4 +1,9 @@
-<!-- Versão: 1.96 | Data: 28/09/2026 -->
+<!-- Versão: 1.97 | Data: 30/09/2026 -->
+<!-- v1.97 (30/09/2026): §4.24 + invariante 34 — visualização ROOT da Tree
+     (0148): canvas com galhos arrastáveis/colapsáveis, direção por galho,
+     galho novo de qualquer nó, caminho até o Resultado; geometria como
+     EXCEÇÃO relativa em tree_nodes; guarda de ciclo no deriveTree; fonte
+     Livre ligada (loadMapTree). -->
 <!-- v1.96 (28/09/2026): §4.18 — CRITÉRIO DE CRÉDITO POR MEMBRO
      (factor.memberCredit): "todo o recorte", "só sem responsável" e "próprio +
      sem responsável", por membro dentro do indicador. A união é resolvida no
@@ -5322,6 +5327,50 @@ linhas são bordas. O refetch segue a regra da origem (§4.10): o event bus
 recarrega em SILÊNCIO, porque o sync roda a cada minuto e uma árvore que pisca
 sozinha lê como defeito.
 
+**A visualização ROOT (0148, 30/09/2026)** desenha a MESMA árvore num canvas
+para mostrar o que depende de quê — o caminho de um planejamento até o
+resultado, ou as etapas de uma rotina. Convenção: **um galho depende dos
+filhos** (o Resultado no alto, os primeiros passos nas folhas). Decisões:
+
+- **Nada de modelo novo.** A árvore segue derivada e `tree_nodes` guarda só
+  exceção — agora também a GEOMETRIA: `offset_x`/`offset_y` são deslocamento
+  RELATIVO ao slot que o layout calcula (somado ao dos ancestrais — arrastar
+  um galho leva o subgalho; "Voltar ao lugar" zera) e `direction` (`h`/`v`) é
+  para onde o galho abre, POR GALHO. Numa linha de exceção, `parent_ref` null
+  passou a significar "sem exceção de pai" (só geometria) — nenhum escritor
+  jamais gravou null ali; `'-'` segue "raiz". O parse é único e puro
+  (`lib/tree/rows.ts`) para as duas leituras (registro e mapa).
+- **Layout puro e determinístico** (`lib/tree/root-layout.ts`): cartão de
+  tamanho FIXO, caixa por subárvore, pai centrado no bloco dos filhos, sem
+  medir o DOM. Os NÓS seguem HTML; só os CONECTORES são SVG — com posição
+  livre, uma borda não liga dois pontos arbitrários. É a única emenda à regra
+  de cima, e vale só na Root.
+- **Arrasto por pointer events** (o canvas tem zoom/pan, e o DnD nativo não
+  sabe de nenhum dos dois): soltar no vazio grava o offset; SOBRE outro nó
+  re-pendura (`setTreeNodeParent`, dono ÚNICO do re-pendurar — anotação e
+  tarefa de mapa mudam a PRÓPRIA linha, fato derivado grava a exceção; o
+  offset zera porque o slot mudou). O descendente nunca é alvo, e o
+  `deriveTree` ganhou GUARDA DE CICLO (o parentesco é decidido inteiro antes
+  de montar os filhos; o membro cuja exceção fechou o laço cai na raiz) —
+  antes duas exceções cruzadas sumiam com os dois nós. Recolhido é
+  preferência de QUEM OLHA (localStorage); posição e direção são da árvore.
+- **Galho novo de qualquer nó**, pelos choke points de sempre: ANOTAÇÃO
+  (`createTreeNote` — pertence à Tree; texto livre, etapa checável ou
+  Resultado esperado via `status`/`is_goal`), TAREFA (`TaskForm` →
+  `createTask`, depois `setTreeNodeParent`/`attachTaskToMap`) e COMENTÁRIO
+  (`addTreeNote` → `createComment`, feed do registro). No mapa Livre o
+  comentário fica DESABILITADO com motivo (`branchKindDisabledReason`). As
+  ações do nó são as MESMAS nas duas visualizações (`tree-node-parts.tsx`).
+- **Leitura do caminho** (`lib/tree/path.ts`, puro): progresso = checáveis
+  ABAIXO do nó; selecionar ilumina a subida até o Resultado mais próximo (ou a
+  raiz) e o que está abaixo, com "faltam N".
+- **Fonte Livre ligada.** O escopo `livre` da 0133 nunca tinha loader:
+  `loadMapTree(mapKey)` lê anotações e tarefas penduradas (hidratadas pela RLS
+  de `tasks`; a que sumiu some, e os filhos sobem). A chave é normalizada por
+  `normalizeMapKey` no construtor E no servidor (`parseTreeScope`). As escritas
+  no escopo de registro conferem que o registro é VISÍVEL antes de gravar — o
+  WITH CHECK da 0133 aceita `created_by = uid` em qualquer `scope_id`.
+
 **O foco do painel liga a tabela ao widget (09/09/2026).** A primeira versão
 entregou o widget Tree sem a seção de configuração dele e sem nenhuma ligação
 com o clique da linha: `settings.tree` não tinha como ser preenchido por
@@ -6947,7 +6996,12 @@ principalmente — para mantenedores humanos.
     agrupador `series:<key>` só nasce com DUAS ou mais — com uma, a árvore é
     byte-idêntica à de antes. O agrupador é sintético: não é filtrável, não é
     selecionável, e o fato avulso segue pendurando na ocorrência da série
-    PRIMÁRIA (ele aconteceu num dia, e o dia cai na janela de todas).
+    PRIMÁRIA (ele aconteceu num dia, e o dia cai na janela de todas). A ROOT
+    (0148, 30/09/2026) não muda isso: a geometria é MAIS exceção (offset
+    RELATIVO ao slot + direção por galho), `parent_ref` null numa exceção é
+    "sem exceção de pai", o re-pendurar tem dono único (`setTreeNodeParent`) e
+    `deriveTree` quebra CICLO soltando na raiz quem o fechou — nunca deixe um
+    arrasto sumir com nó.
 
 35. **Atributo do registro: registry em CÓDIGO e pausar ≠ excluir (0131,
     §4.24).** `lib/attributes/registry.ts` é PURO e client-safe (precedente

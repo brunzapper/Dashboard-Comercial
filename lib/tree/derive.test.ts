@@ -1,4 +1,8 @@
-// Versão: 1.2 | Data: 10/09/2026
+// Versão: 1.3 | Data: 30/09/2026
+// v1.3 (30/09/2026): CICLO. Com a Root, qualquer nó vira pai de qualquer outro
+//   por arrasto; duas exceções cruzadas (ou uma contra o parentesco derivado)
+//   faziam os dois nós sumirem. Os testes pinam que nada some e que quem cai
+//   na raiz é o membro cuja EXCEÇÃO fechou o laço.
 // v1.2 (10/09/2026): VÁRIOS TRONCOS. Um registro pode seguir mais de uma série,
 //   e a árvore desenhava um só. O que os testes novos protegem é a assimetria
 //   que torna a mudança segura: com UMA série a saída continua idêntica à de
@@ -253,5 +257,61 @@ describe("com UMA série, a árvore é a de antes", () => {
   it("a forma por tipo nunca agrupa por série", () => {
     const tree = deriveTree({ facts: uma, layout: "por_tipo" });
     expect(tree.some((n) => n.kind === "series")).toBe(false);
+  });
+});
+
+describe("ciclo (v1.3)", () => {
+  it("duas exceções cruzadas não somem com os nós", () => {
+    const tree = deriveTree({
+      facts,
+      layout: "livre",
+      overrides: [
+        { nodeRef: "task:b", parentRef: "comment:a" },
+        { nodeRef: "comment:a", parentRef: "task:b" },
+      ],
+    });
+    expect(countNodes(tree)).toBe(facts.length);
+  });
+
+  it("exceção contra o parentesco DERIVADO: a exceção é que cede", () => {
+    // comment:a cai (derivado) na occ:1; pendurar a occ:1 no comment:a fecha
+    // o laço — a occ:1 (dona da exceção) volta para a raiz.
+    const tree = deriveTree({
+      facts,
+      layout: "por_ocorrencia",
+      overrides: [{ nodeRef: "occ:1", parentRef: "comment:a" }],
+    });
+    expect(countNodes(tree)).toBe(facts.length);
+    expect(tree.map((n) => n.id)).toContain("occ:1");
+    expect(childIds(tree, "occ:1")).toContain("comment:a");
+  });
+
+  it("cadeia longa (A→B→C→A) também é quebrada", () => {
+    const tree = deriveTree({
+      facts,
+      layout: "livre",
+      overrides: [
+        { nodeRef: "comment:a", parentRef: "task:b" },
+        { nodeRef: "task:b", parentRef: "change:c" },
+        { nodeRef: "change:c", parentRef: "comment:a" },
+      ],
+    });
+    expect(countNodes(tree)).toBe(facts.length);
+  });
+
+  it("anotação pendurada numa tarefa (a Root) fica lá", () => {
+    const withNote: TreeFact[] = [
+      ...facts,
+      { id: "note:n1", kind: "note", at: "2026-09-21", label: "Condição" },
+    ];
+    const tree = deriveTree({
+      facts: withNote,
+      layout: "por_ocorrencia",
+      overrides: [{ nodeRef: "note:n1", parentRef: "task:b" }],
+    });
+    const occ1 = tree.find((n) => n.id === "occ:1")!;
+    const task = occ1.children.find((c) => c.id === "task:b")!;
+    expect(task.children.map((c) => c.id)).toEqual(["note:n1"]);
+    expect(task.children[0].depth).toBe(2);
   });
 });

@@ -1,3 +1,13 @@
+// Versão: 1.3 | Data: 30/09/2026
+// v1.3 (30/09/2026): visualização ROOT. (a) `TreeView` ("lista" | "root") —
+//   a Root é a mesma árvore desenhada num canvas de galhos arrastáveis, que
+//   expandem para o lado ou para baixo; (b) `TreeNodeGeometry` — a posição
+//   livre é EXCEÇÃO relativa ao slot automático (offset), gravada em
+//   `tree_nodes` como o re-pendurar; (c) a NOTA (anotação da Tree) pode ser
+//   ETAPA (checável) e RESULTADO esperado (`TreeFact.goal`); (d) `TreeScope`:
+//   a fonte Livre (mapa por chave, sem registro) passou a existir de verdade;
+//   (e) os TIPOS de galho que se puxam de um nó e o motivo de um estar
+//   desabilitado — comentário é do feed de um REGISTRO, não existe em mapa.
 // Versão: 1.2 | Data: 10/09/2026
 // v1.2 (10/09/2026): (a) o tipo `series` — o nó SINTÉTICO que agrupa as
 //   ocorrências de uma série quando o registro tem mais de uma. Antes a Tree
@@ -75,7 +85,9 @@ export const TREE_NODE_KIND_LABELS: Record<TreeNodeKind, string> = {
   // à mão (foi assim que o termo errado se espalhou por 37 arquivos na 0137).
   comment: "Comentário",
   change: "Alteração",
-  note: "Nota",
+  // v1.3 (30/09/2026): "Anotação" — o texto que pertence à própria Tree (o
+  // comentário vai para o feed do registro; a anotação, não).
+  note: "Anotação",
   record: "Registro",
   field: "Campo",
 };
@@ -110,6 +122,12 @@ export interface TreeFact {
    * alteração não pertencem a tronco nenhum, eles CAEM na janela de um.
    */
   seriesKey?: string | null;
+  /**
+   * v1.3 (30/09/2026): o nó é o RESULTADO esperado (só nota). A Root destaca o
+   * caminho de qualquer nó até ele — "o que isto serve" — e o progresso do
+   * galho dele.
+   */
+  goal?: boolean;
 }
 
 export interface TreeNode extends TreeFact {
@@ -137,4 +155,129 @@ export interface TreeParentOverride {
   /** Id do fato-pai, ou null para soltar na raiz. */
   parentRef: string | null;
   position?: number | null;
+}
+
+/**
+ * v1.3 (30/09/2026): COMO a árvore é desenhada — independente de COMO ela se
+ * organiza (`TreeLayout`). Ausente = "lista" (o widget de sempre, byte-idêntico).
+ */
+export type TreeView = "lista" | "root";
+
+export const TREE_VIEW_LABELS: Record<TreeView, string> = {
+  lista: "Lista (galhos recuados)",
+  root: "Root (canvas de galhos arrastáveis)",
+};
+
+/** Para onde um galho expande os filhos na Root. */
+export type TreeDirection = "h" | "v";
+
+export const TREE_DIRECTION_LABELS: Record<TreeDirection, string> = {
+  h: "Para o lado",
+  v: "Para baixo",
+};
+
+/**
+ * A geometria de UM nó na Root — exceção, como o re-pendurar: sem linha, o nó
+ * fica no slot que o layout calcula. O offset é RELATIVO ao slot e se soma ao
+ * dos ancestrais, então arrastar um galho leva os subgalhos junto.
+ */
+export interface TreeNodeGeometry {
+  nodeRef: string;
+  offsetX: number;
+  offsetY: number;
+  /** null = herda o padrão do widget. */
+  direction: TreeDirection | null;
+}
+
+/** De qual árvore se fala: a de um registro ou um mapa livre. */
+export type TreeScope =
+  | { kind: "record"; recordId: string }
+  | { kind: "livre"; mapKey: string };
+
+/** Os tipos de galho que se puxam de um nó (Root e lista). */
+export type TreeBranchKind = "note" | "task" | "comment";
+
+export const TREE_BRANCH_KINDS: readonly TreeBranchKind[] = [
+  "note",
+  "task",
+  "comment",
+];
+
+/** Rótulo do galho novo. "Anotação" é da Tree; "Comentário" é do feed. */
+export const TREE_BRANCH_LABELS: Record<TreeBranchKind, string> = {
+  note: "Anotação",
+  task: TREE_NODE_KIND_LABELS.task,
+  comment: TREE_NODE_KIND_LABELS.comment,
+};
+
+/**
+ * Por que um tipo de galho não pode ser criado aqui (null = pode). O item fica
+ * DESABILITADO com o motivo, nunca escondido: sumir com a opção faria parecer
+ * que ela não existe.
+ */
+export function branchKindDisabledReason(
+  kind: TreeBranchKind,
+  scope: TreeScope["kind"]
+): string | null {
+  if (kind === "comment" && scope === "livre") {
+    return "Comentário pertence ao feed de um registro — num mapa livre use uma anotação.";
+  }
+  return null;
+}
+
+/**
+ * A chave de um mapa livre: minúsculas, dígitos, hífen e sublinhado, até 80.
+ * O servidor valida pela MESMA função — a chave é dado do usuário e vira
+ * `scope_id`.
+ */
+export function normalizeMapKey(raw: string | null | undefined): string | null {
+  const key = String(raw ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 80);
+  return key === "" ? null : key;
+}
+
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * O escopo que chega do cliente, validado. Fail-closed: formato estranho é
+ * null — o servidor nunca grava `scope_id` que não seja um uuid de registro ou
+ * uma chave de mapa normalizada.
+ */
+export function parseTreeScope(raw: unknown): TreeScope | null {
+  if (!raw || typeof raw !== "object") return null;
+  const r = raw as Record<string, unknown>;
+  if (r.kind === "record") {
+    return typeof r.recordId === "string" && UUID_RE.test(r.recordId)
+      ? { kind: "record", recordId: r.recordId }
+      : null;
+  }
+  if (r.kind === "livre") {
+    const key = normalizeMapKey(typeof r.mapKey === "string" ? r.mapKey : null);
+    return key && key === r.mapKey ? { kind: "livre", mapKey: key } : null;
+  }
+  return null;
+}
+
+/**
+ * Um id lógico de nó ("note:<uuid>", "occ:<rule>:<n>", "task:<uuid>"…) em
+ * formato aceitável. Não prova que o nó existe — só que o texto é um id.
+ */
+export function isTreeNodeRef(v: unknown): v is string {
+  return (
+    typeof v === "string" &&
+    v.length <= 200 &&
+    /^(occ|task|comment|change|note|series|kind):[\w:.-]+$/.test(v)
+  );
+}
+
+/** O uuid depois do prefixo, quando o ref é daquele tipo. */
+export function refUuid(ref: string, prefix: string): string | null {
+  if (!ref.startsWith(`${prefix}:`)) return null;
+  const id = ref.slice(prefix.length + 1);
+  return UUID_RE.test(id) ? id : null;
 }

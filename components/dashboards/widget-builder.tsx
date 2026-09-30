@@ -1,4 +1,8 @@
-// Versão: 1.27 | Data: 17/09/2026
+// Versão: 1.28 | Data: 30/09/2026
+// v1.28 (30/09/2026): Tree — "Como desenhar" (Lista | Root) e, na Root, para
+//   onde os galhos abrem por padrão. A chave do mapa LIVRE passa a ser
+//   normalizada e, vazia, gerada no save: sem ela o mapa não tinha onde morar.
+//   Com fonte Livre a "forma" some — o mapa é sempre o parentesco desenhado.
 // v1.27 (17/09/2026): chip "Base manual" no dropdown de métrica. Na v1.26 as
 //   séries iam sem `chips` e, pela regra do Combobox, apareciam sob TODOS os
 //   chips — inclusive os de Base, às quais não pertencem, e sem jeito de
@@ -132,11 +136,16 @@ import {
 import { Accordion } from "@/components/ui/accordion";
 import { ATTRIBUTE_REGISTRY } from "@/lib/attributes/registry";
 import {
+  normalizeMapKey,
+  TREE_DIRECTION_LABELS,
   TREE_FILTERABLE_KINDS,
   TREE_LAYOUT_LABELS,
   TREE_NODE_KIND_LABELS,
+  TREE_VIEW_LABELS,
+  type TreeDirection,
   type TreeFilterableKind,
   type TreeLayout,
+  type TreeView,
 } from "@/lib/tree/model";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -561,6 +570,13 @@ export function WidgetBuilder({
   );
   const [treeKinds, setTreeKinds] = useState<TreeFilterableKind[]>(
     widget?.settings?.tree?.showKinds ?? []
+  );
+  // v1.28: a visualização (Lista | Root) e a direção padrão dos galhos.
+  const [treeView, setTreeView] = useState<TreeView>(
+    widget?.settings?.tree?.view ?? "lista"
+  );
+  const [treeDirection, setTreeDirection] = useState<TreeDirection>(
+    widget?.settings?.tree?.rootDirection ?? "h"
   );
 
   const [rowActionKind, setRowActionKind] = useState<string>(
@@ -2094,12 +2110,23 @@ export function WidgetBuilder({
         ...(treeSource === "registro" && treeRecordId.trim()
           ? { recordId: treeRecordId.trim() }
           : {}),
-        ...(treeSource === "livre" && treeMapKey.trim()
-          ? { mapKey: treeMapKey.trim() }
+        // v1.28: a chave é normalizada (é o `scope_id` do mapa, validado no
+        // servidor pela MESMA função) e, vazia, gerada — sem ela o mapa livre
+        // não tinha onde morar e o widget ficava vazio para sempre.
+        ...(treeSource === "livre"
+          ? {
+              mapKey:
+                normalizeMapKey(treeMapKey) ??
+                `mapa-${Math.random().toString(36).slice(2, 8)}`,
+            }
           : {}),
         // Lista vazia = TODOS (a ausência da chave é o "sem filtro"), então
         // nunca grave [] — seria "não mostre nada".
         ...(treeKinds.length > 0 ? { showKinds: treeKinds } : {}),
+        // v1.28: ausência = Lista (byte-idêntico ao widget de antes).
+        ...(treeView === "root"
+          ? { view: "root" as const, rootDirection: treeDirection }
+          : {}),
       };
     } else {
       delete settings.tree;
@@ -4151,17 +4178,54 @@ export function WidgetBuilder({
                 aria-label="Fonte dos nós da Tree"
               />
 
-              <Label>Como a árvore se organiza</Label>
+              <Label>Como desenhar</Label>
               <Combobox
-                options={Object.entries(TREE_LAYOUT_LABELS).map(([v, l]) => ({
+                options={Object.entries(TREE_VIEW_LABELS).map(([v, l]) => ({
                   value: v,
                   label: l,
                 }))}
-                value={treeLayout}
-                onValueChange={(v) => setTreeLayout(v as TreeLayout)}
+                value={treeView}
+                onValueChange={(v) => setTreeView(v as TreeView)}
                 searchable={false}
-                aria-label="Forma da árvore"
+                aria-label="Visualização da Tree"
               />
+              {treeView === "root" ? (
+                <>
+                  <p className="text-muted-foreground text-xs">
+                    Na Root cada galho pode ser arrastado (para o vazio: muda
+                    de lugar; sobre outro nó: passa a depender dele),
+                    recolhido e aberto para o lado ou para baixo. De qualquer
+                    nó saem novos galhos — anotação, tarefa ou comentário.
+                  </p>
+                  <Label>Galhos abrem, por padrão</Label>
+                  <Combobox
+                    options={Object.entries(TREE_DIRECTION_LABELS).map(
+                      ([v, l]) => ({ value: v, label: l })
+                    )}
+                    value={treeDirection}
+                    onValueChange={(v) => setTreeDirection(v as TreeDirection)}
+                    searchable={false}
+                    aria-label="Direção padrão dos galhos"
+                  />
+                </>
+              ) : null}
+
+              {/* v1.28: no mapa livre a forma não se aplica — ele é sempre o
+                  parentesco que alguém desenhou. */}
+              {treeSource === "registro" ? (
+                <>
+                  <Label>Como a árvore se organiza</Label>
+                  <Combobox
+                    options={Object.entries(TREE_LAYOUT_LABELS).map(
+                      ([v, l]) => ({ value: v, label: l })
+                    )}
+                    value={treeLayout}
+                    onValueChange={(v) => setTreeLayout(v as TreeLayout)}
+                    searchable={false}
+                    aria-label="Forma da árvore"
+                  />
+                </>
+              ) : null}
 
               {treeSource === "registro" ? (
                 <>
@@ -4183,12 +4247,16 @@ export function WidgetBuilder({
                 <>
                   <Label>Chave do mapa</Label>
                   <p className="text-muted-foreground text-xs">
-                    Identifica este mapa mental. Dois widgets com a mesma chave
-                    mostram os mesmos nós.
+                    Identifica este mapa. Dois widgets com a mesma chave
+                    mostram os mesmos nós. Vazio = uma chave nova é gerada ao
+                    salvar.
                   </p>
                   <Input
                     value={treeMapKey}
                     onChange={(e) => setTreeMapKey(e.target.value)}
+                    onBlur={(e) =>
+                      setTreeMapKey(normalizeMapKey(e.target.value) ?? "")
+                    }
                     placeholder="ex.: planejamento-2026"
                     aria-label="Chave do mapa livre"
                   />

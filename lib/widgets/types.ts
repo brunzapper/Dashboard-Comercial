@@ -1,4 +1,7 @@
-// Versão: 1.16 | Data: 10/09/2026
+// Versão: 1.17 | Data: 30/09/2026
+// v1.17 (30/09/2026): TreeSettings.view ("lista" | "root") e rootDirection —
+//   a visualização Root da Tree (canvas de galhos arrastáveis). Ausentes = a
+//   lista de sempre, byte-idêntica.
 // v1.16 (10/09/2026): só vocabulário — o substantivo da ocorrência
 //   da série saiu do código e virou dado (SeriesConfig.noun, e
 //   tasks.occurrence_noun por tarefa).
@@ -55,7 +58,11 @@
 // v1.1 (09/07/2026): Fase 8 — WidgetConfig/Widget ganham `sources` (fontes
 //   usadas; vazio = todas) e `splitBySource` (quebrar por fonte).
 // Tipos do construtor de dashboards (Fase 6A).
-import type { TreeFilterableKind } from "@/lib/tree/model";
+import type {
+  TreeDirection,
+  TreeFilterableKind,
+  TreeView,
+} from "@/lib/tree/model";
 import type { ManualSpread } from "@/lib/manual-base/types";
 import type { SourceKey } from "@/lib/sources";
 import type { RoleKey } from "@/lib/auth/roles";
@@ -480,6 +487,14 @@ export interface TreeSettings {
    * construtor oferece.
    */
   showKinds?: TreeFilterableKind[];
+  /**
+   * v1.17 (30/09/2026): COMO a árvore é desenhada. Ausente = "lista" (galhos
+   * recuados, o widget de sempre); "root" = canvas com galhos arrastáveis,
+   * colapsáveis, que expandem para o lado ou para baixo.
+   */
+  view?: TreeView;
+  /** v1.17: na Root, para onde os galhos abrem por padrão. Ausente = "h". */
+  rootDirection?: TreeDirection;
 }
 
 export interface RowActionSettings {
