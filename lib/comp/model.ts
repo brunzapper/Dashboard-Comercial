@@ -1,3 +1,11 @@
+// Versão: 1.8 | Data: 28/09/2026
+// v1.8: CRITÉRIO DE CRÉDITO POR MEMBRO (factor.memberCredit — id CANÔNICO →
+// modo). Ausente = "próprio" (+ equipe), byte-idêntico ao anterior. "all" tira
+// o filtro de membro (vale só o recorte do indicador), "unassigned" credita só
+// os registros com o campo de crédito VAZIO e "own_and_unassigned" SOMA os
+// dois. A união é resolvida no ENGINE (memberScopeFor + filterAlternatives do
+// runCalculatedWidget) — RPCs intocados. Parse fail-closed no molde do
+// memberTeams; rótulos únicos em MEMBER_CREDIT_LABELS.
 // Versão: 1.7 | Data: 17/08/2026
 // v1.7: CompDetailGrouping virou `byFactor[factorId] = { into, folded }` — o
 // bloco PRINCIPAL que recebe os operandos dobrados. O shape anterior
@@ -79,6 +87,36 @@ export const MAX_COMMISSION_MEMBER_OVERRIDES = 400;
 export const MAX_COMMISSION_BLOCKS = 6;
 export const MAX_FACTOR_FILTERS = 12;
 
+/**
+ * Critério de CRÉDITO de um membro num fator (v1.8). Ausente = "próprio": o
+ * filtro clássico do memberFilterFor (+ equipe). Os demais trocam o recorte:
+ *  - "all": sem filtro de membro — o membro recebe TODO o recorte do fator
+ *    (valem só factor.sources/factor.filters). Ex.: gestor que ganha sobre
+ *    100% do que qualquer pessoa ou canal vendeu.
+ *  - "unassigned": só os registros com o campo de crédito VAZIO.
+ *  - "own_and_unassigned": próprio (+ equipe) SOMADO aos registros vazios.
+ */
+export type CompMemberCreditMode = "all" | "unassigned" | "own_and_unassigned";
+
+/** Rótulos pt-BR dos critérios — dono ÚNICO (editor e detalhamento). A chave
+ *  "own" é a AUSÊNCIA no config (nunca gravada). */
+export const MEMBER_CREDIT_LABELS = {
+  own: "Próprios registros",
+  own_and_unassigned: "Próprios + sem responsável",
+  unassigned: "Só sem responsável",
+  all: "Todo o recorte (sem critério)",
+} satisfies Record<CompMemberCreditMode | "own", string>;
+
+const MEMBER_CREDIT_MODES = new Set<string>([
+  "all",
+  "unassigned",
+  "own_and_unassigned",
+]);
+
+export function isMemberCreditMode(v: unknown): v is CompMemberCreditMode {
+  return typeof v === "string" && MEMBER_CREDIT_MODES.has(v);
+}
+
 /** Fator do plano: componente ponderado da remuneração. */
 export interface CompFactor {
   id: string; // estável (chave de overrides/targets) — NUNCA regenerar no save
@@ -109,6 +147,9 @@ export interface CompFactor {
   // Sobreposição entre líderes é INTENCIONAL: cada um é medido pela própria
   // equipe, então a mesma pessoa pode contar para dois (nada a validar).
   memberTeams?: Record<string, string[]>;
+  // Critério de CRÉDITO por membro (id CANÔNICO → modo; v1.8). Ausente para
+  // um membro = "próprio" (+ equipe). Ver CompMemberCreditMode.
+  memberCredit?: Record<string, CompMemberCreditMode>;
   // Alvo padrão do mês quando NÃO há linha de goals p/ membro×mês (meta "por
   // sub-operação"). Fallback de LEITURA — nunca vira linha de goals; digitar
   // na célula grava um goal (override), limpar deleta e volta ao padrão.
@@ -457,6 +498,17 @@ function parseFactor(raw: unknown): CompFactor | null {
       if (team.length > 0) memberTeams[leaderId] = team;
     }
     if (Object.keys(memberTeams).length > 0) out.memberTeams = memberTeams;
+  }
+  // Critério de crédito por membro (v1.8) — mesmo molde fail-closed: modo fora
+  // da whitelist derruba o config; mapa vazio é descartado.
+  if (raw.memberCredit != null) {
+    if (!isRecord(raw.memberCredit)) return null;
+    const memberCredit: Record<string, CompMemberCreditMode> = {};
+    for (const [memberId, mode] of Object.entries(raw.memberCredit)) {
+      if (memberId === "" || !isMemberCreditMode(mode)) return null;
+      memberCredit[memberId] = mode;
+    }
+    if (Object.keys(memberCredit).length > 0) out.memberCredit = memberCredit;
   }
   if (defaultTarget != null) out.defaultTarget = defaultTarget;
   if (typeof raw.targetCurrency === "string" && raw.targetCurrency !== "")

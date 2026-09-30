@@ -1,3 +1,5 @@
+// Versão: 1.1 | Data: 28/09/2026
+// v1.1: o merge também preserva memberCredit (critério de crédito por membro).
 // Versão: 1.0 | Data: 08/09/2026
 // Guardas do contrato `remuneracao-edit`. O que se pina aqui não é "o validador
 // recusa JSON torto" — é o conjunto de PERDAS SILENCIOSAS que o merge existe
@@ -32,6 +34,7 @@ function baseConfig(): CompPlanConfig {
         sources: ["negocios"],
         filters: [{ field: "pipeline", op: "eq", value: "Novos" }],
         memberTeams: { r1: ["r2"] },
+        memberCredit: { r3: "all" },
       },
     ],
     commissions: [
@@ -99,7 +102,7 @@ function run(body: Record<string, unknown>, atual = baseConfig(), active = true)
 }
 
 describe("merge do delta sobre a config existente", () => {
-  it("preserva o que a IA não mencionou (presetKey, filtros, memberTeams)", () => {
+  it("preserva o que a IA não mencionou (presetKey, filtros, memberTeams, memberCredit)", () => {
     // O round-trip do plan-editor re-emite estas chaves; um delta que as
     // apagasse destruiria o recorte do fator no primeiro apply.
     const res = run({ plano: { fatores: [{ nome: "Vendas", pesoPct: 70 }] } });
@@ -111,6 +114,7 @@ describe("merge do delta sobre a config existente", () => {
       { field: "pipeline", op: "eq", value: "Novos" },
     ]);
     expect(vendas.memberTeams).toEqual({ r1: ["r2"] });
+    expect(vendas.memberCredit).toEqual({ r3: "all" });
     expect(vendas.sources).toEqual(["negocios"]);
   });
 

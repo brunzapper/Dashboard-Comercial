@@ -1,4 +1,6 @@
 // @vitest-environment jsdom
+// Versão: 1.2 | Data: 28/09/2026
+// v1.2: o save RE-EMITE memberCredit (critério de crédito por membro).
 // Versão: 1.1 | Data: 17/08/2026
 // v1.1: mesma regra do presetKey para `detailGrouping` (engrenagem dos blocos
 // do detalhamento) — o editor não o edita, mas precisa RE-EMITI-LO no save.
@@ -60,7 +62,10 @@ function makeConfig(over: Partial<CompPlanConfig> = {}): CompPlanConfig {
   };
 }
 
-function renderEditor(config: CompPlanConfig) {
+function renderEditor(
+  config: CompPlanConfig,
+  responsibles: { id: string; label: string }[] = []
+) {
   return render(
     <PlanEditor
       plan={{
@@ -73,7 +78,7 @@ function renderEditor(config: CompPlanConfig) {
       }}
       config={config}
       metrics={[]}
-      responsibles={[]}
+      responsibles={responsibles}
       available={[]}
       allFields={[]}
       sources={[]}
@@ -119,6 +124,30 @@ describe("PlanEditor — condições do recorte (factor.filters)", () => {
     const payload = savePlan.mock.calls[0][0] as { config: CompPlanConfig };
     expect(payload.config.factors[0].memberTeams).toEqual(teams);
     expect(notifyActionError).not.toHaveBeenCalled();
+  });
+
+  it("save RE-EMITE memberCredit (senão o critério sumiria no 1º save)", async () => {
+    const credit = { gestor: "all", lider: "own_and_unassigned" } as const;
+    const cfg = makeConfig();
+    cfg.factors[0].memberCredit = { ...credit };
+    renderEditor(cfg);
+    fireEvent.click(screen.getByRole("button", { name: "Salvar plano" }));
+    await waitFor(() => expect(savePlan).toHaveBeenCalledTimes(1));
+    const payload = savePlan.mock.calls[0][0] as { config: CompPlanConfig };
+    expect(payload.config.factors[0].memberCredit).toEqual(credit);
+  });
+
+  it("critério por membro: 'Todo o recorte' esconde o picker de equipe", () => {
+    const cfg = makeConfig({ memberIds: ["gestor", "lider"] });
+    cfg.factors[0].memberCredit = { gestor: "all" };
+    renderEditor(cfg, [
+      { id: "gestor", label: "Gestor" },
+      { id: "lider", label: "Líder" },
+    ]);
+    expect(screen.getByText("Crédito por membro")).toBeTruthy();
+    expect(screen.getByText("Todo o recorte (sem critério)")).toBeTruthy();
+    // Só o líder (critério padrão) mostra a equipe.
+    expect(screen.getAllByText("Sem equipe")).toHaveLength(1);
   });
 
   it("equipe vazia não vira chave no config (vazio = sem equipe)", async () => {

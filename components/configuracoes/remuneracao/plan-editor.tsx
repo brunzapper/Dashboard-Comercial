@@ -1,3 +1,10 @@
+// Versão: 1.7 | Data: 28/09/2026
+// v1.7: "Crédito de equipe" virou "Crédito por membro" — cada membro escolhe,
+// por indicador, o critério (factor.memberCredit): próprios registros (padrão,
+// com a equipe), próprios + sem responsável, só sem responsável, ou todo o
+// recorte (sem critério — valem só as Condições do recorte). O picker de
+// equipe só aparece nos critérios que usam o próprio membro. O save RE-EMITE
+// memberCredit (mesma regra do memberTeams/presetKey).
 // Versão: 1.6 | Data: 02/08/2026
 // v1.6: validação amigável POR FATOR no save (nome/peso/fórmula vazios têm
 // mensagem própria — antes morriam no parse fail-closed do servidor com o
@@ -89,9 +96,12 @@ import {
   MAX_COMMISSION_TIERS,
   MAX_FACTOR_FILTERS,
   MAX_FACTORS,
+  MEMBER_CREDIT_LABELS,
+  isMemberCreditMode,
   resolveOperationMembers,
   type CompCommissionBlock,
   type CompCommissionTier,
+  type CompMemberCreditMode,
   type CompPlanConfig,
   type CompTierKind,
 } from "@/lib/comp/model";
@@ -130,6 +140,9 @@ interface FactorDraft {
   // Equipe creditada a cada líder: id do líder → ids dos liderados. Chave
   // ausente/lista vazia = sem equipe (só o próprio, comportamento clássico).
   memberTeams: Record<string, string[]>;
+  // Critério de crédito por membro (v1.7): id → modo. Ausente = próprios
+  // registros (padrão, com a equipe).
+  memberCredit: Record<string, CompMemberCreditMode>;
   defaultTarget: string;
   targetCurrency: string; // "" = R$ (sem conversão)
   filters: WidgetFilter[]; // condições do recorte (linhas cruas da UI)
@@ -152,6 +165,7 @@ function emptyFactor(): FactorDraft {
     floorPct: "",
     memberField: "",
     memberTeams: {},
+    memberCredit: {},
     defaultTarget: "",
     targetCurrency: "",
     filters: [],
@@ -175,6 +189,8 @@ function draftsFromConfig(config: CompPlanConfig | null): FactorDraft[] {
     memberTeams: Object.fromEntries(
       Object.entries(f.memberTeams ?? {}).map(([k, v]) => [k, [...v]])
     ),
+    // Idem: clonado e RE-EMITIDO no save (v1.7).
+    memberCredit: { ...(f.memberCredit ?? {}) },
     defaultTarget: f.defaultTarget != null ? String(f.defaultTarget) : "",
     targetCurrency: f.targetCurrency ?? "",
     // Clona (nunca mutar o config das props) — e RE-EMITIR no save é
@@ -460,6 +476,10 @@ export function PlanEditor(props: PlanEditorProps) {
       .filter((a) => !a.isNumeric && !a.isDate && !a.displayOnly && !a.aggCalc)
       .map((a) => ({ value: a.field, label: a.label })),
   ];
+  // Critério de crédito por membro (v1.7) — rótulos do dono único do model.
+  const creditOptions: ComboboxOption[] = (
+    Object.entries(MEMBER_CREDIT_LABELS) as [string, string][]
+  ).map(([value, label]) => ({ value, label }));
   const currencyOptions: ComboboxOption[] = [
     { value: CURRENCY_DEFAULT, label: "R$ (sem conversão)" },
     ...props.currencies.filter((c) => c.value !== "BRL"),
@@ -680,6 +700,10 @@ export function PlanEditor(props: PlanEditorProps) {
             );
             return Object.keys(teams).length > 0 ? { memberTeams: teams } : {};
           })(),
+          // RE-EMITIR o critério de crédito (v1.7) — mesma regra da equipe.
+          ...(Object.keys(f.memberCredit).length > 0
+            ? { memberCredit: { ...f.memberCredit } }
+            : {}),
           ...(numOrNull(f.defaultTarget) != null
             ? { defaultTarget: numOrNull(f.defaultTarget) }
             : {}),
@@ -1042,39 +1066,61 @@ export function PlanEditor(props: PlanEditorProps) {
                 </p>
               </div>
             </div>
-            {/* Crédito de EQUIPE: remuneração de líder, cujas oportunidades
-                ficam em nome do time. Sem isto o líder não casa nada e o
-                realizado sai 0. Só aparece com membros efetivos resolvidos —
-                sem eles não há a quem atribuir equipe. */}
+            {/* Crédito POR MEMBRO (v1.7): o critério que define o que conta
+                para cada membro neste indicador, e a EQUIPE (remuneração de
+                líder, cujas oportunidades ficam em nome do time). Só aparece
+                com membros efetivos resolvidos — sem eles não há a quem
+                atribuir. */}
             {commissionMembers.length > 0 ? (
               <div className="flex flex-col gap-1.5">
-                <Label>Crédito de equipe (para líderes)</Label>
-                <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                  {commissionMembers.map((m) => (
-                    <div key={m.id} className="flex flex-col gap-1">
-                      <span className="text-muted-foreground text-xs">
-                        {m.label}
-                      </span>
-                      <MemberPicker
-                        responsibles={props.responsibles.filter(
-                          (r) => r.id !== m.id
-                        )}
-                        value={f.memberTeams[m.id] ?? []}
-                        emptyLabel="Sem equipe"
-                        onChange={(v) =>
-                          patchFactor(f.id, {
-                            memberTeams: { ...f.memberTeams, [m.id]: v },
-                          })
-                        }
-                      />
-                    </div>
-                  ))}
+                <Label>Crédito por membro</Label>
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                  {commissionMembers.map((m) => {
+                    const credit = f.memberCredit[m.id];
+                    const usesOwn = credit !== "all" && credit !== "unassigned";
+                    return (
+                      <div key={m.id} className="flex flex-col gap-1">
+                        <span className="text-muted-foreground text-xs">
+                          {m.label}
+                        </span>
+                        <Combobox
+                          options={creditOptions}
+                          searchable={false}
+                          value={credit ?? "own"}
+                          onValueChange={(v) => {
+                            const next = { ...f.memberCredit };
+                            if (isMemberCreditMode(v)) next[m.id] = v;
+                            else delete next[m.id];
+                            patchFactor(f.id, { memberCredit: next });
+                          }}
+                        />
+                        {usesOwn ? (
+                          <MemberPicker
+                            responsibles={props.responsibles.filter(
+                              (r) => r.id !== m.id
+                            )}
+                            value={f.memberTeams[m.id] ?? []}
+                            emptyLabel="Sem equipe"
+                            onChange={(v) =>
+                              patchFactor(f.id, {
+                                memberTeams: { ...f.memberTeams, [m.id]: v },
+                              })
+                            }
+                          />
+                        ) : null}
+                      </div>
+                    );
+                  })}
                 </div>
                 <p className="text-muted-foreground text-xs">
-                  O realizado de quem tem equipe passa a somar também os
-                  registros dos selecionados — além dos próprios. Serve para
-                  remunerar líderes cujas oportunidades ficam em nome do time.
-                  Sem seleção, nada muda.
+                  Define o que conta para cada membro neste indicador.
+                  &quot;Próprios registros&quot; usa o campo de crédito acima
+                  (Responsável, por padrão) e soma a equipe selecionada — serve
+                  para remunerar líderes cujas oportunidades ficam em nome do
+                  time. &quot;Sem responsável&quot; credita os registros com
+                  esse campo vazio. &quot;Todo o recorte&quot; dispensa
+                  critério de membro: conta tudo o que passar pelas Condições
+                  do recorte (ex.: quem recebe sobre 100% do que for vendido).
                 </p>
               </div>
             ) : null}

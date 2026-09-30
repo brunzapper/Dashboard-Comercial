@@ -1,3 +1,8 @@
+// Versão: 1.13 | Data: 28/09/2026
+// v1.13: detailCreditNote — o critério de crédito do membro (v1.8 do model)
+// dito junto da lista: "todo o recorte", "só sem <campo>" ou "inclui sem
+// <campo>". Sem a frase, uma lista com registros de outras pessoas (ou sem
+// ninguém) lê como erro de cálculo — mesmo motivo do detailTeamNote.
 // Versão: 1.12 | Data: 27/08/2026
 // v1.12: VOCABULÁRIO DE LEITOR. O demonstrativo é lido por colaboradores e pelo
 // RH, não por quem construiu o modelo — então o jargão interno saiu de TODA
@@ -445,6 +450,22 @@ export function detailTeamNote(names: string[]): string {
       ? names[0]
       : `${names.slice(0, -1).join(", ")} e ${names[names.length - 1]}`;
   return `Inclui registros da equipe creditada a este membro: ${quem}.`;
+}
+
+/**
+ * Critério de crédito do membro fora do padrão (v1.13): a lista NÃO é "os
+ * registros dele". `field` = rótulo do campo que identifica o membro
+ * (Responsável, ou o campo escolhido no indicador).
+ */
+export function detailCreditNote(
+  mode: "all" | "unassigned" | "own_and_unassigned",
+  field: string
+): string {
+  if (mode === "all")
+    return "Este membro recebe sobre todos os registros do indicador, de qualquer pessoa — sem critério de membro.";
+  if (mode === "unassigned")
+    return `Este membro recebe sobre os registros sem ${field} preenchido.`;
+  return `Inclui também os registros sem ${field} preenchido.`;
 }
 
 export const DETAIL_DROPPED_FILTER_NOTE =

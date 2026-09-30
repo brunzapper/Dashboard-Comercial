@@ -1574,7 +1574,22 @@ This version has breaking changes — APIs, conventions, and file structure may 
   INTENCIONAL (cada um é medido pela própria equipe). O detalhamento avisa
   de quem são os registros de terceiros (`detailTeamNote`), e o save do
   plan-editor RE-EMITE `memberTeams` (regra do presetKey — sem isso o
-  round-trip apagaria a equipe no 1º save). `factor.defaultTarget` é
+  round-trip apagaria a equipe no 1º save). **CRITÉRIO DE CRÉDITO POR MEMBRO
+  (28/09/2026):** `factor.memberCredit` (id CANÔNICO → `"all"` |
+  `"unassigned"` | `"own_and_unassigned"`; ausente = próprio + equipe,
+  BYTE-IDÊNTICO) sai de `memberScopeFor` (engine) como ALTERNATIVAS DISJUNTAS
+  de filtros: `all` = sem filtro de membro (vale só o recorte do fator — quem
+  ganha sobre 100% do que qualquer pessoa/canal vendeu), `unassigned` = campo
+  de crédito vazio (`is_null`; `custom:` também `eq ""`), e o terceiro SOMA os
+  dois. O filtro do RPC só faz E, então a união é resolvida no CHOKE POINT:
+  `runCalculatedWidget` recebe `filterAlternatives`, resolve a basis UMA vez
+  por alternativa e dobra com `foldBasis` (sum/count são aditivos — a média é
+  sum+count —, então até fórmula com divisão sai Σ/Σ exato); chave nula em
+  qualquer perna anula a chave. NUNCA some os VALORES da fórmula por
+  alternativa (somaria razões) e NÃO recrie as RPCs para OU. O detalhamento
+  usa o MESMO `memberScopeFor` (`configs` por alternativa, listas juntadas,
+  aviso `detailCreditNote`) e o plan-editor RE-EMITE `memberCredit`.
+  `factor.defaultTarget` é
   alvo FALLBACK de leitura (meta "por sub-operação"): linha de `goals` vence;
   limpar a célula segue DELETANDO a linha (restaura o padrão); nunca vira
   linha de goals. `factor.targetCurrency` = moeda em que o alvo é DIGITADO —

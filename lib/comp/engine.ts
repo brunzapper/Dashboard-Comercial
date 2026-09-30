@@ -1,3 +1,11 @@
+// Versão: 1.6 | Data: 28/09/2026
+// v1.6: CRITÉRIO DE CRÉDITO POR MEMBRO (factor.memberCredit). memberScopeFor
+// devolve o recorte do membro como ALTERNATIVAS DISJUNTAS de filtros (a união é
+// o recorte): "próprio" = [[memberFilterFor]] (intocado), "all" = [[]] (sem
+// filtro de membro), "unassigned" = campo de crédito vazio, e
+// "own_and_unassigned" = as duas coisas. O recompute passa 2+ alternativas ao
+// runCalculatedWidget (filterAlternatives), que dobra a basis — soma/contagem
+// são aditivas, então até fórmula com divisão sai exata. RPCs intocados.
 // Versão: 1.5 | Data: 28/08/2026
 // v1.5: CRÉDITO DE EQUIPE (factor.memberTeams — id CANÔNICO do líder → ids dos
 // liderados). memberFilterFor soma a equipe ao próprio membro nos DOIS modos:
@@ -179,6 +187,52 @@ export function memberFilterFor(
     };
   }
   return { field: factor.memberField, op: "in", value: names };
+}
+
+/** Campo que identifica o membro no registro (default: Responsável). */
+export function memberCreditField(factor: Pick<CompFactor, "memberField">): string {
+  return factor.memberField || "responsible_id";
+}
+
+/**
+ * Alternativas de "campo de crédito VAZIO" (disjuntas entre si e do filtro do
+ * próprio, que casa só valores preenchidos). `custom:` mora como TEXTO no
+ * jsonb: além do NULL existe a string vazia, que o `is null` não pega (mesmo
+ * motivo do `neq ""` de nonEmptyFilters no detalhamento).
+ */
+function unassignedAlternatives(field: string): WidgetFilter[][] {
+  const out: WidgetFilter[][] = [[{ field, op: "is_null" }]];
+  if (field.startsWith("custom:")) out.push([{ field, op: "eq", value: "" }]);
+  return out;
+}
+
+/**
+ * Recorte de MEMBRO de um fator como ALTERNATIVAS DISJUNTAS de filtros — a
+ * união delas é o que conta para o membro (cada alternativa entra em E com
+ * `factor.filters`). Critério pelo `factor.memberCredit[id canônico]`:
+ *  - ausente ("próprio"): `[[memberFilterFor(...)]]` — idêntico ao de sempre;
+ *  - "all": `[[]]` — sem filtro de membro (sem exigir nome, inclusive);
+ *  - "unassigned": só o campo de crédito vazio;
+ *  - "own_and_unassigned": próprio (+ equipe) ∪ vazio (erro do próprio sobe).
+ * Uma alternativa só ⇒ o caller usa os filtros direto; 2+ ⇒ a basis é
+ * dobrada por alternativa (runCalculatedWidget.filterAlternatives).
+ */
+export function memberScopeFor(
+  factor: CompFactor,
+  memberId: string,
+  canon: ResponsibleCanon,
+  nameById: Map<string, string | null>
+): { alternatives: WidgetFilter[][] } | { error: string } {
+  const key = canonicalOf(memberId, canon) ?? memberId;
+  const mode = factor.memberCredit?.[key];
+  if (mode === "all") return { alternatives: [[]] };
+  const empty = unassignedAlternatives(memberCreditField(factor));
+  if (mode === "unassigned") return { alternatives: empty };
+  const own = memberFilterFor(factor, memberId, canon, nameById);
+  if ("error" in own) return own;
+  return {
+    alternatives: mode === "own_and_unassigned" ? [[own], ...empty] : [[own]],
+  };
 }
 
 /**
@@ -406,16 +460,19 @@ export async function recomputePlanMonth(
       await Promise.all(
         config.factors.map((factor) =>
           runLimited(async () => {
-            const memberFilter = memberFilterFor(factor, member.id, canon, nameById);
-            if ("error" in memberFilter) {
+            const scope = memberScopeFor(factor, member.id, canon, nameById);
+            if ("error" in scope) {
               realized[factor.id] = null;
-              errors[factor.id] = memberFilter.error;
+              errors[factor.id] = scope.error;
               queryErrors += 1;
               return;
             }
+            // Uma alternativa (o caso clássico) entra direto nos filtros — a
+            // consulta sai idêntica à de antes; 2+ viram filterAlternatives.
+            const single = scope.alternatives.length === 1;
             const filters: WidgetFilter[] = [
               ...(factor.filters ?? []),
-              memberFilter,
+              ...(single ? scope.alternatives[0] : []),
             ];
             try {
               const res = await runCalculatedWidget(rpcClient, {
@@ -423,6 +480,7 @@ export async function recomputePlanMonth(
                 sources: factor.sources,
                 sourceDefs: sources,
                 filters,
+                ...(single ? {} : { filterAlternatives: scope.alternatives }),
                 period,
                 correspondences,
                 currencyMode: "fixed",

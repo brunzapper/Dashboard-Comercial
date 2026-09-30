@@ -242,7 +242,7 @@ describe("factorOperands", () => {
       M1
     );
     if (!q.ok) throw new Error("esperava ok");
-    expect(q.config.filters).toContainEqual({
+    expect(q.configs[0].filters).toContainEqual({
       field: "record_type",
       op: "eq",
       value: "reuniao",
@@ -271,7 +271,7 @@ describe("operandRecordQuery", () => {
       filters: [{ field: "stage", op: "eq", value: "ganho" }],
       formula: f('aggif:["sum","custom:mrr_contrato",[["pipeline","=","Novo"]]]'),
     });
-    expect(q.config.filters).toEqual([
+    expect(q.configs[0].filters).toEqual([
       { field: "stage", op: "eq", value: "ganho" },
       { field: "responsible_id", op: "eq", value: M1 },
       // Op de LISTA, nunca o interno `eq_ci` — o funil o descartaria em
@@ -283,14 +283,14 @@ describe("operandRecordQuery", () => {
   });
 
   it("campo do núcleo leva só not_null (literal vazio quebraria o numérico)", () => {
-    expect(query().config.filters).toEqual([
+    expect(query().configs[0].filters).toEqual([
       { field: "responsible_id", op: "eq", value: M1 },
       { field: "value", op: "not_null" },
     ]);
   });
 
   it("contagem de linhas não filtra campo preenchido — o recorte é a linha", () => {
-    expect(query({ formula: f("agg:count:*") }).config.filters).toEqual([
+    expect(query({ formula: f("agg:count:*") }).configs[0].filters).toEqual([
       { field: "responsible_id", op: "eq", value: M1 },
     ]);
   });
@@ -299,12 +299,12 @@ describe("operandRecordQuery", () => {
     // A agregação consulta a união; restringir a factor.sources zerava o
     // operando de fora (o "0 registros" com realizado > 0).
     const q = query({ formula: f("agg:sum:value", "agg:sum:value@reunioes") }, 0);
-    expect(q.config.sources).toEqual(["negocios", "reunioes"]);
+    expect(q.configs[0].sources).toEqual(["negocios", "reunioes"]);
   });
 
   it("operando escopado roda só na fonte dele, com a data DELA", () => {
     const q = query({ formula: f("agg:sum:value@reunioes") });
-    expect(q.config.sources).toEqual(["reunioes"]);
+    expect(q.configs[0].sources).toEqual(["reunioes"]);
     // monthPeriod dá closed_at às duas fontes; o escopo repõe a coluna própria.
     expect(q.period.fieldBySource?.reuniao ?? q.period.fieldBySource?.reunioes)
       .toBe("source_created_at");
@@ -331,7 +331,7 @@ describe("operandRecordQuery", () => {
     const ops = factorOperands(ctxWith(), comCampo);
     const q = operandRecordQuery(ctxWith(), planWith(), comCampo, ops[0], M1);
     if (!q.ok) throw new Error("esperava ok");
-    expect(q.config.filters[0]).toEqual({
+    expect(q.configs[0].filters[0]).toEqual({
       field: "custom:sdr_reuniao",
       op: "in",
       value: ["Ana"],
@@ -363,7 +363,7 @@ describe("operandRecordQuery", () => {
     const ops = factorOperands(ctx, lider);
     const q = operandRecordQuery(ctx, planWith(), lider, ops[0], M1);
     if (!q.ok) throw new Error("esperava ok");
-    expect(q.config.filters[0]).toEqual({
+    expect(q.configs[0].filters[0]).toEqual({
       field: "custom:sdr_reuniao",
       op: "in",
       value: ["Ana", "Bruno"],
@@ -381,12 +381,46 @@ describe("operandRecordQuery", () => {
       M1
     );
     if (!semEquipe.ok) throw new Error("esperava ok");
-    expect(semEquipe.config.filters[0]).toEqual({
+    expect(semEquipe.configs[0].filters[0]).toEqual({
       field: "custom:sdr_reuniao",
       op: "in",
       value: ["Ana"],
     });
     expect(semEquipe.warnings).toEqual([]);
+  });
+
+  // v1.10 (28/09/2026): critério de crédito por membro.
+  it("crédito 'todo o recorte' tira o filtro de membro e avisa", () => {
+    const q = query({ memberCredit: { [M1]: "all" } });
+    expect(q.configs).toHaveLength(1);
+    expect(q.configs[0].filters).toEqual([{ field: "value", op: "not_null" }]);
+    expect(q.warnings.join(" ")).toContain("todos os registros");
+  });
+
+  it("crédito 'próprios + sem responsável' vira duas consultas disjuntas", () => {
+    const q = query({ memberCredit: { [M1]: "own_and_unassigned" } });
+    expect(q.configs.map((c) => c.filters)).toEqual([
+      [
+        { field: "responsible_id", op: "eq", value: M1 },
+        { field: "value", op: "not_null" },
+      ],
+      [
+        { field: "responsible_id", op: "is_null" },
+        { field: "value", op: "not_null" },
+      ],
+    ]);
+    expect(q.warnings.join(" ")).toContain("sem Responsável preenchido");
+  });
+
+  it("crédito 'só sem responsável' com campo custom cobre NULL e texto vazio", () => {
+    const q = query({
+      memberField: "custom:sdr_reuniao",
+      memberCredit: { [M1]: "unassigned" },
+    });
+    expect(q.configs.map((c) => c.filters[0])).toEqual([
+      { field: "custom:sdr_reuniao", op: "is_null" },
+      { field: "custom:sdr_reuniao", op: "eq", value: "" },
+    ]);
   });
 
   it("avisa quando uma condição do fator não é reproduzível na listagem", () => {

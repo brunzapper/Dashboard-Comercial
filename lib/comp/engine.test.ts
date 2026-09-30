@@ -29,6 +29,7 @@ import { fakeSupabase, type RecordedQuery } from "@/tests/helpers/fake-supabase"
 import {
   memberFilterFor,
   memberResponsibles,
+  memberScopeFor,
   operationMembersFromScopes,
   recomputePlanMonth,
 } from "./engine";
@@ -210,6 +211,90 @@ describe("memberFilterFor", () => {
     const f = fator({ memberField: "custom:sdr", memberTeams: { [M1]: [M2] } });
     const res = memberFilterFor(f, M1, canon, new Map());
     expect(res).toHaveProperty("error");
+  });
+});
+
+// v1.6 (28/09/2026): critério de crédito por membro — alternativas DISJUNTAS.
+describe("memberScopeFor", () => {
+  const canon = {
+    canonicalById: new Map([[M1A, M1]]),
+    groupById: new Map([
+      [M1, [M1, M1A]],
+      [M1A, [M1, M1A]],
+    ]),
+  };
+  const nameById = new Map([
+    [M1, "Líder"],
+    [M1A, "Líder (apelido)"],
+    [M2, "Liderado"],
+  ]);
+  const fator = (over: Partial<CompFactor> = {}): CompFactor => ({
+    id: "f1",
+    label: "Vendas",
+    weightPct: 100,
+    metricKey: "comp_vendas",
+    money: true,
+    formula: { tokens: [{ kind: "field", ref: "agg:sum:value" }] },
+    sources: [],
+    ...over,
+  });
+
+  it("sem critério configurado: uma alternativa com o filtro clássico", () => {
+    expect(memberScopeFor(fator(), M1, canon, nameById)).toEqual({
+      alternatives: [[{ field: "responsible_id", op: "eq", value: M1 }]],
+    });
+  });
+
+  it("'all': sem filtro de membro — nem exige nome", () => {
+    const f = fator({ memberField: "custom:sdr", memberCredit: { [M1]: "all" } });
+    expect(memberScopeFor(f, M1, canon, new Map())).toEqual({ alternatives: [[]] });
+  });
+
+  it("'unassigned': Responsável vazio; campo custom cobre NULL e texto vazio", () => {
+    expect(
+      memberScopeFor(fator({ memberCredit: { [M1]: "unassigned" } }), M1, canon, nameById)
+    ).toEqual({ alternatives: [[{ field: "responsible_id", op: "is_null" }]] });
+    expect(
+      memberScopeFor(
+        fator({ memberField: "custom:sdr", memberCredit: { [M1]: "unassigned" } }),
+        M1,
+        canon,
+        nameById
+      )
+    ).toEqual({
+      alternatives: [
+        [{ field: "custom:sdr", op: "is_null" }],
+        [{ field: "custom:sdr", op: "eq", value: "" }],
+      ],
+    });
+  });
+
+  it("'own_and_unassigned': próprio + equipe ∪ vazio; apelido acha o critério", () => {
+    const f = fator({
+      memberTeams: { [M1]: [M2] },
+      memberCredit: { [M1]: "own_and_unassigned" },
+    });
+    expect(memberScopeFor(f, M1A, canon, nameById)).toEqual({
+      alternatives: [
+        [{ field: "responsible_id", op: "in", value: [M1, M1A, M2] }],
+        [{ field: "responsible_id", op: "is_null" }],
+      ],
+    });
+  });
+
+  it("critério é do membro: outro membro do mesmo fator segue no clássico", () => {
+    const f = fator({ memberCredit: { [M1]: "all" } });
+    expect(memberScopeFor(f, M2, canon, nameById)).toEqual({
+      alternatives: [[{ field: "responsible_id", op: "eq", value: M2 }]],
+    });
+  });
+
+  it("'own_and_unassigned' sem nome para o campo ⇒ erro (nunca consulta aberta)", () => {
+    const f = fator({
+      memberField: "custom:sdr",
+      memberCredit: { [M1]: "own_and_unassigned" },
+    });
+    expect(memberScopeFor(f, M1, canon, new Map())).toHaveProperty("error");
   });
 });
 

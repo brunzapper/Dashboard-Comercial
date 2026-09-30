@@ -1,3 +1,13 @@
+// Versão: 3.8 | Data: 28/09/2026
+// v3.8 (28/09/2026): `filterAlternatives` — recorte como UNIÃO de conjuntos
+//   DISJUNTOS de filtros (o filtro do RPC só faz E). A basis é resolvida uma vez
+//   por alternativa (cada uma em E com `filters`) e DOBRADA por
+//   foldAlternativeBases: as chaves são sum:/count:/aggif: (a média vira
+//   sum+count), todas aditivas — por isso até fórmula com divisão sai exata
+//   (Σnum/Σden). Chave nula em QUALQUER perna ⇒ nula (nunca soma parcial).
+//   Base manual segue preenchida uma vez, depois do fold. Sem alternativas, o
+//   caminho é o de antes. Primeiro consumidor: o crédito por membro da
+//   Remuneração (lib/comp/engine.ts memberScopeFor). RPCs intocados.
 // Versão: 3.7 | Data: 17/09/2026
 // v3.7 (17/09/2026): operandos da BASE MANUAL (`manual:<chave>`, 0142) — soma
 //   dos lançamentos DIGITADOS que caem no período DESTA invocação, escrita
@@ -95,6 +105,7 @@ import {
   basisMetric,
   condFilters,
   evalCalcMoney,
+  foldBasis,
   isManualBasisKey,
   isCondBasisKey,
   isMoneyOperandField,
@@ -134,6 +145,10 @@ export interface CalcInput {
   // sub-fontes precisam do catálogo vivo (predicado da sub).
   sourceDefs?: SourceDef[];
   filters?: WidgetFilter[];
+  // v3.8: recorte como UNIÃO de alternativas DISJUNTAS (cada uma em E com
+  // `filters`). Contrato do caller: nenhuma linha casa duas alternativas —
+  // senão ela seria contada duas vezes. Ausente/vazio = só `filters`.
+  filterAlternatives?: WidgetFilter[][];
   period?: DashboardPeriod | null;
   // Correspondências CRUAS (não o mapa global): o mapa do RPC é montado aqui,
   // escopado às fontes efetivas da consulta (correspondenceMapForSources) —
@@ -149,6 +164,48 @@ export interface CalcInput {
   fields?: FieldDefinition[];
   rates?: CurrencyRates;
   conversionPeriod?: { year: number; quarter: number };
+}
+
+type ResolvedBases = {
+  basis: BasisValues;
+  rawBasis: Record<string, number | null>;
+  cmpBasis: Partial<Record<ComparisonFuncBase, BasisValues>>;
+  cmpRawBasis: Partial<Record<ComparisonFuncBase, Record<string, number | null>>>;
+};
+
+// Dobra aditiva de basis de alternativas DISJUNTAS (foldBasis soma números e
+// detalhamentos por moeda). Diferente do foldBasis, chave nula (consulta que
+// falhou) em QUALQUER alternativa zera a chave inteira: meia soma seria um
+// realizado errado com cara de certo.
+function foldAlternativeBasis<T extends BasisValues>(list: T[]): T {
+  const out = foldBasis(list) as T;
+  for (const b of list) {
+    for (const [k, v] of Object.entries(b)) {
+      if (v == null || (typeof v === "number" && !Number.isFinite(v)))
+        (out as BasisValues)[k] = null;
+    }
+  }
+  return out;
+}
+
+export function foldAlternativeBases(list: ResolvedBases[]): ResolvedBases {
+  const cmpBasis: ResolvedBases["cmpBasis"] = {};
+  const cmpRawBasis: ResolvedBases["cmpRawBasis"] = {};
+  for (const b of Object.keys(list[0]?.cmpBasis ?? {}) as ComparisonFuncBase[]) {
+    cmpBasis[b] = foldAlternativeBasis(list.map((x) => x.cmpBasis[b] ?? {}));
+    cmpRawBasis[b] = foldAlternativeBasis(
+      list.map((x) => x.cmpRawBasis[b] ?? {})
+    ) as Record<string, number | null>;
+  }
+  return {
+    basis: foldAlternativeBasis(list.map((x) => x.basis)),
+    rawBasis: foldAlternativeBasis(list.map((x) => x.rawBasis)) as Record<
+      string,
+      number | null
+    >,
+    cmpBasis,
+    cmpRawBasis,
+  };
 }
 
 /**
@@ -225,41 +282,22 @@ export async function runCalculatedWidget(
   );
 
   // Agrupamento de responsáveis (0101): mesmo choke point do engine — filtros
-  // responsible_id expandem p/ o grupo antes de qualquer consulta.
-  const respCanon = filtersReferenceResponsible(input.filters)
-    ? await loadResponsibleCanon(supabase)
-    : EMPTY_CANON;
-  // Filtro por NOME em relação (31/07/2026): resolve UMA vez, ANTES do canon
-  // (nome → id principal → grupo); scopedAuxInputs é síncrona — o resolve
-  // fica aqui fora e o resultado serve às pernas auxiliares também.
-  // 0143: filtro de COORDENADA sai do caminho de registros ANTES de tudo —
-  // mesmo split do `runWidget`. Ele é o que faz um card mostrar "500 ligações":
-  // sem dimensão nenhuma na tela, o recorte por membro é a única forma de pedir
-  // um número de dentro do total.
-  const { record: recordFilters, coords: coordFilters } =
-    splitManualCoordFilters(input.filters ?? []);
-  const namedFilters = await resolveFkFilterNames(
-    supabase,
-    resolveFilters(recordFilters)
-  );
-  // Segmentação por fonte antes dos filtros sintéticos (mesma ordem do engine).
-  const baseFilters = applyFilterSourceTargets(
-    expandResponsibleFilters(namedFilters, respCanon),
-    querySources,
-    catalog
-  );
-  const withPeriod = (p: DashboardPeriod | null | undefined): WidgetFilter[] => {
-    let f = baseFilters;
-    if (p) f = applyPeriodToFilters(f, p, querySources, catalog);
-    return [...sourceFilters(querySources, catalog), ...f];
-  };
-  const filters = withPeriod(input.period);
+  // responsible_id expandem p/ o grupo antes de qualquer consulta. v3.8: as
+  // ALTERNATIVAS (filterAlternatives) também contam.
+  const respCanon =
+    filtersReferenceResponsible(input.filters) ||
+    (input.filterAlternatives ?? []).some((a) => filtersReferenceResponsible(a))
+      ? await loadResponsibleCanon(supabase)
+      : EMPTY_CANON;
+
+  // 0143: filtro de COORDENADA (manualdim:) é da consulta INTEIRA — as
+  // alternativas de membro (v3.8) nunca o carregam; ele sai de input.filters.
+  const coordFilters = splitManualCoordFilters(input.filters ?? []).coords;
 
   // Funções ANTERIOR/VARPCT/VARABS: a MESMA basis é resolvida também sob os
   // filtros do período de comparação (bases "anterior"/"ano"; janelas ficam de
   // fora do v1 das fórmulas) e vira contexto alternativo do avaliador. Sem
   // período ativo (todo o período) → base indisponível → null ("—").
-  const cmpFiltersByBase: Partial<Record<ComparisonFuncBase, WidgetFilter[]>> = {};
   // Período de cada base (mesmo objeto passado ao withPeriod) — insumo das
   // auxes de operandos ESCOPADOS (período pela data da fonte do escopo).
   const cmpPeriodByBase: Partial<Record<ComparisonFuncBase, DashboardPeriod>> =
@@ -277,7 +315,6 @@ export async function runCalculatedWidget(
       fieldBySource: input.period.fieldBySource,
     };
     cmpPeriodByBase[b] = cmpPeriod;
-    cmpFiltersByBase[b] = withPeriod(cmpPeriod);
   }
 
   // Basis numérica via RPC agregado — é o valor final das contagens/campos
@@ -293,191 +330,232 @@ export async function runCalculatedWidget(
     (k) => !isCondBasisKey(k) && !isManualBasisKey(k)
   );
   const condKeys = allKeys.filter(isCondBasisKey);
-  const basis: BasisValues = {};
-  // Basis numérica CRUA (antes da substituição por MoneyBreakdown): contexto
-  // da reavaliação textual (evaluateFormula não entende MoneyBreakdown).
-  const rawBasis: Record<string, number | null> = {};
-  // Basis do período de comparação, por base (mesmas chaves da principal).
-  const cmpBasis: Partial<Record<ComparisonFuncBase, BasisValues>> = {};
-  const cmpRawBasis: Partial<
-    Record<ComparisonFuncBase, Record<string, number | null>>
-  > = {};
 
-  // Aux de operando ESCOPADO (20/07/2026): perna SÓ da fonte do escopo —
-  // período pela coluna de data DELA (scopedAuxPeriod + patch do sentinel
-  // pré-sintetizado) e correspondências com o membro DELA. Mesma regra do
-  // engine (computeRows.scopedAuxInputs).
-  const scopedAuxInputs = (
-    scope: SourceKey,
-    runPeriod: DashboardPeriod | null | undefined
-  ): { filters: WidgetFilter[]; corr: Record<string, string[]> } => {
-    const rt = recordTypeOf(scope, catalog);
-    const scopeField =
-      runPeriod?.fieldBySource?.[scope] ??
-      catalog.find((s) => s.key === scope)?.defaultPeriodField ??
-      runPeriod?.field ??
-      "source_created_at";
-    let f = applyFilterSourceTargets(
+  // Resolve a basis (principal + bases de comparação) sob UM conjunto de
+  // filtros. v3.8: com filterAlternatives roda uma vez por alternativa e as
+  // basis são DOBRADAS (foldAlternativeBases) — sem alternativas, uma rodada
+  // só com input.filters, exatamente como antes.
+  const resolveBasisFor = async (filterList: WidgetFilter[]) => {
+    // Filtro por NOME em relação (31/07/2026): resolve UMA vez, ANTES do canon
+    // (nome → id principal → grupo); scopedAuxInputs é síncrona — o resolve
+    // fica aqui fora e o resultado serve às pernas auxiliares também.
+    // 0143: filtro de COORDENADA sai do caminho de registros ANTES de tudo —
+    // mesmo split do `runWidget`. Ele é o que faz um card mostrar "500 ligações":
+    // sem dimensão nenhuma na tela, o recorte por membro é a única forma de pedir
+    // um número de dentro do total.
+    const recordFilters = splitManualCoordFilters(filterList).record;
+    const namedFilters = await resolveFkFilterNames(
+      supabase,
+      resolveFilters(recordFilters)
+    );
+    // Segmentação por fonte antes dos filtros sintéticos (mesma ordem do engine).
+    const baseFilters = applyFilterSourceTargets(
       expandResponsibleFilters(namedFilters, respCanon),
-      [scope],
+      querySources,
       catalog
     );
-    const p = scopedAuxPeriod(runPeriod, scope, catalog);
-    if (p) f = applyPeriodToFilters(f, p, [scope], catalog);
-    f = [...sourceFilters([scope], catalog), ...f];
-    // Escopo que ignora o período (0116): remove o sentinela pré-sintetizado em
-    // vez de patchear (mesma guarda do engine.scopedAuxInputs).
-    return {
-      filters: ignoresPeriod(scope, catalog)
-        ? f.filter((x) => x.field !== PERIOD_FIELD_SENTINEL)
-        : patchAuxPeriodByType(f, rt, scopeField),
-      corr: correspondenceMapForSources(
-        input.correspondences ?? [],
+    const withPeriod = (p: DashboardPeriod | null | undefined): WidgetFilter[] => {
+      let f = baseFilters;
+      if (p) f = applyPeriodToFilters(f, p, querySources, catalog);
+      return [...sourceFilters(querySources, catalog), ...f];
+    };
+    const filters = withPeriod(input.period);
+
+    const basis: BasisValues = {};
+    // Basis numérica CRUA (antes da substituição por MoneyBreakdown): contexto
+    // da reavaliação textual (evaluateFormula não entende MoneyBreakdown).
+    const rawBasis: Record<string, number | null> = {};
+    // Basis do período de comparação, por base (mesmas chaves da principal).
+    const cmpBasis: Partial<Record<ComparisonFuncBase, BasisValues>> = {};
+    const cmpRawBasis: Partial<
+      Record<ComparisonFuncBase, Record<string, number | null>>
+    > = {};
+
+    // Aux de operando ESCOPADO (20/07/2026): perna SÓ da fonte do escopo —
+    // período pela coluna de data DELA (scopedAuxPeriod + patch do sentinel
+    // pré-sintetizado) e correspondências com o membro DELA. Mesma regra do
+    // engine (computeRows.scopedAuxInputs).
+    const scopedAuxInputs = (
+      scope: SourceKey,
+      runPeriod: DashboardPeriod | null | undefined
+    ): { filters: WidgetFilter[]; corr: Record<string, string[]> } => {
+      const rt = recordTypeOf(scope, catalog);
+      const scopeField =
+        runPeriod?.fieldBySource?.[scope] ??
+        catalog.find((s) => s.key === scope)?.defaultPeriodField ??
+        runPeriod?.field ??
+        "source_created_at";
+      let f = applyFilterSourceTargets(
+        expandResponsibleFilters(namedFilters, respCanon),
         [scope],
         catalog
-      ),
-    };
-  };
-
-  // Resolve `keys` sob `keyFilters` escrevendo nos alvos dados — a mesma rodada
-  // serve a basis principal e as de comparação. `corrOverride` = mapa de
-  // correspondências da aux escopada (default: o da consulta principal).
-  const makeResolver =
-    (target: BasisValues, rawTarget: Record<string, number | null>) =>
-    async (
-      keys: BasisKey[],
-      keyFilters: WidgetFilter[],
-      corrOverride?: Record<string, string[]>
-    ) => {
-      const corr = corrOverride ?? correspondencesMap;
-      const metrics: Metric[] = keys.map(basisMetric);
-      const values = await aggregate(supabase, metrics, keyFilters, corr);
-      keys.forEach((key, i) => {
-        target[key] = Number.isFinite(values[i]) ? values[i] : null;
-        rawTarget[key] = Number.isFinite(values[i]) ? values[i] : null;
-      });
-
-      // Operandos monetários: detalhamento por moeda (preserva a moeda única do
-      // recorte / converte p/ Real quando misturar). Aux indisponível → mantém o
-      // número cru (degradação = comportamento v1).
-      if (mode !== "none") {
-        const moneyKeys = keys.filter(
-          (key) =>
-            basisMetric(key).agg === "sum" &&
-            isMoneyOperandField(basisMetric(key).field, fieldByKey)
-        );
-        if (moneyKeys.length > 0) {
-          const bds = await aggregateMoneyBreakdowns(
-            supabase,
-            moneyKeys.map(basisMetric),
-            keyFilters,
-            corr,
-            fieldByKey,
-            rates,
-            conversionPeriod
-          );
-          if (bds) moneyKeys.forEach((key, i) => {
-            target[key] = bds[i];
-          });
-        }
-      }
-    };
-
-  // Enfileira as consultas (plain + condicionais) de UMA basis num conjunto de
-  // filtros; usada p/ a principal e p/ cada base de comparação presente.
-  const enqueueBasis = (
-    jobs: Promise<void>[],
-    target: BasisValues,
-    rawTarget: Record<string, number | null>,
-    baseFiltersFor: WidgetFilter[],
-    // Período DESTA rodada (principal ou base de comparação) — insumo das
-    // auxes de operandos escopados.
-    runPeriod: DashboardPeriod | null | undefined,
-    // Basis de comparação degrada TUDO para null em falha (widget segue sem
-    // variação); a principal preserva o comportamento original (plain propaga).
-    lenient: boolean
-  ) => {
-    const resolveKeys = makeResolver(target, rawTarget);
-    if (plainKeys.length > 0) {
-      const p = resolveKeys(plainKeys, baseFiltersFor);
-      jobs.push(
-        lenient
-          ? p.catch(() => {
-              for (const key of plainKeys) target[key] = null;
-            })
-          : p
       );
-    }
-    if (condKeys.length > 0) {
-      // Uma consulta por conjunto distinto de condições (+ escopo — specs
-      // idênticos com escopos diferentes têm auxes diferentes).
-      const groups = new Map<
-        string,
-        { conds: AggCondition[]; keys: BasisKey[]; scope?: string }
-      >();
-      for (const key of condKeys) {
-        const parsed = parseCondBasisKey(key);
-        if (!parsed) {
-          target[key] = null;
-          continue;
-        }
-        const gk = JSON.stringify([parsed.conds, parsed.scope ?? null]);
-        const g =
-          groups.get(gk) ??
-          ({ conds: parsed.conds, keys: [], scope: parsed.scope } as {
-            conds: AggCondition[];
-            keys: BasisKey[];
-            scope?: string;
-          });
-        g.keys.push(key);
-        groups.set(gk, g);
-      }
-      for (const g of groups.values()) {
-        // Falha da consulta condicional (ex.: migração 0050 dos operadores
-        // normalizados ainda não aplicada) degrada a chave para null (operando
-        // ausente → "—") em vez de derrubar a página do dashboard.
-        jobs.push(
-          (async () => {
-            // Condição sobre relação por NOME → resolve p/ UUID antes do RPC;
-            // com apelidos (0101), o UUID expande para o grupo do responsável.
-            let extra = await resolveFkFilterNames(
+      const p = scopedAuxPeriod(runPeriod, scope, catalog);
+      if (p) f = applyPeriodToFilters(f, p, [scope], catalog);
+      f = [...sourceFilters([scope], catalog), ...f];
+      // Escopo que ignora o período (0116): remove o sentinela pré-sintetizado em
+      // vez de patchear (mesma guarda do engine.scopedAuxInputs).
+      return {
+        filters: ignoresPeriod(scope, catalog)
+          ? f.filter((x) => x.field !== PERIOD_FIELD_SENTINEL)
+          : patchAuxPeriodByType(f, rt, scopeField),
+        corr: correspondenceMapForSources(
+          input.correspondences ?? [],
+          [scope],
+          catalog
+        ),
+      };
+    };
+
+    // Resolve `keys` sob `keyFilters` escrevendo nos alvos dados — a mesma rodada
+    // serve a basis principal e as de comparação. `corrOverride` = mapa de
+    // correspondências da aux escopada (default: o da consulta principal).
+    const makeResolver =
+      (target: BasisValues, rawTarget: Record<string, number | null>) =>
+      async (
+        keys: BasisKey[],
+        keyFilters: WidgetFilter[],
+        corrOverride?: Record<string, string[]>
+      ) => {
+        const corr = corrOverride ?? correspondencesMap;
+        const metrics: Metric[] = keys.map(basisMetric);
+        const values = await aggregate(supabase, metrics, keyFilters, corr);
+        keys.forEach((key, i) => {
+          target[key] = Number.isFinite(values[i]) ? values[i] : null;
+          rawTarget[key] = Number.isFinite(values[i]) ? values[i] : null;
+        });
+
+        // Operandos monetários: detalhamento por moeda (preserva a moeda única do
+        // recorte / converte p/ Real quando misturar). Aux indisponível → mantém o
+        // número cru (degradação = comportamento v1).
+        if (mode !== "none") {
+          const moneyKeys = keys.filter(
+            (key) =>
+              basisMetric(key).agg === "sum" &&
+              isMoneyOperandField(basisMetric(key).field, fieldByKey)
+          );
+          if (moneyKeys.length > 0) {
+            const bds = await aggregateMoneyBreakdowns(
               supabase,
-              condFilters(g.conds)
+              moneyKeys.map(basisMetric),
+              keyFilters,
+              corr,
+              fieldByKey,
+              rates,
+              conversionPeriod
             );
-            if (filtersReferenceResponsible(extra))
-              extra = expandResponsibleFilters(
-                extra,
-                await loadResponsibleCanon(supabase)
-              );
-            const scoped = g.scope
-              ? scopedAuxInputs(g.scope, runPeriod)
-              : null;
-            await resolveKeys(
-              g.keys,
-              [...(scoped ? scoped.filters : baseFiltersFor), ...extra],
-              scoped?.corr
-            );
-          })().catch(() => {
-            for (const key of g.keys) target[key] = null;
-          })
+            if (bds) moneyKeys.forEach((key, i) => {
+              target[key] = bds[i];
+            });
+          }
+        }
+      };
+
+    // Enfileira as consultas (plain + condicionais) de UMA basis num conjunto de
+    // filtros; usada p/ a principal e p/ cada base de comparação presente.
+    const enqueueBasis = (
+      jobs: Promise<void>[],
+      target: BasisValues,
+      rawTarget: Record<string, number | null>,
+      baseFiltersFor: WidgetFilter[],
+      // Período DESTA rodada (principal ou base de comparação) — insumo das
+      // auxes de operandos escopados.
+      runPeriod: DashboardPeriod | null | undefined,
+      // Basis de comparação degrada TUDO para null em falha (widget segue sem
+      // variação); a principal preserva o comportamento original (plain propaga).
+      lenient: boolean
+    ) => {
+      const resolveKeys = makeResolver(target, rawTarget);
+      if (plainKeys.length > 0) {
+        const p = resolveKeys(plainKeys, baseFiltersFor);
+        jobs.push(
+          lenient
+            ? p.catch(() => {
+                for (const key of plainKeys) target[key] = null;
+              })
+            : p
         );
       }
+      if (condKeys.length > 0) {
+        // Uma consulta por conjunto distinto de condições (+ escopo — specs
+        // idênticos com escopos diferentes têm auxes diferentes).
+        const groups = new Map<
+          string,
+          { conds: AggCondition[]; keys: BasisKey[]; scope?: string }
+        >();
+        for (const key of condKeys) {
+          const parsed = parseCondBasisKey(key);
+          if (!parsed) {
+            target[key] = null;
+            continue;
+          }
+          const gk = JSON.stringify([parsed.conds, parsed.scope ?? null]);
+          const g =
+            groups.get(gk) ??
+            ({ conds: parsed.conds, keys: [], scope: parsed.scope } as {
+              conds: AggCondition[];
+              keys: BasisKey[];
+              scope?: string;
+            });
+          g.keys.push(key);
+          groups.set(gk, g);
+        }
+        for (const g of groups.values()) {
+          // Falha da consulta condicional (ex.: migração 0050 dos operadores
+          // normalizados ainda não aplicada) degrada a chave para null (operando
+          // ausente → "—") em vez de derrubar a página do dashboard.
+          jobs.push(
+            (async () => {
+              // Condição sobre relação por NOME → resolve p/ UUID antes do RPC;
+              // com apelidos (0101), o UUID expande para o grupo do responsável.
+              let extra = await resolveFkFilterNames(
+                supabase,
+                condFilters(g.conds)
+              );
+              if (filtersReferenceResponsible(extra))
+                extra = expandResponsibleFilters(
+                  extra,
+                  await loadResponsibleCanon(supabase)
+                );
+              const scoped = g.scope
+                ? scopedAuxInputs(g.scope, runPeriod)
+                : null;
+              await resolveKeys(
+                g.keys,
+                [...(scoped ? scoped.filters : baseFiltersFor), ...extra],
+                scoped?.corr
+              );
+            })().catch(() => {
+              for (const key of g.keys) target[key] = null;
+            })
+          );
+        }
+      }
+    };
+
+    const jobs: Promise<void>[] = [];
+    enqueueBasis(jobs, basis, rawBasis, filters, input.period, false);
+    for (const [b, cmpPeriod] of Object.entries(cmpPeriodByBase) as [
+      ComparisonFuncBase,
+      DashboardPeriod,
+    ][]) {
+      const target: BasisValues = {};
+      const rawTarget: Record<string, number | null> = {};
+      cmpBasis[b] = target;
+      cmpRawBasis[b] = rawTarget;
+      enqueueBasis(jobs, target, rawTarget, withPeriod(cmpPeriod), cmpPeriod, true);
     }
+    await Promise.all(jobs);
+    return { basis, rawBasis, cmpBasis, cmpRawBasis };
   };
 
-  const jobs: Promise<void>[] = [];
-  enqueueBasis(jobs, basis, rawBasis, filters, input.period, false);
-  for (const [b, f] of Object.entries(cmpFiltersByBase) as [
-    ComparisonFuncBase,
-    WidgetFilter[],
-  ][]) {
-    const target: BasisValues = {};
-    const rawTarget: Record<string, number | null> = {};
-    cmpBasis[b] = target;
-    cmpRawBasis[b] = rawTarget;
-    enqueueBasis(jobs, target, rawTarget, f, cmpPeriodByBase[b], true);
-  }
-  await Promise.all(jobs);
+  const alternatives =
+    input.filterAlternatives && input.filterAlternatives.length > 0
+      ? input.filterAlternatives.map((alt) => [...(input.filters ?? []), ...alt])
+      : null;
+  const { basis, rawBasis, cmpBasis, cmpRawBasis } = alternatives
+    ? foldAlternativeBases(await Promise.all(alternatives.map(resolveBasisFor)))
+    : await resolveBasisFor(input.filters ?? []);
 
   // BASE MANUAL (0142): sem dimensão, a janela é o período DA INVOCAÇÃO —
   // exatamente o que o KPI/card e a expressão de célula querem. O período de

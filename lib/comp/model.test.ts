@@ -205,6 +205,40 @@ describe("parseCompPlanConfig (fail-closed)", () => {
     expect(reparse(idVazio)).toBeNull();
   });
 
+  // v1.8 (28/09/2026): critério de crédito por membro.
+  it("memberCredit: modos válidos preservados; mapa vazio descartado", () => {
+    const cfg = makeConfig();
+    (cfg.factors[0] as { memberCredit?: unknown }).memberCredit = {
+      gestor: "all",
+      lider: "own_and_unassigned",
+      sdr: "unassigned",
+    };
+    expect(reparse(cfg)!.factors[0].memberCredit).toEqual({
+      gestor: "all",
+      lider: "own_and_unassigned",
+      sdr: "unassigned",
+    });
+    const vazio = makeConfig();
+    (vazio.factors[0] as { memberCredit?: unknown }).memberCredit = {};
+    expect(reparse(vazio)!.factors[0].memberCredit).toBeUndefined();
+    expect(reparse(makeConfig())!.factors[0].memberCredit).toBeUndefined();
+  });
+
+  it("memberCredit: modo desconhecido ou forma errada derruba o config", () => {
+    const modoRuim = makeConfig();
+    (modoRuim.factors[0] as { memberCredit?: unknown }).memberCredit = {
+      gestor: "tudo",
+    };
+    expect(reparse(modoRuim)).toBeNull();
+    const naoObjeto = makeConfig();
+    (naoObjeto.factors[0] as { memberCredit?: unknown }).memberCredit = ["all"];
+    expect(reparse(naoObjeto)).toBeNull();
+    // "own" é a AUSÊNCIA — nunca é gravado, então gravado é sujeira.
+    const own = makeConfig();
+    (own.factors[0] as { memberCredit?: unknown }).memberCredit = { a: "own" };
+    expect(reparse(own)).toBeNull();
+  });
+
   it("comissão: aceita bloco válido (memberTiers preservado) e segue sem ele", () => {
     const parsed = reparse(
       withCommission({ memberTiers: { r1: [{ fromPct: 0, ratePct: 10 }] } })
