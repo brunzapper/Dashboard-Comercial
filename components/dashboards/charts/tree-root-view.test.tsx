@@ -1,5 +1,10 @@
 // @vitest-environment jsdom
-// Versão: 1.0 | Data: 30/09/2026
+// Versão: 1.1 | Data: 01/10/2026
+// v1.1 (01/10/2026): criação e edição DENTRO do canvas — clique direito no
+//   vazio abre a prévia da branch ali; o "+" do card abre a prévia filha;
+//   Enter salva; o clique direito num card abre o menu (converter anotação em
+//   comentário/tarefa); clicar no texto de uma anotação edita no próprio card.
+//   Vocabulário: "branch".
 // A visualização ROOT da Tree. O que um teste estático não alcança e se pina
 // aqui:
 //  - selecionar um nó diz a que ele SERVE (o caminho até o Resultado) e
@@ -9,8 +14,8 @@
 //  - recolher um galho esconde os filhos e diz quantos ficaram escondidos;
 //  - no mapa livre o comentário aparece DESABILITADO (é do feed de um
 //    registro), nunca escondido.
-import { fireEvent, render, screen, within } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { TreeNode } from "@/lib/tree/model";
 
@@ -73,7 +78,11 @@ function setup(over: Partial<TreeRootViewProps> = {}) {
       onNote: vi.fn(),
       onChanged: vi.fn(),
     },
-    onAddBranch: vi.fn(),
+    onCreate: vi.fn(async () => "note:nova"),
+    onCreateTask: vi.fn(),
+    onConvert: vi.fn(),
+    onDeleteNote: vi.fn(),
+    onEditComment: vi.fn(),
     onReparent: vi.fn(),
     onMove: vi.fn(),
     onDirection: vi.fn(),
@@ -87,7 +96,17 @@ function setup(over: Partial<TreeRootViewProps> = {}) {
 const tile = (id: string) =>
   document.querySelector<HTMLElement>(`[data-tree-node="${id}"]`)!;
 
+/** Seleciona pelo CORPO do card (o texto agora edita). */
+function selectTile(id: string) {
+  const canvas = screen.getByRole("tree");
+  fireEvent.pointerDown(tile(id), { button: 0, pointerId: 9, clientX: 5, clientY: 5 });
+  fireEvent.pointerUp(canvas, { pointerId: 9, clientX: 5, clientY: 5 });
+}
+
 describe("TreeRootView", () => {
+  // O recolhido é lembrado em localStorage: um teste não pode herdar o outro.
+  beforeEach(() => window.localStorage.clear());
+
   it("desenha um cartão por nó, com o Resultado marcado", () => {
     setup();
     expect(document.querySelectorAll("[data-tree-node]")).toHaveLength(5);
@@ -98,7 +117,7 @@ describe("TreeRootView", () => {
 
   it("selecionar mostra a que o nó serve e quanto falta", () => {
     setup();
-    fireEvent.click(within(tile("note:proposta")).getByText("note:proposta"));
+    selectTile("note:proposta");
     expect(screen.getByText(/Serve a: Fechar o contrato/)).toBeInTheDocument();
     expect(screen.getByText(/1 de 2 concluídos · faltam 1/)).toBeInTheDocument();
   });
@@ -147,20 +166,133 @@ describe("TreeRootView", () => {
 
   it("recolher esconde os filhos e diz quantos", () => {
     setup();
-    fireEvent.click(within(tile("note:proposta")).getByLabelText("Recolher galho"));
+    fireEvent.click(within(tile("note:proposta")).getByLabelText("Recolher branch"));
     expect(tile("note:orcamento")).toBeNull();
     expect(within(tile("note:proposta")).getByText("+2")).toBeInTheDocument();
   });
 
-  it("a direção do galho é escolhida na barra do nó", () => {
+  it("a direção da branch é escolhida na barra do nó", () => {
     const props = setup();
-    fireEvent.click(within(tile("note:proposta")).getByText("note:proposta"));
-    fireEvent.click(screen.getByLabelText("Galhos abrem para baixo"));
+    selectTile("note:proposta");
+    fireEvent.click(screen.getByLabelText("Branches abrem para baixo"));
     expect(props.onDirection).toHaveBeenCalledWith("note:proposta", "v");
   });
 
   it("vazio convida a começar pelo resultado", () => {
     setup({ nodes: [] });
-    expect(screen.getByText(/Comece pelo resultado esperado/)).toBeInTheDocument();
+    expect(screen.getByText(/comece pelo resultado esperado/)).toBeInTheDocument();
+  });
+
+  // --- v1.1: criação e edição dentro do canvas ---
+  it("clique direito no VAZIO abre a prévia de uma branch independente, e Enter salva", async () => {
+    const props = setup();
+    const canvas = screen.getByRole("tree");
+    fireEvent.contextMenu(canvas, { clientX: 900, clientY: 700 });
+    const draft = tile("draft:new");
+    expect(draft).not.toBeNull();
+    const box = within(draft).getByRole("textbox");
+    expect(box).toHaveFocus();
+    fireEvent.change(box, { target: { value: "Contratar o jurídico" } });
+    fireEvent.keyDown(box, { key: "Enter" });
+    await waitFor(() =>
+      expect(props.onCreate).toHaveBeenCalledWith({
+        kind: "note",
+        parentRef: null,
+        text: "Contratar o jurídico",
+        analyze: false,
+      })
+    );
+    // Salvo: a branch volta para onde a prévia apareceu (geometria).
+    await waitFor(() => expect(tile("draft:new")).toBeNull());
+  });
+
+  it("o + do card abre a prévia FILHA na hora", async () => {
+    const props = setup();
+    fireEvent.click(within(tile("note:contrato")).getByLabelText("Nova branch a partir deste nó"));
+    const box = within(tile("draft:new")).getByRole("textbox");
+    fireEvent.change(box, { target: { value: "Assinatura" } });
+    fireEvent.keyDown(box, { key: "Enter" });
+    await waitFor(() =>
+      expect(props.onCreate).toHaveBeenCalledWith(
+        expect.objectContaining({ parentRef: "note:contrato", text: "Assinatura" })
+      )
+    );
+  });
+
+  it("Esc na prévia vazia descarta sem gravar", () => {
+    const props = setup();
+    fireEvent.contextMenu(screen.getByRole("tree"), { clientX: 10, clientY: 10 });
+    fireEvent.keyDown(within(tile("draft:new")).getByRole("textbox"), { key: "Escape" });
+    expect(tile("draft:new")).toBeNull();
+    expect(props.onCreate).not.toHaveBeenCalled();
+  });
+
+  it("clique direito na PRÉVIA troca o tipo; Tarefa leva o texto para o editor", () => {
+    const props = setup({
+      scope: { kind: "record", recordId: "00000000-0000-4000-a000-000000000001" },
+    });
+    fireEvent.contextMenu(screen.getByRole("tree"), { clientX: 10, clientY: 10 });
+    const box = within(tile("draft:new")).getByRole("textbox");
+    fireEvent.change(box, { target: { value: "Ligar para o decisor" } });
+    fireEvent.contextMenu(box);
+    fireEvent.click(screen.getByRole("menuitem", { name: /Tarefa/ }));
+    expect(props.onCreateTask).toHaveBeenCalledWith({
+      parentRef: null,
+      title: "Ligar para o decisor",
+    });
+  });
+
+  it("clique direito numa ANOTAÇÃO converte em comentário ou tarefa", () => {
+    const props = setup({
+      scope: { kind: "record", recordId: "00000000-0000-4000-a000-000000000001" },
+    });
+    fireEvent.contextMenu(tile("note:demo"));
+    fireEvent.click(screen.getByRole("menuitem", { name: /Converter em tarefa/ }));
+    expect(props.onConvert).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "note:demo" }),
+      "task"
+    );
+  });
+
+  it("no mapa livre, converter em comentário fica desabilitado com o motivo", () => {
+    setup();
+    fireEvent.contextMenu(tile("note:demo"));
+    const item = screen.getByRole("menuitem", { name: /Converter em comentário/ });
+    expect(item).toBeDisabled();
+    expect(item).toHaveTextContent(/feed de um registro/);
+  });
+
+  it("clicar no TEXTO de uma anotação edita no próprio card", () => {
+    const props = setup();
+    fireEvent.click(within(tile("note:demo")).getByText("note:demo"));
+    const box = within(tile("note:demo")).getByRole("textbox");
+    fireEvent.change(box, { target: { value: "Demo marcada" } });
+    fireEvent.keyDown(box, { key: "Enter" });
+    expect(props.onEditNote).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "note:demo" }),
+      { label: "Demo marcada" }
+    );
+  });
+
+  it("comentário também é digitado no card, pelo dono dele", () => {
+    const props = setup({
+      nodes: [
+        n("comment:c1", [], {
+          kind: "comment",
+          refId: "c1",
+          label: "Liguei",
+          body: "Liguei, sem resposta",
+        }),
+      ],
+    });
+    fireEvent.click(within(tile("comment:c1")).getByText("Liguei"));
+    const box = within(tile("comment:c1")).getByRole("textbox");
+    expect(box).toHaveValue("Liguei, sem resposta");
+    fireEvent.change(box, { target: { value: "Liguei, retornar amanhã" } });
+    fireEvent.keyDown(box, { key: "Enter" });
+    expect(props.onEditComment).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "comment:c1" }),
+      "Liguei, retornar amanhã"
+    );
   });
 });

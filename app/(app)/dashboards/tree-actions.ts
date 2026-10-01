@@ -1,4 +1,9 @@
-// Versão: 1.10 | Data: 30/09/2026
+// Versão: 1.11 | Data: 01/10/2026
+// v1.11 (01/10/2026): `convertTreeNote` — a branch nasce como ANOTAÇÃO e o
+//   clique direito a converte em comentário ou tarefa. Cada item nasce pelo
+//   choke point dono dele (`createComment`/`createTask` — invariante 25), herda
+//   o pai e a geometria da anotação, leva os FILHOS junto e só então a
+//   anotação é apagada (último passo: falha no meio não perde nada).
 // v1.10 (30/09/2026): visualização ROOT e mapa LIVRE.
 //   (a) `loadRecordTree` devolve também a GEOMETRIA da Root, e `loadMapTree`
 //       carrega o mapa livre (escopo `livre`, sem registro) — a fonte que a
@@ -86,6 +91,7 @@ import { getSessionInfo } from "@/lib/auth/session";
 import { todayBrasiliaIso } from "@/lib/date/today";
 import { createClient } from "@/lib/supabase/server";
 import { createComment } from "@/lib/comments/actions";
+import { createTask } from "@/lib/tasks/actions";
 import {
   applyCommentThreadCore,
   dismissCommentThreadCore,
@@ -109,6 +115,7 @@ import { loadMapTreeFacts, loadRecordTreeFacts } from "@/lib/tree/load";
 import { TREE_WINDOW_STEP, type TreeWindow } from "@/lib/tree/load";
 import type { TreeSeriesInfo } from "@/lib/tree/load";
 import {
+  branchKindDisabledReason,
   isTreeNodeRef,
   normalizeMapKey,
   parseTreeScope,
@@ -900,4 +907,131 @@ export async function setRecordCadence(
   }
   if (opts.revalidate !== false) revalidatePath("/dashboards");
   return { ok: true };
+}
+
+/**
+ * v1.11 (01/10/2026): converte uma ANOTAÇÃO em comentário (feed do registro) ou
+ * tarefa. A branch nasce como anotação e o clique direito decide o que ela é.
+ *
+ * Ordem deliberada, sem transação:
+ *  1. cria o item pelo choke point (`createComment`/`createTask`);
+ *  2. pendura o item no MESMO pai, com a mesma geometria;
+ *  3. re-pendura os FILHOS da anotação no item novo;
+ *  4. apaga a anotação — por último: se algo falhar antes, nada se perde
+ *     (no pior caso a anotação fica ao lado do item novo).
+ */
+export async function convertTreeNote(
+  scopeRaw: TreeScope,
+  noteId: string,
+  to: "comment" | "task",
+  opts: { revalidate?: boolean } = {}
+): Promise<TreeActionState & { nodeId?: string }> {
+  if (!refUuid(`note:${noteId}`, "note")) {
+    return { ok: false, message: "Anotação inválida." };
+  }
+  if (to !== "comment" && to !== "task") {
+    return { ok: false, message: "Tipo inválido." };
+  }
+  const ctx = await treeWriteContext(scopeRaw);
+  if (!ctx.ok) return { ok: false, message: ctx.message };
+  if (to === "comment") {
+    const reason = branchKindDisabledReason("comment", ctx.scope.kind);
+    if (reason) return { ok: false, message: reason };
+  }
+  const where = scopeColumns(ctx.scope);
+  const { data: row } = await ctx.supabase
+    .from("tree_nodes")
+    .select("id, label, body, parent_ref, offset_x, offset_y, direction")
+    .eq("id", noteId)
+    .eq("kind", "note")
+    .is("node_ref", null)
+    .eq("scope_kind", where.scope_kind)
+    .eq("scope_id", where.scope_id)
+    .maybeSingle();
+  if (!row) return { ok: false, message: "Anotação não encontrada." };
+
+  const label = String(row.label ?? "").trim();
+  const body = String(row.body ?? "").trim();
+  const recordId = ctx.scope.kind === "record" ? ctx.scope.recordId : null;
+
+  // 1. o item, pelo dono dele.
+  let newRef: string;
+  if (to === "comment") {
+    const res = await createComment(
+      { recordId: recordId! },
+      body ? `${label}\n\n${body}` : label
+    );
+    if (!res.ok || !res.id) {
+      return { ok: false, message: res.message ?? "Falha ao criar o comentário." };
+    }
+    newRef = `comment:${res.id}`;
+  } else {
+    const fd = new FormData();
+    fd.set("title", label || "Tarefa");
+    if (body) fd.set("description", body);
+    if (recordId) {
+      fd.set("record_id", recordId);
+      // Responsável padrão = o DO REGISTRO (precedente do create_task, 0129).
+      const { data: rec } = await ctx.supabase
+        .from("records")
+        .select("responsible_id")
+        .eq("id", recordId)
+        .maybeSingle();
+      const resp = (rec?.responsible_id as string | null) ?? null;
+      if (resp) fd.set("responsible_id", resp);
+    }
+    const res = await createTask({}, fd);
+    if (!res.ok || !res.id) {
+      return { ok: false, message: res.message ?? "Falha ao criar a tarefa." };
+    }
+    newRef = `task:${res.id}`;
+  }
+
+  // 2. no mesmo lugar da anotação.
+  const placement: Record<string, unknown> = {
+    offset_x: row.offset_x ?? null,
+    offset_y: row.offset_y ?? null,
+    direction: row.direction ?? null,
+  };
+  if (ctx.scope.kind === "livre") {
+    const { error } = await ctx.supabase.from("tree_nodes").insert({
+      organization_id: ctx.orgId,
+      ...where,
+      kind: "task",
+      ref_id: newRef.slice("task:".length),
+      parent_ref: row.parent_ref ?? "-",
+      created_by: ctx.userId,
+      ...placement,
+    });
+    if (error && error.code !== "23505") {
+      return { ok: false, message: `Item criado, mas não foi possível posicioná-lo: ${error.message}` };
+    }
+  } else {
+    const res = await writeNodeRow(ctx, newRef, {
+      // null = segue a forma (a anotação também seguia); '-' = raiz explícita.
+      parent_ref: row.parent_ref ?? null,
+      ...placement,
+    });
+    if (!res.ok) {
+      return { ok: false, message: `Item criado, mas não foi possível posicioná-lo: ${res.message}` };
+    }
+  }
+
+  // 3. os filhos vão junto — as duas formas de linha (anotação e exceção).
+  await ctx.supabase
+    .from("tree_nodes")
+    .update({ parent_ref: newRef })
+    .eq("scope_kind", where.scope_kind)
+    .eq("scope_id", where.scope_id)
+    .eq("parent_ref", `note:${noteId}`);
+
+  // 4. a anotação sai por último.
+  await ctx.supabase
+    .from("tree_nodes")
+    .delete()
+    .eq("id", noteId)
+    .is("node_ref", null);
+
+  if (opts.revalidate !== false) revalidatePath("/dashboards");
+  return { ok: true, nodeId: newRef };
 }

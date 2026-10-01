@@ -1,3 +1,7 @@
+// Versão: 1.1 | Data: 01/10/2026
+// v1.1 (01/10/2026): vocabulário "branch" ("Nova branch", "Nova branch
+//   independente") e o `TreeTaskComposer` aceita o TÍTULO já digitado — o
+//   rascunho da Root que vira tarefa leva o texto junto.
 // Versão: 1.0 | Data: 30/09/2026
 // v1.0 (30/09/2026): as PEÇAS de um nó da Tree, extraídas do `tree-widget`
 //   para as DUAS visualizações (Lista e Root) usarem as mesmas. Uma segunda
@@ -463,7 +467,7 @@ export function NodeActions({
       {node.kind === "note" && node.refId ? (
         <NodeDeleteButton
           label={`Excluir ${TREE_NODE_KIND_LABELS.note.toLowerCase()}`}
-          confirmText={`Excluir esta ${TREE_NODE_KIND_LABELS.note.toLowerCase()}? Os galhos que dependem dela não são excluídos — ficam soltos na árvore.`}
+          confirmText={`Excluir esta ${TREE_NODE_KIND_LABELS.note.toLowerCase()}? As branches que dependem dela não são excluídas — ficam soltas na árvore.`}
           onDelete={() => deleteTreeNode(node.refId!)}
           onChanged={actx.onChanged}
         />
@@ -486,7 +490,7 @@ export function AddBranchMenu({
   parent,
   scopeKind,
   onPick,
-  label = "Novo galho",
+  label = "Nova branch",
   compact = false,
 }: {
   parent: TreeNode | null;
@@ -528,7 +532,7 @@ export function AddBranchMenu({
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start">
         <DropdownMenuLabel className="text-xs">
-          {parent ? "Galho a partir deste nó" : "Galho na raiz"}
+          {parent ? "Nova branch a partir deste nó" : "Nova branch independente"}
         </DropdownMenuLabel>
         {TREE_BRANCH_KINDS.map((kind) => {
           const reason = branchKindDisabledReason(kind, scopeKind);
@@ -566,6 +570,7 @@ export function TreeTaskComposer({
   ctx,
   recordId,
   recordTitle,
+  title,
   onClose,
   onCreated,
 }: {
@@ -573,6 +578,8 @@ export function TreeTaskComposer({
   ctx: TaskFormContext;
   recordId: string | null;
   recordTitle: string | null;
+  /** v1.1: o texto já digitado no rascunho da branch. */
+  title?: string | null;
   onClose: () => void;
   onCreated: (taskId: string | null) => void;
 }) {
@@ -586,14 +593,14 @@ export function TreeTaskComposer({
         <SheetHeader>
           <SheetTitle>Nova tarefa</SheetTitle>
           <SheetDescription>
-            A tarefa nasce pendurada no galho escolhido — e aparece também em
+            A tarefa nasce pendurada na branch escolhida — e aparece também em
             Tarefas, nos kanbans e na agenda.
           </SheetDescription>
         </SheetHeader>
         {open ? (
           <TaskForm
             ctx={ctx}
-            defaults={{ recordId, recordTitle }}
+            defaults={{ recordId, recordTitle, title: title ?? null }}
             onDone={(taskId) => {
               onCreated(taskId ?? null);
               onClose();

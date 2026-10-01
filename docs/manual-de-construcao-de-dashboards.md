@@ -1,4 +1,9 @@
-<!-- Versão: 1.38 | Data: 30/09/2026 -->
+<!-- Versão: 1.39 | Data: 01/10/2026 -->
+<!-- v1.39 (01/10/2026): §5.14 — Root v1.1: vocabulário "branch"; clique
+     direito no canvas cria branch independente; o "+" abre a prévia na hora;
+     toda branch nasce anotação e o clique direito a converte em comentário ou
+     tarefa; o texto de anotações e comentários é digitado no próprio card;
+     o filtro "O que exibir" não esconde mais anotações. -->
 <!-- v1.38 (30/09/2026): §5.14 — visualização ROOT da Tree (canvas de galhos
      arrastáveis, colapsáveis, para o lado ou para baixo; galho novo de
      qualquer nó; caminho até o Resultado) e a fonte Livre, que agora existe:
@@ -1470,32 +1475,49 @@ No mapa Livre a forma não se aplica: ele é sempre o parentesco desenhado.
 
 **Duas visualizações** (`view`), sobre a mesma árvore:
 
-- **Lista** (padrão) — os galhos recuados, com a seleção múltipla.
+- **Lista** (padrão) — as branches recuadas, com a seleção múltipla.
 - **Root** — a árvore num **canvas**, feita para mostrar *o que depende de
   quê*: o caminho que um planejamento precisa seguir até o resultado, ou as
-  etapas de uma rotina. A convenção: **um galho depende dos filhos** — o
+  etapas de uma rotina. A convenção: **uma branch depende das de baixo** — o
   resultado fica no alto, o que precisa acontecer antes pendura embaixo, e as
-  folhas são os primeiros passos.
-  - **Arrastar** um cartão para o vazio muda o lugar dele (o subgalho vai
-    junto); soltar **sobre outro nó** o pendura ali — ele passa a depender
-    daquele. Um galho nunca pode ser solto dentro de si mesmo.
-  - Cada galho **recolhe** (mostrando quantos ficaram escondidos) e abre
-    **para o lado ou para baixo** — por galho, então uma rotina pode descer
-    enquanto uma das etapas se abre para o lado. O que está recolhido é
+  pontas são os primeiros passos.
+  - **Criar é imediato.** O **clique direito** em qualquer ponto vazio do
+    canvas cria ali uma **branch independente** (que não depende de nenhuma
+    outra); o **"+"** de um card cria uma branch dele; o botão **"Nova branch
+    independente"** faz o mesmo pela barra. Em todos os casos a **prévia** da
+    branch aparece na hora, já no lugar dela, com a caixa de texto pronta:
+    **Enter** salva, **Shift+Enter** quebra linha, **Esc** desiste. Funciona
+    igual em **tela cheia**.
+  - **Toda branch nasce como anotação.** O **clique direito** em cima dela —
+    ainda na prévia ou já salva — muda o tipo: **comentário** (vai para o feed
+    do registro; no mapa livre fica desabilitado, porque não há registro) ou
+    **tarefa** (abre o editor de tarefa com o texto já preenchido, quando ainda
+    é prévia; converte direto, quando já está salva). Ao converter, as branches
+    que dependiam da anotação passam a depender do item novo.
+  - **Digitar no card:** clicar no texto de uma **anotação** ou de um
+    **comentário** abre a edição ali mesmo. Tarefa segue pelo editor de tarefa
+    (prazo, hora, responsável).
+  - O clique direito num card também oferece: nova branch a partir dele,
+    marcar/desmarcar como **Resultado esperado**, alternar entre **texto
+    livre** e **etapa**, **tornar independente** e excluir a anotação.
+  - **Arrastar** um card para o vazio muda o lugar dele (as branches de baixo
+    vão junto); soltar **sobre outro nó** a pendura ali — ela passa a depender
+    daquele. Uma branch nunca pode ser solta dentro de si mesma.
+  - Cada branch **recolhe** (mostrando quantas ficaram escondidas) e abre
+    **para o lado ou para baixo** — por branch. O que está recolhido é
     preferência de quem olha; posição e direção valem para todos.
-  - O **"+"** de qualquer nó puxa um galho novo: **anotação** (pertence à
-    Tree), **tarefa** (o editor de tarefa de sempre — ela aparece também em
-    Tarefas, kanbans e agenda) ou **comentário** (feed do registro). E de
-    qualquer um deles saem outros.
-  - A **anotação** pode ser **texto livre** ou **etapa** (com Concluir), e
-    qualquer uma pode ser marcada como **Resultado esperado**.
-  - Cada galho mostra o **progresso** do que está abaixo dele (tarefas e
-    etapas concluídas / total). **Selecionar** um nó ilumina o caminho dele
-    até o Resultado (ou até a raiz), mostra "Serve a: …" e quanto falta, e
-    abre a barra com as ações do nó (as mesmas da Lista), a edição da anotação,
-    a direção, "Soltar na raiz" e "Voltar ao lugar".
+  - A **anotação** pode ser **texto livre** ou **etapa** (com Concluir).
+  - Cada branch mostra o **progresso** do que está abaixo dela (tarefas e
+    etapas concluídas / total). **Selecionar** um nó (clique no corpo do card)
+    ilumina o caminho dele até o Resultado (ou até a raiz), mostra "Serve a:
+    …" e quanto falta, e abre a barra com as ações do nó (as mesmas da Lista),
+    a direção, "Tornar independente" e "Voltar ao lugar".
   - Zoom (Ctrl + roda, ou os botões), arrastar o fundo para navegar,
     **Ajustar** para encaixar tudo na janela e **Tela cheia**.
+
+**Anotações nunca são escondidas pelo filtro "O que exibir"** — elas são o que
+se desenha na própria árvore. Tarefa ou comentário criados com o tipo fora do
+filtro avisam que foram criados, mas que o filtro os esconde.
 
 **O que se faz dentro da árvore** (respeitando as permissões de sempre):
 

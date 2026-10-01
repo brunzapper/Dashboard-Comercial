@@ -1,4 +1,12 @@
-// Versão: 1.9 | Data: 30/09/2026
+// Versão: 1.10 | Data: 01/10/2026
+// v1.10 (01/10/2026): (a) o filtro "O que exibir" NUNCA esconde anotação —
+//   era o "+ Galho na raiz não faz nada": a branch nascia e o filtro a sumia
+//   na hora (o widget real tinha showKinds sem "note"). Tarefa e comentário
+//   criados com o tipo filtrado avisam por toast em vez de sumir calados.
+//   (b) na Root a criação mora DENTRO do canvas (rascunho, clique direito,
+//   conversão de anotação em comentário/tarefa, edição no card) — o
+//   compositor deste widget ficava FORA do portal da tela cheia, atrás do
+//   canvas. Ele segue só na Lista. (c) vocabulário "branch".
 // v1.9 (30/09/2026): visualização ROOT e mapa LIVRE.
 //   (a) `settings.view === "root"` desenha a MESMA árvore no canvas da Root
 //       (`tree-root-view.tsx`): galhos arrastáveis, colapsáveis, que abrem
@@ -112,7 +120,9 @@ import {
 import {
   addTreeNote,
   attachTaskToMap,
+  convertTreeNote,
   createTreeNote,
+  deleteTreeNode,
   loadMapTree,
   loadRecordTree,
   setTreeNodeGeometry,
@@ -142,6 +152,7 @@ import { moveSubtree } from "@/lib/tree/path";
 import { TreeBulkBar } from "./tree-bulk-bar";
 import {
   normalizeMapKey,
+  TREE_ALWAYS_VISIBLE_KINDS,
   TREE_COMMENT_VERB,
   TREE_NODE_KIND_LABELS,
   TREE_WINDOW_STEP,
@@ -160,7 +171,10 @@ import {
   TreeTaskComposer,
   type NodeActionsContext,
 } from "./tree-node-parts";
-import { TreeRootView } from "./tree-root-view";
+import { TreeRootView, type RootCreateInput } from "./tree-root-view";
+import { updateComment } from "@/lib/comments/actions";
+import { notifyActionError } from "@/lib/feedback/notify";
+import { toast } from "sonner";
 
 /** O que o NodeCard precisa saber sobre a seleção (v1.5). */
 interface NodeSelection {
@@ -278,7 +292,9 @@ function filterKinds(
   keep: TreeFilterableKind[] | undefined
 ): TreeNode[] {
   if (!keep || keep.length === 0) return nodes;
-  const set = new Set<string>([...keep, "series"]);
+  // v1.10: a anotação é o que se desenha na própria árvore — nunca some pelo
+  // filtro (esconder fazia a branch recém-criada sumir no mesmo instante).
+  const set = new Set<string>([...keep, "series", ...TREE_ALWAYS_VISIBLE_KINDS]);
   const walk = (list: TreeNode[]): TreeNode[] =>
     list.flatMap((n) => {
       const children = walk(n.children);
@@ -328,9 +344,11 @@ export function TreeWidget({
     goal?: boolean;
   } | null>(null);
   // v1.9: a tarefa nova pendurada num galho — o editor de sempre, por estado.
-  const [taskDraft, setTaskDraft] = useState<{ parentRef: string | null } | null>(
-    null
-  );
+  const [taskDraft, setTaskDraft] = useState<{
+    parentRef: string | null;
+    /** v1.10: o texto já digitado no rascunho da Root. */
+    title?: string;
+  } | null>(null);
   // v1.8: a proposta da IA NÃO mora aqui. Ela é uma conversa no dock do
   // painel (ai-suggestions-context) — este widget só a ABRE.
   const dock = useAiSuggestions();
@@ -522,7 +540,121 @@ export function TreeWidget({
     });
   };
 
-  /** v1.9: "+" — o galho novo sai do nó escolhido (ou da raiz). */
+  /**
+   * v1.10: o filtro "O que exibir" vai esconder este tipo? Então avisar — um
+   * item criado que some calado parece um botão quebrado.
+   */
+  const warnIfFiltered = (kind: TreeNode["kind"]) => {
+    const keep = settings?.showKinds;
+    if (!keep || keep.length === 0) return;
+    if ((keep as string[]).includes(kind)) return;
+    if (TREE_ALWAYS_VISIBLE_KINDS.includes(kind)) return;
+    toast.info(`${TREE_NODE_KIND_LABELS[kind]} criado`, {
+      description: `O filtro "O que exibir" deste widget esconde ${TREE_NODE_KIND_LABELS[kind].toLowerCase()}s — ajuste-o na configuração do widget para vê-lo aqui.`,
+    });
+  };
+
+  /**
+   * v1.10: salva o RASCUNHO da Root. Devolve o id do nó criado (a Root o usa
+   * para manter a branch onde a prévia apareceu) ou null na falha.
+   */
+  const createFromRoot = async (input: RootCreateInput): Promise<string | null> => {
+    if (input.kind === "comment") {
+      if (!recordScopeId) return null;
+      const res = await addTreeNote(recordScopeId, input.text, {
+        revalidate: false,
+        parentRef: input.parentRef,
+      });
+      if (!res.ok || !res.commentId) {
+        notifyActionError("Não foi possível comentar", res.message);
+        return null;
+      }
+      warnIfFiltered("comment");
+      await refresh();
+      if (input.analyze) {
+        dock.start({
+          recordId: recordScopeId,
+          recordTitle: data.recordTitle,
+          comment: input.text,
+        });
+      }
+      return `comment:${res.commentId}`;
+    }
+    const res = await createTreeNote(
+      scope,
+      { parentRef: input.parentRef, label: input.text, status: "texto" },
+      { revalidate: false }
+    );
+    if (!res.ok || !res.nodeId) {
+      notifyActionError("Não foi possível criar a branch", res.message);
+      return null;
+    }
+    await refresh();
+    return res.nodeId;
+  };
+
+  /** v1.10: clique direito → a anotação vira comentário ou tarefa. */
+  const convertNote = (node: TreeNode, to: "comment" | "task") => {
+    if (!node.refId) return;
+    save({
+      key: `tree-convert:${node.refId}`,
+      context: `Não foi possível converter em ${TREE_NODE_KIND_LABELS[to].toLowerCase()}`,
+      reconcile: false,
+      action: async () => {
+        const res = await convertTreeNote(scope, node.refId!, to, {
+          revalidate: false,
+        });
+        if (res.ok) {
+          warnIfFiltered(to);
+          void refresh();
+        }
+        return res;
+      },
+    });
+  };
+
+  const deleteNote = (node: TreeNode) => {
+    if (!node.refId) return;
+    if (
+      !confirm(
+        `Excluir esta ${TREE_NODE_KIND_LABELS.note.toLowerCase()}? As branches que dependem dela não são excluídas — ficam soltas na árvore.`
+      )
+    ) {
+      return;
+    }
+    save({
+      key: `tree-note-del:${node.refId}`,
+      context: "Não foi possível excluir a anotação",
+      reconcile: false,
+      action: async () => {
+        const res = await deleteTreeNode(node.refId!, { revalidate: false });
+        if (res.ok) void refresh();
+        return res;
+      },
+    });
+  };
+
+  /** v1.10: o comentário é digitado no card — o dono segue `updateComment`. */
+  const editComment = (node: TreeNode, body: string) => {
+    if (!node.refId) return;
+    const before = data;
+    const apply = (list: TreeNode[]): TreeNode[] =>
+      list.map((n) =>
+        n.id === node.id
+          ? { ...n, body, label: body.slice(0, 120), children: apply(n.children) }
+          : { ...n, children: apply(n.children) }
+      );
+    patchData({ ...data, nodes: apply(data.nodes) });
+    save({
+      key: `tree-comment-edit:${node.refId}`,
+      context: "Não foi possível editar o comentário",
+      reconcile: false,
+      action: () => updateComment(node.refId!, body),
+      revert: () => patchData(before),
+    });
+  };
+
+  /** v1.9: "+" — a branch nova sai do nó escolhido (ou é independente). */
   const addBranch = (kind: TreeBranchKind, parent: TreeNode | null) => {
     const parentRef = parent?.id ?? null;
     if (kind === "task") return setTaskDraft({ parentRef });
@@ -533,12 +665,13 @@ export function TreeWidget({
     setDraft({ kind: "note", text: "", nodeId: parentRef, noteStatus: "texto" });
   };
 
-  /** A tarefa que o editor acabou de criar vai para o galho escolhido. */
+  /** A tarefa que o editor acabou de criar vai para a branch escolhida. */
   const hangTask = (taskId: string | null, parentRef: string | null) => {
     if (!taskId) return reloadSoon();
+    warnIfFiltered("task");
     save({
       key: `tree-task-hang:${taskId}`,
-      context: "A tarefa foi criada, mas não foi possível pendurá-la no galho",
+      context: "A tarefa foi criada, mas não foi possível pendurá-la na branch",
       reconcile: false,
       action: async () => {
         const res =
@@ -570,7 +703,7 @@ export function TreeWidget({
     });
     save({
       key: `tree-parent:${nodeId}`,
-      context: "Não foi possível mover o galho",
+      context: "Não foi possível mover a branch",
       reconcile: false,
       action: async () => {
         const res = await setTreeNodeParent(scope, nodeId, parentId, {
@@ -603,7 +736,7 @@ export function TreeWidget({
     patchData({ ...data, geometry });
     save({
       key: `tree-geometry:${nodeId}`,
-      context: "Não foi possível guardar a posição do galho",
+      context: "Não foi possível guardar a posição da branch",
       reconcile: false,
       action: () =>
         setTreeNodeGeometry(scope, nodeId, patch, { revalidate: false }),
@@ -677,7 +810,7 @@ export function TreeWidget({
         onChange={(e) => setDraft((d) => (d ? { ...d, text: e.target.value } : d))}
         placeholder={
           draft.kind === "note"
-            ? "O que é este galho? (uma etapa, uma condição, o resultado…)"
+            ? "O que é esta branch? (uma etapa, uma condição, o resultado…)"
             : "O que aconteceu?"
         }
         onKeyDown={(e) => {
@@ -777,6 +910,7 @@ export function TreeWidget({
       ctx={taskCtx}
       recordId={recordScopeId}
       recordTitle={recordScopeId ? data.recordTitle : null}
+      title={taskDraft?.title ?? null}
       onClose={() => setTaskDraft(null)}
       onCreated={(taskId) => hangTask(taskId, taskDraft?.parentRef ?? null)}
     />
@@ -863,7 +997,7 @@ export function TreeWidget({
         parent={null}
         scopeKind={scope.kind}
         onPick={addBranch}
-        label={isMap ? "Novo galho" : "Galho na raiz"}
+        label={isMap ? "Nova branch" : "Nova branch independente"}
       />
       {/* v1.6: criar OUTRA sequência. */}
       {data.canConfigureSeries && data.sourceKey ? (
@@ -882,7 +1016,8 @@ export function TreeWidget({
       <div className="flex h-full min-h-0 flex-col gap-2 overflow-hidden p-3">
         {header}
         {pausedNote}
-        {composer}
+        {/* v1.10: sem o compositor externo — na Root a criação é um rascunho
+            DENTRO do canvas, que vai junto para a tela cheia. */}
         <TreeRootView
           key={scopeId}
           nodes={visibleNodes}
@@ -891,26 +1026,20 @@ export function TreeWidget({
           storageKey={`tree-root:collapsed:${scopeId}`}
           scope={scope}
           actx={actx}
-          onAddBranch={addBranch}
+          onCreate={createFromRoot}
+          onCreateTask={({ parentRef, title }) => setTaskDraft({ parentRef, title })}
+          onConvert={convertNote}
+          onDeleteNote={deleteNote}
+          onEditComment={editComment}
           onReparent={reparent}
           onMove={(id, offset) =>
             patchGeometry(id, { offsetX: offset.x, offsetY: offset.y })
           }
           onDirection={(id, direction) => patchGeometry(id, { direction })}
           onEditNote={editNote}
+          canAnalyze={hasDock}
           toolbarExtra={
             <>
-              {recordScopeId ? (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="h-7 gap-1 text-xs"
-                  onClick={() => setDraft({ kind: "comment", text: "", nodeId: null })}
-                >
-                  <MessageSquarePlus className="size-3.5" /> {TREE_COMMENT_VERB}
-                </Button>
-              ) : null}
               {orderButton}
               {loadMoreButton}
             </>

@@ -1,4 +1,8 @@
-<!-- Versão: 1.97 | Data: 30/09/2026 -->
+<!-- Versão: 1.98 | Data: 01/10/2026 -->
+<!-- v1.98 (01/10/2026): §4.24 — Root v1.1: criação por RASCUNHO dentro do
+     canvas (vai junto para a tela cheia), clique direito, conversão de
+     anotação em comentário/tarefa pelos choke points (convertTreeNote),
+     edição do texto no card, e o filtro showKinds nunca esconde anotação. -->
 <!-- v1.97 (30/09/2026): §4.24 + invariante 34 — visualização ROOT da Tree
      (0148): canvas com galhos arrastáveis/colapsáveis, direção por galho,
      galho novo de qualquer nó, caminho até o Resultado; geometria como
@@ -5370,6 +5374,36 @@ filhos** (o Resultado no alto, os primeiros passos nas folhas). Decisões:
   `normalizeMapKey` no construtor E no servidor (`parseTreeScope`). As escritas
   no escopo de registro conferem que o registro é VISÍVEL antes de gravar — o
   WITH CHECK da 0133 aceita `created_by = uid` em qualquer `scope_id`.
+
+**Root v1.1 (01/10/2026): criar e editar DENTRO do canvas.** O uso real
+mostrou dois defeitos e um pedido:
+
+- **O filtro escondia a branch recém-criada.** `TreeSettings.showKinds` sem
+  `note` fazia a anotação nascer e sumir no mesmo instante. A anotação saiu de
+  `TREE_FILTERABLE_KINDS` e entrou em `TREE_ALWAYS_VISIBLE_KINDS`, que o
+  `filterKinds` NUNCA recorta: ela não é fato do histórico, é a estrutura que a
+  pessoa desenha. Tarefa/comentário criados com o tipo filtrado avisam por
+  toast em vez de sumirem calados.
+- **O compositor ficava atrás da tela cheia.** Ele morava no widget, FORA do
+  portal. A criação na Root virou um RASCUNHO dentro do próprio canvas: o nó
+  falso `draft:new` entra no layout por `insertNode` (`lib/tree/path.ts`),
+  então a prévia aparece exatamente onde a branch vai ficar, com a caixa de
+  texto focada. Gatilhos: o "+" do card, o clique direito no vazio (branch
+  independente NAQUELE ponto) e o botão "Nova branch independente". Como o
+  servidor decide o slot pela DATA, a branch independente salva é levada de
+  volta ao ponto da prévia gravando o deslocamento como geometria (o mesmo
+  offset relativo do arrasto). O compositor do widget segue só na Lista.
+- **Toda branch nasce anotação; o clique direito decide o tipo.**
+  `convertTreeNote` cria o item pelo dono dele (`createComment`/`createTask`,
+  invariante 25), herda o pai e a geometria, re-pendura os FILHOS
+  (`parent_ref = 'note:<id>'` → o ref novo) e só então apaga a anotação —
+  último passo, então falha no meio nunca perde nada. O menu de contexto é
+  próprio (coordenada livre, dentro do portal) e não rouba o foco da caixa de
+  texto.
+- **O texto se digita no card**: anotação por `updateTreeNote`, comentário por
+  `updateComment` (dono de 0066, emite `comment.updated`). Tarefa segue pelo
+  editor de tarefa.
+- Vocabulário de tela: "branch" no lugar de "galho".
 
 **O foco do painel liga a tabela ao widget (09/09/2026).** A primeira versão
 entregou o widget Tree sem a seção de configuração dele e sem nenhuma ligação
