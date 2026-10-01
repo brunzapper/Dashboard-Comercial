@@ -1,4 +1,11 @@
-// Versão: 1.4 | Data: 01/10/2026
+// Versão: 1.5 | Data: 01/10/2026
+// v1.5 (01/10/2026): nós OPERACIONAIS (0149) — `indicator` (meta × realizado
+//   de um indicador, com o operador dos filhos), `plan` (plano de ação 5W2H) e
+//   `ritual` (rotina de acompanhamento que vira tarefa). Linhas PRÓPRIAS de
+//   `tree_nodes`, endereçadas como `note:<uuid>` (como a anotação: arrastar,
+//   geometria e excluir funcionam sem roteamento novo); payload em
+//   lib/tree/payload.ts. Só no mapa LIVRE — no registro ficam desabilitados
+//   com motivo. Nunca escondidos pelo filtro (são estrutura desenhada).
 // v1.4 (01/10/2026): (a) a ANOTAÇÃO saiu de `TREE_FILTERABLE_KINDS`. Ela não é
 //   fato do histórico — é a estrutura que a pessoa desenha — e o filtro "O que
 //   exibir" a escondia: a branch era criada e sumia na hora (era o "+ Galho na
@@ -52,7 +59,11 @@ export type TreeNodeKind =
   | "change"
   | "note"
   | "record"
-  | "field";
+  | "field"
+  // v1.5 (01/10/2026): nós operacionais (0149).
+  | "indicator"
+  | "plan"
+  | "ritual";
 
 /**
  * Os tipos que o widget deixa FILTRAR (`TreeSettings.showKinds`).
@@ -79,7 +90,19 @@ export const TREE_FILTERABLE_KINDS = [
  * desenha na própria árvore. Esconder a anotação fazia a branch recém-criada
  * sumir no mesmo instante.
  */
-export const TREE_ALWAYS_VISIBLE_KINDS: readonly TreeNodeKind[] = ["note"];
+export const TREE_ALWAYS_VISIBLE_KINDS: readonly TreeNodeKind[] = [
+  "note",
+  // v1.5: estrutura desenhada, como a anotação.
+  "indicator",
+  "plan",
+  "ritual",
+];
+
+/**
+ * v1.5 (01/10/2026): tipos que são linha PRÓPRIA de `tree_nodes` (id lógico
+ * `note:<uuid>`). O servidor roteia escrita/geometria por este conjunto.
+ */
+export const TREE_OWN_ROW_KINDS = ["note", "indicator", "plan", "ritual"] as const;
 
 export type TreeFilterableKind = (typeof TREE_FILTERABLE_KINDS)[number];
 
@@ -103,6 +126,10 @@ export const TREE_NODE_KIND_LABELS: Record<TreeNodeKind, string> = {
   note: "Anotação",
   record: "Registro",
   field: "Campo",
+  // v1.5 (01/10/2026)
+  indicator: "Indicador",
+  plan: "Plano de ação",
+  ritual: "Ritual",
 };
 
 /**
@@ -141,6 +168,11 @@ export interface TreeFact {
    * galho dele.
    */
   goal?: boolean;
+  /**
+   * v1.5 (01/10/2026): o payload CRU do nó operacional (indicador/plano/
+   * ritual) — o card o parseia por `parseNodePayload` (fail-closed).
+   */
+  payload?: unknown;
 }
 
 export interface TreeNode extends TreeFact {
@@ -208,12 +240,22 @@ export type TreeScope =
   | { kind: "livre"; mapKey: string };
 
 /** Os tipos de galho que se puxam de um nó (Root e lista). */
-export type TreeBranchKind = "note" | "task" | "comment";
+export type TreeBranchKind =
+  | "note"
+  | "task"
+  | "comment"
+  // v1.5 (01/10/2026): nós operacionais (só mapa livre).
+  | "indicator"
+  | "plan"
+  | "ritual";
 
 export const TREE_BRANCH_KINDS: readonly TreeBranchKind[] = [
   "note",
   "task",
   "comment",
+  "indicator",
+  "plan",
+  "ritual",
 ];
 
 /** Rótulo do galho novo. "Anotação" é da Tree; "Comentário" é do feed. */
@@ -221,6 +263,9 @@ export const TREE_BRANCH_LABELS: Record<TreeBranchKind, string> = {
   note: "Anotação",
   task: TREE_NODE_KIND_LABELS.task,
   comment: TREE_NODE_KIND_LABELS.comment,
+  indicator: TREE_NODE_KIND_LABELS.indicator,
+  plan: TREE_NODE_KIND_LABELS.plan,
+  ritual: TREE_NODE_KIND_LABELS.ritual,
 };
 
 /**
@@ -234,6 +279,11 @@ export function branchKindDisabledReason(
 ): string | null {
   if (kind === "comment" && scope === "livre") {
     return "Comentário pertence ao feed de um registro — num mapa livre use uma anotação.";
+  }
+  // v1.5: o desdobramento de metas mora num mapa livre (o planejamento), não
+  // no acompanhamento de um registro.
+  if ((kind === "indicator" || kind === "plan" || kind === "ritual") && scope === "record") {
+    return "Indicador, plano e ritual moram num mapa livre (Tree com fonte “Mapa livre”).";
   }
   return null;
 }

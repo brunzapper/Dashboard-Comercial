@@ -1,4 +1,11 @@
-// Versão: 1.1 | Data: 01/10/2026
+// Versão: 1.2 | Data: 01/10/2026
+// v1.2 (01/10/2026): nós OPERACIONAIS (0149). (a) o tamanho do cartão é POR
+//   NÓ (`sizeOf` → layoutRoot): indicador/plano/ritual mostram meta ×
+//   realizado, 5W2H e a próxima data, e não cabem em 224×92; (b) o corpo deles
+//   vem do widget (`renderBody`) — a Root não sabe de indicador; (c) o
+//   rascunho vira Indicador/Plano/Ritual pelo clique direito (abre o editor do
+//   nó com o texto digitado, como a tarefa); (d) "Copiar id do nó" — o valor de
+//   "Mostrar só o galho" (`rootRef`) de outro widget.
 // v1.1 (01/10/2026): criação e edição DENTRO do canvas.
 //   (a) RASCUNHO no canvas: o "+" de um card, o clique direito no vazio e o
 //       "Nova branch independente" abrem na hora a PRÉVIA da branch nova — um
@@ -91,6 +98,8 @@ import {
   edgePath,
   hitTest,
   layoutRoot,
+  ROOT_NODE_HEIGHT,
+  ROOT_NODE_WIDTH,
   type RootBox,
 } from "@/lib/tree/root-layout";
 import {
@@ -255,6 +264,16 @@ export interface TreeRootViewProps {
   canAnalyze?: boolean;
   /** Controles do widget que moram na barra da Root (ordem, carregar mais…). */
   toolbarExtra?: ReactNode;
+  /** v1.2: tamanho do cartão por nó (ausente = o fixo de sempre). */
+  sizeOf?: (node: TreeNode) => { w: number; h: number };
+  /** v1.2: corpo de um nó operacional (null = o corpo de sempre). */
+  renderBody?: (node: TreeNode) => ReactNode | null;
+  /** v1.2: o rascunho vira um nó operacional (abre o editor dele). */
+  onCreateOperational?: (input: {
+    kind: "indicator" | "plan" | "ritual";
+    parentRef: string | null;
+    title: string;
+  }) => void;
 }
 
 /** Anotação e comentário com dono no banco são digitáveis no próprio card. */
@@ -280,6 +299,9 @@ export function TreeRootView({
   onEditNote,
   canAnalyze = false,
   toolbarExtra,
+  sizeOf,
+  renderBody,
+  onCreateOperational,
 }: TreeRootViewProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [size, setSize] = useState({ w: 0, h: 0 });
@@ -339,8 +361,15 @@ export function TreeRootView({
       defaultDirection,
       directionOf: (id: string) => geoById.get(id)?.direction ?? null,
       collapsed,
+      // v1.2: o rascunho mantém o cartão padrão (ele é um texto).
+      ...(sizeOf
+        ? {
+            sizeOf: (n: TreeNode) =>
+              n.id === ROOT_DRAFT_ID ? { w: ROOT_NODE_WIDTH, h: ROOT_NODE_HEIGHT } : sizeOf(n),
+          }
+        : {}),
     }),
-    [defaultDirection, geoById, collapsed]
+    [defaultDirection, geoById, collapsed, sizeOf]
   );
 
   const layout = useMemo(
@@ -731,6 +760,23 @@ export function TreeRootView({
           hint: "Abre o editor de tarefa com este texto",
           onSelect: draftToTask,
         },
+        // v1.2 (01/10/2026): nós operacionais — abrem o editor do nó.
+        ...(onCreateOperational
+          ? (["indicator", "plan", "ritual"] as const).map((k) => ({
+              label: TREE_BRANCH_LABELS[k],
+              hint: "Abre o editor com este texto",
+              disabled: branchKindDisabledReason(k, scope.kind),
+              onSelect: () => {
+                const d = draft;
+                setDraft(null);
+                onCreateOperational({
+                  kind: k,
+                  parentRef: d?.parentId ?? null,
+                  title: d?.text.trim() ?? "",
+                });
+              },
+            }))
+          : []),
       ];
     }
     const node = nodeById.get(menu.target.id);
@@ -746,6 +792,26 @@ export function TreeRootView({
     ];
     if (isTextEditable(node)) {
       items.push({ label: "Editar texto", onSelect: () => setEditing(node.id) });
+    }
+    // v1.2: nó operacional abre o editor dele.
+    if (
+      (node.kind === "indicator" || node.kind === "plan" || node.kind === "ritual") &&
+      actx.onEditOperational
+    ) {
+      items.push({
+        label: `Editar ${TREE_NODE_KIND_LABELS[node.kind].toLowerCase()}`,
+        onSelect: () => actx.onEditOperational?.(node),
+      });
+    }
+    // v1.2: o id que outro widget usa em "Mostrar só o galho".
+    if (!synthetic) {
+      items.push({
+        label: "Copiar id do nó",
+        hint: "Para “Mostrar só o galho” noutro widget",
+        onSelect: () => {
+          void navigator.clipboard?.writeText(node.id).catch(() => undefined);
+        },
+      });
     }
     if (node.kind === "note" && node.refId) {
       const checkable = node.status === "aberta" || node.status === "concluída";
@@ -1029,6 +1095,7 @@ export function TreeRootView({
                 }}
                 onCancelEdit={() => setEditing(null)}
                 onNewBranch={() => startDraft(node.id)}
+                body={renderBody?.(node) ?? null}
               />
             );
           })}
@@ -1329,6 +1396,7 @@ function RootNodeTile({
   onCommitEdit,
   onCancelEdit,
   onNewBranch,
+  body,
 }: {
   node: TreeNode;
   box: RootBox;
@@ -1347,6 +1415,8 @@ function RootNodeTile({
   onCommitEdit: (text: string) => void;
   onCancelEdit: () => void;
   onNewBranch: () => void;
+  /** v1.2: corpo do nó operacional (null = data + progresso de sempre). */
+  body?: ReactNode | null;
 }) {
   const task = node.refId ? (actx.taskById.get(node.refId) ?? null) : null;
   const done = isCheckable(node) && isDone(node);
@@ -1460,7 +1530,12 @@ function RootNodeTile({
           {node.label}
         </button>
       )}
-      {editing ? null : (
+      {editing ? null : body ? (
+        // v1.2: indicador/plano/ritual trazem o próprio corpo.
+        <div className="min-h-0 flex-1 overflow-hidden">
+          {body}
+        </div>
+      ) : (
         <div className="mt-auto flex items-center gap-1.5">
           {node.at || task ? <NodeDate node={node} task={task} /> : null}
           <ProgressBar progress={progress} />

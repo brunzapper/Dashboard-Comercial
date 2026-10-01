@@ -1,3 +1,7 @@
+// Versão: 1.1 | Data: 01/10/2026
+// v1.1 (01/10/2026): `ensureGoalTarget` — a meta SÓ é criada quando a chave
+// não tem linha (ensure-if-absent das seções de dados do preset, 0149): o
+// valor ajustado à mão depois do apply nunca é sobrescrito no re-apply.
 // Versão: 1.0 | Data: 30/07/2026
 // Upsert PROGRAMÁTICO de metas (goals) e do registry de métricas — IO fino com
 // o client como argumento (testável; sem imports de lib/auth/*). Extraído de
@@ -73,6 +77,36 @@ export async function upsertGoalTarget(
     ? await supabase.from("goals").update({ target }).eq("id", existing.id)
     : await supabase.from("goals").insert(row);
   return error ? error.message : null;
+}
+
+/**
+ * v1.1 (01/10/2026): cria a meta SÓ se a chave não tem linha. Devolve
+ * "created" | "kept" ou a mensagem de erro (o chamador relata por item).
+ */
+export async function ensureGoalTarget(
+  supabase: SupabaseClient,
+  orgId: string | null,
+  key: GoalTargetKey,
+  target: number
+): Promise<"created" | "kept" | { error: string }> {
+  if (!Number.isFinite(target)) return { error: "Alvo inválido." };
+  const { data: existing, error: findError } = await findGoal(
+    supabase,
+    key
+  ).maybeSingle();
+  if (findError) return { error: findError.message };
+  if (existing?.id) return "kept";
+  const { error } = await supabase.from("goals").insert({
+    period_year: key.year,
+    period_month: key.month,
+    scope: key.scope,
+    operation_id: key.operationId ?? null,
+    responsible_id: key.responsibleId ?? null,
+    metric: key.metric,
+    target,
+    ...(orgId ? { organization_id: orgId } : {}),
+  });
+  return error ? { error: error.message } : "created";
 }
 
 /**

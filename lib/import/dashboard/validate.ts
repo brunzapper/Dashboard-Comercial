@@ -1,3 +1,6 @@
+// Versão: 1.9 | Data: 01/10/2026
+// v1.9 (01/10/2026): `settings.goalTable` (Tabela de metas, 0149) saneado pela
+//   régua única de lib/widgets/goal-table.ts.
 // Versão: 1.8 | Data: 18/09/2026
 // v1.8 (18/09/2026): cruzamento DADO × FAMÍLIA da Base manual (0143). Os ramos
 //   da 1.7 e da 0143 conferiam, cada um por si, que a família existe (dimensão/
@@ -111,6 +114,7 @@ import {
   sanitizeKanbanSettings,
 } from "@/lib/import/dashboard/kanban-settings";
 import { slugify } from "@/lib/records/slug";
+import { sanitizeGoalTableSettings } from "@/lib/widgets/goal-table";
 import { isCoreDef } from "@/lib/records/core-defs";
 import { ROLE_LABELS } from "@/lib/auth/roles";
 import {
@@ -1413,6 +1417,18 @@ export function validateDashboardImport(
       });
       if (bm) wSettings.baseManual = bm;
       else delete (wSettings as Record<string, unknown>).baseManual;
+    }
+
+    // v1.9 (01/10/2026): Tabela de metas (0149) — régua ÚNICA
+    // (lib/widgets/goal-table.ts): indicador desconhecido = aviso + descarte.
+    if ((wSettings as Record<string, unknown>).goalTable !== undefined) {
+      const gt = sanitizeGoalTableSettings(wSettings.goalTable, {
+        knownKeys: new Set(ctx.goalMetrics.map((m) => m.key)),
+        where,
+        warnings,
+      });
+      if (gt) wSettings.goalTable = gt;
+      else delete (wSettings as Record<string, unknown>).goalTable;
     }
 
     // Coerência kanban/agenda × `sources`: é de `widgets.sources` que a page

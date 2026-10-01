@@ -1,3 +1,9 @@
+// Versão: 1.18 | Data: 01/10/2026
+// v1.18 (01/10/2026): (a) visual_type 'metas' — a TABELA DE METAS (0149):
+//   indicador × mês com meta, realizado e atingimento, lidos pelo catálogo de
+//   Indicadores (lib/indicators) — `GoalTableSettings`; (b) TreeSettings.rootRef
+//   — o widget mostra só o GALHO a partir de um nó do mapa ("uma árvore, várias
+//   vistas"); (c) DashboardSettings.presentation — abas fora do modo Apresentar.
 // Versão: 1.17 | Data: 30/09/2026
 // v1.17 (30/09/2026): TreeSettings.view ("lista" | "root") e rootDirection —
 //   a visualização Root da Tree (canvas de galhos arrastáveis). Ausentes = a
@@ -98,7 +104,9 @@ export type VisualType =
   | "agenda"
   | "imagem"
   | "tree"
-  | "base_manual";
+  | "base_manual"
+  // v1.18 (01/10/2026): Tabela de metas (0149).
+  | "metas";
 
 export const VISUAL_TYPE_LABELS: Record<VisualType, string> = {
   kpi: "Card",
@@ -125,6 +133,7 @@ export const VISUAL_TYPE_LABELS: Record<VisualType, string> = {
   agenda: "Agenda",
   tree: "Tree",
   base_manual: "Base do Dashboard",
+  metas: "Tabela de metas",
 };
 
 export type Aggregation = "sum" | "count" | "avg" | "min" | "max";
@@ -461,6 +470,50 @@ export interface BaseManualSettings {
   defaultSpread?: ManualSpread;
 }
 
+/**
+ * v1.18 (01/10/2026): Tabela de metas (visual_type 'metas', 0149). Linhas =
+ * indicadores (ou um indicador repartido por responsável); colunas = meses do
+ * período do dashboard (ou `months` fixos). A META sai de `goals` (resolveGoal,
+ * explicit-first + roll-up) e o REALIZADO da fórmula do indicador
+ * (runCalculatedWidget) — tudo em lib/indicators/values.ts.
+ */
+export interface GoalTableRow {
+  /** Chave do indicador (= goals.metric). */
+  indicator: string;
+  /** Responsável por NOME (resolvido no servidor; id nunca no settings). */
+  responsible?: string;
+  /** Rótulo exibido (ausente = o do indicador). */
+  label?: string;
+  /** Linha em destaque (ex.: o N0 do painel). */
+  bold?: boolean;
+}
+
+export interface GoalTableSettings {
+  /** "indicadores": uma linha por indicador; "por_responsavel": um indicador repartido. */
+  mode?: "indicadores" | "por_responsavel";
+  rows?: GoalTableRow[];
+  /** Modo por_responsavel: o indicador repartido. */
+  indicator?: string;
+  /** Modo por_responsavel: os responsáveis (nomes), na ordem de exibição. */
+  responsibles?: string[];
+  /** Meses fixos ("YYYY-MM"). Ausente = os meses do período do dashboard. */
+  months?: string[];
+  /** Mostrar o realizado abaixo da meta (padrão true). */
+  showRealized?: boolean;
+  /** Mostrar a pílula de atingimento (padrão true). */
+  showAttainment?: boolean;
+  /** Coluna de total pela regra do indicador (padrão true). */
+  totalColumn?: boolean;
+  /** Modo por_responsavel: linha de soma das metas ("Compromissos individuais"). */
+  totalRowLabel?: string;
+  /** Rótulo da primeira coluna (padrão "Indicador"/"Responsável"). */
+  headerLabel?: string;
+  /** Admin edita a META direto na célula (padrão false). */
+  editable?: boolean;
+  /** Rodapé (regra de cálculo, donos). */
+  note?: string;
+}
+
 /** Configuração do widget Tree (0134). */
 export interface TreeSettings {
   /**
@@ -495,6 +548,13 @@ export interface TreeSettings {
   view?: TreeView;
   /** v1.17: na Root, para onde os galhos abrem por padrão. Ausente = "h". */
   rootDirection?: TreeDirection;
+  /**
+   * v1.18 (01/10/2026): mostrar só o GALHO a partir deste nó (modo livre).
+   * `preset:<chave>` (nó semeado por preset) ou o id lógico (`note:<uuid>`,
+   * `indicator:<uuid>`…). Ausente = a árvore inteira. Nó que não existe mais
+   * cai na árvore inteira (nunca um widget vazio sem explicação).
+   */
+  rootRef?: string;
 }
 
 export interface RowActionSettings {
@@ -1198,6 +1258,8 @@ export type WidgetSettings = KpiSettings &
   tree?: TreeSettings;
   /** Widget "Base do Dashboard" (0142). */
   baseManual?: BaseManualSettings;
+  /** v1.18 (01/10/2026): Widget "Tabela de metas" (0149). */
+  goalTable?: GoalTableSettings;
     // Config do widget agenda (visual_type 'agenda', 0064).
     agenda?: AgendaSettings;
     appearance?: AppearanceSettings;
@@ -1241,6 +1303,9 @@ export type WidgetSettings = KpiSettings &
 export interface DashboardSettings {
   // Config do kanban dedicado (kind 'kanban'). Ausente em dashboards comuns.
   kanban?: KanbanSettings;
+  // v1.18 (01/10/2026): modo Apresentar — abas (ids de `tabs`) que ficam FORA
+  // dos slides (abas de trabalho). Ausente = todas as abas são slides.
+  presentation?: { hiddenTabs?: string[] };
   periodBar?: {
     enabled?: boolean; // default true (barra global visível)
     defaultPreset?: string; // preset inicial da barra global

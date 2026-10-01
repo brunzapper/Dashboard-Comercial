@@ -1,4 +1,9 @@
-// Versão: 2.18 | Data: 12/08/2026
+// Versão: 2.19 | Data: 01/10/2026
+// v2.19 (01/10/2026): (a) widget 'metas' — GoalTableWidget (Tabela de metas,
+//   0149), deferido pelo próprio fetch com o fingerprint de escopo; aviso no
+//   link público (as metas são lidas por action com sessão); (b) a Tree recebe
+//   dashboardId/widgetId/scopeKey — os nós de INDICADOR leem meta × realizado
+//   pelo widget-scope (período da aba).
 // v2.18 (12/08/2026): botão "+" de criação manual (settings.showAddRecord) —
 //   gate em runtime (manualEntryRootSource + canEditValues) e 3 slots: dentro
 //   da TableFilterBar (primário), no header com a barra oculta, no flutuante
@@ -152,6 +157,7 @@ import {
   buildAggOperandCatalog,
 } from "@/lib/widgets/agg-catalog";
 import { useSources } from "@/components/sources-context";
+import { useSnapshotMode } from "@/components/snapshots/snapshot-mode";
 import { useGoalMetrics } from "@/components/goal-metrics-context";
 import { useManualAxes, useManualSeries } from "@/components/manual-series-context";
 import type { OperandRef } from "@/lib/records/date-operands";
@@ -213,6 +219,10 @@ const AgendaWidget = dynamic(
 );
 const TreeWidget = dynamic(
   () => import("./charts/tree-widget").then((m) => m.TreeWidget),
+  { ssr: false, loading: () => chunkFallback }
+);
+const GoalTableWidget = dynamic(
+  () => import("./charts/goal-table-widget").then((m) => m.GoalTableWidget),
   { ssr: false, loading: () => chunkFallback }
 );
 const ManualBaseWidget = dynamic(
@@ -467,6 +477,9 @@ export const WidgetCard = memo(function WidgetCard({
   const isTree = widget.visual_type === "tree";
   // "Base do Dashboard" (0142): grade dos números digitados, editada no card.
   const isManualBase = widget.visual_type === "base_manual";
+  // v2.19 (01/10/2026): Tabela de metas (0149).
+  const isGoalTable = widget.visual_type === "metas";
+  const snapshotReadOnly = useSnapshotMode().snapshot;
   const isCalc = widget.visual_type === "calculado";
   const isKpi = widget.visual_type === "kpi";
   const isCalculator = widget.visual_type === "calculadora";
@@ -821,6 +834,7 @@ export const WidgetCard = memo(function WidgetCard({
     // A Base do Dashboard é uma GRADE DE EDIÇÃO, não um recorte de registros:
     // "Exportar CSV" ali sairia vazio.
     !isManualBase &&
+    !isGoalTable &&
     !isCalc &&
     !isCalculator &&
     !isNote &&
@@ -1371,7 +1385,23 @@ export const WidgetCard = memo(function WidgetCard({
               // registro em foco no painel — o clique de uma tabela com
               // "Clique na linha → Tree" (record-focus-context).
               recordId={widget.settings?.tree?.recordId ?? null}
+              dashboardId={dashboardId}
+              widgetId={widget.id}
+              scopeKey={deferredScopeKey}
             />
+          ) : isGoalTable ? (
+            snapshotReadOnly ? (
+              <div className="text-muted-foreground flex h-full items-center justify-center p-3 text-center text-sm">
+                A tabela de metas não é exibida no link público.
+              </div>
+            ) : (
+              <GoalTableWidget
+                dashboardId={dashboardId}
+                widgetId={widget.id}
+                settings={widget.settings?.goalTable}
+                scopeKey={deferredScopeKey}
+              />
+            )
           ) : isManualBase ? (
             <ManualBaseWidget settings={widget.settings?.baseManual} />
           ) : isKanban ? (

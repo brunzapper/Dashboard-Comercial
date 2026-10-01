@@ -1,3 +1,6 @@
+// Versão: 1.8 | Data: 01/10/2026
+// v1.8 (01/10/2026): `goalTable` (Tabela de metas, 0149) e
+//   `presentation` (modo Apresentar) documentados para a IA.
 // Versão: 1.7 | Data: 07/09/2026
 // v1.7 (07/09/2026): `kanban` e `agenda` deixam de ser `null` — a IA passa
 //   a CONFIGURAR quadros e calendários, não só a criar o widget vazio. Os
@@ -55,6 +58,7 @@ import {
 } from "@/lib/records/formula-funcs";
 import { PERIOD_ALL, PERIOD_PRESETS } from "@/lib/widgets/period";
 import { MANUAL_SPREAD_LABELS } from "@/lib/manual-base/types";
+import { GOAL_TABLE_MODE_LABELS } from "@/lib/widgets/goal-table";
 import {
   DEFAULT_CUSTOM_COLUMNS,
   DEFAULT_TASK_PHASES,
@@ -339,6 +343,17 @@ export const WIDGET_SETTINGS_DOC = {
   "defaultMonth": "2026-08",              // mês semeado no formulário (ausente = mês atual)
   "defaultSpread": "ancora"               // ${enumKeys(MANUAL_SPREAD_LABELS)} — como o lançamento conta no período
 }`,
+  // v1.8 (01/10/2026): Tabela de metas (visual_type "metas", 0149). A IA
+  // escolhe QUAIS indicadores e como exibir; as METAS e a fórmula do realizado
+  // vivem no catálogo de Indicadores (Configurações → Metas) — nunca aqui.
+  goalTable: `"goalTable": {                          // SÓ com "visual_type": "metas"; "sources"/"dimensions"/"metrics" ficam vazios
+  "mode": "indicadores",                  // ${Object.keys(GOAL_TABLE_MODE_LABELS).join(" | ")}
+  "rows": [ { "indicator": "mrr", "label": "MRR novo", "bold": false, "responsible": "<nome, opcional>" } ],  // modo indicadores; "indicator" = chave de meta/indicador existente (operandos meta:<chave>)
+  "indicator": "mrr", "responsibles": ["<nome>", "<nome>"], "totalRowLabel": "Total",  // modo por_responsavel
+  "months": ["2026-10", "2026-11"],       // AAAA-MM fixos; ausente = meses do período do dashboard
+  "showRealized": true, "showAttainment": true, "totalColumn": true,
+  "headerLabel": "Indicador", "editable": false, "note": "rodapé (regra de cálculo, donos)"
+}`,
   appearance: `"appearance": {                            // aparência (tudo opcional; TUDO NO NÍVEL RAIZ — NÃO existe sub-objeto "chart")
 ${renderDocBlock(APPEARANCE_DOC, "  ")}
 }`,
@@ -371,4 +386,6 @@ export const DASHBOARD_SETTINGS_DOC = {
   connectors: null, // linhas entre widgets — o export não as emite; criadas na UI
   preset: null, // identidade de preset — o SERVIDOR gerencia; a IA nunca envia
   sourceScope: null, // recorte de Bases do board (⋮ → Bases) — config manual, fora do import
+  // v1.8 (01/10/2026): modo Apresentar — abas fora dos slides.
+  presentation: `"presentation": { "hiddenTabs": ["<tabId>"] },   // abas de trabalho que o modo Apresentar pula (ausente = todas são slides)`,
 } satisfies Record<keyof DashboardSettings, string | null>;

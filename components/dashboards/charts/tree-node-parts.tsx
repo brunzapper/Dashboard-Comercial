@@ -1,4 +1,8 @@
-// Versão: 1.1 | Data: 01/10/2026
+// Versão: 1.2 | Data: 01/10/2026
+// v1.2 (01/10/2026): nós OPERACIONAIS (0149) — ícones/tom de Indicador,
+//   Plano de ação e Ritual; `NodeActions` ganha "Editar" (abre o editor do nó,
+//   `onEditOperational`) e a exclusão, pelo MESMO `deleteTreeNode` da anotação
+//   (são linhas próprias de `tree_nodes`).
 // v1.1 (01/10/2026): vocabulário "branch" ("Nova branch", "Nova branch
 //   independente") e o `TreeTaskComposer` aceita o TÍTULO já digitado — o
 //   rascunho da Root que vira tarefa leva o texto junto.
@@ -24,8 +28,12 @@ import { useState, useTransition } from "react";
 import {
   CheckCircle2,
   Circle,
+  ClipboardList,
+  Gauge,
   MessageSquarePlus,
+  Pencil,
   Plus,
+  Repeat,
   StickyNote,
   ListTodo,
   Trash2,
@@ -92,6 +100,10 @@ export const KIND_TONE: Record<string, string> = {
   comment: "border-emerald-500/40",
   change: "border-muted",
   note: "border-sky-500/40",
+  // v1.3 (01/10/2026): nós operacionais (0149).
+  indicator: "border-emerald-600/60 bg-emerald-500/5",
+  plan: "border-violet-500/50 bg-violet-500/5",
+  ritual: "border-orange-500/50 bg-orange-500/5",
 };
 
 /**
@@ -379,6 +391,8 @@ export interface NodeActionsContext {
   /** "Comentar aqui": abre o compositor pendurado neste nó. */
   onNote: (node: TreeNode) => void;
   onChanged: () => void;
+  /** v1.2 (01/10/2026): abre o editor de um nó operacional (0149). */
+  onEditOperational?: (node: TreeNode) => void;
 }
 
 /**
@@ -464,6 +478,31 @@ export function NodeActions({
           onChanged={actx.onChanged}
         />
       ) : null}
+      {/* v1.2 (01/10/2026): nós operacionais — editar e excluir. */}
+      {(node.kind === "indicator" || node.kind === "plan" || node.kind === "ritual") &&
+      node.refId ? (
+        <>
+          {actx.onEditOperational ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="size-6"
+              title={`Editar ${TREE_NODE_KIND_LABELS[node.kind].toLowerCase()}`}
+              aria-label={`Editar ${TREE_NODE_KIND_LABELS[node.kind].toLowerCase()}`}
+              onClick={() => actx.onEditOperational?.(node)}
+            >
+              <Pencil className="size-3.5" />
+            </Button>
+          ) : null}
+          <NodeDeleteButton
+            label={`Excluir ${TREE_NODE_KIND_LABELS[node.kind].toLowerCase()}`}
+            confirmText={`Excluir este nó (${TREE_NODE_KIND_LABELS[node.kind].toLowerCase()})? As branches que dependem dele ficam soltas na árvore; tarefas já criadas continuam existindo.`}
+            onDelete={() => deleteTreeNode(node.refId!)}
+            onChanged={actx.onChanged}
+          />
+        </>
+      ) : null}
       {node.kind === "note" && node.refId ? (
         <NodeDeleteButton
           label={`Excluir ${TREE_NODE_KIND_LABELS.note.toLowerCase()}`}
@@ -480,6 +519,10 @@ const BRANCH_ICON: Record<TreeBranchKind, typeof StickyNote> = {
   note: StickyNote,
   task: ListTodo,
   comment: MessageSquarePlus,
+  // v1.3 (01/10/2026): nós operacionais (0149).
+  indicator: Gauge,
+  plan: ClipboardList,
+  ritual: Repeat,
 };
 
 /**

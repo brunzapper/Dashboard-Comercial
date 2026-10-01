@@ -1,3 +1,8 @@
+// Versão: 1.1 | Data: 01/10/2026
+// v1.1 (01/10/2026): tamanho POR NÓ (`sizeOf`). Os nós operacionais (0149 —
+//   indicador com a faixa de meses, plano 5W2H, ritual) não cabem no cartão de
+//   224×92. Ausente = o tamanho fixo de sempre: a mesma árvore sai no MESMO
+//   lugar que antes (byte-idêntico, pinado no teste).
 // Versão: 1.0 | Data: 30/09/2026
 // v1.0 (30/09/2026): o LAYOUT da visualização Root — onde cada nó fica no
 //   canvas. Puro, sem React e sem medir o DOM: o cartão da Root tem tamanho
@@ -36,6 +41,8 @@ export interface RootLayoutOptions {
   collapsed?: ReadonlySet<string>;
   /** Offset gravado por nó (relativo ao slot). */
   offsetOf?: (id: string) => { x: number; y: number } | null | undefined;
+  /** v1.1: tamanho do cartão de UM nó. Ausente = ROOT_NODE_WIDTH × HEIGHT. */
+  sizeOf?: (node: TreeNode) => { w: number; h: number };
 }
 
 export interface RootBox {
@@ -74,6 +81,9 @@ function countDescendants(node: TreeNode): number {
 
 interface Measured {
   node: TreeNode;
+  /** v1.1: o cartão do próprio nó. */
+  nw: number;
+  nh: number;
   w: number;
   h: number;
   direction: TreeDirection;
@@ -89,19 +99,16 @@ export function layoutRoot(
   const dirOf = (id: string): TreeDirection =>
     opts.directionOf?.(id) ?? opts.defaultDirection;
 
+  const sizeOf = (node: TreeNode) =>
+    opts.sizeOf?.(node) ?? { w: ROOT_NODE_WIDTH, h: ROOT_NODE_HEIGHT };
+
   const measure = (node: TreeNode): Measured => {
     const direction = dirOf(node.id);
     const open = node.children.length > 0 && !collapsed.has(node.id);
     const children = open ? node.children.map(measure) : [];
+    const { w: nw, h: nh } = sizeOf(node);
     if (children.length === 0) {
-      return {
-        node,
-        w: ROOT_NODE_WIDTH,
-        h: ROOT_NODE_HEIGHT,
-        direction,
-        open,
-        children,
-      };
+      return { node, nw, nh, w: nw, h: nh, direction, open, children };
     }
     const gaps = ROOT_GAP_CROSS * (children.length - 1);
     if (direction === "h") {
@@ -109,8 +116,10 @@ export function layoutRoot(
       const wide = Math.max(...children.map((c) => c.w));
       return {
         node,
-        w: ROOT_NODE_WIDTH + ROOT_GAP_MAIN + wide,
-        h: Math.max(ROOT_NODE_HEIGHT, block),
+        nw,
+        nh,
+        w: nw + ROOT_GAP_MAIN + wide,
+        h: Math.max(nh, block),
         direction,
         open,
         children,
@@ -120,8 +129,10 @@ export function layoutRoot(
     const tall = Math.max(...children.map((c) => c.h));
     return {
       node,
-      w: Math.max(ROOT_NODE_WIDTH, block),
-      h: ROOT_NODE_HEIGHT + ROOT_GAP_MAIN + tall,
+      nw,
+      nh,
+      w: Math.max(nw, block),
+      h: nh + ROOT_GAP_MAIN + tall,
       direction,
       open,
       children,
@@ -141,14 +152,14 @@ export function layoutRoot(
   ) => {
     const own = opts.offsetOf?.(m.node.id) ?? null;
     const shift = { x: acc.x + (own?.x ?? 0), y: acc.y + (own?.y ?? 0) };
-    const slotX = m.direction === "h" ? x : x + (m.w - ROOT_NODE_WIDTH) / 2;
-    const slotY = m.direction === "h" ? y + (m.h - ROOT_NODE_HEIGHT) / 2 : y;
+    const slotX = m.direction === "h" ? x : x + (m.w - m.nw) / 2;
+    const slotY = m.direction === "h" ? y + (m.h - m.nh) / 2 : y;
     boxes.push({
       id: m.node.id,
       x: slotX + shift.x,
       y: slotY + shift.y,
-      w: ROOT_NODE_WIDTH,
-      h: ROOT_NODE_HEIGHT,
+      w: m.nw,
+      h: m.nh,
       depth,
       parentId,
       direction: m.direction,
@@ -160,7 +171,7 @@ export function layoutRoot(
     if (m.direction === "h") {
       const block = m.children.reduce((a, c) => a + c.h, 0) + gaps;
       let cy = y + (m.h - block) / 2;
-      const cx = x + ROOT_NODE_WIDTH + ROOT_GAP_MAIN;
+      const cx = x + m.nw + ROOT_GAP_MAIN;
       for (const c of m.children) {
         edges.push({ from: m.node.id, to: c.node.id, direction: "h" });
         place(c, cx, cy, depth + 1, m.node.id, shift);
@@ -170,7 +181,7 @@ export function layoutRoot(
     }
     const block = m.children.reduce((a, c) => a + c.w, 0) + gaps;
     let cx = x + (m.w - block) / 2;
-    const cy = y + ROOT_NODE_HEIGHT + ROOT_GAP_MAIN;
+    const cy = y + m.nh + ROOT_GAP_MAIN;
     for (const c of m.children) {
       edges.push({ from: m.node.id, to: c.node.id, direction: "v" });
       place(c, cx, cy, depth + 1, m.node.id, shift);

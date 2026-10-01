@@ -1,4 +1,15 @@
-// Versão: 1.10 | Data: 01/10/2026
+// Versão: 1.11 | Data: 01/10/2026
+// v1.11 (01/10/2026): a Tree DESDOBRA METAS (0149).
+//   (a) nós operacionais no mapa livre — Indicador (meta × realizado ×
+//       atingimento por mês do período do painel, e o projetado dos filhos),
+//       Plano de ação (5W2H) e Ritual ("Agendar próxima" / automático). Os
+//       números vêm de `loadTreeIndicatorValues` (widget-scope + o MESMO dono
+//       da Tabela de metas); o corpo e o editor moram em `tree-op-nodes.tsx`;
+//   (b) `settings.rootRef`: o widget mostra só o GALHO a partir de um nó —
+//       uma árvore, várias vistas (cada slide, o galho dele);
+//   (c) o widget recebe dashboardId/widgetId/scopeKey do card: os valores
+//       re-buscam quando o período do painel muda, e o tick do event bus
+//       re-busca em silêncio (§4.10).
 // v1.10 (01/10/2026): (a) o filtro "O que exibir" NUNCA esconde anotação —
 //   era o "+ Galho na raiz não faz nada": a branch nascia e o filtro a sumia
 //   na hora (o widget real tinha showKinds sem "note"). Tarefa e comentário
@@ -121,12 +132,15 @@ import {
   addTreeNote,
   attachTaskToMap,
   convertTreeNote,
+  createTreeNode,
   createTreeNote,
   deleteTreeNode,
   loadMapTree,
   loadRecordTree,
+  scheduleRitualOccurrence,
   setTreeNodeGeometry,
   setTreeNodeParent,
+  updateTreeNode,
   updateTreeNote,
   type TreeData,
   type TreeNoteStatus,
@@ -172,6 +186,22 @@ import {
   type NodeActionsContext,
 } from "./tree-node-parts";
 import { TreeRootView, type RootCreateInput } from "./tree-root-view";
+import {
+  isOperationalNode,
+  OperationalBody,
+  OperationalNodeSheet,
+  operationalSize,
+  TreeOpsProvider,
+  type OperationalDraft,
+  type TreeOpsValue,
+} from "./tree-op-nodes";
+import {
+  loadTreeIndicatorValues,
+  type TreeIndicatorValues,
+} from "@/app/(app)/dashboards/goal-table-actions";
+import { indicatorRequestsOf, seriesKey } from "@/lib/tree/payload";
+import { useGoalMetrics } from "@/components/goal-metrics-context";
+import { ROOT_NODE_HEIGHT, ROOT_NODE_WIDTH } from "@/lib/tree/root-layout";
 import { updateComment } from "@/lib/comments/actions";
 import { notifyActionError } from "@/lib/feedback/notify";
 import { toast } from "sonner";
@@ -265,6 +295,13 @@ function NodeCard({
         ) : null}
       </div>
 
+      {/* v1.11: indicador/plano/ritual trazem o próprio corpo. */}
+      {isOperationalNode(node) ? (
+        <div className="ml-6 max-w-md rounded-md border border-dashed px-2 py-1.5">
+          <OperationalBody node={node} />
+        </div>
+      ) : null}
+
       {open && hasChildren ? (
         // A linha de conexão é a borda esquerda: o galho é visual, não SVG.
         <div className="border-muted ml-4 flex flex-col gap-1.5 border-l pt-1.5 pl-3">
@@ -307,12 +344,20 @@ export function TreeWidget({
   settings,
   recordId,
   dataChangedAt,
+  dashboardId,
+  widgetId,
+  scopeKey: boardScopeKey,
 }: {
   settings: TreeSettings | undefined;
   /** Registro em foco: o do settings, ou o que a tabela clicou. */
   recordId: string | null;
   /** Carimbo do event bus — muda quando um registro mudou. */
   dataChangedAt?: number;
+  /** v1.11: o painel (os nós de indicador leem pelo widget-scope). */
+  dashboardId?: string;
+  widgetId?: string;
+  /** v1.11: fingerprint de escopo da page (período/filtros/config). */
+  scopeKey?: string;
 }) {
   // v1.9: a fonte LIVRE é um mapa por chave, sem registro nenhum.
   const isMap = settings?.source === "livre";
@@ -377,7 +422,8 @@ export function TreeWidget({
    * O que o usuário escolheu ver. Trocar qualquer parte disto é ação DELE e
    * pede feedback; o tick do event bus não mexe aqui e por isso é silencioso.
    */
-  const scopeKey = `${scopeId}|${layout}|${order}|${limit}`;
+  const rootRef = isMap ? (settings?.rootRef ?? "").trim() : "";
+  const scopeKey = `${scopeId}|${layout}|${order}|${limit}|${rootRef}`;
 
   // O payload guarda o ESCOPO a que pertence. É isso que faz a árvore do
   // registro anterior sumir no mesmo instante do clique, sem `setState` dentro
@@ -415,7 +461,7 @@ export function TreeWidget({
     const scopeAtCall = scopeKey;
     const next =
       scope.kind === "livre"
-        ? await loadMapTree(scope.mapKey)
+        ? await loadMapTree(scope.mapKey, { rootRef: rootRef || null })
         : await loadRecordTree(scope.recordId, layout, { order, limit });
     // Payload idêntico não re-renderiza: o tick do sync roda a cada minuto e
     // não pode fazer a árvore piscar para quem só está lendo.
@@ -441,6 +487,91 @@ export function TreeWidget({
     const t = window.setTimeout(() => void refresh(), BUS_REFETCH_DELAY_MS);
     return () => window.clearTimeout(t);
   }, [refresh, dataChangedAt, originOf]);
+
+  // --- v1.11: valores dos nós de INDICADOR (e dos indicadores dos planos) ---
+  const requests = useMemo(
+    () => (data && isMap ? indicatorRequestsOf(data.nodes) : []),
+    [data, isMap]
+  );
+  const requestsKey = JSON.stringify(requests);
+  const valuesKey = `${requestsKey}|${boardScopeKey ?? ""}`;
+  const [values, setValues] = useState<{ key: string; data: TreeIndicatorValues } | null>(
+    null
+  );
+  const valuesJson = useRef<string>("");
+  const valuesOrigin = useRefetchOrigin(valuesKey);
+  useEffect(() => {
+    if (!dashboardId || !widgetId || requests.length === 0) return;
+    const userCaused = valuesOrigin();
+    let cancelled = false;
+    const t = window.setTimeout(
+      () => {
+        void loadTreeIndicatorValues(dashboardId, widgetId, requests, window.location.search).then(
+          (res) => {
+            if (cancelled) return;
+            const json = `${valuesKey}::${JSON.stringify(res)}`;
+            if (json === valuesJson.current) return;
+            valuesJson.current = json;
+            setValues({ key: valuesKey, data: res });
+          }
+        );
+      },
+      userCaused ? 60 : BUS_REFETCH_DELAY_MS
+    );
+    return () => {
+      cancelled = true;
+      window.clearTimeout(t);
+    };
+    // `requests` é derivado de `requestsKey` (deps reais: o conteúdo).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dashboardId, widgetId, valuesKey, dataChangedAt, valuesOrigin]);
+
+  const [scheduling, setScheduling] = useState<ReadonlySet<string>>(() => new Set());
+  const [opDraft, setOpDraft] = useState<OperationalDraft | null>(null);
+  const [opSaving, setOpSaving] = useState(false);
+  const goalMetrics = useGoalMetrics();
+  const indicatorOptions = useMemo(
+    () => goalMetrics.map((m) => ({ value: m.key, label: m.label })),
+    [goalMetrics]
+  );
+
+  const opsValue: TreeOpsValue | null = useMemo(() => {
+    if (!data) return null;
+    const current = values?.key === valuesKey ? values.data : null;
+    return {
+      months: current?.months ?? [],
+      series: new Map(
+        (current?.series ?? []).map((x) => [seriesKey(x.key, x.responsible), x])
+      ),
+      loading: requests.length > 0 && current == null,
+      ritualOccurrences: data.ritualOccurrences ?? {},
+      scheduling,
+      onScheduleRitual: (node) => {
+        if (scope?.kind !== "livre") return;
+        const mk = scope.mapKey;
+        setScheduling((prev) => new Set(prev).add(node.id));
+        void scheduleRitualOccurrence(mk, node.id, { revalidate: false }).then((res) => {
+          setScheduling((prev) => {
+            const next = new Set(prev);
+            next.delete(node.id);
+            return next;
+          });
+          if (res.ok) {
+            toast.success("Ocorrência agendada", {
+              description: res.dueDate
+                ? `Tarefa criada para ${res.dueDate.slice(8, 10)}/${res.dueDate.slice(5, 7)}.`
+                : undefined,
+            });
+            void refresh();
+          } else {
+            notifyActionError("Não foi possível agendar", res.message);
+          }
+        });
+      },
+    };
+    // `scope`/`refresh` mudam junto do `data` (mesmo escopo).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data, values, valuesKey, scheduling, requests.length]);
 
   if (!scope) {
     return (
@@ -658,6 +789,10 @@ export function TreeWidget({
   const addBranch = (kind: TreeBranchKind, parent: TreeNode | null) => {
     const parentRef = parent?.id ?? null;
     if (kind === "task") return setTaskDraft({ parentRef });
+    // v1.11: nó operacional abre o editor dele.
+    if (kind === "indicator" || kind === "plan" || kind === "ritual") {
+      return setOpDraft({ kind, node: null, parentRef, title: "" });
+    }
     if (kind === "comment") {
       if (!recordScopeId) return;
       return setDraft({ kind: "comment", text: "", nodeId: parentRef });
@@ -800,7 +935,55 @@ export function TreeWidget({
     // comentário pendurava na ocorrência de hoje.
     onNote: (target) => setDraft({ kind: "comment", text: "", nodeId: target.id }),
     onChanged: reloadSoon,
+    // v1.11: o editor dos nós operacionais.
+    onEditOperational: (node) => {
+      if (node.kind !== "indicator" && node.kind !== "plan" && node.kind !== "ritual") return;
+      setOpDraft({ kind: node.kind, node, parentRef: null, title: node.label });
+    },
   };
+
+  /** v1.11: salva o nó operacional (criar ou editar). */
+  const saveOperational = (input: { label: string; payload: unknown }) => {
+    const d = opDraft;
+    if (!d) return;
+    setOpSaving(true);
+    const run = d.node?.refId
+      ? updateTreeNode(
+          d.node.refId,
+          { kind: d.kind, label: input.label, payload: input.payload },
+          { revalidate: false }
+        )
+      : createTreeNode(
+          scope,
+          { kind: d.kind, parentRef: d.parentRef, label: input.label, payload: input.payload },
+          { revalidate: false }
+        );
+    void run.then((res) => {
+      setOpSaving(false);
+      if (!res.ok) {
+        notifyActionError("Não foi possível salvar o nó", res.message);
+        return;
+      }
+      setOpDraft(null);
+      void refresh();
+    });
+  };
+
+  const opSheet = (
+    <OperationalNodeSheet
+      draft={opDraft}
+      onClose={() => setOpDraft(null)}
+      onSave={saveOperational}
+      indicatorOptions={indicatorOptions}
+      responsibleOptions={data.responsibles.map((r) => ({ value: r.label, label: r.label }))}
+      saving={opSaving}
+    />
+  );
+  const rootMissingNote = data.rootMissing ? (
+    <p className="text-muted-foreground text-xs">
+      O galho configurado (“{rootRef}”) não existe mais neste mapa — exibindo o mapa inteiro.
+    </p>
+  ) : null;
 
   const composer = draft ? (
     <div className="flex flex-wrap items-center gap-2 rounded-md border p-2">
@@ -1013,9 +1196,11 @@ export function TreeWidget({
   // --- ROOT (v1.9) ---
   if (view === "root") {
     return (
+      <TreeOpsProvider value={opsValue}>
       <div className="flex h-full min-h-0 flex-col gap-2 overflow-hidden p-3">
         {header}
         {pausedNote}
+        {rootMissingNote}
         {/* v1.10: sem o compositor externo — na Root a criação é um rascunho
             DENTRO do canvas, que vai junto para a tela cheia. */}
         <TreeRootView
@@ -1044,16 +1229,25 @@ export function TreeWidget({
               {loadMoreButton}
             </>
           }
+          sizeOf={(n) => operationalSize(n) ?? { w: ROOT_NODE_WIDTH, h: ROOT_NODE_HEIGHT }}
+          renderBody={(n) => (isOperationalNode(n) ? <OperationalBody node={n} /> : null)}
+          onCreateOperational={({ kind, parentRef, title }) =>
+            setOpDraft({ kind, node: null, parentRef, title })
+          }
         />
         {taskComposer}
+        {opSheet}
       </div>
+      </TreeOpsProvider>
     );
   }
 
   return (
+    <TreeOpsProvider value={opsValue}>
     <div className="flex h-full flex-col gap-2 overflow-auto p-3">
       {header}
       {pausedNote}
+      {rootMissingNote}
       {composer ?? topActions}
 
       {visibleNodes.length === 0 ? (
@@ -1091,6 +1285,8 @@ export function TreeWidget({
 
       {loadMoreButton}
       {taskComposer}
+      {opSheet}
     </div>
+    </TreeOpsProvider>
   );
 }

@@ -1,3 +1,7 @@
+// Versão: 1.1 | Data: 01/10/2026
+// v1.1 (01/10/2026): 'metas' (Tabela de metas, 0149) e 'tree' fora do lote de
+//   engine — têm actions próprias (runGoalTable / tree-actions); antes o
+//   'tree' passava aqui e gastava uma consulta de contagem à toa.
 // Versão: 1.0 | Data: 26/07/2026
 // Widgets de ENGINE deferidos (padrão Tabela Livre/Kanban, agora em LOTE): a
 // page NÃO computa gráfico/KPI/card/pizza/funil/tabela agregada/calculado/
@@ -71,6 +75,10 @@ function isEngineWidget(w: Widget): boolean {
     "tabela_editavel",
     "kanban",
     "agenda",
+    // v1.1 (01/10/2026): actions próprias.
+    "tree",
+    "metas",
+    "base_manual",
   ].includes(w.visual_type);
 }
 

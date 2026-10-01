@@ -1,3 +1,6 @@
+// Versão: 1.4 | Data: 01/10/2026
+// v1.4 (01/10/2026): rótulos de grupo dos nós operacionais (0149) na forma
+//   por tipo — no mapa livre (a única casa deles) a forma não se aplica.
 // Versão: 1.3 | Data: 30/09/2026
 // v1.3 (30/09/2026): GUARDA DE CICLO. Com a Root, qualquer nó vira pai de
 //   qualquer outro por arrasto — e duas exceções cruzadas (A sob B, B sob A),
@@ -285,6 +288,9 @@ const KIND_LABEL: Record<TreeNodeKind, string> = {
   note: "Anotações",
   record: "Registros",
   field: "Campos",
+  indicator: "Indicadores",
+  plan: "Planos de ação",
+  ritual: "Rituais",
 };
 
 /** Total de nós (o cabeçalho do widget diz o tamanho da árvore). */

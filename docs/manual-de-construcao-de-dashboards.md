@@ -1,4 +1,7 @@
-<!-- Versão: 1.39 | Data: 01/10/2026 -->
+<!-- Versão: 1.40 | Data: 01/10/2026 -->
+<!-- v1.40 (01/10/2026): Tabela de metas (tipo de widget 21), catálogo de
+     Indicadores, nós de Indicador/Plano/Ritual da Tree, "Mostrar só o galho"
+     e o modo Apresentar. -->
 <!-- v1.39 (01/10/2026): §5.14 — Root v1.1: vocabulário "branch"; clique
      direito no canvas cria branch independente; o "+" abre a prévia na hora;
      toda branch nasce anotação e o clique direito a converte em comentário ou
@@ -3094,10 +3097,10 @@ referência.
 
 ### 16.2 Enumerações completas (uma linha por lista)
 
-- **Tipos de widget (20)**: Card, Métrica calculada, Calculadora, Nota
+- **Tipos de widget (21)**: Card, Métrica calculada, Calculadora, Nota
   (post-it), Forma, Linha divisória, Imagem, Tabela, Tabela Livre, Barra
   vertical, Barra horizontal, Linha, Pizza, Funil, Filtro de período, Filtro
-  por campo, Kanban, Agenda, Tree, Base do Dashboard.
+  por campo, Kanban, Agenda, Tree, Base do Dashboard, Tabela de metas.
 - **Agregações de métrica (5)**: Soma, Contagem, Média, Mínimo, Máximo.
 - **Agregações de "Agrupar período" (6)**: Individual (por registro), Soma,
   Contagem, Média, Mediana, Moda.

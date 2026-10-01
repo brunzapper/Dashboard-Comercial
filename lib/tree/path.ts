@@ -1,4 +1,6 @@
-// Versão: 1.1 | Data: 01/10/2026
+// Versão: 1.2 | Data: 01/10/2026
+// v1.2 (01/10/2026): `subtreeAt` — o GALHO a partir de um nó (o `rootRef` do
+//   widget: cada slide mostra o galho dele do MESMO mapa).
 // v1.1 (01/10/2026): `insertNode` — o rascunho da branch nova entra no layout.
 // Versão: 1.0 | Data: 30/09/2026
 // v1.0 (30/09/2026): a LEITURA DO CAMINHO na Root — o que torna a árvore um
@@ -172,4 +174,27 @@ export function insertNode(
         : { ...n, children: walk(n.children, depth + 1) }
     );
   return walk(roots, 0);
+}
+
+/**
+ * v1.2 (01/10/2026): o galho a partir de `id` (o nó vira a raiz, profundidade
+ * recontada). Nó inexistente ⇒ null — o chamador cai na árvore inteira.
+ */
+export function subtreeAt(roots: TreeNode[], id: string): TreeNode[] | null {
+  const find = (list: TreeNode[]): TreeNode | null => {
+    for (const n of list) {
+      if (n.id === id) return n;
+      const hit = find(n.children);
+      if (hit) return hit;
+    }
+    return null;
+  };
+  const hit = find(roots);
+  if (!hit) return null;
+  const redepth = (n: TreeNode, depth: number): TreeNode => ({
+    ...n,
+    depth,
+    children: n.children.map((c) => redepth(c, depth + 1)),
+  });
+  return [redepth(hit, 0)];
 }
