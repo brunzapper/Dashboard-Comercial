@@ -1,4 +1,9 @@
-// Versão: 3.3 | Data: 12/09/2026
+// Versão: 3.4 | Data: 01/10/2026
+// v3.4 (01/10/2026): modo APRESENTAR — cada aba vira um slide em tela cheia,
+//   painel vivo, teclado e barra flutuante (presentation-mode.tsx; regra pura
+//   em lib/dashboards/presentation.ts). A troca de slide é a MESMA troca de
+//   aba (`selectTabSafe`). Entrar desliga a edição; o laser segue disponível.
+//   `settings.presentation.hiddenTabs` deixa abas de trabalho fora.
 // v3.3 (12/09/2026): botão de VOLTAR no topo do board — e a superfície EXTERNA deixou de vazar para dentro dos
 //   widgets. O marcador data-board-chrome estava na RAIZ do painel — ou seja,
 //   envolvia o grid —, e a regra de texto secundário de globals.css alcança
@@ -86,6 +91,7 @@ import {
   ChevronDown,
   Clock,
   Pencil,
+  Presentation,
   Plus,
   Redo2,
   Spline,
@@ -159,6 +165,9 @@ import { DashboardMenu } from "./dashboard-menu";
 import { AiEditPanel, type AiEditPanelHandle } from "./ai-edit-panel";
 import type { SnapshotPeriodCapture } from "./snapshots-panel";
 import { DashboardTabs } from "./dashboard-tabs";
+import { cn } from "@/lib/utils";
+import { PresentationBar, usePresentationMode } from "./presentation-mode";
+import { slideTabIds, stepSlide } from "@/lib/dashboards/presentation";
 import {
   DashboardHistoryProvider,
   useDashboardHistory,
@@ -1049,6 +1058,35 @@ export function DashboardClient({
     },
     [resolveAutoPlacement, selectTab]
   );
+  // v3.4 (01/10/2026): modo Apresentar — efêmero.
+  const [presenting, setPresenting] = useState(false);
+  const presentRef = useRef<HTMLDivElement | null>(null);
+  const slideIds = useMemo(
+    () => slideTabIds(tabs, settings.presentation?.hiddenTabs),
+    [tabs, settings.presentation?.hiddenTabs]
+  );
+  const startPresenting = useCallback(() => {
+    setEditMode(false);
+    setConnectMode(false);
+    // Aba atual fora dos slides (aba de trabalho) ⇒ começa no primeiro slide.
+    if (tabs.length > 0 && !slideIds.includes(activeTabId)) {
+      selectTabSafe(stepSlide(slideIds, "", "first"));
+    }
+    setPresenting(true);
+  }, [tabs.length, slideIds, activeTabId, selectTabSafe]);
+  const stopPresenting = useCallback(() => {
+    setPresenting(false);
+    setLaserMode(false);
+  }, []);
+  usePresentationMode({
+    active: presenting,
+    slideIds,
+    currentId: activeTabId,
+    onSelect: selectTabSafe,
+    onExit: stopPresenting,
+    containerRef: presentRef,
+  });
+
   // Pendente excluído antes do refresh viraria fantasma (o id nunca chega do
   // servidor para a reconciliação) — o WidgetCard avisa a exclusão por aqui.
   const onWidgetDeleted = useCallback((id: string) => {
@@ -1074,12 +1112,22 @@ export function DashboardClient({
     <AiSuggestionsProvider>
     {previewCapture ? <PreviewRecorder id={dashboardId} {...previewCapture}
       ready={!renaming && activeTabId === firstTabId && !engineLoading && (engineIds.length === 0 || engineData !== null)} /> : null}
-    <div className="flex flex-col gap-4" data-preview-ready={!engineLoading && (engineIds.length === 0 || engineData !== null)}>
+    <div
+      ref={presentRef}
+      className={cn(
+        "flex flex-col gap-4",
+        // v3.4: apresentando, o painel cobre a janela (com ou sem a API de
+        // tela cheia — iframe/permissão podem negá-la).
+        presenting && "bg-background fixed inset-0 z-50 overflow-auto p-6 pb-20"
+      )}
+      data-presenting={presenting || undefined}
+      data-preview-ready={!engineLoading && (engineIds.length === 0 || engineData !== null)}
+    >
       {/* data-board-chrome = cabeçalho + abas. O marcador NÃO pode envolver o
           grid: a regra de texto secundário (globals.css) alcança descendentes e
           recoloriria rótulo de gráfico, eixo e célula de tabela — era o que
           quebrava as cores do dashboard ao escolher uma cor externa. */}
-      <div className="flex flex-col gap-4" data-board-chrome>
+      <div className={cn("flex flex-col gap-4", presenting && "hidden")} data-board-chrome>
       {/* Saída do board: leva à tela anterior (a barra lateral pode estar
           oculta, e o dashboard é onde mais se entra por link direto). */}
       <BackLink fallback="/" fallbackLabel="Workspace" className="-ml-2 self-start" />
@@ -1117,6 +1165,16 @@ export function DashboardClient({
                 <Pencil className="size-4" />
               </Button>
             ) : null}
+            {/* v3.4: Apresentar — para todo mundo que vê o board. */}
+            <Button
+              variant="ghost"
+              size="sm"
+              className="text-muted-foreground hover:text-foreground h-7 gap-1"
+              onClick={startPresenting}
+              title="Apresentar: cada aba vira um slide em tela cheia (←/→ navegam, Esc sai)"
+            >
+              <Presentation className="size-4" /> Apresentar
+            </Button>
           </div>
         )}
         {canEdit ? (
@@ -1350,6 +1408,17 @@ export function DashboardClient({
           </WidgetFocusProvider>
         </div>
       </DashboardPendingProvider>
+      {presenting ? (
+        <PresentationBar
+          slideIds={slideIds}
+          currentId={activeTabId}
+          title={tabs.find((t) => t.id === activeTabId)?.name ?? name}
+          onSelect={selectTabSafe}
+          onExit={stopPresenting}
+          laserMode={laserMode}
+          onLaserChange={handleLaserChange}
+        />
+      ) : null}
     </div>
     <AiSuggestionsDock />
     </AiSuggestionsProvider>
