@@ -1,3 +1,7 @@
+// Versão: 1.2 | Data: 01/10/2026
+// v1.2 (01/10/2026): RITUAIS automáticos da Tree (0149, `runTreeRituals`) no
+//   orçamento restante — a próxima ocorrência de cada ritual com `auto` vira
+//   tarefa (trava por ocorrência; 23505 = no-op).
 // Versão: 1.1 | Data: 28/07/2026
 // "Tick" das AUTOMAÇÕES do kanban, disparado pelo pg_cron a cada minuto
 // (supabase/apply/pg-cron-kanban-automations.sql). Protegido por SYNC_SECRET
@@ -16,6 +20,7 @@ import { syncSecretAuthorized } from "@/lib/auth/sync-secret";
 import { createServiceClient } from "@/lib/supabase/service";
 import { runAllKanbanAutomations } from "@/lib/kanban/automations/engine";
 import { reconcileAllKanbanAllocationFields } from "@/lib/kanban/allocation-reconcile";
+import { runTreeRituals } from "@/lib/rituals/run";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -31,11 +36,18 @@ export async function POST(request: Request) {
     const db = createServiceClient();
     const counters = await runAllKanbanAutomations(db, deadline);
     const allocation = await reconcileAllKanbanAllocationFields(db, deadline);
+    // v1.2: rituais automáticos (best-effort — nunca derruba o tick).
+    const rituals = await runTreeRituals(db, deadline).catch((e) => {
+      console.error("[kanban-automations/tick] rituais:", e);
+      return { rituals: 0, created: 0, skipped: 0 };
+    });
     return NextResponse.json({
       ok: true,
       ...counters,
       allocationBoards: allocation.boards,
       allocationUpdated: allocation.updated,
+      ritualsChecked: rituals.rituals,
+      ritualTasksCreated: rituals.created,
     });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
