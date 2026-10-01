@@ -1,4 +1,6 @@
-<!-- Versão: 1.39 | Data: 01/10/2026 -->
+<!-- Versão: 1.40 | Data: 01/10/2026 -->
+<!-- v1.40 (01/10/2026): §5.14 — o clique direito na prévia ainda VAZIA já
+     abre o menu de tipo (antes era preciso salvar primeiro). -->
 <!-- v1.39 (01/10/2026): §5.14 — Root v1.1: vocabulário "branch"; clique
      direito no canvas cria branch independente; o "+" abre a prévia na hora;
      toda branch nasce anotação e o clique direito a converte em comentário ou
@@ -1489,7 +1491,7 @@ No mapa Livre a forma não se aplica: ele é sempre o parentesco desenhado.
     **Enter** salva, **Shift+Enter** quebra linha, **Esc** desiste. Funciona
     igual em **tela cheia**.
   - **Toda branch nasce como anotação.** O **clique direito** em cima dela —
-    ainda na prévia ou já salva — muda o tipo: **comentário** (vai para o feed
+    ainda na prévia (mesmo vazia, antes de digitar) ou já salva — muda o tipo: **comentário** (vai para o feed
     do registro; no mapa livre fica desabilitado, porque não há registro) ou
     **tarefa** (abre o editor de tarefa com o texto já preenchido, quando ainda
     é prévia; converte direto, quando já está salva). Ao converter, as branches

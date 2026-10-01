@@ -1,5 +1,7 @@
 // @vitest-environment jsdom
-// Versão: 1.1 | Data: 01/10/2026
+// Versão: 1.2 | Data: 01/10/2026
+// v1.2 (01/10/2026): clique direito na prévia VAZIA (fora da caixa de texto)
+//   abre o menu de tipo sem salvar nem descartar.
 // v1.1 (01/10/2026): criação e edição DENTRO do canvas — clique direito no
 //   vazio abre a prévia da branch ali; o "+" do card abre a prévia filha;
 //   Enter salva; o clique direito num card abre o menu (converter anotação em
@@ -17,7 +19,7 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { TreeNode } from "@/lib/tree/model";
+import { TREE_BRANCH_LABELS, type TreeNode } from "@/lib/tree/model";
 
 vi.mock("@/app/(app)/dashboards/tree-actions", () => ({
   deleteTreeNode: vi.fn(async () => ({ ok: true })),
@@ -224,6 +226,27 @@ describe("TreeRootView", () => {
     fireEvent.contextMenu(screen.getByRole("tree"), { clientX: 10, clientY: 10 });
     fireEvent.keyDown(within(tile("draft:new")).getByRole("textbox"), { key: "Escape" });
     expect(tile("draft:new")).toBeNull();
+    expect(props.onCreate).not.toHaveBeenCalled();
+  });
+
+  it("v1.2: clique direito na prévia VAZIA, fora da caixa, abre o menu de tipo", () => {
+    const props = setup({
+      scope: { kind: "record", recordId: "00000000-0000-4000-a000-000000000001" },
+    });
+    fireEvent.contextMenu(screen.getByRole("tree"), { clientX: 10, clientY: 10 });
+    const draft = tile("draft:new");
+    const badge = within(draft).getByText(TREE_BRANCH_LABELS.note);
+    // O mousedown fora da caixa não pode tirar o foco dela (o blur descartaria
+    // a prévia vazia antes do menu).
+    expect(fireEvent.mouseDown(badge, { button: 2 })).toBe(false);
+    expect(within(draft).getByRole("textbox")).toHaveFocus();
+    fireEvent.contextMenu(badge);
+    expect(screen.getByRole("menuitem", { name: /Anotação/ })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: /Tarefa/ })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("menuitem", { name: /Comentário/ }));
+    const after = tile("draft:new");
+    expect(after).not.toBeNull();
+    expect(within(after).getByText(TREE_BRANCH_LABELS.comment)).toBeInTheDocument();
     expect(props.onCreate).not.toHaveBeenCalled();
   });
 
