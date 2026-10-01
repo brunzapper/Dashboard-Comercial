@@ -1,4 +1,7 @@
-// Versão: 1.7 | Data: 01/10/2026
+// Versão: 1.8 | Data: 01/10/2026
+// v1.8 (01/10/2026): a barra lateral ROLA quando os itens não cabem (antes,
+//   com muitos fixados, o fim da lista ficava fora da tela). Fixada, ela é
+//   sticky com a altura da tela — rola sozinha, não junto com a página.
 // v1.7 (01/10/2026): `useAppChromeOptional` — leitura sem exigir o shell (o
 //   dashboard esconde o ⋮ dos widgets no modo tela cheia; a prévia/snapshot
 //   renderizam fora do AppShell e não podem quebrar).
@@ -206,7 +209,8 @@ export function AppShell({
               }
             }}
             className={cn(
-              "bg-sidebar text-sidebar-foreground relative flex w-60 shrink-0 flex-col border-r p-4 transition-transform duration-200",
+              "bg-sidebar text-sidebar-foreground relative flex w-60 shrink-0 flex-col overflow-y-auto overscroll-contain border-r p-4 transition-transform duration-200",
+              !overlay && "sticky top-0 h-screen self-start",
               overlay &&
                 "fixed inset-y-0 left-0 z-40 shadow-lg " +
                   (sidebarVisible ? "translate-x-0" : "-translate-x-full")

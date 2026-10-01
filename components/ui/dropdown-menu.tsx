@@ -1,4 +1,6 @@
-// Versão: 1.0 | Data: 10/07/2026
+// Versão: 1.1 | Data: 01/10/2026
+// v1.1 (01/10/2026): menu longo rola dentro do espaço livre da viewport
+//   (antes `overflow-hidden` cortava os itens finais).
 // Componente DropdownMenu (shadcn/ui, new-york) sobre radix-ui. Menu "⋮" do
 // topo do dashboard e de cada widget (Fase 10).
 "use client";
@@ -25,7 +27,7 @@ function DropdownMenuContent({
         data-slot="dropdown-menu-content"
         sideOffset={sideOffset}
         className={cn(
-          "bg-popover text-popover-foreground data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 z-50 min-w-[10rem] origin-[var(--radix-dropdown-menu-content-transform-origin)] overflow-hidden rounded-md border p-1 shadow-md",
+          "bg-popover text-popover-foreground data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 z-50 max-h-[var(--radix-dropdown-menu-content-available-height)] min-w-[10rem] origin-[var(--radix-dropdown-menu-content-transform-origin)] overflow-x-hidden overflow-y-auto rounded-md border p-1 shadow-md",
           className
         )}
         {...props}
