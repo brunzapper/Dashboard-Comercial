@@ -1,4 +1,6 @@
-// Versão: 1.2 | Data: 04/09/2026
+// Versão: 1.3 | Data: 01/10/2026
+// v1.3 (01/10/2026): FloatingMenu ganha teto de altura (espaço até a borda de
+//   baixo) + rolagem — o clamp assumia 220px e menu maior saía da tela.
 // v1.2 (04/09/2026): useWidgetAppearance FLUSHA a gravação pendente no
 //   desmonte. Mesma classe do bug dos filtros: a troca de aba do dashboard
 //   desmonta os widgets da aba anterior e o cleanup matava o debounce de 500ms
@@ -148,10 +150,15 @@ export function FloatingPanel({
       <div className="fixed inset-0 z-40" onMouseDown={onClose} />
       <div
         className={cn(
-          "bg-popover text-popover-foreground fixed z-50 rounded-md border p-2 shadow-md",
+          "bg-popover text-popover-foreground fixed z-50 overflow-y-auto overscroll-contain rounded-md border p-2 shadow-md",
           className
         )}
-        style={{ left: Math.max(4, left), top: Math.max(4, top) }}
+        style={{
+          left: Math.max(4, left),
+          top: Math.max(4, top),
+          // v1.3: limita ao espaço restante até a borda inferior.
+          maxHeight: `calc(100dvh - ${Math.max(4, top) + 4}px)`,
+        }}
         onMouseDown={(e) => e.stopPropagation()}
       >
         {children}
