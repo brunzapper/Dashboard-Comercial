@@ -1,3 +1,7 @@
+// Versão: 1.8 | Data: 01/10/2026
+// v1.8 (01/10/2026): `SourcePicker` EXPORTADO — o editor de Indicadores
+// (components/admin/indicators-manager.tsx) escolhe as bases do realizado com o
+// MESMO seletor.
 // Versão: 1.7 | Data: 28/09/2026
 // v1.7: "Crédito de equipe" virou "Crédito por membro" — cada membro escolhe,
 // por indicador, o critério (factor.memberCredit): próprios registros (padrão,
@@ -1637,7 +1641,8 @@ function MemberPicker(props: {
 }
 
 // Multi-select de fontes (raízes e sub-bases). Vazio = todas as fontes.
-function SourcePicker(props: {
+// v1.8 (01/10/2026): exportado (reuso no editor de Indicadores).
+export function SourcePicker(props: {
   sources: SourceDef[];
   value: string[];
   onChange: (v: string[]) => void;

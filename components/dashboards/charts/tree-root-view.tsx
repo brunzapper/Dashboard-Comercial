@@ -1,10 +1,19 @@
-// Versão: 1.2 | Data: 01/10/2026
-// v1.2 (01/10/2026): o clique direito na PRÉVIA ainda vazia abre o menu de tipo.
+// Versão: 1.3 | Data: 01/10/2026
+// v1.3 (01/10/2026): merge com a main — a v1.2 dela (clique direito na
+//   prévia vazia) chega aqui renumerada como v1.3; as duas mudanças convivem.
+// v1.3 (01/10/2026): o clique direito na PRÉVIA ainda vazia abre o menu de tipo.
 //   O mousedown do botão direito fora da caixa de texto (badge, borda do card)
 //   tirava o foco dela; o blur, sem `relatedTarget`, DESCARTAVA a prévia vazia
 //   (ou SALVAVA a preenchida) antes de o `contextmenu` chegar — o menu só
 //   aparecia depois de salvar. O `DraftTile` agora segura o foco na caixa
 //   (`preventDefault` no mousedown fora dela) e o blur para o menu é ignorado.
+// v1.2 (01/10/2026): nós OPERACIONAIS (0149). (a) o tamanho do cartão é POR
+//   NÓ (`sizeOf` → layoutRoot): indicador/plano/ritual mostram meta ×
+//   realizado, 5W2H e a próxima data, e não cabem em 224×92; (b) o corpo deles
+//   vem do widget (`renderBody`) — a Root não sabe de indicador; (c) o
+//   rascunho vira Indicador/Plano/Ritual pelo clique direito (abre o editor do
+//   nó com o texto digitado, como a tarefa); (d) "Copiar id do nó" — o valor de
+//   "Mostrar só o galho" (`rootRef`) de outro widget.
 // v1.1 (01/10/2026): criação e edição DENTRO do canvas.
 //   (a) RASCUNHO no canvas: o "+" de um card, o clique direito no vazio e o
 //       "Nova branch independente" abrem na hora a PRÉVIA da branch nova — um
@@ -97,6 +106,8 @@ import {
   edgePath,
   hitTest,
   layoutRoot,
+  ROOT_NODE_HEIGHT,
+  ROOT_NODE_WIDTH,
   type RootBox,
 } from "@/lib/tree/root-layout";
 import {
@@ -261,6 +272,16 @@ export interface TreeRootViewProps {
   canAnalyze?: boolean;
   /** Controles do widget que moram na barra da Root (ordem, carregar mais…). */
   toolbarExtra?: ReactNode;
+  /** v1.2: tamanho do cartão por nó (ausente = o fixo de sempre). */
+  sizeOf?: (node: TreeNode) => { w: number; h: number };
+  /** v1.2: corpo de um nó operacional (null = o corpo de sempre). */
+  renderBody?: (node: TreeNode) => ReactNode | null;
+  /** v1.2: o rascunho vira um nó operacional (abre o editor dele). */
+  onCreateOperational?: (input: {
+    kind: "indicator" | "plan" | "ritual";
+    parentRef: string | null;
+    title: string;
+  }) => void;
 }
 
 /** Anotação e comentário com dono no banco são digitáveis no próprio card. */
@@ -286,6 +307,9 @@ export function TreeRootView({
   onEditNote,
   canAnalyze = false,
   toolbarExtra,
+  sizeOf,
+  renderBody,
+  onCreateOperational,
 }: TreeRootViewProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [size, setSize] = useState({ w: 0, h: 0 });
@@ -345,8 +369,15 @@ export function TreeRootView({
       defaultDirection,
       directionOf: (id: string) => geoById.get(id)?.direction ?? null,
       collapsed,
+      // v1.2: o rascunho mantém o cartão padrão (ele é um texto).
+      ...(sizeOf
+        ? {
+            sizeOf: (n: TreeNode) =>
+              n.id === ROOT_DRAFT_ID ? { w: ROOT_NODE_WIDTH, h: ROOT_NODE_HEIGHT } : sizeOf(n),
+          }
+        : {}),
     }),
-    [defaultDirection, geoById, collapsed]
+    [defaultDirection, geoById, collapsed, sizeOf]
   );
 
   const layout = useMemo(
@@ -737,6 +768,23 @@ export function TreeRootView({
           hint: "Abre o editor de tarefa com este texto",
           onSelect: draftToTask,
         },
+        // v1.2 (01/10/2026): nós operacionais — abrem o editor do nó.
+        ...(onCreateOperational
+          ? (["indicator", "plan", "ritual"] as const).map((k) => ({
+              label: TREE_BRANCH_LABELS[k],
+              hint: "Abre o editor com este texto",
+              disabled: branchKindDisabledReason(k, scope.kind),
+              onSelect: () => {
+                const d = draft;
+                setDraft(null);
+                onCreateOperational({
+                  kind: k,
+                  parentRef: d?.parentId ?? null,
+                  title: d?.text.trim() ?? "",
+                });
+              },
+            }))
+          : []),
       ];
     }
     const node = nodeById.get(menu.target.id);
@@ -752,6 +800,26 @@ export function TreeRootView({
     ];
     if (isTextEditable(node)) {
       items.push({ label: "Editar texto", onSelect: () => setEditing(node.id) });
+    }
+    // v1.2: nó operacional abre o editor dele.
+    if (
+      (node.kind === "indicator" || node.kind === "plan" || node.kind === "ritual") &&
+      actx.onEditOperational
+    ) {
+      items.push({
+        label: `Editar ${TREE_NODE_KIND_LABELS[node.kind].toLowerCase()}`,
+        onSelect: () => actx.onEditOperational?.(node),
+      });
+    }
+    // v1.2: o id que outro widget usa em "Mostrar só o galho".
+    if (!synthetic) {
+      items.push({
+        label: "Copiar id do nó",
+        hint: "Para “Mostrar só o galho” noutro widget",
+        onSelect: () => {
+          void navigator.clipboard?.writeText(node.id).catch(() => undefined);
+        },
+      });
     }
     if (node.kind === "note" && node.refId) {
       const checkable = node.status === "aberta" || node.status === "concluída";
@@ -1035,6 +1103,7 @@ export function TreeRootView({
                 }}
                 onCancelEdit={() => setEditing(null)}
                 onNewBranch={() => startDraft(node.id)}
+                body={renderBody?.(node) ?? null}
               />
             );
           })}
@@ -1205,7 +1274,7 @@ function CardTextarea({
         ) {
           return;
         }
-        // v1.2 (01/10/2026): foco indo para o menu de contexto não salva nem
+        // v1.3 (01/10/2026): foco indo para o menu de contexto não salva nem
         // descarta — é a troca de tipo da prévia.
         if (
           e.relatedTarget instanceof Element &&
@@ -1249,7 +1318,7 @@ function DraftTile({
         KIND_TONE[draft.kind] ?? "border-muted"
       )}
       style={{ left: box.x, top: box.y, width: box.w, minHeight: box.h }}
-      // v1.2 (01/10/2026): o foco FICA na caixa de texto. Sem isso, o mousedown
+      // v1.3 (01/10/2026): o foco FICA na caixa de texto. Sem isso, o mousedown
       // (direito, no badge ou na borda) a desfocava e o blur descartava a
       // prévia vazia antes de o menu de tipo abrir. Botões seguem recebendo o
       // click — só o foco não sai.
@@ -1350,6 +1419,7 @@ function RootNodeTile({
   onCommitEdit,
   onCancelEdit,
   onNewBranch,
+  body,
 }: {
   node: TreeNode;
   box: RootBox;
@@ -1368,6 +1438,8 @@ function RootNodeTile({
   onCommitEdit: (text: string) => void;
   onCancelEdit: () => void;
   onNewBranch: () => void;
+  /** v1.2: corpo do nó operacional (null = data + progresso de sempre). */
+  body?: ReactNode | null;
 }) {
   const task = node.refId ? (actx.taskById.get(node.refId) ?? null) : null;
   const done = isCheckable(node) && isDone(node);
@@ -1481,7 +1553,12 @@ function RootNodeTile({
           {node.label}
         </button>
       )}
-      {editing ? null : (
+      {editing ? null : body ? (
+        // v1.2: indicador/plano/ritual trazem o próprio corpo.
+        <div className="min-h-0 flex-1 overflow-hidden">
+          {body}
+        </div>
+      ) : (
         <div className="mt-auto flex items-center gap-1.5">
           {node.at || task ? <NodeDate node={node} task={task} /> : null}
           <ProgressBar progress={progress} />

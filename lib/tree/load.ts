@@ -1,3 +1,7 @@
+// Versão: 1.7 | Data: 01/10/2026
+// v1.7 (01/10/2026): o mapa devolve `presetRefs` (resolve o `rootRef` do
+//   widget) e, por RITUAL (0149), as ocorrências que já viraram tarefa
+//   (`tasks.ritual_node_id`) — é com elas que o nó sabe qual é a "próxima".
 // Versão: 1.6 | Data: 30/09/2026
 // v1.6 (30/09/2026): visualização ROOT e fonte LIVRE. (a) o parse das linhas
 //   de `tree_nodes` saiu para `rows.ts` (puro, testado) e passou a devolver a
@@ -420,6 +424,10 @@ export interface TreeMapFacts {
   geometry: TreeNodeGeometry[];
   /** Ids das tarefas penduradas que a RLS deixou ver (o editor as hidrata). */
   taskIds: string[];
+  /** v1.7: `preset_key` → id lógico do nó. */
+  presetRefs: Record<string, string>;
+  /** v1.7: por nó de ritual (`note:<uuid>`), as ocorrências já criadas. */
+  ritualOccurrences: Record<string, { n: number; taskId: string; done: boolean }[]>;
 }
 
 /**
@@ -475,5 +483,39 @@ export async function loadMapTreeFacts(
       overrides.push({ nodeRef: id, parentRef: ref.parentRef });
     }
   }
-  return { facts, overrides, geometry: parsed.geometry, taskIds };
+  // v1.7 (0149): ocorrências dos rituais (concluídas inclusas — a N-ésima
+  // aconteceu uma vez na vida, e a "próxima" é a primeira que não existe).
+  const ritualIds = parsed.facts
+    .filter((f) => f.kind === "ritual" && f.refId)
+    .map((f) => f.refId as string);
+  const ritualOccurrences: TreeMapFacts["ritualOccurrences"] = {};
+  if (ritualIds.length > 0) {
+    const { data: occ } = await db
+      .from("tasks")
+      .select("id, ritual_node_id, ritual_occurrence, completed_at")
+      .in("ritual_node_id", ritualIds)
+      .not("ritual_occurrence", "is", null)
+      .limit(2000);
+    for (const t of (occ ?? []) as {
+      id: string;
+      ritual_node_id: string;
+      ritual_occurrence: number;
+      completed_at: string | null;
+    }[]) {
+      const key = `note:${t.ritual_node_id}`;
+      (ritualOccurrences[key] ??= []).push({
+        n: t.ritual_occurrence,
+        taskId: t.id,
+        done: t.completed_at != null,
+      });
+    }
+  }
+  return {
+    facts,
+    overrides,
+    geometry: parsed.geometry,
+    taskIds,
+    presetRefs: parsed.presetRefs,
+    ritualOccurrences,
+  };
 }

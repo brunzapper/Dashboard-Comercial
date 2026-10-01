@@ -1,3 +1,9 @@
+// Versão: 1.1 | Data: 01/10/2026
+// v1.1 (01/10/2026): nós OPERACIONAIS (0149). Linha própria de `kind`
+//   indicator/plan/ritual vira fato do MESMO jeito que a anotação (id
+//   `note:<uuid>`, pai e geometria na própria linha), carregando o `payload`
+//   cru; e `preset_key` alimenta `presetRefs` — é o que resolve o
+//   `rootRef: "preset:<chave>"` do widget (mostrar só um galho).
 // Versão: 1.0 | Data: 30/09/2026
 // v1.0 (30/09/2026): o PARSE das linhas de `tree_nodes`, extraído do loader
 //   para ser puro e testável — e porque agora há dois loaders (registro e mapa
@@ -17,7 +23,7 @@
 //     derivado, e a linha seria redundante.
 //
 // Módulo PURO e client-safe.
-import { TREE_NODE_KIND_LABELS } from "./model";
+import { TREE_NODE_KIND_LABELS, TREE_OWN_ROW_KINDS } from "./model";
 import type {
   TreeDirection,
   TreeFact,
@@ -41,11 +47,14 @@ export interface TreeNodeRow {
   direction?: string | null;
   status?: string | null;
   is_goal?: boolean | null;
+  /** v1.1 (0149): payload do nó operacional e identidade do seed. */
+  payload?: unknown;
+  preset_key?: string | null;
 }
 
 /** As colunas que os loaders pedem — um lugar só, para as duas leituras. */
 export const TREE_NODE_COLUMNS =
-  "id, kind, ref_id, node_ref, parent_ref, label, body, position, created_at, offset_x, offset_y, direction, status, is_goal";
+  "id, kind, ref_id, node_ref, parent_ref, label, body, position, created_at, offset_x, offset_y, direction, status, is_goal, payload, preset_key";
 
 /** Uma tarefa que a linha pendura num mapa (hidratada pelo loader). */
 export interface TreeMapTaskRef {
@@ -63,6 +72,8 @@ export interface ParsedTreeRows {
   geometry: TreeNodeGeometry[];
   /** Tarefas de mapa a hidratar (só no escopo livre). */
   mapTasks: TreeMapTaskRef[];
+  /** v1.1: `preset_key` → id lógico do nó (`note:<uuid>`). */
+  presetRefs: Record<string, string>;
 }
 
 const day = (v: unknown): string =>
@@ -104,6 +115,7 @@ export function parseTreeNodeRows(
     overrides: [],
     geometry: [],
     mapTasks: [],
+    presetRefs: {},
   };
   for (const row of rows) {
     const parent = parentOf(row.parent_ref);
@@ -133,14 +145,17 @@ export function parseTreeNodeRows(
       continue;
     }
 
-    if (row.kind !== "note") continue;
+    if (!(TREE_OWN_ROW_KINDS as readonly string[]).includes(row.kind)) continue;
+    const kind = row.kind as (typeof TREE_OWN_ROW_KINDS)[number];
     const id = `note:${row.id}`;
-    const checkable = row.status === "pendente" || row.status === "concluida";
+    if (row.preset_key) out.presetRefs[row.preset_key] = id;
+    const checkable =
+      kind === "note" && (row.status === "pendente" || row.status === "concluida");
     out.facts.push({
       id,
-      kind: "note",
+      kind,
       at: day(row.created_at),
-      label: row.label?.trim() || TREE_NODE_KIND_LABELS.note,
+      label: row.label?.trim() || TREE_NODE_KIND_LABELS[kind],
       body: row.body ?? null,
       refId: row.id,
       // Mesmo vocabulário das tarefas: a Root soma as duas no progresso.
@@ -150,6 +165,8 @@ export function parseTreeNodeRows(
           : "aberta"
         : null,
       goal: row.is_goal === true,
+      // v1.1: o payload cru — o card parseia (fail-closed) pelo tipo.
+      ...(kind !== "note" && row.payload != null ? { payload: row.payload } : {}),
     });
     // O pai da anotação mora na própria linha. '-' = raiz explícita (criada
     // na raiz da Root); vazio = segue a forma (no acompanhamento, pendura na

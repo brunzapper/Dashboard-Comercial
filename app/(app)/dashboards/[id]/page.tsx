@@ -1,6 +1,9 @@
-// Versão: 3.4 | Data: 03/08/2026
+// Versão: 3.5 | Data: 01/10/2026
 // Página de um dashboard: computa os dados de cada widget (server, via RLS) e
 // entrega ao shell client (grid + charts). Fase 6A.
+// v3.5 (01/10/2026): Tabela de metas ('metas', 0149) e Tree ficam FORA do lote
+//   de engine (actions próprias); a Tabela de metas ganha fingerprint de escopo
+//   (deferredScopeById) para re-buscar quando período/config mudam.
 // v3.4 (03/08/2026): Ponteiro Laser — carrega user_settings (loadUserSettings,
 //   React cache) e entrega laserColor (resolveLaserColor) ao DashboardClient.
 // v3.3 (31/07/2026): fingerprint deferido ganha a CONFIG do widget
@@ -967,6 +970,10 @@ export default async function DashboardPage({
   // Kanban e Agenda: também DEFERIDOS (fetch no cliente, padrão Tabela Livre).
   const isKanbanWidget = (w: Widget) => w.visual_type === "kanban";
   const isAgendaWidget = (w: Widget) => w.visual_type === "agenda";
+  // v3.5 (01/10/2026): Tabela de metas (runGoalTable) e Tree (tree-actions)
+  // buscam pelos próprios caminhos — fora do lote de engine.
+  const isGoalTableWidget = (w: Widget) => w.visual_type === "metas";
+  const isTreeWidget = (w: Widget) => w.visual_type === "tree";
   // Deferimento automático dos widgets de ENGINE (26/07/2026): gráfico/KPI/
   // card/pizza/funil/tabela agregada/calculado/calculadora/nota saem do
   // caminho crítico do RSC — o DashboardClient os busca em LOTE via
@@ -979,7 +986,9 @@ export default async function DashboardPage({
     !isListWidget(w) &&
     !isQuickTableWidget(w) &&
     !isKanbanWidget(w) &&
-    !isAgendaWidget(w);
+    !isAgendaWidget(w) &&
+    !isGoalTableWidget(w) &&
+    !isTreeWidget(w);
 
   // Fingerprint de ESCOPO dos widgets deferidos (Tabela Livre/kanban/engine):
   // o effect do cliente re-busca quando período/filtros EFETIVOS mudam —
@@ -994,6 +1003,8 @@ export default async function DashboardPage({
     if (
       !isQuickTableWidget(w) &&
       !isKanbanWidget(w) &&
+      !isGoalTableWidget(w) &&
+      !isTreeWidget(w) &&
       !isEngineDeferredWidget(w)
     ) {
       continue;

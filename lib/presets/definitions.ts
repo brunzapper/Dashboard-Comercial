@@ -1,4 +1,17 @@
-// Versão: 2.1 | Data: 31/07/2026
+// Versão: 2.2 | Data: 01/10/2026
+// v2.2 (01/10/2026): seções de DADOS de org (0149), no mesmo regime das seções
+//   de org da v2.1 (SÓ o caminho de fábrica — `allowOrgSections`; o import/IA
+//   segue incapaz de criá-las) e todas ENSURE-IF-ABSENT — nunca sobrescrevem o
+//   que foi editado depois do apply:
+//   - `indicators` (catálogo de Indicadores, por key);
+//   - `goals` (metas mês × indicador, global ou por responsável — só insere
+//     onde não há linha explícita; `ensureGoalTarget`);
+//   - `manualFamilies`/`manualSeries` (Base manual, pelos choke points dela;
+//     sem lançamentos — realizado é dado);
+//   - `maps` (mapa livre da Tree, nós por `preset_key`; nó movido/editado
+//     nunca é tocado de novo).
+//   Executor em lib/presets/data-sections.ts. Isto AMENDA a regra antiga
+//   "Metas não são deps de preset": um preset de METAS é justamente o caso.
 // Definições declarativas dos dashboards preset (Fase 6B) + campos de apoio.
 // v2.1 (31/07/2026): seções de ORG opcionais — operations (árvore ensure-by-
 //   name) e compPlans (planos de remuneração ensure por config.presetKey) —
@@ -40,6 +53,11 @@ import type { SourceKey } from "@/lib/sources";
 import type { DataType } from "@/lib/records/types";
 import type { Formula } from "@/lib/records/formulas";
 import type { CompPlanConfig } from "@/lib/comp/model";
+import type {
+  IndicatorDirection,
+  IndicatorRollup,
+  IndicatorUnit,
+} from "@/lib/indicators/model";
 
 export interface PresetField {
   field_key: string;
@@ -133,6 +151,69 @@ export interface PresetCompPlan {
   config: Omit<CompPlanConfig, "memberIds" | "memberOperationIds" | "presetKey">;
 }
 
+// ---- v2.2 (01/10/2026): seções de DADOS (0149) ----------------------------
+
+/** Indicador do catálogo (ensure por key). */
+export interface PresetIndicator {
+  key: string;
+  label: string;
+  description?: string;
+  unit: IndicatorUnit;
+  rollup?: IndicatorRollup;
+  direction?: IndicatorDirection;
+  tolerancePct?: number;
+  /** Dono por NOME (display_name); não resolvido = aviso, dono vazio. */
+  ownerName?: string;
+  /** Fórmula do realizado; ausente = só meta (premissa). */
+  realized?: { formula: Formula; sources: SourceKey[]; filters?: WidgetFilter[] };
+  sortOrder?: number;
+}
+
+/** Meta mensal (ensure-if-absent: linha explícita existente nunca muda). */
+export interface PresetGoal {
+  indicator: string;
+  year: number;
+  month: number;
+  target: number;
+  /** Ausente = meta global; presente = meta do responsável (por nome). */
+  responsibleName?: string;
+}
+
+export interface PresetManualFamily {
+  key: string;
+  label: string;
+  members: { key: string; label: string }[];
+}
+
+export interface PresetManualSeries {
+  key: string;
+  label: string;
+  /** Famílias declaradas (opt-in do modelo de níveis, 0143). */
+  families?: string[];
+}
+
+/** Nó do mapa livre da Tree, identificado por `key` (vira `preset_key`). */
+export interface PresetMapNode {
+  key: string;
+  parentKey?: string;
+  kind: "note" | "indicator" | "plan" | "ritual";
+  label: string;
+  body?: string;
+  /** Só anotação: etapa a concluir. */
+  status?: "pendente" | "concluida";
+  /** Só anotação: o Resultado esperado. */
+  goal?: boolean;
+  direction?: "h" | "v";
+  /** Indicador/plano/ritual — parseado por lib/tree/payload.ts. */
+  payload?: unknown;
+}
+
+export interface PresetMap {
+  mapKey: string;
+  /** Pais ANTES dos filhos. */
+  nodes: PresetMapNode[];
+}
+
 export interface PresetDashboard {
   presetKey: string; // identidade estável (dashboards.settings.preset.key)
   version: number; // bump a cada mudança relevante (auditoria/futuro diff)
@@ -159,6 +240,12 @@ export interface PresetDashboard {
   // applyPreset/generatePresets o barram/pulam quando o feature da org está
   // desligado (os dois caminhos são alcançáveis por action direta).
   requiresFeature?: import("@/lib/config/org-features").OrgFeatureKey;
+  // v2.2 (01/10/2026): seções de DADOS (só fábrica; ensure-if-absent).
+  indicators?: PresetIndicator[];
+  goals?: PresetGoal[];
+  manualFamilies?: PresetManualFamily[];
+  manualSeries?: PresetManualSeries[];
+  maps?: PresetMap[];
   widgets: PresetWidget[];
 }
 
@@ -198,6 +285,8 @@ export const PRESET_FIELDS: PresetField[] = [
 import { INBOUND_PRESET } from "./inbound";
 import { OUTBOUND_PRESET } from "./outbound";
 import { REMUNERACAO_VARIAVEL_PRESET } from "./remuneracao-variavel";
+// v2.2 (01/10/2026): Metas e desdobramentos 4T26 (seções de dados).
+import { METAS_4T26_PRESET } from "./comercial-metas-4t26";
 
 // Filtros reutilizáveis
 const closedThisMonth: WidgetFilter[] = [
@@ -214,6 +303,7 @@ export const PRESETS: PresetDashboard[] = [
   INBOUND_PRESET,
   OUTBOUND_PRESET,
   REMUNERACAO_VARIAVEL_PRESET,
+  METAS_4T26_PRESET,
   {
     presetKey: "performance_mes",
     version: 1,

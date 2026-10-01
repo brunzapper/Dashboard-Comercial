@@ -1,3 +1,6 @@
+// Versão: 1.3 | Data: 01/10/2026
+// v1.3 (01/10/2026): Tabela de metas (visual_type 'metas', 0149) fora dos
+//   widgets de engine do snapshot (o card exibe aviso no link público).
 // Versão: 1.2 | Data: 26/07/2026
 // v1.2 (26/07/2026): agrupamento de responsáveis (0101) — as opções de
 //   responsável congeladas colapsam apelidos no principal (mesma lista da
@@ -213,7 +216,10 @@ async function doRefresh(
       w.visual_type !== "imagem" &&
       // "Base do Dashboard" (0142) é uma GRADE DE EDIÇÃO da Base manual, não
       // um recorte de registros: sem métrica, o RPC recusaria o SELECT vazio.
-      w.visual_type !== "base_manual"
+      w.visual_type !== "base_manual" &&
+      // v1.3 (01/10/2026): Tabela de metas (0149) — lê metas/indicadores por
+      // action com sessão; no link público não há o que computar.
+      w.visual_type !== "metas"
   );
   const fieldFilterWidgets = tabWidgets.filter(
     (w) => w.visual_type === "filtro_campo"

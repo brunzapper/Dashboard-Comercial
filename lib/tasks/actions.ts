@@ -1,4 +1,10 @@
-// Versão: 1.2 | Data: 10/09/2026
+// Versão: 1.4 | Data: 01/10/2026
+// v1.4 (01/10/2026): `createTask` aceita a OCORRÊNCIA DE RITUAL (0149) —
+//   `ritual_node_id` + `ritual_occurrence` no FormData. O nó tem de ser um
+//   ritual visível (RLS de tree_nodes); 23505 no índice
+//   `uq_tasks_ritual_occurrence` volta como `duplicate` ("já agendada"),
+//   nunca como falha genérica. É o MESMO choke point da criação — o
+//   "Agendar próxima" da Tree não escreve em `tasks` por fora.
 // v1.3 (11/09/2026): `snoozeRecordSeries` — ADIAR a sequência até um dia, em
 //   vez de encerrá-la. "O cliente pediu para contactar no fim de outubro" não é
 //   o mesmo que "parei de acompanhar este registro", e até aqui só havia a
@@ -52,6 +58,8 @@ export interface TaskActionState {
   ok?: boolean;
   message?: string;
   id?: string;
+  /** v1.4 (01/10/2026): a ocorrência de ritual já existia (23505). */
+  duplicate?: boolean;
 }
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -197,11 +205,32 @@ export async function createTask(
     session.roles.includes("admin") || session.roles.includes("gestor");
   const isGlobal = isManager && String(formData.get("is_global") ?? "") === "1";
 
+  // v1.4 (01/10/2026): ocorrência de RITUAL (0149). Só com o par completo e
+  // um nó `ritual` que a RLS deixa ver — senão o campo é ignorado em silêncio
+  // seria pior: a tarefa nasceria sem trava e o botão duplicaria.
+  const ritualNodeId = cleanStr(formData.get("ritual_node_id"), 40) || null;
+  const ritualOccRaw = cleanStr(formData.get("ritual_occurrence"), 10);
+  let ritual: { ritual_node_id: string; ritual_occurrence: number } | null = null;
+  if (ritualNodeId) {
+    const occ = Number(ritualOccRaw);
+    if (!Number.isInteger(occ) || occ < 0)
+      return { ok: false, message: "Ocorrência do ritual inválida." };
+    const { data: node } = await supabase
+      .from("tree_nodes")
+      .select("id")
+      .eq("id", ritualNodeId)
+      .eq("kind", "ritual")
+      .maybeSingle();
+    if (!node) return { ok: false, message: "Ritual não encontrado." };
+    ritual = { ritual_node_id: ritualNodeId, ritual_occurrence: occ };
+  }
+
   // Carimbo de org (multi-org, 0090).
   const orgId = await getActiveOrgId();
   const { data, error } = await supabase
     .from("tasks")
     .insert({
+      ...(ritual ?? {}),
       ...(orgId ? { organization_id: orgId } : {}),
       title: parsed.title,
       description: parsed.description,
@@ -223,7 +252,12 @@ export async function createTask(
     })
     .select("id")
     .single();
-  if (error) return { ok: false, message: `Falha ao criar: ${error.message}` };
+  if (error) {
+    // v1.4: a N-ésima ocorrência do ritual já existe — o pedido já foi feito.
+    if (ritual && error.code === "23505")
+      return { ok: false, duplicate: true, message: "Esta ocorrência do ritual já foi agendada." };
+    return { ok: false, message: `Falha ao criar: ${error.message}` };
+  }
   await emitWebhookEvent(
     "task.created",
     {

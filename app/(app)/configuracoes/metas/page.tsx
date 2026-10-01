@@ -1,5 +1,9 @@
-// Versão: 1.1 | Data: 20/07/2026
+// Versão: 1.2 | Data: 01/10/2026
 // Tela de Metas (admin) — Fase 6B.
+// v1.2 (01/10/2026): seção "Indicadores" (0149) — o catálogo que explica cada
+// chave de meta (unidade, total, direção, dono, fórmula do realizado). O
+// catálogo do editor de fórmula sai das MESMAS fontes que o servidor usa para
+// validar (lib/indicators/validate.ts).
 // v1.1 (20/07/2026): seção "Dias não úteis" (non_working_days, 0081) —
 // calendário global consumido pelos utilitários de dia útil.
 import { createClient } from "@/lib/supabase/server";
@@ -9,6 +13,14 @@ import { GoalsManager, type GoalRow } from "@/components/admin/goals-manager";
 import { NonWorkingDaysManager } from "@/components/configuracoes/non-working-days-manager";
 import { loadNonWorkingDayRows } from "@/lib/config/non-working-days";
 import { loadGoalMetrics } from "@/lib/config/goal-metrics";
+import { getActiveOrgId } from "@/lib/auth/org";
+import { loadSources } from "@/lib/config/sources";
+import { loadCorrespondences } from "@/lib/correspondences";
+import { loadIndicators } from "@/lib/indicators/load";
+import { loadManualAxes, loadManualSeries } from "@/lib/manual-base/load";
+import type { FieldDefinition } from "@/lib/records/types";
+import { buildAvailableFields } from "@/lib/widgets/fields";
+import { IndicatorsManager } from "@/components/admin/indicators-manager";
 
 // Título da aba (template do layout completa "— {appName}").
 export const metadata = { title: "Metas" };
@@ -16,6 +28,7 @@ export const metadata = { title: "Metas" };
 export default async function MetasPage() {
   await requireSettingsArea("metas");
   const supabase = await createClient();
+  const orgId = await getActiveOrgId();
 
   const [
     { data: goalsData },
@@ -23,6 +36,12 @@ export default async function MetasPage() {
     { data: resps },
     nonWorkingDays,
     goalMetrics,
+    indicators,
+    sources,
+    correspondences,
+    { data: fieldsData },
+    manualSeries,
+    manualAxes,
   ] =
     await Promise.all([
       supabase
@@ -36,7 +55,19 @@ export default async function MetasPage() {
       supabase.from("responsibles").select("id, display_name").eq("active", true).order("display_name"),
       loadNonWorkingDayRows(supabase),
       loadGoalMetrics(supabase),
+      // v1.2 (01/10/2026): catálogo de indicadores + insumos do editor.
+      loadIndicators(supabase, orgId),
+      loadSources(supabase, orgId),
+      loadCorrespondences(supabase, orgId),
+      supabase
+        .from("field_definitions")
+        .select(
+          "field_key, label, data_type, formula, applies_to, currency_code, currency_mode, allow_negative, show_as_percent, options"
+        ),
+      loadManualSeries(supabase, orgId),
+      loadManualAxes(supabase, orgId),
     ]);
+  const allFields = (fieldsData ?? []) as FieldDefinition[];
 
   const goals: GoalRow[] = (goalsData ?? []).map((g) => ({
     id: g.id as string,
@@ -68,6 +99,18 @@ export default async function MetasPage() {
           Na leitura, elas se comunicam por roll-up (responsáveis → operação → global).
         </p>
       </div>
+      <IndicatorsManager
+        indicators={indicators}
+        responsibles={responsibles}
+        catalog={{
+          available: buildAvailableFields(allFields, correspondences, sources),
+          allFields,
+          sources,
+          metrics: goalMetrics,
+          manualSeries,
+          manualAxes,
+        }}
+      />
       <GoalsManager
         goals={goals}
         operations={operations}

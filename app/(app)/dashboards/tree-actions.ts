@@ -1,4 +1,17 @@
-// Versão: 1.11 | Data: 01/10/2026
+// Versão: 1.12 | Data: 01/10/2026
+// v1.12 (01/10/2026): nós OPERACIONAIS (0149) e o galho por widget.
+//   (a) `loadMapTree(mapKey, { rootRef })` devolve só o GALHO a partir de um
+//       nó (`preset:<chave>` ou o id lógico) — cada slide mostra o galho dele
+//       do MESMO mapa; nó sumido cai na árvore inteira com `rootMissing`;
+//   (b) `createTreeNode`/`updateTreeNode` — indicador, plano de ação e ritual,
+//       linhas próprias (payload re-parseado no servidor, fail-closed), só no
+//       mapa livre;
+//   (c) `scheduleRitualOccurrence` — "Agendar próxima": a ocorrência é
+//       DERIVADA do calendário (lib/rituals/cadence.ts) e a tarefa nasce pelo
+//       `createTask` de sempre (com a trava `uq_tasks_ritual_occurrence`),
+//       pendurada no ritual por `attachTaskToMap`;
+//   (d) `writeNodeRow` aceita os tipos de linha própria (`TREE_OWN_ROW_KINDS`)
+//       — arrastar/geometria funcionam igual para a anotação e os novos.
 // v1.11 (01/10/2026): `convertTreeNote` — a branch nasce como ANOTAÇÃO e o
 //   clique direito a converte em comentário ou tarefa. Cada item nasce pelo
 //   choke point dono dele (`createComment`/`createTask` — invariante 25), herda
@@ -111,6 +124,14 @@ import {
   type BulkItemResult,
 } from "@/lib/kanban/bulk-helpers";
 import { deriveTree } from "@/lib/tree/derive";
+import { subtreeAt } from "@/lib/tree/path";
+import { parseNodePayload, parseRitualPayload } from "@/lib/tree/payload";
+import { nextOpenOccurrence } from "@/lib/rituals/cadence";
+import { loadNonWorkingDays } from "@/lib/config/non-working-days";
+import {
+  loadResponsibleNameIndex,
+  responsibleIdForName,
+} from "@/lib/config/responsible-names";
 import { loadMapTreeFacts, loadRecordTreeFacts } from "@/lib/tree/load";
 import { TREE_WINDOW_STEP, type TreeWindow } from "@/lib/tree/load";
 import type { TreeSeriesInfo } from "@/lib/tree/load";
@@ -125,6 +146,7 @@ import {
   type TreeNode,
   type TreeNodeGeometry,
   type TreeScope,
+  TREE_OWN_ROW_KINDS,
 } from "@/lib/tree/model";
 import { TASK_COLS_WITH_RECORD, type TaskRow } from "@/lib/tasks/types";
 import type { OptionItem } from "@/lib/records/types";
@@ -164,6 +186,10 @@ export interface TreeData {
   canConfigureSeries: boolean;
   /** v1.10: a geometria da Root (offset e direção por nó). */
   geometry: TreeNodeGeometry[];
+  /** v1.12 (0149): por ritual, as ocorrências que já viraram tarefa. */
+  ritualOccurrences?: Record<string, { n: number; taskId: string; done: boolean }[]>;
+  /** v1.12: o `rootRef` pedido não existe mais — exibindo o mapa inteiro. */
+  rootMissing?: boolean;
   message?: string;
 }
 
@@ -303,7 +329,11 @@ export async function loadRecordTree(
  * registro. É onde um planejamento ou uma rotina mora. Sempre na forma
  * `livre`: só o parentesco que alguém desenhou.
  */
-export async function loadMapTree(mapKey: string): Promise<TreeData> {
+export async function loadMapTree(
+  mapKey: string,
+  // v1.12 (01/10/2026): só o galho a partir deste nó.
+  opts: { rootRef?: string | null } = {}
+): Promise<TreeData> {
   const session = await getSessionInfo();
   if (!session) return { ...EMPTY, message: "Sessão expirada." };
   const key = normalizeMapKey(mapKey);
@@ -330,13 +360,23 @@ export async function loadMapTree(mapKey: string): Promise<TreeData> {
           .in("id", facts.taskIds)
       : { data: [] };
 
+  const all = deriveTree({
+    facts: facts.facts,
+    layout: "livre",
+    overrides: facts.overrides,
+  });
+  // v1.12: o galho pedido — `preset:<chave>` resolve pelo seed do preset.
+  const rootRef = (opts.rootRef ?? "").trim();
+  const rootId = rootRef.startsWith("preset:")
+    ? (facts.presetRefs[rootRef.slice("preset:".length)] ?? null)
+    : rootRef || null;
+  const cut = rootId ? subtreeAt(all, rootId) : null;
   return {
     ...EMPTY,
-    nodes: deriveTree({
-      facts: facts.facts,
-      layout: "livre",
-      overrides: facts.overrides,
-    }),
+    nodes: cut ?? all,
+    rootMissing: rootRef !== "" && cut == null,
+    ritualOccurrences: facts.ritualOccurrences,
+    canConfigureSeries: session.roles.includes("admin"),
     tasks: (taskRows ?? []) as unknown as TaskRow[],
     responsibles: (resps ?? []).map((r) => ({
       id: r.id as string,
@@ -614,9 +654,10 @@ async function writeNodeRow(
       .eq("scope_kind", where.scope_kind)
       .eq("scope_id", where.scope_id)
       .is("node_ref", null);
+    // v1.12: linha PRÓPRIA = anotação ou nó operacional (0149).
     q =
       target.kind === "note"
-        ? q.eq("id", target.id).eq("kind", "note")
+        ? q.eq("id", target.id).in("kind", [...TREE_OWN_ROW_KINDS])
         : q.eq("ref_id", target.taskId).eq("kind", "task");
     const { data, error } = await q.select("id");
     if (error) return { ok: false, message: `Falha ao salvar: ${error.message}` };
@@ -1034,4 +1075,168 @@ export async function convertTreeNote(
 
   if (opts.revalidate !== false) revalidatePath("/dashboards");
   return { ok: true, nodeId: newRef };
+}
+
+// ============================================================================
+// v1.12 (01/10/2026): nós OPERACIONAIS (0149) — indicador, plano de ação e
+// ritual. Linhas próprias de `tree_nodes` (id lógico `note:<uuid>`), só no
+// mapa LIVRE. O payload é RE-PARSEADO aqui pela mesma régua do cliente
+// (lib/tree/payload.ts): o cliente nunca grava jsonb cru.
+// ============================================================================
+
+export type OperationalNodeKind = "indicator" | "plan" | "ritual";
+
+function isOperationalKind(v: unknown): v is OperationalNodeKind {
+  return v === "indicator" || v === "plan" || v === "ritual";
+}
+
+export async function createTreeNode(
+  scopeRaw: TreeScope,
+  input: {
+    kind: OperationalNodeKind;
+    parentRef: string | null;
+    label: string;
+    body?: string | null;
+    payload: unknown;
+  },
+  opts: { revalidate?: boolean } = {}
+): Promise<TreeActionState & { nodeId?: string }> {
+  if (!isOperationalKind(input.kind)) return { ok: false, message: "Tipo de nó inválido." };
+  const reason = branchKindDisabledReason(input.kind, (scopeRaw as TreeScope)?.kind ?? "record");
+  if (reason) return { ok: false, message: reason };
+  const label = String(input.label ?? "").trim().slice(0, NOTE_LABEL_MAX);
+  if (!label) return { ok: false, message: "Dê um nome ao nó." };
+  if (input.parentRef != null && !isTreeNodeRef(input.parentRef)) {
+    return { ok: false, message: "Nó inválido." };
+  }
+  const payload = parseNodePayload(input.kind, input.payload);
+  if (!payload) return { ok: false, message: "Configuração do nó incompleta." };
+  const ctx = await treeWriteContext(scopeRaw);
+  if (!ctx.ok) return { ok: false, message: ctx.message };
+  const body = input.body ? String(input.body).slice(0, NOTE_BODY_MAX) : null;
+  const { data, error } = await ctx.supabase
+    .from("tree_nodes")
+    .insert({
+      organization_id: ctx.orgId,
+      ...scopeColumns(ctx.scope),
+      kind: input.kind,
+      parent_ref: input.parentRef ?? "-",
+      label,
+      body,
+      payload,
+      created_by: ctx.userId,
+    })
+    .select("id")
+    .single();
+  if (error || !data) {
+    return { ok: false, message: `Falha ao criar o nó: ${error?.message ?? ""}` };
+  }
+  if (opts.revalidate !== false) revalidatePath("/dashboards");
+  return { ok: true, nodeId: `note:${data.id as string}` };
+}
+
+export async function updateTreeNode(
+  nodeId: string,
+  patch: { kind: OperationalNodeKind; label?: string; body?: string | null; payload?: unknown },
+  opts: { revalidate?: boolean } = {}
+): Promise<TreeActionState> {
+  const session = await getSessionInfo();
+  if (!session) return { ok: false, message: "Sessão expirada." };
+  if (!refUuid(`note:${nodeId}`, "note") || !isOperationalKind(patch.kind)) {
+    return { ok: false, message: "Nó inválido." };
+  }
+  const cols: Record<string, unknown> = {};
+  if (patch.label !== undefined) {
+    const label = String(patch.label).trim().slice(0, NOTE_LABEL_MAX);
+    if (!label) return { ok: false, message: "O nome do nó não pode ficar vazio." };
+    cols.label = label;
+  }
+  if (patch.body !== undefined) {
+    cols.body = patch.body ? String(patch.body).slice(0, NOTE_BODY_MAX) : null;
+  }
+  if (patch.payload !== undefined) {
+    const payload = parseNodePayload(patch.kind, patch.payload);
+    if (!payload) return { ok: false, message: "Configuração do nó incompleta." };
+    cols.payload = payload;
+  }
+  if (Object.keys(cols).length === 0) return { ok: true };
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("tree_nodes")
+    .update(cols)
+    .eq("id", nodeId)
+    .eq("kind", patch.kind)
+    .is("node_ref", null)
+    .select("id");
+  if (error) return { ok: false, message: `Falha ao salvar: ${error.message}` };
+  if (!data || data.length === 0) {
+    return { ok: false, message: "Sem permissão para alterar este nó." };
+  }
+  if (opts.revalidate !== false) revalidatePath("/dashboards");
+  return { ok: true };
+}
+
+/**
+ * v1.12: "Agendar próxima" de um RITUAL. A ocorrência é a primeira de hoje em
+ * diante que ainda não tem tarefa (derivada do calendário — nunca um contador),
+ * e a tarefa nasce pelo choke point `createTask` com a trava
+ * `(ritual_node_id, ritual_occurrence)`. Repetir o clique é "já agendada".
+ */
+export async function scheduleRitualOccurrence(
+  mapKey: string,
+  nodeRef: string,
+  opts: { revalidate?: boolean } = {}
+): Promise<TreeActionState & { taskId?: string; dueDate?: string }> {
+  const nodeId = refUuid(nodeRef, "note");
+  if (!nodeId) return { ok: false, message: "Ritual inválido." };
+  const ctx = await treeWriteContext({ kind: "livre", mapKey });
+  if (!ctx.ok) return { ok: false, message: ctx.message };
+  const { data: row } = await ctx.supabase
+    .from("tree_nodes")
+    .select("id, label, payload")
+    .eq("id", nodeId)
+    .eq("kind", "ritual")
+    .eq("scope_kind", "livre")
+    .eq("scope_id", mapKey)
+    .maybeSingle();
+  if (!row) return { ok: false, message: "Ritual não encontrado." };
+  const payload = parseRitualPayload(row.payload);
+  if (!payload) return { ok: false, message: "Configure a cadência do ritual." };
+
+  const [{ data: occ }, holidays, names] = await Promise.all([
+    ctx.supabase
+      .from("tasks")
+      .select("ritual_occurrence")
+      .eq("ritual_node_id", nodeId)
+      .not("ritual_occurrence", "is", null),
+    loadNonWorkingDays(ctx.supabase),
+    loadResponsibleNameIndex(ctx.supabase),
+  ]);
+  const existing = new Set(
+    ((occ ?? []) as { ritual_occurrence: number }[]).map((o) => o.ritual_occurrence)
+  );
+  const next = nextOpenOccurrence(payload.schedule, todayBrasiliaIso(), existing, holidays);
+  if (!next) return { ok: false, message: "O ritual não tem mais ocorrências (fim da janela)." };
+
+  const fd = new FormData();
+  fd.set("title", String(row.label ?? "Ritual"));
+  if (payload.reading) fd.set("description", payload.reading);
+  fd.set("due_date", next.date);
+  const respId = responsibleIdForName(names, payload.responsible);
+  if (respId) fd.set("responsible_id", respId);
+  fd.set("ritual_node_id", nodeId);
+  fd.set("ritual_occurrence", String(next.n));
+  const created = await createTask({}, fd);
+  if (!created.ok || !created.id) {
+    return { ok: false, message: created.message ?? "Não foi possível agendar." };
+  }
+  const hang = await attachTaskToMap(mapKey, created.id, nodeRef, { revalidate: false });
+  if (!hang.ok) {
+    return {
+      ok: false,
+      message: `Tarefa criada, mas não foi possível pendurá-la no ritual: ${hang.message ?? ""}`,
+    };
+  }
+  if (opts.revalidate !== false) revalidatePath("/dashboards");
+  return { ok: true, taskId: created.id, dueDate: next.date };
 }

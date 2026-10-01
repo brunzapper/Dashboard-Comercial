@@ -1,4 +1,6 @@
-<!-- Versão: 1.45 | Data: 21/09/2026 -->
+<!-- Versão: 1.46 | Data: 01/10/2026 -->
+<!-- v1.46 (01/10/2026): §4.18 — preset de metas (seções de dados),
+     catálogo de Indicadores, rituais da Tree e modo Apresentar. -->
 
 ### Atualização do Workspace (0144)
 
@@ -1492,6 +1494,36 @@ carregamento do app autenticado; forçar um F5 resolve. Valor que não é
 **Fixados na barra lateral**: o alfinete nos cards do Workspace e da Operação.
 Item excluído, arquivado ou que a pessoa perdeu acesso simplesmente some da
 barra — não há o que limpar à mão.
+
+### 4.18 Metas e desdobramentos: indicadores, Tree operacional e rituais (0149, 01/10/2026)
+
+**Aplicar o preset** "Comercial — Metas e desdobramentos 4T26" em
+Configurações → Presets (admin). Ele cria, se ainda não existirem: os
+indicadores (Configurações → Metas → Indicadores), as metas de out–dez/2026
+(globais e por vendedor), os dados da Base manual (investimento por
+componente, marketing, MRR de abertura/expansão/perda), o mapa `metas-4t26` da
+Tree e o dashboard. Reaplicar não duplica nem desfaz ajustes. Responsável citado
+por nome (Bruno, Felipe, Ricardo, vendedores) que não existir aparece no
+relatório do apply — a meta dele é pulada e o indicador fica sem dono.
+
+**Realizado.** Indicadores sem fórmula (empresas prospectadas, contatos,
+vendas outbound…) mostram só a meta. Para ligar o realizado: Configurações →
+Metas → Indicadores → editar → "Calcular realizado". Investimento, marketing e
+abertura/expansão/perda de MRR vêm da Base manual — lance pela aba
+"Investimento" do dashboard ou em Registros → Base manual.
+
+**Editar metas**: na Tabela de metas com "Admin edita a meta na célula" ligado,
+clique no valor. Apagar o valor exclui a meta (nunca grava 0).
+
+**Rituais**: o nó de ritual mostra a próxima data e "Agendar próxima" (cria a
+tarefa pendurada nele). Marcar "Gerar as tarefas sozinho" passa a criar pelo
+tick das automações (`/api/kanban-automations/tick`, a cada minuto). Duas
+tarefas para a mesma ocorrência não são possíveis (índice único) — se o botão
+diz "já agendada", ela existe.
+
+**Apresentar**: botão "Apresentar" ao lado do nome do dashboard. ←/→ navegam,
+Esc sai. Abas listadas em `settings.presentation.hiddenTabs` ficam fora (o
+preset deixa a "Árvore completa" de fora).
 
 ## 5. Troubleshooting
 

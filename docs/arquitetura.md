@@ -1,4 +1,8 @@
-<!-- Versão: 1.98 | Data: 01/10/2026 -->
+<!-- Versão: 1.99 | Data: 01/10/2026 -->
+<!-- v1.99 (01/10/2026): §4.27 + invariante 42 — catálogo de Indicadores,
+     Tabela de metas, Tree operacional (indicador/plano/ritual, galho por
+     widget), rituais com ocorrência derivada, modo Apresentar e as seções de
+     DADOS do preset (0149). -->
 <!-- v1.98 (01/10/2026): §4.24 — Root v1.1: criação por RASCUNHO dentro do
      canvas (vai junto para a tela cheia), clique direito, conversão de
      anotação em comentário/tarefa pelos choke points (convertTreeNote),
@@ -6453,6 +6457,77 @@ a Base manual funciona numa organização sem IA configurada.
 manual com operando monetário funciona, porque o monetário converte para BRL,
 mas o resultado não carrega moeda do lado manual) e a Remuneração variável.
 
+### 4.27 Indicadores, Tabela de metas, Tree operacional e modo Apresentar (0149, 01/10/2026)
+
+O pedido foi levar uma apresentação de metas (N0 → N1 → N2 → N3, metas de
+outubro a dezembro, compromissos por vendedor, planos de ação, ritmo de
+acompanhamento) para DENTRO do sistema, viva e operável — e sem escrevê-la à
+mão. O que faltava eram quatro peças genéricas; o preset "Comercial — Metas e
+desdobramentos 4T26" (`lib/presets/comercial-metas-4t26.ts`) é só DADO montado
+com elas.
+
+**Catálogo de Indicadores (`indicators`, `lib/indicators/`).** `goals` sempre
+guardou só o ALVO e `goal_metrics` só `{key,label,money}`; o realizado era
+remontado em cada widget. O indicador é a EXPLICAÇÃO de uma chave de meta —
+unidade, regra de total entre meses (`soma|ultimo|media|nenhum`: MRR final é
+saldo, conversão é média), direção (CAC: menor é melhor), tolerância (o "desvio
+>5%") e a fórmula do REALIZADO. A `key` é a MESMA de `goals.metric`; o registry
+de metas passa a incluir os indicadores (`mergeGoalMetrics`), então `meta:`,
+KPI modo meta e goalLine os enxergam. O realizado só sai de
+`runCalculatedWidget` (`lib/indicators/values.ts`, molde do
+`lib/comp/engine.ts`): um mês por consulta com `monthPeriod`, escopo de
+responsável por `responsible_id eq` (o canon expande no choke point), falha
+isolada por célula ("—", nunca 0). A meta sai de `resolveGoal` — explicit-first,
+e é isso que faz "a operação segue as metas oficiais": a linha global explícita
+vence a soma dos compromissos individuais. O save valida a fórmula pelo MESMO
+catálogo agregado do construtor (`lib/indicators/validate.ts`). RPCs INTOCADAS.
+
+**Tabela de metas (`visual_type 'metas'`).** Indicador × mês com meta,
+realizado e atingimento colorido por `indicatorStatus` (mês fechado compara
+cheio; mês corrente compara pro-rata por DIA ÚTIL; custo e percentual não
+prorrateiam). Os meses são os do período do painel (ou fixos). Escopo SEMPRE
+pelo widget-scope (`runGoalTable`, invariante 12); régua única de saneamento em
+`lib/widgets/goal-table.ts` (action, builder e import da IA). A célula editável
+grava por `upsertGoalTarget`/`deleteGoalTarget` — vazia EXCLUI a meta. Fora do
+lote de engine (como a Tree) e do snapshot público (lê por action com sessão).
+
+**Tree operacional.** Três nós novos no MAPA LIVRE — `indicator`, `plan`
+(5W2H) e `ritual` —, linhas próprias de `tree_nodes` endereçadas como
+`note:<uuid>` (arrastar, geometria, re-pendurar e excluir funcionam sem
+roteamento novo); `payload` jsonb com parse FAIL-CLOSED em
+`lib/tree/payload.ts`, re-parseado no servidor. O nó de indicador lê os
+números por `loadTreeIndicatorValues` (widget-scope + o MESMO dono da Tabela) e,
+com operador e filhos indicadores, mostra o PROJETADO (`combineChildren`: 31
+vendas × R$ 1.000 contra a meta oficial de R$ 30.220; percentual entra como
+fração). `TreeSettings.rootRef` mostra só o GALHO a partir de um nó
+(`preset:<chave>` ou o id lógico; `subtreeAt`) — uma árvore, várias vistas: cada
+slide mostra o galho dele do mesmo mapa. O cartão da Root tem tamanho por nó
+(`layoutRoot` com `sizeOf`; ausente = byte-idêntico).
+
+**Rituais (`lib/rituals/`).** Rotina sem registro (as séries da 0132 exigem
+registro). A ocorrência é DERIVADA do calendário (`cadence.ts`: dia útil,
+semanal, mensal/último dia útil, a cada N dias) e a trava é o índice
+`uq_tasks_ritual_occurrence (ritual_node_id, ritual_occurrence)` — sem
+`completed_at is null`, como a 0132. Padrão "Agendar próxima": o
+`createTask` (choke point) recebe `ritual_node_id`/`ritual_occurrence` e
+devolve `duplicate` no 23505; a tarefa é pendurada no ritual por
+`attachTaskToMap`. Opt-in `auto`: `runTreeRituals` no tick das automações,
+service role com org explícita, nunca retroativo, 23505 = no-op.
+
+**Modo Apresentar.** Cada ABA vira um slide, em tela cheia, com o painel VIVO
+(`presentation-mode.tsx`; regra pura em `lib/dashboards/presentation.ts`). A
+troca de slide é a MESMA troca de aba (`selectTabSafe` → `?tab=`).
+`DashboardSettings.presentation.hiddenTabs` deixa abas de trabalho fora.
+Efêmero.
+
+**Seções de DADOS do preset (`lib/presets/data-sections.ts`).** `indicators`,
+`goals`, `manualFamilies`/`manualSeries` e `maps` — SÓ no caminho de fábrica
+(`allowOrgSections`), todas ensure-if-absent: indicador por key, meta só onde
+não há linha explícita (`ensureGoalTarget`), Base manual pelos choke points
+dela, nó de mapa por `tree_nodes.preset_key`. Reaplicar nunca desfaz um ajuste.
+Isto AMENDA a regra antiga "metas não são deps de preset": um preset de METAS é
+exatamente o caso.
+
 ## 5. Invariantes críticas (NÃO QUEBRAR)
 
 Estas regras já causaram ou causariam bugs graves e silenciosos. Elas também estão
@@ -7159,6 +7234,17 @@ principalmente — para mantenedores humanos.
     não se sabe. E o cruzamento dado × família é conferido no VALIDADOR de
     import (aviso, nunca erro), porque "a família existe" e "o dado existe",
     checados em separado, deixavam passar o widget que nasce vazio.
+
+42. **Indicador é a explicação de uma chave de meta, e o realizado só sai do
+    ENGINE (0149, §4.27).** `indicators.key` = `goals.metric`; o realizado é
+    `runCalculatedWidget` por mês (nunca RPC novo, nunca um caminho paralelo de
+    consulta) e a meta é `resolveGoal` (explicit-first). Tabela de metas e nós
+    de indicador leem pelo widget-scope e pelo dono único
+    `resolveIndicatorValues`. Célula de meta vazia EXCLUI a linha. Ritual tem
+    ocorrência DERIVADA e trava por ocorrência (`uq_tasks_ritual_occurrence`,
+    sem `completed_at is null`). Nó operacional da Tree é linha própria
+    (`note:<uuid>`) com payload re-parseado no servidor. Seções de dados de
+    preset são ensure-if-absent e SÓ do caminho de fábrica.
 
 ## 6. Convenções do projeto
 

@@ -1,3 +1,5 @@
+// Versão: 1.2 | Data: 01/10/2026
+// v1.2 (01/10/2026): ícone do tipo 'metas' (Tabela de metas, Target).
 // Versão: 1.1 | Data: 25/07/2026
 // v1.1 (25/07/2026): ícone do novo tipo 'linha_divisoria' (Minus).
 // Flyout do "Inserir ▸" do menu de contexto do grid: TODOS os tipos de widget
@@ -29,6 +31,7 @@ import {
   Table,
   Table2,
   type LucideIcon,
+  Target,
 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
@@ -56,6 +59,8 @@ const TYPE_ICONS: Record<VisualType, LucideIcon> = {
   agenda: CalendarDays,
   tree: GitBranch,
   base_manual: PencilLine,
+  // v1.2 (01/10/2026): Tabela de metas (0149).
+  metas: Target,
 };
 
 // Busca sem acento/caixa ("metrica" acha "Métrica calculada").

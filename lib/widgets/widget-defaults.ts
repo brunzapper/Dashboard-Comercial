@@ -1,3 +1,5 @@
+// Versão: 1.3 | Data: 01/10/2026
+// v1.3 (01/10/2026): defaults do tipo 'metas' (Tabela de metas, 0149).
 // Versão: 1.2 | Data: 25/07/2026
 // v1.2 (25/07/2026): tamanhos no espaço FINO do grid (base 120, ×10−1/×4−1 —
 //   lib/widgets/grid-space): 6×8 → 59×31 etc. O −1 preserva o vão de 1 célula
@@ -65,6 +67,8 @@ export const DEFAULT_WIDGET_SIZE: Record<VisualType, { w: number; h: number }> =
     tree: { w: 59, h: 43 },
     // Grade de lançamentos: larga (uma coluna por dado) e de altura média.
     base_manual: { w: 79, h: 31 },
+    // v1.3 (01/10/2026): Tabela de metas — larga (meses) e média.
+    metas: { w: 79, h: 31 },
   };
 
 // Tipos que exigem configuração para mostrar algo útil: a criação rápida abre
@@ -95,6 +99,8 @@ export const WIDGET_NEEDS_CONFIG: Record<VisualType, boolean> = {
   // Auto-suficiente: a grade já nasce útil com todos os dados da Base manual,
   // e é editada dentro do próprio card (molde da Nota/Tabela Livre).
   base_manual: false,
+  // v1.3: precisa escolher os indicadores.
+  metas: true,
 };
 
 // Tipos consultados pelo engine (run_widget_query): precisam de ≥1 métrica —

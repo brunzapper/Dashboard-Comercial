@@ -1,0 +1,550 @@
+// Versão: 1.0 | Data: 01/10/2026
+// Preset "Comercial — Metas e desdobramentos 4T26" (0149): a apresentação de
+// metas do 4º trimestre de 2026 montada com as PEÇAS do sistema — nada de
+// slide escrito à mão.
+//
+//  - os NÚMEROS são dados: indicadores do catálogo (o que cada meta mede e
+//    como se calcula o realizado), metas mês a mês em `goals` (globais e por
+//    vendedor) e a Base manual para o que não vem do CRM (investimento,
+//    marketing, abertura/expansão/perda de MRR);
+//  - as ÁRVORES N0→N1→N2→N3, os PLANOS de ação e o RITMO de acompanhamento são
+//    UM mapa livre da Tree (`metas-4t26`); cada slide mostra o galho dele
+//    (`rootRef`) — editar um nó edita a apresentação inteira;
+//  - cada ABA é um slide (modo Apresentar); a aba "Árvore completa" é de
+//    trabalho e fica fora dos slides.
+//
+// Tudo ensure-if-absent (lib/presets/data-sections.ts): ajustar uma meta, um
+// nó ou um indicador depois do apply nunca é desfeito por reaplicar. Onde o
+// mapeamento no CRM é incerto (empresas prospectadas, contatos), o indicador
+// nasce SEM realizado — só meta/premissa, configurável em Configurações →
+// Metas → Indicadores.
+import type { Formula, FormulaToken } from "@/lib/records/formulas";
+import type { WidgetSettings } from "@/lib/widgets/types";
+import type {
+  PresetDashboard,
+  PresetGoal,
+  PresetIndicator,
+  PresetMapNode,
+  PresetWidget,
+} from "./definitions";
+import { INBOUND_PRESET } from "./inbound";
+import { OUTBOUND_PRESET } from "./outbound";
+
+export const METAS_4T26_KEY = "metas_4t26";
+export const METAS_4T26_MAP = "metas-4t26";
+const YEAR = 2026;
+const MONTHS = [10, 11, 12] as const;
+
+// ---- fórmulas do realizado (operandos com escopo de Base — §4.1) -----------
+const fld = (ref: string): FormulaToken => ({ kind: "field", ref });
+const op = (o: "+" | "-" | "*" | "/"): FormulaToken => ({ kind: "op", op: o });
+const num = (value: number): FormulaToken => ({ kind: "const", value });
+const LP: FormulaToken = { kind: "lparen" };
+const RP: FormulaToken = { kind: "rparen" };
+
+const MRR_VENDAS = [
+  fld("agg:sum:custom:mrr_contrato@vendas_assinadas"),
+  op("+"),
+  fld("agg:sum:mrr@vendas_site"),
+];
+const VENDAS = [fld("agg:count:*@vendas_assinadas"), op("+"), fld("agg:count:*@vendas_site")];
+const SQL = [fld("agg:count:*@sqls"), op("+"), fld("agg:count:*@clientes_lite")];
+const m = (key: string): FormulaToken => fld(`manual:${key}`);
+const f = (tokens: FormulaToken[], source: string): Formula => ({ tokens, source });
+
+const R_MRR: Formula = f(MRR_VENDAS, "[agg:sum:custom:mrr_contrato@vendas_assinadas] + [agg:sum:mrr@vendas_site]");
+const R_VENDAS: Formula = f(VENDAS, "[agg:count:*@vendas_assinadas] + [agg:count:*@vendas_site]");
+const R_TICKET: Formula = f([LP, ...MRR_VENDAS, RP, op("/"), LP, ...VENDAS, RP], "MRR das vendas ÷ vendas");
+const R_SQL: Formula = f(SQL, "[agg:count:*@sqls] + [agg:count:*@clientes_lite]");
+const R_MQL: Formula = f([fld("agg:count:*@mqls")], "[agg:count:*@mqls]");
+const R_CONV_MQL_SQL: Formula = f(
+  [LP, LP, ...SQL, RP, op("/"), fld("agg:count:*@mqls"), RP, op("*"), num(100)],
+  "SQL ÷ MQL × 100"
+);
+const R_CONV_SQL_VENDA: Formula = f(
+  [LP, LP, ...VENDAS, RP, op("/"), LP, ...SQL, RP, RP, op("*"), num(100)],
+  "vendas ÷ SQL × 100"
+);
+const R_REUNIOES: Formula = f([fld("agg:count:*@ob_rr")], "[agg:count:*@ob_rr]");
+const R_MANUAL = (key: string): Formula => f([m(key)], `[manual:${key}]`);
+const R_INVEST_PART = (member: string): Formula =>
+  f(
+    [fld(`manual:investimento_comercial@componente_investimento=${member}`)],
+    `[manual:investimento_comercial@componente_investimento=${member}]`
+  );
+const R_CAC: Formula = f(
+  [LP, m("marketing"), op("+"), m("investimento_comercial"), RP, op("/"), LP, ...VENDAS, RP],
+  "(Marketing + Comercial) ÷ clientes novos"
+);
+const R_MRR_FINAL: Formula = f(
+  [m("mrr_abertura"), op("+"), ...MRR_VENDAS, op("+"), m("mrr_expansao"), op("-"), m("mrr_perda")],
+  "abertura + novos + expansão − perda"
+);
+
+const realized = (formula: Formula) => ({ formula, sources: [] as string[] });
+
+// ---- indicadores -------------------------------------------------------------
+export const METAS_4T26_INDICATORS: PresetIndicator[] = [
+  // N0
+  { key: "mrr_final", label: "MRR final", unit: "moeda", rollup: "ultimo", ownerName: "Bruno", description: "MRR final = abertura + novos + expansão − perda.", realized: realized(R_MRR_FINAL) },
+  { key: "cac", label: "CAC (R$/cliente)", unit: "moeda", rollup: "media", direction: "menor_melhor", ownerName: "Felipe", description: "CAC = (Marketing + Comercial) ÷ clientes novos.", realized: realized(R_CAC) },
+  // N1
+  { key: "mrr_novo", label: "MRR novo (oficial)", unit: "moeda", ownerName: "Bruno", description: "Inbound + outbound. Meta global oficial; metas por vendedor são compromissos individuais.", realized: realized(R_MRR) },
+  { key: "mrr_novo_inbound", label: "MRR novo inbound", unit: "moeda", ownerName: "Bruno", description: "Vendas × ticket. Regra de venda herdada do preset Inbound (contratos assinados + vendas do site) — ajuste se os contratos incluírem outbound.", realized: realized(R_MRR) },
+  { key: "mrr_novo_outbound", label: "MRR novo outbound", unit: "moeda", ownerName: "Bruno", description: "Vendas × ticket outbound. Defina o realizado quando a venda outbound tiver marcação no CRM." },
+  { key: "investimento_comercial", label: "Investimento comercial", unit: "moeda", ownerName: "Felipe", description: "Equipe + comissões + softwares + consultorias (Base manual).", realized: realized(R_MANUAL("investimento_comercial")) },
+  { key: "clientes_novos", label: "Clientes novos", unit: "quantidade", ownerName: "Bruno", realized: realized(R_VENDAS) },
+  { key: "marketing", label: "Investimento em marketing", unit: "moeda", ownerName: "Felipe", realized: realized(R_MANUAL("marketing")) },
+  { key: "mrr_abertura", label: "MRR de abertura", unit: "moeda", rollup: "nenhum", ownerName: "Ricardo", realized: realized(R_MANUAL("mrr_abertura")) },
+  { key: "mrr_expansao", label: "MRR de expansão", unit: "moeda", ownerName: "Ricardo", realized: realized(R_MANUAL("mrr_expansao")) },
+  { key: "mrr_perda", label: "MRR perdido", unit: "moeda", direction: "menor_melhor", ownerName: "Ricardo", realized: realized(R_MANUAL("mrr_perda")) },
+  // N2
+  { key: "vendas_inbound", label: "Vendas inbound", unit: "quantidade", description: "SQL realizados × conversão.", realized: realized(R_VENDAS) },
+  { key: "ticket_inbound", label: "Ticket inbound", unit: "moeda", rollup: "media", description: "MRR novo inbound ÷ vendas.", realized: realized(R_TICKET) },
+  { key: "vendas_outbound", label: "Vendas outbound", unit: "quantidade" },
+  { key: "ticket_outbound", label: "Ticket outbound", unit: "moeda", rollup: "media" },
+  { key: "clientes_inbound", label: "Clientes inbound", unit: "quantidade", realized: realized(R_VENDAS) },
+  { key: "clientes_outbound", label: "Clientes outbound", unit: "quantidade" },
+  { key: "invest_equipe", label: "Equipe: pessoas × custo médio", unit: "moeda", realized: realized(R_INVEST_PART("equipe")) },
+  { key: "invest_comissoes", label: "Comissões: soma por contrato", unit: "moeda", realized: realized(R_INVEST_PART("comissoes")) },
+  { key: "invest_softwares", label: "Softwares: licenças × preços", unit: "moeda", realized: realized(R_INVEST_PART("softwares")) },
+  { key: "invest_consultorias", label: "Consultorias: soma dos contratos", unit: "moeda", realized: realized(R_INVEST_PART("consultorias")) },
+  // N3 — funil inbound
+  { key: "leads_inbound", label: "Leads necessários", unit: "quantidade" },
+  { key: "conv_lead_mql", label: "Conversão lead → MQL", unit: "percentual", rollup: "media" },
+  { key: "mql_inbound", label: "MQL necessários", unit: "quantidade", realized: realized(R_MQL) },
+  { key: "conv_mql_sql", label: "Conversão MQL → SQL", unit: "percentual", rollup: "media", realized: realized(R_CONV_MQL_SQL) },
+  { key: "sql_inbound", label: "SQL realizados", unit: "quantidade", realized: realized(R_SQL) },
+  { key: "conv_sql_venda", label: "Conversão SQL → venda", unit: "percentual", rollup: "media", realized: realized(R_CONV_SQL_VENDA) },
+  // N3 — funil outbound
+  { key: "empresas_mailing", label: "Empresas prospectadas (mailing)", unit: "quantidade", description: "Em média 2 pessoas por empresa em mailing." },
+  { key: "empresas_manual", label: "Empresas prospecção manual", unit: "quantidade" },
+  { key: "contatos_sucesso", label: "Contatos bem-sucedidos", unit: "quantidade" },
+  { key: "contatos_por_reuniao", label: "Contatos bem-sucedidos por reunião", unit: "numero", rollup: "media", direction: "menor_melhor" },
+  { key: "reunioes_agendar", label: "Reuniões a agendar", unit: "quantidade" },
+  { key: "comparecimento", label: "Comparecimento", unit: "percentual", rollup: "media" },
+  { key: "reunioes_realizadas", label: "Reuniões realizadas", unit: "quantidade", realized: realized(R_REUNIOES) },
+  { key: "conv_reuniao_venda", label: "Conversão reunião → venda", unit: "percentual", rollup: "media" },
+].map((ind, i) => ({ ...ind, sortOrder: (i + 1) * 10 }) as PresetIndicator);
+
+// ---- metas (Out/Nov/Dez 2026) --------------------------------------------
+const TARGETS: Record<string, readonly [number, number, number]> = {
+  mrr_final: [517591, 549278, 584639],
+  cac: [2837, 2684, 2482],
+  mrr_novo: [33820, 38650, 42750],
+  mrr_novo_inbound: [30220, 34330, 37566],
+  mrr_novo_outbound: [3600, 4320, 5184],
+  investimento_comercial: [41357, 41700, 42074],
+  clientes_novos: [33, 35, 38],
+  marketing: [52250, 52250, 52250],
+  vendas_inbound: [31, 33, 35],
+  ticket_inbound: [1000, 1050, 1100],
+  vendas_outbound: [2, 2, 3],
+  ticket_outbound: [1800, 2160, 1728],
+  clientes_inbound: [31, 33, 35],
+  clientes_outbound: [2, 2, 3],
+  invest_equipe: [20000, 20000, 20000],
+  invest_comissoes: [14857, 15200, 15574],
+  invest_softwares: [5000, 5000, 5000],
+  invest_consultorias: [1500, 1500, 1500],
+  leads_inbound: [422, 430, 438],
+  conv_lead_mql: [80, 80, 80],
+  mql_inbound: [337, 344, 350],
+  conv_mql_sql: [40, 40, 40],
+  sql_inbound: [135, 138, 140],
+  conv_sql_venda: [23, 24, 25],
+  empresas_mailing: [7500, 7500, 7500],
+  empresas_manual: [2050, 2050, 2050],
+  contatos_sucesso: [300, 300, 350],
+  contatos_por_reuniao: [10, 10, 10],
+  reunioes_agendar: [30, 30, 30],
+  comparecimento: [85, 85, 85],
+  reunioes_realizadas: [25, 25, 25],
+  conv_reuniao_venda: [8, 8, 12],
+};
+
+/** Compromissos individuais (MRR novo por vendedor). */
+export const METAS_4T26_SELLERS: Record<string, readonly [number, number, number]> = {
+  Gabriella: [15000, 15500, 16000],
+  "Paulo Vitor": [10000, 12500, 15000],
+  Daniela: [6000, 7000, 8000],
+  "Marcus Vinicius": [2000, 2500, 3000],
+  "Marcos Hernandes": [2000, 2500, 3000],
+};
+
+export const METAS_4T26_GOALS: PresetGoal[] = [
+  ...Object.entries(TARGETS).flatMap(([indicator, vals]) =>
+    MONTHS.map((month, i) => ({ indicator, year: YEAR, month, target: vals[i] }))
+  ),
+  ...Object.entries(METAS_4T26_SELLERS).flatMap(([responsibleName, vals]) =>
+    MONTHS.map((month, i) => ({
+      indicator: "mrr_novo",
+      year: YEAR,
+      month,
+      target: vals[i],
+      responsibleName,
+    }))
+  ),
+];
+
+// ---- o mapa da Tree ----------------------------------------------------------
+const ind = (
+  key: string,
+  parentKey: string | undefined,
+  label: string,
+  payload: Record<string, unknown>,
+  direction?: "h" | "v"
+): PresetMapNode => ({ key, parentKey, kind: "indicator", label, payload, ...(direction ? { direction } : {}) });
+const note = (key: string, parentKey: string, label: string, extra: Partial<PresetMapNode> = {}): PresetMapNode => ({
+  key,
+  parentKey,
+  kind: "note",
+  label,
+  ...extra,
+});
+const step = (key: string, parentKey: string, label: string) => note(key, parentKey, label, { status: "pendente" });
+
+const RITUAL_WINDOW = { anchor: "2026-10-01", until: "2026-12-31" };
+
+const NODES: PresetMapNode[] = [
+  // N0
+  note("resultado", "", "Resultado do 4T26 — MRR e CAC", { goal: true, parentKey: undefined, body: "Diretoria valida a ligação N3 → N2 → N1 → N0 e os planos." }),
+  ind("mrr_final", "resultado", "N0 · MRR final", { indicator: "mrr_final", level: "N0", hint: "abertura + novos + expansão − perda" }),
+  ind("mrr_abertura", "mrr_final", "MRR de abertura", { indicator: "mrr_abertura", level: "N1" }),
+  ind("mrr_novo", "mrr_final", "N1 · MRR novo (oficial)", { indicator: "mrr_novo", level: "N1", childrenOp: "+", hint: "inbound + outbound" }),
+  ind("mrr_inbound", "mrr_novo", "N1 · MRR novo inbound", { indicator: "mrr_novo_inbound", level: "N1", childrenOp: "×", hint: "Vendas × ticket" }),
+  ind("vendas_inbound", "mrr_inbound", "N2 · Vendas inbound", { indicator: "vendas_inbound", level: "N2", childrenOp: "×", hint: "SQL realizados × conversão" }),
+  ind("sql_inbound", "vendas_inbound", "N3 · SQL", { indicator: "sql_inbound", level: "N3" }),
+  ind("conv_sql_venda", "vendas_inbound", "N3 · Conversão SQL → venda", { indicator: "conv_sql_venda", level: "N3" }),
+  note("n3_revisar_sql", "vendas_inbound", "Revisar SQLs e cadências semanalmente"),
+  ind("ticket_inbound", "mrr_inbound", "N2 · Ticket inbound", { indicator: "ticket_inbound", level: "N2", hint: "MRR novo inbound ÷ vendas" }),
+  note("n3_ticket_inbound", "ticket_inbound", "Acompanhar ticket médio de entrada e propostas comerciais"),
+  ind("mrr_outbound", "mrr_novo", "N1 · MRR novo outbound", { indicator: "mrr_novo_outbound", level: "N1", childrenOp: "×", hint: "Vendas × ticket" }),
+  ind("vendas_outbound", "mrr_outbound", "N2 · Vendas outbound", { indicator: "vendas_outbound", level: "N2", childrenOp: "×", hint: "Reuniões × conversão (8 a 12%)" }),
+  ind("reunioes_ob", "vendas_outbound", "N3 · Reuniões realizadas", { indicator: "reunioes_realizadas", level: "N3" }),
+  ind("conv_reuniao", "vendas_outbound", "N3 · Conversão reunião → venda", { indicator: "conv_reuniao_venda", level: "N3" }),
+  ind("ticket_outbound", "mrr_outbound", "N2 · Ticket outbound", { indicator: "ticket_outbound", level: "N2" }),
+  note("n3_ticket_outbound", "ticket_outbound", "Prospectar empresas no porte adequado. Critérios definidos na criação das listas"),
+  ind("mrr_expansao", "mrr_final", "MRR de expansão", { indicator: "mrr_expansao", level: "N1" }),
+  ind("mrr_perda", "mrr_final", "MRR perdido", { indicator: "mrr_perda", level: "N1" }),
+  ind("cac", "resultado", "N0 · CAC", { indicator: "cac", level: "N0", hint: "(Marketing + Comercial) ÷ clientes" }),
+  ind("investimento", "cac", "N1 · Investimento comercial", { indicator: "investimento_comercial", level: "N1", childrenOp: "+", hint: "equipe + comissões + softwares + consultorias" }),
+  ind("inv_equipe", "investimento", "Equipe", { indicator: "invest_equipe", level: "N2", hint: "pessoas × custo médio" }),
+  ind("inv_comissoes", "investimento", "Comissões", { indicator: "invest_comissoes", level: "N2", hint: "soma por contrato" }),
+  ind("inv_softwares", "investimento", "Softwares", { indicator: "invest_softwares", level: "N2", hint: "licenças × preços" }),
+  ind("inv_consultorias", "investimento", "Consultorias", { indicator: "invest_consultorias", level: "N2", hint: "soma dos contratos" }),
+  ind("marketing", "cac", "Marketing", { indicator: "marketing", level: "N1" }),
+  ind("clientes_novos", "cac", "N1 · Clientes novos", { indicator: "clientes_novos", level: "N1", childrenOp: "+", hint: "inbound + outbound" }),
+  ind("clientes_inbound", "clientes_novos", "N2 · Clientes inbound", { indicator: "clientes_inbound", level: "N2" }),
+  note("n3_clientes_inbound", "clientes_inbound", "N3: 134,78 / 137,50 / 140 SQL × 23% / 24% / 25%"),
+  ind("clientes_outbound", "clientes_novos", "N2 · Clientes outbound", { indicator: "clientes_outbound", level: "N2" }),
+  note("n3_clientes_outbound", "clientes_outbound", "N3: 25 / 25 / 30 reuniões com conversão entre 8 e 10%"),
+
+  // Planos de ação (slides 10–12)
+  note("planos", "", "Planos de ação"),
+  {
+    key: "plano_1",
+    parentKey: "planos",
+    kind: "plan" as const,
+    label: "1. Implantar ciclo completo com foco no lead",
+    payload: {
+      oQue: "Atribuir cada lead a um vendedor responsável por todo o ciclo, com carteira e agenda definidas.",
+      porQue: "Atenção contínua reduz perdas entre etapas e sustenta as conversões projetadas.",
+      resultado: "Cinco vendedores em ciclo completo; 33/35/38 clientes e MRR oficial R$ 33.820/38.650/42.750.",
+      comoMedir: "Bitrix: MRR, clientes, conversão e tempo até contato por vendedor e canal.",
+      prazo: "Início em 01/10. Gestão diária, revisão semanal e fechamento em 31/10, 30/11 e 31/12.",
+      comoAcontecer: "Bruno distribui leads, orienta a equipe e revisa funil e agenda. Alinha recursos previstos com Alice.",
+      responsible: "Bruno",
+      indicators: ["mrr_novo", "clientes_novos"],
+    },
+  },
+  step("p1_distribuir", "plano_1", "Bruno distribui leads com carteira e agenda por vendedor"),
+  step("p1_revisar", "plano_1", "Orientar a equipe e revisar funil e agenda"),
+  step("p1_recursos", "plano_1", "Alinhar recursos previstos com Alice"),
+  {
+    key: "plano_2",
+    parentKey: "planos",
+    kind: "plan" as const,
+    label: "2. Converter inbound com ticket e qualificação",
+    payload: {
+      oQue: "Aplicar roteamento, qualificação, cadência e revisão de propostas desde o primeiro dia.",
+      porQue: "O mesmo vendedor acompanha o lead até o fechamento, base para a conversão projetada de 23%/24%/25%.",
+      resultado: "31/33/35 vendas; conversão SQL-venda 23%/24%/25%; ticket R$ 1.000/1.050/1.100.",
+      comoMedir: "Bitrix: leads, SQL, vendas, tempo de resposta e ticket médio de entrada por cliente.",
+      prazo: "Início em 01/10. Contato diário, revisão semanal e fechamento em 31/10, 30/11 e 31/12.",
+      comoAcontecer: "Contato em 15 min e cadência até o 5º dia. Bruno qualifica e revisa propostas; Felipe acompanha a geração.",
+      responsible: "Bruno",
+      indicators: ["mrr_novo_inbound", "vendas_inbound", "conv_sql_venda", "ticket_inbound"],
+    },
+  },
+  step("p2_contato", "plano_2", "Contato em até 15 minutos"),
+  step("p2_cadencia", "plano_2", "Cadência até o 5º dia"),
+  step("p2_propostas", "plano_2", "Bruno qualifica e revisa propostas"),
+  step("p2_geracao", "plano_2", "Felipe acompanha a geração de demanda"),
+  {
+    key: "plano_3",
+    parentKey: "planos",
+    kind: "plan" as const,
+    label: "3. Gerar outbound com listas qualificadas",
+    payload: {
+      oQue: "Executar prospecção com empresas únicas, critérios de perfil e agenda por vendedor.",
+      porQue: "O acompanhamento individual preserva o contexto do prospect. A taxa de 14% segue como premissa a medir.",
+      resultado: "2/2/3 vendas; MRR R$ 3.600/4.320/5.184; ticket R$ 1.800/2.160/1.728; 15/15/22 reuniões.",
+      comoMedir: "Bitrix: empresas únicas, reuniões, conversão e ticket. Medir duplicidade e rendimento da lista.",
+      prazo: "Início em 01/10. Prospecção diária, revisão semanal e fechamento em 31/10, 30/11 e 31/12.",
+      comoAcontecer: "Bruno prioriza ICP, indicações e Apollo; distribui listas, acompanha abordagens e revisa propostas e perdas.",
+      responsible: "Bruno",
+      indicators: ["mrr_novo_outbound", "vendas_outbound", "reunioes_realizadas", "ticket_outbound"],
+    },
+  },
+  step("p3_icp", "plano_3", "Priorizar ICP, indicações e Apollo"),
+  step("p3_listas", "plano_3", "Distribuir listas por vendedor"),
+  step("p3_abordagens", "plano_3", "Acompanhar abordagens"),
+  step("p3_perdas", "plano_3", "Revisar propostas e perdas"),
+
+  // Ritmo de acompanhamento (slide 13)
+  note("ritmo", "", "Ritmo de acompanhamento e diagnóstico"),
+  {
+    key: "ritual_diario",
+    parentKey: "ritmo",
+    kind: "ritual" as const,
+    label: "Acompanhar ações e agenda",
+    payload: {
+      schedule: { cadence: "diario_util", ...RITUAL_WINDOW },
+      responsible: "Bruno",
+      reading: "Desde 01/10: acompanhar ações e agenda diariamente.",
+    },
+  },
+  {
+    key: "ritual_semanal",
+    parentKey: "ritmo",
+    kind: "ritual" as const,
+    label: "Revisar conversão, ticket e causas",
+    payload: {
+      schedule: { cadence: "semanal", weekday: 5, ...RITUAL_WINDOW },
+      responsible: "Bruno",
+      reading: "Revisar conversão, ticket e causas toda semana.",
+    },
+  },
+  {
+    key: "ritual_mensal",
+    parentKey: "ritmo",
+    kind: "ritual" as const,
+    label: "Fechar os quatro N1",
+    payload: {
+      schedule: { cadence: "mensal", monthDay: "ultimo_util", ...RITUAL_WINDOW },
+      responsible: "Bruno",
+      reading: "Fechar os quatro N1, avaliar conversão, receita e recursos usados frente ao plano.",
+    },
+  },
+  {
+    key: "ritual_n0",
+    parentKey: "ritmo",
+    kind: "ritual" as const,
+    label: "Reunião N0 (Bruno / Felipe)",
+    payload: {
+      schedule: { cadence: "mensal", monthDay: "ultimo_util", ...RITUAL_WINDOW },
+      responsible: "Bruno",
+      reading:
+        "MRR: Bruno; CAC: Felipe. Diretoria valida a ligação N3 → N2 → N1 → N0 e os planos. Desvios >5%: fato, causa e ação.",
+    },
+  },
+  note("correcao", "ritmo", "Correção — dono do ramo", {
+    body:
+      "Volume abaixo: demanda/agenda. Conversão abaixo: resposta e qualificação. Ticket abaixo: mix/proposta. Recursos: verificar disponibilidade.",
+  }),
+];
+export const METAS_4T26_NODES: PresetMapNode[] = NODES.map((n) =>
+  n.parentKey === "" ? { ...n, parentKey: undefined } : n
+);
+
+// ---- widgets / abas = slides ---------------------------------------------
+const TABS = [
+  { id: "capa", name: "Capa" },
+  { id: "painel", name: "Painel estratégico" },
+  { id: "vendedores", name: "Vendedores" },
+  { id: "mrr_inbound", name: "MRR inbound" },
+  { id: "inbound", name: "Inbound: demanda e conversão" },
+  { id: "mrr_outbound", name: "MRR outbound" },
+  { id: "outbound", name: "Outbound" },
+  { id: "clientes", name: "Clientes novos" },
+  { id: "investimento", name: "Investimento" },
+  { id: "plano_1", name: "Plano 1 · Ciclo completo" },
+  { id: "plano_2", name: "Plano 2 · Inbound" },
+  { id: "plano_3", name: "Plano 3 · Outbound" },
+  { id: "ritmo", name: "Ritmo" },
+  { id: "fontes", name: "Fontes e critérios" },
+  { id: "arvore", name: "Árvore completa" },
+];
+
+const base = (key: string, tab: string, title: string, visual: PresetWidget["visual_type"], settings: WidgetSettings, pos: PresetWidget["grid_position"]): PresetWidget => ({
+  presetKey: `${METAS_4T26_KEY}.${tab}.${key}`,
+  title,
+  visual_type: visual,
+  sources: [],
+  dimensions: [],
+  metrics: [],
+  filters: [],
+  settings: { tab, ...settings },
+  grid_position: pos,
+});
+
+const nota = (tab: string, key: string, title: string, text: string, pos: PresetWidget["grid_position"], ap?: NonNullable<WidgetSettings["appearance"]>["note"]) =>
+  base(key, tab, title, "nota", { note: { text }, ...(ap ? { appearance: { note: ap } } : {}) }, pos);
+
+const tree = (tab: string, rootRef: string | null, title: string, h = 16): PresetWidget =>
+  base("tree", tab, title, "tree", {
+    tree: {
+      source: "livre",
+      layout: "livre",
+      mapKey: METAS_4T26_MAP,
+      view: "root",
+      rootDirection: "h",
+      ...(rootRef ? { rootRef } : {}),
+    },
+  }, { x: 0, y: 0, w: 12, h });
+
+const table = (tab: string, title: string, goalTable: WidgetSettings["goalTable"], h = 10, y = 0): PresetWidget =>
+  base("tabela", tab, title, "metas", { goalTable }, { x: 0, y, w: 12, h });
+
+const rows = (list: [string, string, boolean?][]) =>
+  list.map(([indicator, label, bold]) => ({ indicator, label, ...(bold ? { bold: true } : {}) }));
+
+export const METAS_4T26_WIDGETS: PresetWidget[] = [
+  nota("capa", "titulo", "Capa", "Comercial\nMetas e desdobramentos\n\n4º trimestre de 2026", { x: 0, y: 0, w: 12, h: 10 }, { bg: "#212121", color: "#ffffff", fontSize: 36, frameless: true }),
+  table("painel", "Painel estratégico", {
+    mode: "indicadores",
+    rows: rows([
+      ["mrr_novo_inbound", "N1 MRR novo inbound (R$)"],
+      ["mrr_novo_outbound", "N1 MRR novo outbound (R$)"],
+      ["investimento_comercial", "N1 Investimento comercial (R$)"],
+      ["clientes_novos", "N1 Clientes novos"],
+      ["mrr_final", "N0 MRR final (R$)"],
+      ["cac", "N0 CAC (R$/cliente)", true],
+    ]),
+    editable: true,
+    note: "MRR final = abertura + novos + expansão − perda. CAC = (Marketing + Comercial) ÷ clientes.\nMRR: Bruno; CAC: Felipe; expansão e perda: Ricardo. Marketing: R$ 52.250/mês.",
+  }, 11),
+  table("vendedores", "Cinco vendedores em ciclo completo", {
+    mode: "por_responsavel",
+    indicator: "mrr_novo",
+    responsibles: Object.keys(METAS_4T26_SELLERS),
+    headerLabel: "Vendedor",
+    totalRowLabel: "Compromissos individuais (R$)",
+    editable: true,
+    note: "Cada vendedor acompanha seus leads do primeiro contato ao fechamento. Metas individuais arredondadas — a operação segue as metas oficiais do painel.",
+  }, 11),
+  tree("mrr_inbound", "preset:mrr_inbound", "N1 MRR novo inbound — vendas × ticket"),
+  table("inbound", "Inbound: demanda e conversão necessárias", {
+    mode: "indicadores",
+    headerLabel: "Etapa ou premissa",
+    rows: rows([
+      ["leads_inbound", "Leads necessários"],
+      ["conv_lead_mql", "Conversão lead para MQL"],
+      ["mql_inbound", "MQL necessários"],
+      ["conv_mql_sql", "Conversão MQL para SQL"],
+      ["sql_inbound", "SQL realizados necessários"],
+      ["conv_sql_venda", "Conversão SQL para venda"],
+      ["vendas_inbound", "Vendas inbound", true],
+    ]),
+    editable: true,
+    note: "SQL → venda: 23%, 24%, 25%. O novo desenho pressupõe mais atenção por lead.",
+  }, 13),
+  tree("mrr_outbound", "preset:mrr_outbound", "N1 MRR novo outbound — vendas × ticket"),
+  table("outbound", "Outbound", {
+    mode: "indicadores",
+    headerLabel: "Etapa ou premissa",
+    rows: rows([
+      ["empresas_mailing", "Empresas prospectadas (mailing)"],
+      ["empresas_manual", "Empresas prospecção manual"],
+      ["contatos_sucesso", "Contatos bem sucedidos necessários"],
+      ["contatos_por_reuniao", "Contatos bem sucedidos para gerar 1 reunião"],
+      ["reunioes_agendar", "Reuniões a agendar"],
+      ["comparecimento", "Comparecimento"],
+      ["reunioes_realizadas", "Reuniões realizadas"],
+      ["conv_reuniao_venda", "Conversão reunião para venda"],
+      ["vendas_outbound", "Vendas outbound", true],
+    ]),
+    editable: true,
+    note: "Em média 2 pessoas por empresa em mailing.",
+  }, 15),
+  tree("clientes", "preset:clientes_novos", "N1 Clientes novos — inbound + outbound"),
+  table("investimento", "N1 investimento comercial", {
+    mode: "indicadores",
+    headerLabel: "N2 e fórmula N3 (R$)",
+    rows: rows([
+      ["invest_equipe", "Equipe: pessoas × custo médio"],
+      ["invest_comissoes", "Comissões: soma por contrato"],
+      ["invest_softwares", "Softwares: licenças × preços"],
+      ["invest_consultorias", "Consultorias: soma dos contratos"],
+      ["investimento_comercial", "N1 investimento comercial", true],
+    ]),
+    editable: true,
+    note: "O realizado sai da Base manual — lance os valores do mês no quadro ao lado.",
+  }, 10),
+  base("lancamentos", "investimento", "Lançar o realizado (Base manual)", "base_manual", {
+    baseManual: {
+      series: ["investimento_comercial", "marketing", "mrr_abertura", "mrr_expansao", "mrr_perda"],
+      defaultMonth: "2026-10",
+    },
+  }, { x: 0, y: 10, w: 12, h: 8 }),
+  tree("plano_1", "preset:plano_1", "1. Implantar ciclo completo com foco no lead", 14),
+  tree("plano_2", "preset:plano_2", "2. Converter inbound com ticket e qualificação", 14),
+  tree("plano_3", "preset:plano_3", "3. Gerar outbound com listas qualificadas", 14),
+  tree("ritmo", "preset:ritmo", "Ritmo de acompanhamento e diagnóstico", 14),
+  nota(
+    "fontes",
+    "criterios",
+    "Fontes e critérios de cálculo",
+    "Cálculos auditáveis, com metas oficiais separadas das propostas.\n\n" +
+      "Metas e desdobramentos — regras: slides 2, 4, 5 e 6. Metas: slide 9. Árvores e plano: slides 11–19.\n" +
+      "Novo Desenho Comercial — papéis, cadências e listas. Metas por vendedor: slides 16–18.\n" +
+      "Metas Quadrimestre — somente outubro a dezembro, colunas E:G. Fórmulas e conciliação na aba Racional Comercial 4T26.\n\n" +
+      "Taxas e capacidade são premissas. Metas operacionais inteiras arredondam para cima. A fonte original e o orçamento permanecem preservados.\n\n" +
+      "(Cole aqui os links das planilhas — [rótulo](https://…).)",
+    { x: 0, y: 0, w: 12, h: 10 }
+  ),
+  tree("arvore", null, "Árvore completa (trabalho)", 22),
+];
+
+export const METAS_4T26_PRESET: PresetDashboard = {
+  presetKey: METAS_4T26_KEY,
+  version: 1,
+  name: "Comercial — Metas e desdobramentos 4T26",
+  visible_to_roles: ["admin", "gestor"],
+  settings: {
+    tabs: TABS,
+    periodBar: { enabled: true, defaultPreset: "este_trimestre", scope: "global" },
+    canvas: { cols: 12, rowHeight: 30 },
+    presentation: { hiddenTabs: ["arvore"] },
+  },
+  // Reusa as dependências declaradas pelos presets Inbound/Outbound (ensure
+  // por key — nunca sobrescreve): sub-bases de MQL/SQL/vendas/reuniões e o
+  // campo calculado mrr_contrato.
+  fields: [...(INBOUND_PRESET.fields ?? []), ...(OUTBOUND_PRESET.fields ?? [])],
+  subSources: [...(INBOUND_PRESET.subSources ?? []), ...(OUTBOUND_PRESET.subSources ?? [])],
+  correspondences: INBOUND_PRESET.correspondences,
+  indicators: METAS_4T26_INDICATORS,
+  goals: METAS_4T26_GOALS,
+  manualFamilies: [
+    {
+      key: "componente_investimento",
+      label: "Componente do investimento",
+      members: [
+        { key: "equipe", label: "Equipe" },
+        { key: "comissoes", label: "Comissões" },
+        { key: "softwares", label: "Softwares" },
+        { key: "consultorias", label: "Consultorias" },
+      ],
+    },
+  ],
+  manualSeries: [
+    { key: "investimento_comercial", label: "Investimento comercial", families: ["componente_investimento"] },
+    { key: "marketing", label: "Investimento em marketing" },
+    { key: "mrr_abertura", label: "MRR de abertura" },
+    { key: "mrr_expansao", label: "MRR de expansão" },
+    { key: "mrr_perda", label: "MRR perdido" },
+  ],
+  maps: [{ mapKey: METAS_4T26_MAP, nodes: METAS_4T26_NODES }],
+  widgets: METAS_4T26_WIDGETS,
+};

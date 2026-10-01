@@ -1,3 +1,6 @@
+// Versão: 1.8 | Data: 01/10/2026
+// v1.8 (01/10/2026): Tabela de metas (visual_type 'metas', 0149) fora dos
+//   widgets de engine do snapshot (o card exibe aviso no link público).
 // Versão: 1.7 | Data: 29/07/2026
 // v1.7 (29/07/2026): skeleton via <Suspense> IN-PAGE (SnapshotContent) — a
 //   validação do token roda antes do streaming e o 404 uniforme responde com
@@ -401,7 +404,10 @@ async function SnapshotContent({
       w.visual_type !== "imagem" &&
       // "Base do Dashboard" (0142) é uma GRADE DE EDIÇÃO da Base manual, não
       // um recorte de registros: sem métrica, o RPC recusaria o SELECT vazio.
-      w.visual_type !== "base_manual"
+      w.visual_type !== "base_manual" &&
+      // v1.8 (01/10/2026): Tabela de metas (0149) — lê metas/indicadores por
+      // action com sessão; no link público não há o que computar.
+      w.visual_type !== "metas"
   );
   const filterWidgets = widgets.filter((w) => w.visual_type === "filtro");
   const fieldFilterWidgets = widgets.filter(

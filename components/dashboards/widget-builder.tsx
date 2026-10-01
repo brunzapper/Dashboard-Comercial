@@ -1,4 +1,8 @@
-// Versão: 1.29 | Data: 01/10/2026
+// Versão: 1.30 | Data: 01/10/2026
+// v1.30 (01/10/2026): (a) TABELA DE METAS ('metas', 0149) — seção própria
+//   (GoalTableSection) e `settings.goalTable` gravado pela régua única
+//   (sanitizeGoalTableSettings); o bloco de bases/dimensões/métricas não se
+//   aplica a ela. (b) Tree: "Mostrar só o galho" (`tree.rootRef`).
 // v1.29 (01/10/2026): Tree — vocabulário "branch" nos textos da Root, e o
 //   filtro "O que exibir" deixa de oferecer Anotação (ela nunca é escondida:
 //   escondê-la fazia a branch recém-criada sumir).
@@ -312,6 +316,9 @@ import type { FilterValueSource } from "@/components/filters/filter-value-picker
 import { ComparisonSection } from "@/components/dashboards/widget-builder-comparison";
 import { GoalsSection } from "@/components/dashboards/widget-builder-goals";
 import { CardModeSection } from "@/components/dashboards/card-mode-section";
+import { GoalTableSection } from "@/components/dashboards/goal-table-section";
+import { sanitizeGoalTableSettings } from "@/lib/widgets/goal-table";
+import type { GoalTableSettings } from "@/lib/widgets/types";
 import { TargetTabChecklist } from "@/components/dashboards/target-tab-checklist";
 import { groupByLevels } from "@/lib/widgets/appearance";
 import { DATE_FORMAT_LABELS, DATE_FORMATS } from "@/lib/widgets/format";
@@ -584,6 +591,16 @@ export function WidgetBuilder({
   );
   const [treeDirection, setTreeDirection] = useState<TreeDirection>(
     widget?.settings?.tree?.rootDirection ?? "h"
+  );
+
+  // v1.30 (01/10/2026): Tree — galho exibido (vazio = árvore inteira).
+  const [treeRootRef, setTreeRootRef] = useState<string>(
+    widget?.settings?.tree?.rootRef ?? ""
+  );
+  // v1.30 (01/10/2026): Tabela de metas (0149).
+  const isGoalTableWidget = visualType === "metas";
+  const [goalTable, setGoalTable] = useState<GoalTableSettings>(
+    () => widget?.settings?.goalTable ?? { mode: "indicadores", rows: [] }
   );
 
   const [rowActionKind, setRowActionKind] = useState<string>(
@@ -2134,9 +2151,27 @@ export function WidgetBuilder({
         ...(treeView === "root"
           ? { view: "root" as const, rootDirection: treeDirection }
           : {}),
+        // v1.30: só o galho a partir deste nó (vazio = árvore inteira).
+        ...(treeSource === "livre" && treeRootRef.trim()
+          ? { rootRef: treeRootRef.trim() }
+          : {}),
       };
     } else {
       delete settings.tree;
+    }
+
+    // v1.30 (01/10/2026): Tabela de metas — régua única (a mesma do servidor e
+    // do import da IA); chave inválida some com aviso no console do builder.
+    if (isGoalTableWidget) {
+      const gt = sanitizeGoalTableSettings(goalTable, {
+        knownKeys: new Set(goalMetrics.map((m) => m.key)),
+        where: "builder",
+        warnings: [],
+      });
+      if (gt) settings.goalTable = gt;
+      else delete settings.goalTable;
+    } else {
+      delete settings.goalTable;
     }
 
     // Filtros rápidos: grava a config limpa (ids preservados — são a chave dos
@@ -2807,6 +2842,11 @@ export function WidgetBuilder({
                 </div>
               ) : null}
             </>
+          ) : null}
+
+          {/* v1.30 (01/10/2026): Tabela de metas (0149). */}
+          {isGoalTableWidget ? (
+            <GoalTableSection value={goalTable} onChange={setGoalTable} />
           ) : null}
 
           {/* Config do KANBAN: modo, fonte, colunas (campo ou bucket de data),
@@ -3523,7 +3563,9 @@ export function WidgetBuilder({
           visualType !== "imagem" &&
           visualType !== "tabela_editavel" &&
           visualType !== "kanban" &&
-          visualType !== "agenda" ? (
+          visualType !== "agenda" &&
+          // v1.30: a Tabela de metas lê o catálogo de Indicadores, não Bases.
+          visualType !== "metas" ? (
           <Accordion type="multiple" className="-mt-2">
           {/* Fontes + modo de combinação */}
           <BuilderSection
@@ -4269,6 +4311,19 @@ export function WidgetBuilder({
                     }
                     placeholder="ex.: planejamento-2026"
                     aria-label="Chave do mapa livre"
+                  />
+                  {/* v1.30: uma árvore, várias vistas — cada widget pode
+                      mostrar um GALHO do mesmo mapa. */}
+                  <Label>Mostrar só o galho (opcional)</Label>
+                  <p className="text-muted-foreground text-xs">
+                    Id do nó onde o widget começa — o menu do nó tem
+                    &quot;Copiar id do nó&quot;. Vazio = o mapa inteiro.
+                  </p>
+                  <Input
+                    value={treeRootRef}
+                    onChange={(e) => setTreeRootRef(e.target.value)}
+                    placeholder="ex.: preset:mrr_inbound"
+                    aria-label="Galho exibido"
                   />
                 </>
               )}
