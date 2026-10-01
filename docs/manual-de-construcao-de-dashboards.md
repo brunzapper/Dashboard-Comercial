@@ -1654,6 +1654,50 @@ widget é para lançar e corrigir números, que é o gesto do dia a dia.
 
 ---
 
+### 5.16 Tabela de metas (`metas`)
+
+Grade **indicador × mês** com a meta, o realizado e o atingimento (verde = no
+plano, âmbar = atenção, vermelho = fora; o mês corrente compara com a meta
+proporcional aos dias úteis decorridos). As colunas são os meses do período do
+painel — ou meses fixos.
+
+- **Formato**: "Uma linha por indicador" (escolha os indicadores, a ordem, o
+  rótulo e quais ficam em negrito) ou "Um indicador repartido por responsável"
+  (um nome por linha, com linha de total opcional).
+- O que cada linha significa vem do catálogo de **Indicadores** (Configurações →
+  Metas): unidade, como os meses viram total, direção, dono e a fórmula do
+  realizado. Indicador sem fórmula mostra só a meta.
+- **Admin edita a meta na célula**: clique no número; apagar exclui a meta.
+- **Rodapé**: texto livre sob a tabela (regra de cálculo, donos).
+
+### 5.17 Tree operacional: indicador, plano de ação e ritual
+
+No **mapa livre**, o "+" de qualquer branch (ou o clique direito no rascunho)
+cria também:
+
+- **Indicador** — meta × realizado por mês do indicador escolhido. Com "Filhos
+  se combinam por" (×, +, −, ÷) e filhos indicadores, mostra o **projetado**
+  (ex.: vendas × ticket) contra a meta oficial do nó. Nível N0–N3 é rótulo.
+- **Plano de ação** — o quê, por quê, resultado esperado, como medir, prazo,
+  como acontecer, responsável e os indicadores que ele move (status vivo). As
+  etapas são branches filhas (anotação-etapa ou tarefa).
+- **Ritual** — rotina com cadência (dia útil, semanal, mensal, a cada N dias),
+  responsável e "leitura e decisão". "Agendar próxima" cria a tarefa da
+  próxima ocorrência; "Gerar sozinho" deixa o sistema criar.
+
+**Mostrar só o galho** (configuração do widget Tree, mapa livre): o id de um nó
+(menu do nó → "Copiar id do nó", ou `preset:<chave>`) faz o widget começar
+nele. Vários widgets podem mostrar galhos diferentes do MESMO mapa.
+
+### 5.18 Modo Apresentar
+
+O botão **Apresentar** ao lado do nome do dashboard põe o painel em tela cheia
+e transforma cada aba em um slide. ←/→ (ou PageUp/PageDown, espaço) navegam,
+Home/End vão às pontas e Esc sai. Os widgets continuam vivos — filtros,
+árvores e tabelas respondem durante a apresentação — e o ponteiro laser está na
+barra flutuante. Abas de trabalho podem ficar fora dos slides
+(`dashboard.settings.presentation.hiddenTabs`).
+
 ## 6. O editor de widget, seção por seção
 
 O editor abre num painel lateral (largura ajustável pela borda). No topo,

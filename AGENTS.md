@@ -2283,3 +2283,26 @@ This version has breaking changes — APIs, conventions, and file structure may 
   `lib/records/trash.test.ts` + `records-table.selection.test.tsx` + blocos
   de seleção em `update-validate.test.ts`/`update-instructions.test.ts`.
   Ver `docs/arquitetura.md` §4.21 e invariante 30.
+- **Indicadores, Tabela de metas, Tree operacional e rituais (0149,
+  01/10/2026):** `indicators` é o catálogo que EXPLICA uma chave de meta
+  (`key` = `goals.metric`; unidade, rollup, direção, tolerância, dono, fórmula
+  do realizado). O realizado sai SÓ de `runCalculatedWidget` por mês e a meta
+  de `resolveGoal` (explicit-first — a meta global oficial vence o roll-up dos
+  compromissos individuais), pelo dono único `resolveIndicatorValues`
+  (`lib/indicators/values.ts`) — Tabela de metas (`visual_type 'metas'`,
+  `runGoalTable`) e nós de indicador da Tree (`loadTreeIndicatorValues`) leem
+  por ele e pelo widget-scope. NÃO recrie as RPCs para isso. A validação do
+  realizado usa o MESMO catálogo agregado do construtor
+  (`lib/indicators/validate.ts`); saneamento do `settings.goalTable` é ÚNICO
+  (`lib/widgets/goal-table.ts`); célula de meta vazia EXCLUI a linha. Nós
+  `indicator`/`plan`/`ritual` são linhas próprias de `tree_nodes` no mapa
+  livre (id lógico `note:<uuid>`), payload re-parseado no servidor
+  (`lib/tree/payload.ts`); `TreeSettings.rootRef` mostra um galho do mesmo mapa.
+  Ritual tem ocorrência DERIVADA do calendário (`lib/rituals/cadence.ts`) e
+  trava `uq_tasks_ritual_occurrence` (sem `completed_at is null`); "Agendar
+  próxima" passa pelo `createTask`, o modo automático por `runTreeRituals` no
+  tick (23505 = no-op). Seções de DADOS do preset (`indicators`/`goals`/
+  `manualFamilies`/`manualSeries`/`maps`, `lib/presets/data-sections.ts`) são
+  SÓ do caminho de fábrica e ensure-if-absent. Modo Apresentar = abas como
+  slides (`lib/dashboards/presentation.ts`). Ver `docs/arquitetura.md` §4.27 e
+  invariante 42.
