@@ -1,3 +1,8 @@
+// Versão: 1.1 | Data: 01/10/2026
+// v1.1 (01/10/2026): `mergeGoalMetrics` aceita os INDICADORES (0149) como 2º
+// argumento — a chave de um indicador é uma chave de meta, então `meta:`,
+// KPI modo meta e goalLine passam a enxergá-la sem cadastro duplicado. O
+// rótulo do indicador vence o do sync_config (é a definição mais rica).
 // Versão: 1.0 | Data: 20/07/2026
 // Registry PURO das métricas de meta (goals.metric). `goals.metric` sempre
 // foi texto livre no banco (0016); este módulo dá vocabulário/rótulo às
@@ -35,9 +40,27 @@ function cleanLabel(v: unknown): string | null {
  * Builtins + métricas custom (valor cru do sync_config, tolerante a
  * ausente/inválido). Chave custom que colide com builtin é ignorada.
  */
-export function mergeGoalMetrics(value: unknown): GoalMetricDef[] {
+export function mergeGoalMetrics(
+  value: unknown,
+  // v1.1 (01/10/2026): indicadores do catálogo (key/label/unit).
+  indicators: { key: string; label: string; unit: string }[] = []
+): GoalMetricDef[] {
   const out = [...BUILTIN_GOAL_METRICS];
   const seen = new Set(out.map((m) => m.key));
+  for (const ind of indicators) {
+    const key = cleanKey(ind.key);
+    const label = cleanLabel(ind.label);
+    if (!key || !label) continue;
+    const money = ind.unit === "moeda";
+    const builtin = out.findIndex((m) => m.key === key);
+    if (builtin >= 0) {
+      out[builtin] = { key, label, money };
+      continue;
+    }
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ key, label, money });
+  }
   if (Array.isArray(value)) {
     for (const item of value) {
       const raw = (item ?? {}) as Record<string, unknown>;

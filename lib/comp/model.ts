@@ -1,3 +1,7 @@
+// Versão: 1.9 | Data: 01/10/2026
+// v1.9 (01/10/2026): `parseUiFilter` EXPORTADO (era o parseFilter privado) —
+// o catálogo de Indicadores (lib/indicators/model.ts) parseia o recorte do
+// realizado pela MESMA régua (FILTER_OPS estrito), nunca uma cópia.
 // Versão: 1.8 | Data: 28/09/2026
 // v1.8: CRITÉRIO DE CRÉDITO POR MEMBRO (factor.memberCredit — id CANÔNICO →
 // modo). Ausente = "próprio" (+ equipe), byte-idêntico ao anterior. "all" tira
@@ -384,7 +388,8 @@ const UI_FILTER_OPS = new Set<string>(FILTER_OPS.map((o) => o.op));
 const isScalar = (v: unknown): v is string | number | boolean =>
   typeof v === "string" || typeof v === "number" || typeof v === "boolean";
 
-function parseFilter(raw: unknown): WidgetFilter | null {
+// v1.9 (01/10/2026): exportado como `parseUiFilter` (lib/indicators reusa).
+export function parseUiFilter(raw: unknown): WidgetFilter | null {
   if (!isRecord(raw)) return null;
   const { field, op } = raw;
   if (typeof field !== "string" || field === "") return null;
@@ -469,7 +474,7 @@ function parseFactor(raw: unknown): CompFactor | null {
     if (raw.filters.length > MAX_FACTOR_FILTERS) return null;
     const filters: WidgetFilter[] = [];
     for (const f of raw.filters) {
-      const parsed = parseFilter(f);
+      const parsed = parseUiFilter(f);
       if (!parsed) return null;
       filters.push(parsed);
     }
