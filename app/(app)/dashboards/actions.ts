@@ -1,4 +1,9 @@
-// Versão: 1.13 | Data: 12/09/2026
+// Versão: 1.14 | Data: 01/10/2026
+// v1.14 (01/10/2026): seções de DADOS do preset (0149 — indicadores, metas,
+//   Base manual, mapas da Tree), aplicadas SÓ no caminho de fábrica junto das
+//   seções de org (lib/presets/data-sections.ts, ensure-if-absent). E o
+//   resolvedor de responsável por NOME saiu para lib/config/responsible-names.ts
+//   (dono único — a Tabela de metas e a Tree usam o mesmo).
 // v1.13 (12/09/2026): preferências de INTERFACE (0141) — saveUiPrefs (camada
 //   do usuário; a TRAVA da org é decidida no resolver, não aqui),
 //   toggleSidebarPinned/saveSidebarPins (itens fixados na barra: guardam
@@ -92,6 +97,8 @@ import {
 } from "@/lib/presets/definitions";
 import { GOAL_METRICS_CONFIG_KEY } from "@/lib/config/goal-metrics";
 import { mergeGoalMetrics } from "@/lib/metas/metrics";
+import { loadResponsibleNameIndex } from "@/lib/config/responsible-names";
+import { applyPresetDataSections } from "@/lib/presets/data-sections";
 import { registerGoalMetrics } from "@/lib/metas/upsert";
 import { parseCompPlanConfig } from "@/lib/comp/model";
 import { ensureMirrorSource, MIRROR_SOURCE_KEY } from "@/lib/comp/mirror";
@@ -2214,6 +2221,13 @@ export interface PresetApplyResult {
   // Erros NÃO fatais das seções de org (plano pulado por operação ausente…):
   // o apply do dashboard segue, mas o admin precisa VER o motivo.
   orgSectionErrors?: string[];
+  // v1.14 (01/10/2026): seções de DADOS (só fábrica) — o que foi criado.
+  dataCreated?: {
+    indicators: number;
+    goals: number;
+    manual: number;
+    mapNodes: number;
+  };
 }
 
 async function ensurePresetFields(
@@ -2328,22 +2342,8 @@ async function ensurePresetOperations(
 async function loadResponsibleIdByName(
   supabase: Awaited<ReturnType<typeof createClient>>
 ): Promise<Map<string, string>> {
-  const { data } = await supabase
-    .from("responsibles")
-    .select("id, display_name, canonical_id");
-  const byName = new Map<string, { id: string; canonical: boolean }>();
-  for (const r of (data ?? []) as {
-    id: string;
-    display_name: string | null;
-    canonical_id: string | null;
-  }[]) {
-    const name = (r.display_name ?? "").trim();
-    if (!name) continue;
-    const entry = { id: r.canonical_id ?? r.id, canonical: r.canonical_id == null };
-    const cur = byName.get(name);
-    if (!cur || (!cur.canonical && entry.canonical)) byName.set(name, entry);
-  }
-  return new Map([...byName].map(([name, e]) => [name, e.id]));
+  // v1.14 (01/10/2026): delega ao dono único (mesma regra, mapa EXATO).
+  return (await loadResponsibleNameIndex(supabase)).exact;
 }
 
 // Vínculos responsável↔operação declarados no preset
@@ -2709,6 +2709,7 @@ async function applyPresetDefinition(
   let linksResult = { created: 0, skipped: 0, errors: [] as string[] };
   let compPlansResult = { created: 0, skipped: 0, errors: [] as string[] };
   const extraSectionErrors: string[] = [];
+  let dataResult: Awaited<ReturnType<typeof applyPresetDataSections>> | null = null;
   if (opts.allowOrgSections) {
     const sectionOrgId = await getActiveOrgId();
     const opsOut = await ensurePresetOperations(
@@ -2730,6 +2731,16 @@ async function applyPresetDefinition(
       sectionOrgId,
       preset.compPlans ?? []
     );
+    // v1.14 (01/10/2026): seções de DADOS (0149) — indicadores ANTES das
+    // metas não é exigência (goals.metric é texto), mas a ordem do relatório
+    // fica legível; tudo ensure-if-absent.
+    const data = await applyPresetDataSections(
+      supabase,
+      { orgId: sectionOrgId, userId },
+      preset
+    );
+    dataResult = data;
+    extraSectionErrors.push(...data.errors);
     if (preset.ensureCompMirror) {
       const mirror = await ensureMirrorSource(supabase, sectionOrgId);
       if (!mirror.ok) {
@@ -2971,6 +2982,16 @@ async function applyPresetDefinition(
     compPlansCreated: compPlansResult.created,
     compPlansSkipped: compPlansResult.skipped,
     ...(orgSectionErrors.length > 0 ? { orgSectionErrors } : {}),
+    ...(dataResult
+      ? {
+          dataCreated: {
+            indicators: dataResult.indicatorsCreated,
+            goals: dataResult.goalsCreated,
+            manual: dataResult.manualCreated,
+            mapNodes: dataResult.mapNodesCreated,
+          },
+        }
+      : {}),
   };
 }
 
