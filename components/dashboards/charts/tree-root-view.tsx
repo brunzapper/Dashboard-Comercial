@@ -1,4 +1,10 @@
-// Versão: 1.1 | Data: 01/10/2026
+// Versão: 1.2 | Data: 01/10/2026
+// v1.2 (01/10/2026): o clique direito na PRÉVIA ainda vazia abre o menu de tipo.
+//   O mousedown do botão direito fora da caixa de texto (badge, borda do card)
+//   tirava o foco dela; o blur, sem `relatedTarget`, DESCARTAVA a prévia vazia
+//   (ou SALVAVA a preenchida) antes de o `contextmenu` chegar — o menu só
+//   aparecia depois de salvar. O `DraftTile` agora segura o foco na caixa
+//   (`preventDefault` no mousedown fora dela) e o blur para o menu é ignorado.
 // v1.1 (01/10/2026): criação e edição DENTRO do canvas.
 //   (a) RASCUNHO no canvas: o "+" de um card, o clique direito no vazio e o
 //       "Nova branch independente" abrem na hora a PRÉVIA da branch nova — um
@@ -1199,6 +1205,14 @@ function CardTextarea({
         ) {
           return;
         }
+        // v1.2 (01/10/2026): foco indo para o menu de contexto não salva nem
+        // descarta — é a troca de tipo da prévia.
+        if (
+          e.relatedTarget instanceof Element &&
+          e.relatedTarget.closest("[data-tree-menu]")
+        ) {
+          return;
+        }
         done.current = true;
         const text = e.currentTarget.value.trim();
         if (text) onCommit(text);
@@ -1235,6 +1249,13 @@ function DraftTile({
         KIND_TONE[draft.kind] ?? "border-muted"
       )}
       style={{ left: box.x, top: box.y, width: box.w, minHeight: box.h }}
+      // v1.2 (01/10/2026): o foco FICA na caixa de texto. Sem isso, o mousedown
+      // (direito, no badge ou na borda) a desfocava e o blur descartava a
+      // prévia vazia antes de o menu de tipo abrir. Botões seguem recebendo o
+      // click — só o foco não sai.
+      onMouseDown={(e) => {
+        if (!(e.target as HTMLElement).closest("textarea")) e.preventDefault();
+      }}
     >
       <div className="flex items-center gap-1">
         <Badge variant="outline" className="h-4 shrink-0 px-1 text-[10px]">
