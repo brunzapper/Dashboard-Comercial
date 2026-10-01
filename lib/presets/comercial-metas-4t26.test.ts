@@ -1,4 +1,6 @@
-// Versão: 1.0 | Data: 01/10/2026
+// Versão: 1.1 | Data: 01/10/2026
+// v1.1 (01/10/2026): os slides ocupam a tela (grade fina, sem sobreposição,
+//   sem sobra) e o período é fixo (meses nas tabelas e na Tree, barra off).
 // O preset de metas 4T26 é DADO — este teste confere que os números batem com
 // a aritmética da apresentação e que toda referência (indicador, galho, nó
 // pai, aba) existe. Um número digitado errado aqui vira meta errada na org.
@@ -11,6 +13,7 @@ import { sanitizeGoalTableSettings } from "@/lib/widgets/goal-table";
 import {
   METAS_4T26_GOALS,
   METAS_4T26_INDICATORS,
+  METAS_4T26_MONTH_KEYS,
   METAS_4T26_NODES,
   METAS_4T26_PRESET,
   METAS_4T26_SELLERS,
@@ -132,5 +135,44 @@ describe("integridade das referências", () => {
     }
     // A aba de trabalho fica fora dos slides.
     expect(METAS_4T26_PRESET.settings?.presentation?.hiddenTabs).toEqual(["arvore"]);
+  });
+});
+
+describe("slides ocupam a tela e já vêm no período certo (v1.1)", () => {
+  const slides = (METAS_4T26_PRESET.settings?.tabs ?? []).filter(
+    (t) => !(METAS_4T26_PRESET.settings?.presentation?.hiddenTabs ?? []).includes(t.id)
+  );
+
+  it("grade fina, linha quadrada e barra de período desligada", () => {
+    expect(METAS_4T26_PRESET.settings?.canvas).toEqual({ gridVersion: 2 });
+    expect(METAS_4T26_PRESET.settings?.periodBar?.enabled).toBe(false);
+  });
+
+  it("cada slide cobre a largura toda, sem sobreposição", () => {
+    for (const tab of slides) {
+      const ws = METAS_4T26_PRESET.widgets.filter((w) => w.settings?.tab === tab.id);
+      expect(ws.length, tab.id).toBeGreaterThan(0);
+      for (const w of ws) expect(w.grid_position.x + w.grid_position.w, w.presetKey).toBeLessThanOrEqual(120);
+      // largura coberta (com o vão de 1 célula entre colunas)
+      const right = Math.max(...ws.map((w) => w.grid_position.x + w.grid_position.w));
+      expect(right, tab.id).toBe(120);
+      // mesma altura em todos os quadros do slide
+      expect(new Set(ws.map((w) => w.grid_position.h)).size, tab.id).toBe(1);
+      for (let i = 0; i < ws.length; i++)
+        for (let j = i + 1; j < ws.length; j++) {
+          const a = ws[i].grid_position;
+          const b = ws[j].grid_position;
+          const overlap = a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+          expect(overlap, `${ws[i].presetKey} × ${ws[j].presetKey}`).toBe(false);
+        }
+    }
+  });
+
+  it("tabelas e árvores com os meses fixos de out–dez/2026", () => {
+    expect(METAS_4T26_MONTH_KEYS).toEqual(["2026-10", "2026-11", "2026-12"]);
+    for (const w of METAS_4T26_PRESET.widgets) {
+      if (w.visual_type === "metas") expect(w.settings?.goalTable?.months, w.presetKey).toEqual(METAS_4T26_MONTH_KEYS);
+      if (w.visual_type === "tree") expect(w.settings?.tree?.months, w.presetKey).toEqual(METAS_4T26_MONTH_KEYS);
+    }
   });
 });

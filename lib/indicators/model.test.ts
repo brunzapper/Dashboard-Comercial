@@ -1,4 +1,5 @@
-// Versão: 1.0 | Data: 01/10/2026
+// Versão: 1.1 | Data: 01/10/2026
+// v1.1 (01/10/2026): cleanMonthKeys.
 import { describe, expect, it } from "vitest";
 
 import {
@@ -11,6 +12,7 @@ import {
   parseIndicatorRealized,
   parseIndicatorRow,
   rollupMonths,
+  cleanMonthKeys,
 } from "./model";
 import { monthElapsed } from "./values";
 
@@ -168,5 +170,13 @@ describe("formatIndicatorValue", () => {
     expect(formatIndicatorValue(23, "percentual")).toBe("23%");
     expect(formatIndicatorValue(33, "quantidade")).toBe("33");
     expect(formatIndicatorValue(null, "moeda")).toBe("—");
+  });
+});
+
+describe("cleanMonthKeys (v1.1)", () => {
+  it("só AAAA-MM válidos, sem repetir, até o teto", () => {
+    expect(cleanMonthKeys(["2026-10", "2026-13", "x", "2026-10", "2026-11"])).toEqual(["2026-10", "2026-11"]);
+    expect(cleanMonthKeys("2026-10")).toEqual([]);
+    expect(cleanMonthKeys(Array.from({ length: 20 }, (_, i) => `2026-${String((i % 12) + 1).padStart(2, "0")}`))).toHaveLength(12);
   });
 });

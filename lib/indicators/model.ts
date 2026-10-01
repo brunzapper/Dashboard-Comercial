@@ -1,4 +1,8 @@
-// Versão: 1.0 | Data: 01/10/2026
+// Versão: 1.1 | Data: 01/10/2026
+// v1.1 (01/10/2026): `cleanMonthKeys` — lista de meses fixos (AAAA-MM) de um
+//   widget, saneada em silêncio. Dona única da régua usada pela Tree (meses
+//   fixos dos nós de indicador) — a Tabela de metas segue avisando pelo
+//   sanitizador dela.
 // Catálogo de INDICADORES (0149) — módulo PURO e client-safe.
 //
 // Um indicador é a EXPLICAÇÃO de uma chave de meta (`goals.metric`): o que ela
@@ -353,6 +357,20 @@ export function monthKey(year: number, month: number): string {
 }
 
 export const MAX_TABLE_MONTHS = 12;
+
+/**
+ * v1.1 (01/10/2026): meses fixos de um widget — só `AAAA-MM` válidos, sem
+ * repetição, até MAX_TABLE_MONTHS. Lixo some em silêncio (vazio = "use o
+ * período do dashboard").
+ */
+export function cleanMonthKeys(raw: unknown): string[] {
+  const out: string[] = [];
+  for (const m of Array.isArray(raw) ? raw : []) {
+    if (parseMonthKey(m) && !out.includes(m as string)) out.push(m as string);
+    if (out.length >= MAX_TABLE_MONTHS) break;
+  }
+  return out;
+}
 
 /**
  * Meses (YYYY-MM) cobertos por um intervalo de datas YYYY-MM-DD, em ordem, até

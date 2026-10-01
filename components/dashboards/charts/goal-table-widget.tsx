@@ -1,4 +1,9 @@
-// Versão: 1.0 | Data: 01/10/2026
+// Versão: 1.1 | Data: 01/10/2026
+// v1.1 (01/10/2026): (a) a tabela OCUPA o card — as linhas dividem a altura
+//   (antes ficavam no topo, com o resto do card vazio, que é o que fazia o
+//   slide parecer usar só parte da tela); (b) a fonte segue a escala do
+//   dashboard (`useFontScale` — e, apresentando, o ajuste à tela); (c) avisa
+//   prontidão ao pré-render do modo Apresentar (`useWarmupReady`).
 // Widget "Tabela de metas" (visual_type 'metas', 0149): indicador × mês com
 // META, REALIZADO e atingimento.
 //
@@ -19,6 +24,8 @@ import { Loader2 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { useBackgroundSave } from "@/lib/feedback/use-background-save";
+import { useFontScale } from "../font-scale-context";
+import { useWarmupReady } from "../presentation-warmup";
 import {
   BUS_REFETCH_DELAY_MS,
   useRefetchOrigin,
@@ -74,6 +81,7 @@ export function GoalTableWidget({
   const [optimistic, setOptimistic] = useState<Record<string, number | null>>({});
   const [editing, setEditing] = useState<string | null>(null);
   const { save, pendingKeys } = useBackgroundSave();
+  const fontScale = useFontScale();
 
   useDataChanged((d) => {
     if (d.kind === "record") setTick((t) => t + 1);
@@ -162,6 +170,9 @@ export function GoalTableWidget({
     });
   };
 
+  // v1.1: pronto para o pré-render quando a 1ª resposta chegou.
+  useWarmupReady(widgetId, data !== null);
+
   const totalRowTargets = useMemo(() => {
     if (!data?.totalRow) return null;
     return data.months.map((_, mi) => {
@@ -192,15 +203,21 @@ export function GoalTableWidget({
   }
 
   return (
-    <div className={cn("relative flex h-full flex-col gap-2 overflow-auto", refreshing && "opacity-70")}>
+    <div
+      className={cn("relative flex h-full flex-col gap-2 overflow-auto", refreshing && "opacity-70")}
+      // v1.1: 14px × escala do dashboard; os textos menores são em `em`.
+      style={{ fontSize: Math.round(14 * fontScale * 10) / 10 }}
+    >
       {refreshing ? (
-        <div className="text-muted-foreground absolute top-1 right-1 flex items-center gap-1 text-xs">
+        <div className="text-muted-foreground absolute top-1 right-1 flex items-center gap-1 text-[0.85em]">
           <Loader2 className="size-3 animate-spin" /> Atualizando…
         </div>
       ) : null}
-      <table className="w-full border-separate border-spacing-0 text-sm">
+      {/* v1.1: flex-1 + h-full — as linhas repartem a altura do card. */}
+      <table className="h-full w-full flex-1 border-separate border-spacing-0">
         <thead>
-          <tr>
+          {/* v1.1: o cabeçalho fica justo; a sobra de altura vai às linhas. */}
+          <tr className="h-px">
             <th className="bg-primary/10 sticky top-0 rounded-tl-md px-3 py-2 text-left font-semibold">
               {header}
             </th>
@@ -223,10 +240,10 @@ export function GoalTableWidget({
             );
             return (
               <tr key={row.id} className={cn(row.bold && "font-semibold")}>
-                <td className="border-b px-3 py-2 align-top">
+                <td className="border-b px-3 py-2 align-middle">
                   {row.label}
                   {row.responsibleMissing ? (
-                    <span className="text-destructive block text-xs font-normal">
+                    <span className="text-destructive block text-[0.8em] font-normal">
                       Responsável não encontrado
                     </span>
                   ) : null}
@@ -236,12 +253,12 @@ export function GoalTableWidget({
                   const target = targets[mi];
                   const isEditing = editing === k;
                   return (
-                    <td key={k} className="border-b px-3 py-2 text-right align-top tabular-nums">
+                    <td key={k} className="border-b px-3 py-2 text-right align-middle tabular-nums">
                       {isEditing ? (
                         <input
                           autoFocus
                           defaultValue={target == null ? "" : String(target).replace(".", ",")}
-                          className="bg-background w-24 rounded border px-1 text-right"
+                          className="bg-background w-[6em] rounded border px-1 text-right"
                           onBlur={(e) => commit(row.id, mi, e.currentTarget.value)}
                           onKeyDown={(e) => {
                             if (e.key === "Enter") e.currentTarget.blur();
@@ -264,7 +281,7 @@ export function GoalTableWidget({
                         </button>
                       )}
                       {showRealized && row.hasRealized && cell.elapsed > 0 ? (
-                        <div className="text-muted-foreground mt-0.5 flex items-center justify-end gap-1 text-xs font-normal">
+                        <div className="text-muted-foreground mt-0.5 flex items-center justify-end gap-1 text-[0.8em] font-normal">
                           <span title={row.errors?.[cell.month] ?? "Realizado"}>
                             {row.errors?.[cell.month] ? "erro" : formatIndicatorValue(cell.realized, row.unit)}
                           </span>
@@ -282,10 +299,10 @@ export function GoalTableWidget({
                   );
                 })}
                 {showTotal ? (
-                  <td className="border-b px-3 py-2 text-right align-top tabular-nums">
+                  <td className="border-b px-3 py-2 text-right align-middle tabular-nums">
                     {formatIndicatorValue(rollupMonths(targets, row.rollup), row.unit)}
                     {showRealized && row.hasRealized && row.total.realized != null ? (
-                      <div className="text-muted-foreground mt-0.5 text-xs font-normal">
+                      <div className="text-muted-foreground mt-0.5 text-[0.8em] font-normal">
                         {formatIndicatorValue(row.total.realized, row.unit)}
                         {showAttainment && row.total.attainment != null
                           ? ` · ${formatAttainment(row.total.attainment)}`
@@ -318,7 +335,7 @@ export function GoalTableWidget({
         </tbody>
       </table>
       {settings?.note ? (
-        <p className="text-muted-foreground px-1 text-xs whitespace-pre-line">{settings.note}</p>
+        <p className="text-muted-foreground shrink-0 px-1 text-[0.85em] whitespace-pre-line">{settings.note}</p>
       ) : null}
     </div>
   );

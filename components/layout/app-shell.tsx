@@ -1,4 +1,7 @@
-// Versão: 1.6 | Data: 12/09/2026
+// Versão: 1.7 | Data: 01/10/2026
+// v1.7 (01/10/2026): `useAppChromeOptional` — leitura sem exigir o shell (o
+//   dashboard esconde o ⋮ dos widgets no modo tela cheia; a prévia/snapshot
+//   renderizam fora do AppShell e não podem quebrar).
 // v1.6 (12/09/2026): o <main> ganhou `data-app-main` e passou a consumir
 //   --app-surface / --app-surface-text (regra em globals.css). É assim que o
 //   tema EXTERNO do dashboard pinta a JANELA: o padding é do <main>, e o
@@ -63,6 +66,11 @@ interface AppChrome {
 }
 
 const AppChromeContext = createContext<AppChrome | null>(null);
+
+/** v1.7: como `useAppChrome`, mas null fora do AppShell (sem lançar). */
+export function useAppChromeOptional(): AppChrome | null {
+  return useContext(AppChromeContext);
+}
 
 export function useAppChrome(): AppChrome {
   const ctx = useContext(AppChromeContext);

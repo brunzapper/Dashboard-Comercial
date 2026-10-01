@@ -1,4 +1,8 @@
-// Versão: 1.11 | Data: 01/10/2026
+// Versão: 1.12 | Data: 01/10/2026
+// v1.12 (01/10/2026): (a) avisa prontidão ao pré-render do modo Apresentar
+//   (`useWarmupReady`): pronta quando a árvore E os números dos indicadores
+//   chegaram; (b) `settings.months` — meses FIXOS dos nós de indicador (o
+//   slide não depende da barra de período), aplicados pela action.
 // v1.11 (01/10/2026): a Tree DESDOBRA METAS (0149).
 //   (a) nós operacionais no mapa livre — Indicador (meta × realizado ×
 //       atingimento por mês do período do painel, e o projetado dos filhos),
@@ -128,6 +132,7 @@ import {
   useAiSuggestions,
   useHasAiSuggestions,
 } from "@/components/dashboards/ai-suggestions-context";
+import { useWarmupReady } from "@/components/dashboards/presentation-warmup";
 import {
   addTreeNote,
   attachTaskToMap,
@@ -525,6 +530,14 @@ export function TreeWidget({
     // `requests` é derivado de `requestsKey` (deps reais: o conteúdo).
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dashboardId, widgetId, valuesKey, dataChangedAt, valuesOrigin]);
+
+  // v1.12: pré-render da apresentação — pronta com a árvore e os números.
+  useWarmupReady(
+    widgetId,
+    !scope ||
+      (data !== null &&
+        (requests.length === 0 || !dashboardId || !widgetId || values?.key === valuesKey))
+  );
 
   const [scheduling, setScheduling] = useState<ReadonlySet<string>>(() => new Set());
   const [opDraft, setOpDraft] = useState<OperationalDraft | null>(null);

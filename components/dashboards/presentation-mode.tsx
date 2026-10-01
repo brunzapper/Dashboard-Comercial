@@ -1,4 +1,8 @@
-// Versão: 1.0 | Data: 01/10/2026
+// Versão: 1.1 | Data: 01/10/2026
+// v1.1 (01/10/2026): `ready` — enquanto os slides preparam (pré-render, ver
+//   presentation-warmup.tsx) só a saída responde ao teclado. A tela cheia é
+//   pedida JÁ no clique (o navegador só a concede com o gesto ainda fresco) e
+//   cobre a espera; navegar fica para quando tudo estiver pronto.
 // Modo APRESENTAR do dashboard: cada aba vira um slide, em tela cheia, com o
 // painel VIVO (widgets interativos, laser disponível). Navegação por teclado
 // (←/→, PageUp/PageDown, espaço, Home/End, Esc) e pela barra flutuante.
@@ -30,8 +34,11 @@ export function usePresentationMode(opts: {
   onSelect: (id: string) => void;
   onExit: () => void;
   containerRef: React.RefObject<HTMLElement | null>;
+  /** v1.1: false = preparando (só Esc responde). Ausente = pronto. */
+  ready?: boolean;
 }) {
   const { active, slideIds, currentId, onSelect, onExit, containerRef } = opts;
+  const ready = opts.ready ?? true;
 
   useEffect(() => {
     if (!active) return;
@@ -62,12 +69,13 @@ export function usePresentationMode(opts: {
       if (!action) return;
       e.preventDefault();
       if (action === "exit") return onExit();
+      if (!ready) return; // v1.1: preparando — ainda não navega.
       const next = stepSlide(slideIds, currentId, action);
       if (next !== currentId) onSelect(next);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [active, slideIds, currentId, onSelect, onExit]);
+  }, [active, ready, slideIds, currentId, onSelect, onExit]);
 }
 
 export function PresentationBar({

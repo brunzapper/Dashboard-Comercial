@@ -1,4 +1,7 @@
-<!-- Versão: 1.41 | Data: 01/10/2026 -->
+<!-- Versão: 1.42 | Data: 01/10/2026 -->
+<!-- v1.42 (01/10/2026): §5.18 — "Apresentar" no menu ⋮ do dashboard,
+     preparação dos slides antes de começar, ajuste à tela, sem barra de
+     período nem ⋮ dos widgets; §5.17 — meses fixos dos indicadores da Tree. -->
 <!-- v1.41 (01/10/2026): §5.14 — o clique direito na prévia ainda VAZIA já
      abre o menu de tipo (antes era preciso salvar primeiro). Merge com a main
      (lá era a v1.40). -->
@@ -1692,10 +1695,27 @@ cria também:
 (menu do nó → "Copiar id do nó", ou `preset:<chave>`) faz o widget começar
 nele. Vários widgets podem mostrar galhos diferentes do MESMO mapa.
 
+**Meses fixos dos indicadores** (mesma configuração): `AAAA-MM` separados por
+vírgula. Os nós de indicador passam a mostrar sempre esses meses, sem depender
+da barra de período — é o que deixa um slide de apresentação "já no período
+certo". Vazio = os meses do período do painel.
+
 ### 5.18 Modo Apresentar
 
-O botão **Apresentar** ao lado do nome do dashboard põe o painel em tela cheia
-e transforma cada aba em um slide. ←/→ (ou PageUp/PageDown, espaço) navegam,
+**Apresentar** fica no menu **⋮** do dashboard (canto superior direito), logo
+abaixo de **Modo tela cheia** — quem só visualiza o dashboard também tem esse
+menu, com as duas opções. Ele põe o painel em tela cheia e transforma cada aba
+em um slide.
+
+Antes de começar aparece **"Preparando a apresentação…"**: todos os slides são
+carregados de uma vez, para que passar de página seja instantâneo. Leva alguns
+segundos a mais para entrar, mas nenhum slide fica "carregando" na frente da
+plateia. **Começar agora** pula a espera; **Cancelar** (ou Esc) desiste.
+
+Na apresentação cada slide se ajusta à altura da tela (o texto cresce junto),
+e a barra de período e o **⋮** dos widgets somem — prepare o período de cada
+quadro antes (meses fixos na Tabela de metas e nos indicadores da Tree). O ⋮
+dos widgets também some no **Modo tela cheia**. ←/→ (ou PageUp/PageDown, espaço) navegam,
 Home/End vão às pontas e Esc sai. Os widgets continuam vivos — filtros,
 árvores e tabelas respondem durante a apresentação — e o ponteiro laser está na
 barra flutuante. Abas de trabalho podem ficar fora dos slides

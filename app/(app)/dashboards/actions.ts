@@ -1,4 +1,6 @@
-// Versão: 1.14 | Data: 01/10/2026
+// Versão: 1.15 | Data: 01/10/2026
+// v1.15 (01/10/2026): `settings.presentation` passa a ser seção GERIDA no
+//   update in-place do preset (como periodBar/canvas).
 // v1.14 (01/10/2026): seções de DADOS do preset (0149 — indicadores, metas,
 //   Base manual, mapas da Tree), aplicadas SÓ no caminho de fábrica junto das
 //   seções de org (lib/presets/data-sections.ts, ensure-if-absent). E o
@@ -2847,6 +2849,9 @@ async function applyPresetDefinition(
     // fontScale gerida (23/07/2026): presets de fábrica não a definem (zero
     // mudança); o modo Editar da IA precisa alcançá-la (export a inclui).
     if (managed.fontScale !== undefined) next.fontScale = managed.fontScale;
+    // v1.15 (01/10/2026): as abas fora dos slides são do preset (a aba de
+    // trabalho dele) — reaplicar as reconduz.
+    if (managed.presentation !== undefined) next.presentation = managed.presentation;
     if (managed.tabs) {
       const presetTabIds = new Set(managed.tabs.map((t) => t.id));
       next.tabs = [

@@ -1,4 +1,6 @@
-<!-- Versão: 1.46 | Data: 01/10/2026 -->
+<!-- Versão: 1.47 | Data: 01/10/2026 -->
+<!-- v1.47 (01/10/2026): §4.18 — Apresentar v2 (menu ⋮, preparação dos
+     slides) e preset de metas v2 (reaplicar para o novo layout). -->
 <!-- v1.46 (01/10/2026): §4.18 — preset de metas (seções de dados),
      catálogo de Indicadores, rituais da Tree e modo Apresentar. -->
 
@@ -1521,9 +1523,18 @@ tick das automações (`/api/kanban-automations/tick`, a cada minuto). Duas
 tarefas para a mesma ocorrência não são possíveis (índice único) — se o botão
 diz "já agendada", ela existe.
 
-**Apresentar**: botão "Apresentar" ao lado do nome do dashboard. ←/→ navegam,
-Esc sai. Abas listadas em `settings.presentation.hiddenTabs` ficam fora (o
-preset deixa a "Árvore completa" de fora).
+**Apresentar**: menu ⋮ do dashboard → "Apresentar" (abaixo de "Modo tela
+cheia"). Antes de começar, todos os slides carregam de uma vez ("Preparando a
+apresentação…" — teto de 45 s; "Começar agora" pula). ←/→ navegam, Esc sai.
+Abas listadas em `settings.presentation.hiddenTabs` ficam fora (o preset deixa
+a "Árvore completa" de fora). Slide aparecendo "carregando" na apresentação =
+widget de fetch próprio que não avisa `useWarmupReady` (ver arquitetura §4.27).
+
+**Preset de metas v2 (01/10/2026)**: reaplicar o preset em Configurações →
+Presets traz o novo layout (slides em grade fina ocupando a tela, notas ao lado
+das tabelas, meses fixos out–dez/2026, barra de período desligada). Só os
+widgets do preset e as seções geridas mudam — metas, indicadores e nós
+ajustados seguem intocados (ensure-if-absent).
 
 ## 5. Troubleshooting
 

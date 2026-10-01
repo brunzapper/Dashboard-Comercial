@@ -1,4 +1,7 @@
-<!-- Versão: 1.99 | Data: 01/10/2026 -->
+<!-- Versão: 2.0 | Data: 01/10/2026 -->
+<!-- v2.0 (01/10/2026): §4.27 — modo Apresentar v2: pré-render de todos os
+     slides antes de começar, ajuste à altura da tela, sem barra de período nem
+     ⋮ dos widgets; "Apresentar" no menu ⋮ do dashboard; meses fixos da Tree. -->
 <!-- v1.99 (01/10/2026): §4.27 + invariante 42 — catálogo de Indicadores,
      Tabela de metas, Tree operacional (indicador/plano/ritual, galho por
      widget), rituais com ocorrência derivada, modo Apresentar e as seções de
@@ -6519,6 +6522,28 @@ service role com org explícita, nunca retroativo, 23505 = no-op.
 troca de slide é a MESMA troca de aba (`selectTabSafe` → `?tab=`).
 `DashboardSettings.presentation.hiddenTabs` deixa abas de trabalho fora.
 Efêmero.
+
+*v2 (01/10/2026).* A entrada fica no menu ⋮ do dashboard, abaixo de "Modo tela
+cheia" (quem não edita ganhou esse menu, reduzido às duas entradas de
+exibição). **Passar de página nunca espera dado:** ao pedir, o shell entra em
+`"warming"` e monta UM `DashboardGrid` por slide de uma vez — o atual visível,
+os demais `invisible`/`inert` mas medidos e vivos —, na ordem `warmupOrder` (o
+atual, depois os seguintes: as actions de um cliente rodam uma de cada vez, e é
+a ordem de montagem que decide quem chega primeiro). A espera ("Preparando a
+apresentação…", dentro do contêiner da tela cheia, com "Começar agora" e teto
+de 45 s) acaba quando o lote do engine chegou e cada widget de fetch próprio
+avisou `useWarmupReady` (`presentation-warmup.tsx`; Tabela de metas e Tree
+hoje — widget novo de fetch próprio deve avisar também, senão o slide dele
+pode aparecer carregando). A tela cheia é pedida no CLIQUE (o navegador só a
+concede com o gesto fresco) e cobre a espera; o teclado só navega com tudo
+pronto. **Ajuste à tela:** o grid recebe `fitHeight` e `fitRowHeight` estica a
+linha (piso 0,6×, teto 3×) para o slide ocupar a altura útil; o canvas acaba
+no último card e a escala de fonte acompanha (0,85–1,6×). Apresentando, a
+barra de período e o ⋮ dos widgets somem (o ⋮ também no modo tela cheia, via
+`BoardChrome.hideWidgetMenus`): o slide tem de vir no período certo de origem
+— por isso a Tree aceita `settings.tree.months` (meses FIXOS dos nós de
+indicador, como os `months` da Tabela de metas), e o preset `metas_4t26` v2 os
+fixa e nasce com a barra desligada.
 
 **Seções de DADOS do preset (`lib/presets/data-sections.ts`).** `indicators`,
 `goals`, `manualFamilies`/`manualSeries` e `maps` — SÓ no caminho de fábrica

@@ -1,4 +1,6 @@
-// Versão: 2.19 | Data: 01/10/2026
+// Versão: 2.20 | Data: 01/10/2026
+// v2.20 (01/10/2026): o menu ⋮ some quando o shell pede
+//   (`chrome.hideWidgetMenus` — modo Apresentar e modo tela cheia).
 // v2.19 (01/10/2026): (a) widget 'metas' — GoalTableWidget (Tabela de metas,
 //   0149), deferido pelo próprio fetch com o fingerprint de escopo; aviso no
 //   link público (as metas são lidas por action com sessão); (b) a Tree recebe
@@ -950,8 +952,9 @@ export const WidgetCard = memo(function WidgetCard({
   };
 
   const showExportItems = canExportDisplayed || canExportRecords;
+  // v2.20: apresentando (ou em tela cheia) o ⋮ não aparece.
   const menu =
-    canEdit || showExportItems ? (
+    !chrome.hideWidgetMenus && (canEdit || showExportItems) ? (
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button variant="ghost" size="icon" aria-label="Opções do widget">

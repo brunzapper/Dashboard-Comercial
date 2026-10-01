@@ -1,4 +1,11 @@
-// Versão: 1.0 | Data: 01/10/2026
+// Versão: 1.1 | Data: 01/10/2026
+// v1.1 (01/10/2026): (a) PRÉ-RENDER — `warmupOrder` dá a ordem em que os
+//   slides montam ao entrar no modo (o atual primeiro, depois os seguintes):
+//   as Server Actions de um cliente rodam UMA de cada vez, então a ordem de
+//   montagem é a ordem em que os dados chegam; `warmupState` decide quando a
+//   apresentação pode começar. (b) AJUSTE À TELA — `fitRowHeight` estica (ou
+//   encolhe, com piso) a altura da linha do grid para o slide ocupar a altura
+//   disponível: a largura já é a da tela; a altura era a gravada em px.
 // Modo APRESENTAR de um dashboard — módulo PURO e client-safe.
 //
 // Cada ABA vira um slide, na ordem das abas. Os widgets seguem vivos e
@@ -69,4 +76,58 @@ export function isTypingTarget(el: EventTarget | null): boolean {
   const h = el as HTMLElement;
   const tag = h.tagName.toLowerCase();
   return tag === "input" || tag === "textarea" || tag === "select" || h.isContentEditable === true;
+}
+
+/**
+ * v1.1: ordem de montagem dos slides no pré-render — o atual, os seguintes
+ * (é para lá que o apresentador anda) e por fim os anteriores.
+ */
+export function warmupOrder(ids: readonly string[], current: string): string[] {
+  const i = ids.indexOf(current);
+  if (i < 0) return [...ids];
+  return [...ids.slice(i), ...ids.slice(0, i).reverse()];
+}
+
+export interface WarmupState {
+  /** Widgets que avisam prontidão (os que buscam os próprios dados). */
+  total: number;
+  ready: number;
+  /** Pode começar: tudo pronto (ou nada a esperar). */
+  done: boolean;
+}
+
+/**
+ * v1.1: prontidão do pré-render. `armed` = os slides já montaram (antes disso
+ * o mapa está vazio e "nada a esperar" seria mentira); `batchLoading` = o lote
+ * único dos gráficos do engine ainda está a caminho.
+ */
+export function warmupState(
+  entries: ReadonlyMap<string, boolean>,
+  armed: boolean,
+  batchLoading: boolean
+): WarmupState {
+  let ready = 0;
+  for (const v of entries.values()) if (v) ready += 1;
+  const total = entries.size;
+  return { total, ready, done: armed && !batchLoading && ready === total };
+}
+
+/** Piso e teto do ajuste à tela, em múltiplos da altura natural da linha. */
+export const FIT_MIN_FACTOR = 0.6;
+export const FIT_MAX_FACTOR = 3;
+
+/**
+ * v1.1: altura de linha que faz `contentRows` linhas ocuparem `available` px.
+ * Encolher tem PISO (abaixo dele o conteúdo dos cards ficaria ilegível — o
+ * slide rola) e esticar tem TETO (um slide com um card pequeno não vira um
+ * card gigante). Sem medida ou sem conteúdo ⇒ a natural.
+ */
+export function fitRowHeight(
+  available: number,
+  contentRows: number,
+  natural: number
+): number {
+  if (!(available > 0) || !(contentRows > 0) || !(natural > 0)) return natural;
+  const fit = available / contentRows;
+  return Math.min(natural * FIT_MAX_FACTOR, Math.max(natural * FIT_MIN_FACTOR, fit));
 }

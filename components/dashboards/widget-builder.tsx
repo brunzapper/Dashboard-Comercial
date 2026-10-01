@@ -1,4 +1,6 @@
-// Versão: 1.30 | Data: 01/10/2026
+// Versão: 1.31 | Data: 01/10/2026
+// v1.31 (01/10/2026): Tree — "Meses fixos" dos nós de indicador
+//   (`tree.months`, mapa livre).
 // v1.30 (01/10/2026): (a) TABELA DE METAS ('metas', 0149) — seção própria
 //   (GoalTableSection) e `settings.goalTable` gravado pela régua única
 //   (sanitizeGoalTableSettings); o bloco de bases/dimensões/métricas não se
@@ -317,6 +319,7 @@ import { ComparisonSection } from "@/components/dashboards/widget-builder-compar
 import { GoalsSection } from "@/components/dashboards/widget-builder-goals";
 import { CardModeSection } from "@/components/dashboards/card-mode-section";
 import { GoalTableSection } from "@/components/dashboards/goal-table-section";
+import { cleanMonthKeys } from "@/lib/indicators/model";
 import { sanitizeGoalTableSettings } from "@/lib/widgets/goal-table";
 import type { GoalTableSettings } from "@/lib/widgets/types";
 import { TargetTabChecklist } from "@/components/dashboards/target-tab-checklist";
@@ -596,6 +599,10 @@ export function WidgetBuilder({
   // v1.30 (01/10/2026): Tree — galho exibido (vazio = árvore inteira).
   const [treeRootRef, setTreeRootRef] = useState<string>(
     widget?.settings?.tree?.rootRef ?? ""
+  );
+  // v1.31: meses fixos dos nós de indicador (texto livre, saneado no save).
+  const [treeMonths, setTreeMonths] = useState<string>(
+    (widget?.settings?.tree?.months ?? []).join(", ")
   );
   // v1.30 (01/10/2026): Tabela de metas (0149).
   const isGoalTableWidget = visualType === "metas";
@@ -2154,6 +2161,10 @@ export function WidgetBuilder({
         // v1.30: só o galho a partir deste nó (vazio = árvore inteira).
         ...(treeSource === "livre" && treeRootRef.trim()
           ? { rootRef: treeRootRef.trim() }
+          : {}),
+        // v1.31: só AAAA-MM válidos; nenhum = os meses do período.
+        ...(treeSource === "livre" && cleanMonthKeys(treeMonths.split(",").map((m) => m.trim())).length > 0
+          ? { months: cleanMonthKeys(treeMonths.split(",").map((m) => m.trim())) }
           : {}),
       };
     } else {
@@ -4324,6 +4335,14 @@ export function WidgetBuilder({
                     onChange={(e) => setTreeRootRef(e.target.value)}
                     placeholder="ex.: preset:mrr_inbound"
                     aria-label="Galho exibido"
+                  />
+                  {/* v1.31: a janela dos números não depende da barra. */}
+                  <Label>Meses fixos dos indicadores (opcional)</Label>
+                  <Input
+                    value={treeMonths}
+                    onChange={(e) => setTreeMonths(e.target.value)}
+                    placeholder="ex.: 2026-10, 2026-11, 2026-12 (vazio = período do painel)"
+                    aria-label="Meses fixos dos indicadores"
                   />
                 </>
               )}

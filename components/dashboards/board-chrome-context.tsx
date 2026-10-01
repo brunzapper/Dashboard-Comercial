@@ -1,5 +1,7 @@
 "use client";
-// Versão: 1.0 | Data: 26/07/2026
+// Versão: 1.1 | Data: 01/10/2026
+// v1.1 (01/10/2026): `hideWidgetMenus` — o menu ⋮ dos cards some no modo
+//   Apresentar e no modo tela cheia (decisão do shell, não do dashboard).
 // Cromo dos cards do dashboard (DashboardSettings.hideComparisonLabels/
 // hideBusinessDayBadges) propagado por context, no molde do FontScaleProvider:
 // chega a WidgetCard/WidgetChart sem prop-drilling e vale automaticamente no
@@ -12,6 +14,8 @@ import { createContext, useContext } from "react";
 export interface BoardChrome {
   hideComparisonLabels: boolean;
   hideBusinessDayBadges: boolean;
+  /** v1.1: sem o menu ⋮ nos cards (apresentação / tela cheia). */
+  hideWidgetMenus?: boolean;
 }
 
 const BoardChromeContext = createContext<BoardChrome>({

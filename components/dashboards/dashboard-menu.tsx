@@ -1,4 +1,8 @@
-// Versão: 1.4 | Data: 12/09/2026
+// Versão: 1.5 | Data: 01/10/2026
+// v1.5 (01/10/2026): "Apresentar" mora aqui, logo abaixo de "Modo tela cheia"
+//   (antes era um botão ao lado do título). Quem NÃO edita também ganha o
+//   menu — reduzido às duas entradas de exibição (`canEdit=false`): sem ele, o
+//   leitor perderia o modo Apresentar.
 // v1.4 (12/09/2026): o sheet Aparência ganhou a superfície EXTERNA
 //   (settings.outerBackground) ao lado da interna. "Igual ao interno" é a
 //   quarta opção do seletor do entorno e é o que resolve "em conjunto ou
@@ -30,6 +34,7 @@ import {
   Maximize,
   MoreVertical,
   Palette,
+  Presentation,
   Users,
 } from "lucide-react";
 
@@ -88,8 +93,14 @@ export function DashboardMenu({
   dashboardId,
   settings,
   snapshotPeriod,
+  onPresent,
+  canEdit = true,
 }: {
   dashboardId: string;
+  /** v1.5: abre o modo Apresentar (o shell prepara os slides). */
+  onPresent?: () => void;
+  /** v1.5: false = só as entradas de exibição (tela cheia / Apresentar). */
+  canEdit?: boolean;
   settings: DashboardSettings;
   // Contexto do período do dashboard (0059): captura do período congelado na
   // criação de snapshots.
@@ -248,6 +259,16 @@ export function DashboardMenu({
           <DropdownMenuItem onSelect={() => toggleFullscreen()}>
             <Maximize className="size-4" /> Modo tela cheia
           </DropdownMenuItem>
+          {onPresent ? (
+            <DropdownMenuItem
+              onSelect={() => onPresent()}
+              title="Cada aba vira um slide em tela cheia (←/→ navegam, Esc sai)"
+            >
+              <Presentation className="size-4" /> Apresentar
+            </DropdownMenuItem>
+          ) : null}
+          {canEdit ? (
+          <>
           <DropdownMenuSeparator />
           <DropdownMenuItem
             onSelect={(e) => {
@@ -298,6 +319,8 @@ export function DashboardMenu({
           >
             <Camera className="size-4" /> Snapshots
           </DropdownMenuItem>
+          </>
+          ) : null}
         </DropdownMenuContent>
       </DropdownMenu>
 

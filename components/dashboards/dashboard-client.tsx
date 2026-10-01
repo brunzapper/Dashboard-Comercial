@@ -1,4 +1,17 @@
-// Versão: 3.4 | Data: 01/10/2026
+// Versão: 3.5 | Data: 01/10/2026
+// v3.5 (01/10/2026): modo Apresentar v2. (a) PRÉ-RENDER: ao pedir, TODOS os
+//   slides montam de uma vez (um DashboardGrid por aba; os que não estão na
+//   tela ficam invisíveis, mas medidos e vivos) atrás da tela "Preparando…", e
+//   a apresentação só começa quando o lote do engine chegou e cada widget de
+//   fetch próprio avisou que tem dado (`useWarmupReady`). Passar de página é
+//   trocar a camada visível — nada é buscado nem desenhado naquele instante. A
+//   ordem de montagem é `warmupOrder` (o atual, depois os seguintes): as
+//   actions de um cliente rodam uma de cada vez. (b) AJUSTE À TELA: o grid
+//   recebe a altura útil (`fitHeight`) e estica a linha para o slide ocupá-la.
+//   (c) apresentando, sem barra de período e sem o ⋮ dos widgets (este também
+//   some no modo tela cheia). (d) "Apresentar" saiu do cabeçalho para o menu ⋮
+//   do dashboard, abaixo de "Modo tela cheia" — e quem não edita ganhou esse
+//   menu, reduzido às duas entradas de exibição.
 // v3.4 (01/10/2026): modo APRESENTAR — cada aba vira um slide em tela cheia,
 //   painel vivo, teclado e barra flutuante (presentation-mode.tsx; regra pura
 //   em lib/dashboards/presentation.ts). A troca de slide é a MESMA troca de
@@ -91,7 +104,6 @@ import {
   ChevronDown,
   Clock,
   Pencil,
-  Presentation,
   Plus,
   Redo2,
   Spline,
@@ -167,7 +179,17 @@ import type { SnapshotPeriodCapture } from "./snapshots-panel";
 import { DashboardTabs } from "./dashboard-tabs";
 import { cn } from "@/lib/utils";
 import { PresentationBar, usePresentationMode } from "./presentation-mode";
-import { slideTabIds, stepSlide } from "@/lib/dashboards/presentation";
+import {
+  slideTabIds,
+  stepSlide,
+  warmupOrder,
+  warmupState,
+} from "@/lib/dashboards/presentation";
+import {
+  PresentationWarmupOverlay,
+  PresentationWarmupProvider,
+} from "./presentation-warmup";
+import { useAppChromeOptional } from "@/components/layout/app-shell";
 import {
   DashboardHistoryProvider,
   useDashboardHistory,
@@ -1059,12 +1081,54 @@ export function DashboardClient({
     [resolveAutoPlacement, selectTab]
   );
   // v3.4 (01/10/2026): modo Apresentar — efêmero.
-  const [presenting, setPresenting] = useState(false);
+  // v3.5: em duas fases — "warming" (slides montando atrás da espera) e "on".
+  const [presentPhase, setPresentPhase] = useState<"off" | "warming" | "on">("off");
+  const presenting = presentPhase !== "off";
   const presentRef = useRef<HTMLDivElement | null>(null);
   const slideIds = useMemo(
     () => slideTabIds(tabs, settings.presentation?.hiddenTabs),
     [tabs, settings.presentation?.hiddenTabs]
   );
+  // v3.5: prontidão do pré-render — widget → já tem dado? Só conta enquanto a
+  // fase é "warming" (depois, refetch de fundo não reabre a espera).
+  const [warmEntries, setWarmEntries] = useState<ReadonlyMap<string, boolean>>(
+    () => new Map()
+  );
+  const [warmArmed, setWarmArmed] = useState(false);
+  const warmingRef = useRef(false);
+  useEffect(() => {
+    warmingRef.current = presentPhase === "warming";
+  }, [presentPhase]);
+  const reportWarm = useCallback((id: string, ready: boolean | null) => {
+    if (!warmingRef.current) return;
+    setWarmEntries((prev) => {
+      if (ready === null) {
+        if (!prev.has(id)) return prev;
+        const next = new Map(prev);
+        next.delete(id);
+        return next;
+      }
+      if (prev.get(id) === ready) return prev;
+      const next = new Map(prev);
+      next.set(id, ready);
+      return next;
+    });
+  }, []);
+  const warm = warmupState(warmEntries, warmArmed, engineLoading);
+  // Pronto ⇒ começa (ajuste de estado no render, sem efeito).
+  if (presentPhase === "warming" && warm.done) setPresentPhase("on");
+  useEffect(() => {
+    if (presentPhase !== "warming") return;
+    // Os slides montam e registram os widgets no mesmo commit; o "armar" dá
+    // um respiro para o grid medir e os fetches partirem. O teto é a rede de
+    // segurança: um widget que nunca responde não prende a apresentação.
+    const arm = window.setTimeout(() => setWarmArmed(true), 400);
+    const cap = window.setTimeout(() => setPresentPhase("on"), 45_000);
+    return () => {
+      window.clearTimeout(arm);
+      window.clearTimeout(cap);
+    };
+  }, [presentPhase]);
   const startPresenting = useCallback(() => {
     setEditMode(false);
     setConnectMode(false);
@@ -1072,20 +1136,40 @@ export function DashboardClient({
     if (tabs.length > 0 && !slideIds.includes(activeTabId)) {
       selectTabSafe(stepSlide(slideIds, "", "first"));
     }
-    setPresenting(true);
+    warmingRef.current = true;
+    setWarmEntries(new Map());
+    setWarmArmed(false);
+    setPresentPhase("warming");
   }, [tabs.length, slideIds, activeTabId, selectTabSafe]);
   const stopPresenting = useCallback(() => {
-    setPresenting(false);
+    warmingRef.current = false;
+    setPresentPhase("off");
     setLaserMode(false);
   }, []);
   usePresentationMode({
     active: presenting,
+    ready: presentPhase === "on",
     slideIds,
     currentId: activeTabId,
     onSelect: selectTabSafe,
     onExit: stopPresenting,
     containerRef: presentRef,
   });
+  // v3.5: altura útil da janela para o ajuste à tela (só apresentando).
+  const [viewportH, setViewportH] = useState(0);
+  useEffect(() => {
+    if (!presenting) return;
+    const measure = () => setViewportH(window.innerHeight);
+    const raf = window.requestAnimationFrame(measure);
+    window.addEventListener("resize", measure);
+    return () => {
+      window.cancelAnimationFrame(raf);
+      window.removeEventListener("resize", measure);
+    };
+  }, [presenting]);
+  // v3.5: modo tela cheia do app também esconde o ⋮ dos widgets.
+  const appChrome = useAppChromeOptional();
+  const hideWidgetMenus = presenting || (appChrome?.chromeHidden ?? false);
 
   // Pendente excluído antes do refresh viraria fantasma (o id nunca chega do
   // servidor para a reconciliação) — o WidgetCard avisa a exclusão por aqui.
@@ -1099,6 +1183,75 @@ export function DashboardClient({
       await updateDashboardSettings(dashboardId, { ...settings, tabs: next });
     });
   }
+
+  // v3.5: as props do grid são as mesmas no painel e em cada slide da
+  // apresentação — só mudam os widgets, a aba e o laser.
+  const gridProps = {
+    boardWidgets: widgets,
+    dataById: effDataById,
+    deferredPendingIds: enginePendingIds,
+    recordListById,
+    recordListExtraById,
+    recordListTotalById,
+    recordListWindowTotalById,
+    entityListById,
+    calcById: effCalcById,
+    calcVarsById: effCalcVarsById,
+    noteById: effNoteById,
+    calcExprById,
+    tableCellsById,
+    fields,
+    fkLabels,
+    respCanon,
+    responsibleOptions,
+    userRoles,
+    canEditValues,
+    available,
+    availableForBuilder,
+    dashboardId,
+    dateFormat,
+    settings,
+    tabs,
+    canEdit,
+    canExport: true,
+    canManageFields,
+    currencyOptions,
+    currencyRates,
+    conversionPeriodById,
+    editMode,
+    filterOptionsById,
+    fieldFilterSeedById,
+    quickFiltersById,
+    periodWindowById,
+    deferredScopeById,
+    layoutById,
+    applyLayoutPatch,
+    lineById,
+    applyLinePatch,
+    connectors,
+    saveConnectors,
+    connectMode: editMode && connectMode,
+    drawMode: drawQuick != null,
+    onDrawDone,
+    onDrawCancel: () => setDrawQuick(null),
+    placing,
+    onPlace: onPlaceAt,
+    onPlaceCancel: resolveAutoPlacement,
+    onLaserModeChange: handleLaserChange,
+    laserColor,
+    onToggleEditMode: canEdit ? toggleEditMode : undefined,
+    autoEditWidgetId: autoEditId,
+    onAutoEditConsumed: clearAutoEdit,
+    onQuickCreate: quickCreateWidget,
+    onWidgetDeleted,
+    hideWidgetMenus,
+  } satisfies Partial<React.ComponentProps<typeof DashboardGrid>>;
+  // v3.5: altura útil do slide — janela menos as margens do modo (pt-4 +
+  // pb-16) e o respiro do fundo interno (p-3), quando há.
+  const presentFitHeight =
+    presenting && viewportH > 0
+      ? Math.max(200, viewportH - 16 - 64 - (backgroundCss ? 24 : 0))
+      : null;
 
   return (
     <DashboardHistoryProvider dashboardId={dashboardId} seed={historySeed}>
@@ -1118,7 +1271,8 @@ export function DashboardClient({
         "flex flex-col gap-4",
         // v3.4: apresentando, o painel cobre a janela (com ou sem a API de
         // tela cheia — iframe/permissão podem negá-la).
-        presenting && "bg-background fixed inset-0 z-50 overflow-auto p-6 pb-20"
+        // v3.5: margens enxutas — o slide ocupa a altura útil (fitHeight).
+        presenting && "bg-background fixed inset-0 z-50 overflow-auto px-6 pt-4 pb-16"
       )}
       data-presenting={presenting || undefined}
       data-preview-ready={!engineLoading && (engineIds.length === 0 || engineData !== null)}
@@ -1165,16 +1319,6 @@ export function DashboardClient({
                 <Pencil className="size-4" />
               </Button>
             ) : null}
-            {/* v3.4: Apresentar — para todo mundo que vê o board. */}
-            <Button
-              variant="ghost"
-              size="sm"
-              className="text-muted-foreground hover:text-foreground h-7 gap-1"
-              onClick={startPresenting}
-              title="Apresentar: cada aba vira um slide em tela cheia (←/→ navegam, Esc sai)"
-            >
-              <Presentation className="size-4" /> Apresentar
-            </Button>
           </div>
         )}
         {canEdit ? (
@@ -1273,9 +1417,19 @@ export function DashboardClient({
               dashboardId={dashboardId}
               settings={settings}
               snapshotPeriod={snapshotPeriod}
+              onPresent={startPresenting}
             />
           </div>
-        ) : null}
+        ) : (
+          // v3.5: quem não edita também tem o ⋮ — só tela cheia e Apresentar.
+          <DashboardMenu
+            dashboardId={dashboardId}
+            settings={settings}
+            snapshotPeriod={snapshotPeriod}
+            onPresent={startPresenting}
+            canEdit={false}
+          />
+        )}
       </div>
 
       {tabs.length > 0 || (canEdit && editMode) ? (
@@ -1292,7 +1446,13 @@ export function DashboardClient({
       <DashboardPendingProvider>
         {/* Segundo trecho de cromo: a barra de período e o aviso de posição
             ficam sobre a superfície externa; o grid, logo abaixo, fica FORA. */}
-        <div className="flex flex-col gap-4" data-board-chrome data-preview-content>
+        {/* v3.5: apresentando, a barra de período some — os slides já vêm
+            com o período certo (o preset fixa os meses de cada quadro). */}
+        <div
+          className={cn("flex flex-col gap-4", presenting && "hidden")}
+          data-board-chrome
+          data-preview-content
+        >
         {barEnabled ? (
           <PeriodFilter
             available={availableForBuilder}
@@ -1343,72 +1503,60 @@ export function DashboardClient({
           style={backgroundCss ? { background: backgroundCss } : undefined}
         >
           <WidgetFocusProvider focus={focusWidget}>
-          <DashboardGrid
-            widgets={visibleWidgets}
-            boardWidgets={widgets}
-            dataById={effDataById}
-            deferredPendingIds={enginePendingIds}
-            recordListById={recordListById}
-            recordListExtraById={recordListExtraById}
-            recordListTotalById={recordListTotalById}
-            recordListWindowTotalById={recordListWindowTotalById}
-            entityListById={entityListById}
-            calcById={effCalcById}
-            calcVarsById={effCalcVarsById}
-            noteById={effNoteById}
-            calcExprById={calcExprById}
-            tableCellsById={tableCellsById}
-            fields={fields}
-            fkLabels={fkLabels}
-            respCanon={respCanon}
-            responsibleOptions={responsibleOptions}
-            userRoles={userRoles}
-            canEditValues={canEditValues}
-            available={available}
-            availableForBuilder={availableForBuilder}
-            dashboardId={dashboardId}
-            dateFormat={dateFormat}
-            settings={settings}
-            tabs={tabs}
-            activeTabId={activeTabId}
-            canEdit={canEdit}
-            canExport
-            canManageFields={canManageFields}
-            currencyOptions={currencyOptions}
-            currencyRates={currencyRates}
-            conversionPeriodById={conversionPeriodById}
-            editMode={editMode}
-            filterOptionsById={filterOptionsById}
-            fieldFilterSeedById={fieldFilterSeedById}
-            quickFiltersById={quickFiltersById}
-            periodWindowById={periodWindowById}
-            deferredScopeById={deferredScopeById}
-            layoutById={layoutById}
-            applyLayoutPatch={applyLayoutPatch}
-            lineById={lineById}
-            applyLinePatch={applyLinePatch}
-            connectors={connectors}
-            saveConnectors={saveConnectors}
-            connectMode={editMode && connectMode}
-            drawMode={drawQuick != null}
-            onDrawDone={onDrawDone}
-            onDrawCancel={() => setDrawQuick(null)}
-            placing={placing}
-            onPlace={onPlaceAt}
-            onPlaceCancel={resolveAutoPlacement}
-            laserMode={laserMode}
-            onLaserModeChange={handleLaserChange}
-            laserColor={laserColor}
-            onToggleEditMode={canEdit ? toggleEditMode : undefined}
-            autoEditWidgetId={autoEditId}
-            onAutoEditConsumed={clearAutoEdit}
-            onQuickCreate={quickCreateWidget}
-            onWidgetDeleted={onWidgetDeleted}
-          />
+          {presenting ? (
+            // v3.5: todos os slides montados — o atual visível, os demais
+            // invisíveis mas medidos (mesma largura) e vivos.
+            <PresentationWarmupProvider report={reportWarm}>
+              <div className="relative">
+                {warmupOrder(slideIds, activeTabId).map((tabId) => {
+                  const current = tabId === activeTabId;
+                  return (
+                    <div
+                      key={tabId || "_"}
+                      aria-hidden={current ? undefined : true}
+                      inert={!current}
+                      className={cn(
+                        !current && "pointer-events-none invisible absolute inset-x-0 top-0"
+                      )}
+                    >
+                      <DashboardGrid
+                        {...gridProps}
+                        widgets={
+                          tabs.length === 0
+                            ? allWidgets
+                            : allWidgets.filter((w) => widgetTab(w) === tabId)
+                        }
+                        activeTabId={tabId}
+                        laserMode={current && laserMode}
+                        fitHeight={presentFitHeight}
+                      />
+                    </div>
+                  );
+                })}
+              </div>
+            </PresentationWarmupProvider>
+          ) : (
+            <DashboardGrid
+              {...gridProps}
+              widgets={visibleWidgets}
+              activeTabId={activeTabId}
+              laserMode={laserMode}
+            />
+          )}
           </WidgetFocusProvider>
         </div>
       </DashboardPendingProvider>
-      {presenting ? (
+      {/* v3.5: espera do pré-render — dentro do contêiner da tela cheia (o
+          que fica fora dele não aparece em fullscreen). */}
+      {presentPhase === "warming" ? (
+        <PresentationWarmupOverlay
+          state={warm}
+          slides={slideIds.length}
+          onStartNow={() => setPresentPhase("on")}
+          onCancel={stopPresenting}
+        />
+      ) : null}
+      {presentPhase === "on" ? (
         <PresentationBar
           slideIds={slideIds}
           currentId={activeTabId}

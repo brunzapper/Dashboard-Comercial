@@ -1,4 +1,5 @@
-// Versão: 1.18 | Data: 01/10/2026
+// Versão: 1.19 | Data: 01/10/2026
+// v1.19 (01/10/2026): TreeSettings.months — meses FIXOS dos nós de indicador.
 // v1.18 (01/10/2026): (a) visual_type 'metas' — a TABELA DE METAS (0149):
 //   indicador × mês com meta, realizado e atingimento, lidos pelo catálogo de
 //   Indicadores (lib/indicators) — `GoalTableSettings`; (b) TreeSettings.rootRef
@@ -555,6 +556,13 @@ export interface TreeSettings {
    * cai na árvore inteira (nunca um widget vazio sem explicação).
    */
   rootRef?: string;
+  /**
+   * v1.19 (01/10/2026): meses FIXOS (AAAA-MM) dos nós de indicador — o galho
+   * mostra sempre a mesma janela, independente da barra de período (é o que
+   * deixa um slide de apresentação "já no período certo"). Ausente = os meses
+   * do período do dashboard.
+   */
+  months?: string[];
 }
 
 export interface RowActionSettings {
