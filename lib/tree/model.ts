@@ -1,3 +1,10 @@
+// Versão: 1.4 | Data: 01/10/2026
+// v1.4 (01/10/2026): (a) a ANOTAÇÃO saiu de `TREE_FILTERABLE_KINDS`. Ela não é
+//   fato do histórico — é a estrutura que a pessoa desenha — e o filtro "O que
+//   exibir" a escondia: a branch era criada e sumia na hora (era o "+ Galho na
+//   raiz não faz nada"). Um "note" já gravado em showKinds é inofensivo; o
+//   filtro a mantém sempre. (b) Vocabulário: "branch" no lugar de "galho" nos
+//   rótulos de tela.
 // Versão: 1.3 | Data: 30/09/2026
 // v1.3 (30/09/2026): visualização ROOT. (a) `TreeView` ("lista" | "root") —
 //   a Root é a mesma árvore desenhada num canvas de galhos arrastáveis, que
@@ -65,8 +72,14 @@ export const TREE_FILTERABLE_KINDS = [
   "task",
   "comment",
   "change",
-  "note",
 ] as const satisfies readonly TreeNodeKind[];
+
+/**
+ * v1.4 (01/10/2026): os tipos que o filtro NUNCA esconde — o que a pessoa
+ * desenha na própria árvore. Esconder a anotação fazia a branch recém-criada
+ * sumir no mesmo instante.
+ */
+export const TREE_ALWAYS_VISIBLE_KINDS: readonly TreeNodeKind[] = ["note"];
 
 export type TreeFilterableKind = (typeof TREE_FILTERABLE_KINDS)[number];
 
@@ -164,8 +177,8 @@ export interface TreeParentOverride {
 export type TreeView = "lista" | "root";
 
 export const TREE_VIEW_LABELS: Record<TreeView, string> = {
-  lista: "Lista (galhos recuados)",
-  root: "Root (canvas de galhos arrastáveis)",
+  lista: "Lista (branches recuadas)",
+  root: "Root (canvas de branches arrastáveis)",
 };
 
 /** Para onde um galho expande os filhos na Root. */

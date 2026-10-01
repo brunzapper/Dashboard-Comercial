@@ -1,4 +1,7 @@
-// Versão: 1.28 | Data: 30/09/2026
+// Versão: 1.29 | Data: 01/10/2026
+// v1.29 (01/10/2026): Tree — vocabulário "branch" nos textos da Root, e o
+//   filtro "O que exibir" deixa de oferecer Anotação (ela nunca é escondida:
+//   escondê-la fazia a branch recém-criada sumir).
 // v1.28 (30/09/2026): Tree — "Como desenhar" (Lista | Root) e, na Root, para
 //   onde os galhos abrem por padrão. A chave do mapa LIVRE passa a ser
 //   normalizada e, vazia, gerada no save: sem ela o mapa não tinha onde morar.
@@ -568,8 +571,12 @@ export function WidgetBuilder({
   const [treeMapKey, setTreeMapKey] = useState<string>(
     widget?.settings?.tree?.mapKey ?? ""
   );
-  const [treeKinds, setTreeKinds] = useState<TreeFilterableKind[]>(
-    widget?.settings?.tree?.showKinds ?? []
+  // v1.29: só os tipos ainda filtráveis — "note" saiu da lista (a anotação
+  // nunca é escondida) e um valor antigo gravado não deve voltar no save.
+  const [treeKinds, setTreeKinds] = useState<TreeFilterableKind[]>(() =>
+    (widget?.settings?.tree?.showKinds ?? []).filter((k) =>
+      (TREE_FILTERABLE_KINDS as readonly string[]).includes(k)
+    )
   );
   // v1.28: a visualização (Lista | Root) e a direção padrão dos galhos.
   const [treeView, setTreeView] = useState<TreeView>(
@@ -4192,12 +4199,15 @@ export function WidgetBuilder({
               {treeView === "root" ? (
                 <>
                   <p className="text-muted-foreground text-xs">
-                    Na Root cada galho pode ser arrastado (para o vazio: muda
+                    Na Root cada branch pode ser arrastada (para o vazio: muda
                     de lugar; sobre outro nó: passa a depender dele),
-                    recolhido e aberto para o lado ou para baixo. De qualquer
-                    nó saem novos galhos — anotação, tarefa ou comentário.
+                    recolhida e aberta para o lado ou para baixo. Clique
+                    direito no canvas cria uma branch independente; o &quot;+&quot; de
+                    um card cria uma branch dele. Toda branch nasce como
+                    anotação — o clique direito nela a converte em comentário
+                    ou tarefa.
                   </p>
-                  <Label>Galhos abrem, por padrão</Label>
+                  <Label>Branches abrem, por padrão</Label>
                   <Combobox
                     options={Object.entries(TREE_DIRECTION_LABELS).map(
                       ([v, l]) => ({ value: v, label: l })
@@ -4205,7 +4215,7 @@ export function WidgetBuilder({
                     value={treeDirection}
                     onValueChange={(v) => setTreeDirection(v as TreeDirection)}
                     searchable={false}
-                    aria-label="Direção padrão dos galhos"
+                    aria-label="Direção padrão das branches"
                   />
                 </>
               ) : null}
@@ -4265,7 +4275,8 @@ export function WidgetBuilder({
 
               <Label className="border-t pt-3">O que exibir</Label>
               <p className="text-muted-foreground text-xs">
-                Nada marcado = mostra tudo.
+                Nada marcado = mostra tudo. Anotações aparecem sempre:
+                elas são o que se desenha na própria árvore.
               </p>
               <div className="flex flex-wrap gap-x-4 gap-y-2">
                 {TREE_FILTERABLE_KINDS.map((k) => (

@@ -1,3 +1,6 @@
+// Versão: 1.6 | Data: 01/10/2026
+// v1.6 (01/10/2026): `defaults.title` — a Root da Tree abre o editor com o
+//   texto que a pessoa já digitou no rascunho da branch.
 // Versão: 1.5 | Data: 30/09/2026
 // v1.5 (30/09/2026): `onDone` recebe o id da tarefa (criada ou editada). A
 //   Root da Tree precisa dele para pendurar a tarefa nova no galho em que a
@@ -75,6 +78,8 @@ export interface TaskFormContext {
 // Pré-preenchimentos de criação (quick-create de coluna, seção do registro,
 // feed dos cards). parentTaskId = subtarefa (vive no feed da tarefa pai).
 export interface TaskDefaults {
+  /** v1.6: título já digitado em outro lugar (rascunho da Root). */
+  title?: string | null;
   boardId?: string | null;
   phase?: string;
   recordId?: string | null;
@@ -166,7 +171,7 @@ export function TaskForm({
         <Input
           id="task-title"
           name="title"
-          defaultValue={task?.title ?? ""}
+          defaultValue={task?.title ?? defaults?.title ?? ""}
           placeholder="Ex.: Preparar proposta"
           required
         />

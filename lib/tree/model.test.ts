@@ -1,3 +1,5 @@
+// Versão: 1.1 | Data: 01/10/2026
+// v1.1 (01/10/2026): a anotação não é filtrável (ver model.ts v1.4).
 // Versão: 1.0 | Data: 30/09/2026
 // Os validadores do modelo que o SERVIDOR usa antes de gravar em
 // `tree_nodes` (0148): o escopo que chega do cliente e os ids de nó. São a
@@ -6,6 +8,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   branchKindDisabledReason,
+  TREE_ALWAYS_VISIBLE_KINDS,
+  TREE_FILTERABLE_KINDS,
   isTreeNodeRef,
   normalizeMapKey,
   parseTreeScope,
@@ -69,5 +73,12 @@ describe("tipos de galho", () => {
     expect(branchKindDisabledReason("comment", "record")).toBeNull();
     expect(branchKindDisabledReason("note", "livre")).toBeNull();
     expect(branchKindDisabledReason("task", "livre")).toBeNull();
+  });
+});
+
+describe("filtro 'O que exibir'", () => {
+  it("anotação nunca é filtrável — ela é o que se desenha na árvore", () => {
+    expect(TREE_FILTERABLE_KINDS as readonly string[]).not.toContain("note");
+    expect(TREE_ALWAYS_VISIBLE_KINDS).toContain("note");
   });
 });

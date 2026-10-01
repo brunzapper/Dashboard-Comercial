@@ -707,7 +707,13 @@ This version has breaking changes — APIs, conventions, and file structure may 
   `deriveTree` quebra ciclo. Nós seguem HTML e só os conectores da Root são
   SVG; as ações do nó vivem em `tree-node-parts.tsx` para as duas
   visualizações. A fonte Livre (mapa por chave) é `loadMapTree`; comentário
-  nela fica desabilitado com motivo. Ver `docs/arquitetura.md` §4.24 e
+  nela fica desabilitado com motivo. **Root v1.1 (01/10/2026):** criar é um
+  RASCUNHO dentro do canvas (`draft:new` via `insertNode` — vai junto para a
+  tela cheia; o compositor do widget é só da Lista), a branch nasce ANOTAÇÃO e
+  `convertTreeNote` a converte pelos choke points (`createComment`/
+  `createTask`, filhos re-pendurados, anotação apagada por ÚLTIMO), e o filtro
+  `showKinds` NUNCA esconde anotação (`TREE_ALWAYS_VISIBLE_KINDS`). Ver
+  `docs/arquitetura.md` §4.24 e
   invariantes 33/34/35.
 - **O adaptador do Gemini TRANSMITE SEMPRE, falha de transporte REPETE e
   modelo saturado REBAIXA (10/09/2026; rebaixamento 17/09/2026):** o

@@ -1,4 +1,8 @@
-// Versão: 1.6 | Data: 30/09/2026
+// Versão: 1.7 | Data: 01/10/2026
+// v1.7 (01/10/2026): guardas da Root v1.1 — o filtro nunca esconde anotação
+//   (era o "+ Galho na raiz não faz nada"), a conversão de anotação nasce
+//   pelos choke points de comentário e tarefa, e a Root não usa o compositor
+//   do widget (ele ficava FORA do portal da tela cheia).
 // v1.6 (30/09/2026): as peças do nó saíram para `tree-node-parts.tsx`,
 //   compartilhadas pela Lista e pela ROOT. As guardas de "o nó conclui/exclui
 //   sem régua paralela" passam a ler a SUPERFÍCIE do nó (widget + peças) — o
@@ -423,5 +427,39 @@ describe("Root: sem régua paralela", () => {
   it("o que está recolhido é de quem olha — e o storage nunca derruba a tela", () => {
     expect(root).toContain("localStorage");
     expect(root).toMatch(/try \{[\s\S]{0,120}localStorage/);
+  });
+});
+
+describe("Root v1.1: criar dentro do canvas, pelos donos de sempre", () => {
+  const widget = readFileSync(
+    "components/dashboards/charts/tree-widget.tsx",
+    "utf8"
+  );
+  const actions = readFileSync("app/(app)/dashboards/tree-actions.ts", "utf8");
+
+  it("o filtro 'O que exibir' nunca esconde anotação", () => {
+    // O widget real tinha showKinds sem "note": a branch nascia e sumia.
+    expect(widget).toContain("TREE_ALWAYS_VISIBLE_KINDS");
+  });
+
+  it("converter anotação usa createComment/createTask — nunca insert direto", () => {
+    const convert = actions.slice(actions.indexOf("export async function convertTreeNote"));
+    expect(convert).toContain("createComment(");
+    expect(convert).toContain("createTask(");
+    expect(convert).not.toMatch(/from\("tasks"\)\s*\.insert/);
+    expect(convert).not.toMatch(/from\("comments"\)/);
+    // A anotação só sai DEPOIS de o item novo existir e herdar os filhos.
+    expect(convert.indexOf(".delete()")).toBeGreaterThan(
+      convert.indexOf('update({ parent_ref: newRef })')
+    );
+  });
+
+  it("a Root não renderiza o compositor do widget (fora da tela cheia)", () => {
+    const root = widget.slice(
+      widget.indexOf('if (view === "root")'),
+      widget.indexOf("{composer ?? topActions}")
+    );
+    expect(root).not.toContain("{composer}");
+    expect(root).toContain("onCreate={createFromRoot}");
   });
 });

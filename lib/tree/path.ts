@@ -1,3 +1,5 @@
+// Versão: 1.1 | Data: 01/10/2026
+// v1.1 (01/10/2026): `insertNode` — o rascunho da branch nova entra no layout.
 // Versão: 1.0 | Data: 30/09/2026
 // v1.0 (30/09/2026): a LEITURA DO CAMINHO na Root — o que torna a árvore um
 //   planejamento, e não só um desenho.
@@ -144,4 +146,30 @@ export function moveSubtree(
   const host = findNode(pruned, parentId)!;
   host.children = [...host.children, moving];
   return pruned.map((r) => fixDepth(r, 0));
+}
+
+/**
+ * v1.1 (01/10/2026): a árvore com `node` pendurado em `parentId` (null = mais
+ * uma raiz, no fim). É o RASCUNHO da Root: a prévia da branch nova entra no
+ * layout como um nó de verdade, e por isso aparece exatamente onde vai ficar.
+ * Pai inexistente = raiz. Pura: devolve uma cópia.
+ */
+export function insertNode(
+  roots: TreeNode[],
+  parentId: string | null,
+  node: TreeNode
+): TreeNode[] {
+  if (!parentId || !findNode(roots, parentId)) {
+    return [...roots, { ...node, depth: 0 }];
+  }
+  const walk = (list: TreeNode[], depth: number): TreeNode[] =>
+    list.map((n) =>
+      n.id === parentId
+        ? {
+            ...n,
+            children: [...n.children, { ...node, depth: depth + 1, children: [] }],
+          }
+        : { ...n, children: walk(n.children, depth + 1) }
+    );
+  return walk(roots, 0);
 }
