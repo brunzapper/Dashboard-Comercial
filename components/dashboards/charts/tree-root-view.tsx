@@ -1,4 +1,12 @@
-// Versão: 1.2 | Data: 01/10/2026
+// Versão: 1.3 | Data: 01/10/2026
+// v1.3 (01/10/2026): merge com a main — a v1.2 dela (clique direito na
+//   prévia vazia) chega aqui renumerada como v1.3; as duas mudanças convivem.
+// v1.3 (01/10/2026): o clique direito na PRÉVIA ainda vazia abre o menu de tipo.
+//   O mousedown do botão direito fora da caixa de texto (badge, borda do card)
+//   tirava o foco dela; o blur, sem `relatedTarget`, DESCARTAVA a prévia vazia
+//   (ou SALVAVA a preenchida) antes de o `contextmenu` chegar — o menu só
+//   aparecia depois de salvar. O `DraftTile` agora segura o foco na caixa
+//   (`preventDefault` no mousedown fora dela) e o blur para o menu é ignorado.
 // v1.2 (01/10/2026): nós OPERACIONAIS (0149). (a) o tamanho do cartão é POR
 //   NÓ (`sizeOf` → layoutRoot): indicador/plano/ritual mostram meta ×
 //   realizado, 5W2H e a próxima data, e não cabem em 224×92; (b) o corpo deles
@@ -1266,6 +1274,14 @@ function CardTextarea({
         ) {
           return;
         }
+        // v1.3 (01/10/2026): foco indo para o menu de contexto não salva nem
+        // descarta — é a troca de tipo da prévia.
+        if (
+          e.relatedTarget instanceof Element &&
+          e.relatedTarget.closest("[data-tree-menu]")
+        ) {
+          return;
+        }
         done.current = true;
         const text = e.currentTarget.value.trim();
         if (text) onCommit(text);
@@ -1302,6 +1318,13 @@ function DraftTile({
         KIND_TONE[draft.kind] ?? "border-muted"
       )}
       style={{ left: box.x, top: box.y, width: box.w, minHeight: box.h }}
+      // v1.3 (01/10/2026): o foco FICA na caixa de texto. Sem isso, o mousedown
+      // (direito, no badge ou na borda) a desfocava e o blur descartava a
+      // prévia vazia antes de o menu de tipo abrir. Botões seguem recebendo o
+      // click — só o foco não sai.
+      onMouseDown={(e) => {
+        if (!(e.target as HTMLElement).closest("textarea")) e.preventDefault();
+      }}
     >
       <div className="flex items-center gap-1">
         <Badge variant="outline" className="h-4 shrink-0 px-1 text-[10px]">
