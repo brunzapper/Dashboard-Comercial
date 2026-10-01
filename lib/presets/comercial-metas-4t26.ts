@@ -1,4 +1,12 @@
-// Versão: 1.0 | Data: 01/10/2026
+// Versão: 1.1 | Data: 01/10/2026
+// v1.1 (01/10/2026): slides que OCUPAM a tela. (a) grade FINA (gridVersion 2,
+//   linha quadrada): cada slide é um bloco 120 × 64 células, ~16:9 em
+//   qualquer largura — antes as posições eram do espaço legado com linha de
+//   30px e vários slides usavam metade da altura; (b) tabelas dividem o slide
+//   com uma nota "como ler" (o texto que estava no rodapé da tabela); (c) os
+//   meses ficam FIXOS (out–dez/2026) nas tabelas e nos nós de indicador e a
+//   barra de período nasce desligada — toda aba já abre no período certo, e o
+//   modo Apresentar não precisa de filtro nenhum. Versão do preset → 2.
 // Preset "Comercial — Metas e desdobramentos 4T26" (0149): a apresentação de
 // metas do 4º trimestre de 2026 montada com as PEÇAS do sistema — nada de
 // slide escrito à mão.
@@ -377,6 +385,18 @@ const TABS = [
   { id: "arvore", name: "Árvore completa" },
 ];
 
+/** v1.1: os meses da apresentação, fixos (nada depende da barra de período). */
+export const METAS_4T26_MONTH_KEYS = MONTHS.map((m) => `${YEAR}-${String(m).padStart(2, "0")}`);
+
+// v1.1: grade fina — cada slide ocupa 120 × SLIDE_H células (linha quadrada,
+// ~16:9 em qualquer largura; o modo Apresentar ainda ajusta à altura da tela).
+const SLIDE_W = 120;
+const SLIDE_H = 64;
+const MAIN_W = 84; // coluna principal quando o slide tem nota ao lado
+const SIDE_X = MAIN_W + 1;
+const SIDE_W = SLIDE_W - SIDE_X;
+const full = { x: 0, y: 0, w: SLIDE_W, h: SLIDE_H };
+
 const base = (key: string, tab: string, title: string, visual: PresetWidget["visual_type"], settings: WidgetSettings, pos: PresetWidget["grid_position"]): PresetWidget => ({
   presetKey: `${METAS_4T26_KEY}.${tab}.${key}`,
   title,
@@ -392,7 +412,12 @@ const base = (key: string, tab: string, title: string, visual: PresetWidget["vis
 const nota = (tab: string, key: string, title: string, text: string, pos: PresetWidget["grid_position"], ap?: NonNullable<WidgetSettings["appearance"]>["note"]) =>
   base(key, tab, title, "nota", { note: { text }, ...(ap ? { appearance: { note: ap } } : {}) }, pos);
 
-const tree = (tab: string, rootRef: string | null, title: string, h = 16): PresetWidget =>
+/** v1.1: a nota "como ler" ao lado da tabela (sem px fixo — escala no slide). */
+const SIDE_NOTE = { bg: "#f1f5f9", color: "#0f172a" } as const;
+const lado = (tab: string, title: string, text: string) =>
+  nota(tab, "como_ler", title, text, { x: SIDE_X, y: 0, w: SIDE_W, h: SLIDE_H }, SIDE_NOTE);
+
+const tree = (tab: string, rootRef: string | null, title: string, h = SLIDE_H): PresetWidget =>
   base("tree", tab, title, "tree", {
     tree: {
       source: "livre",
@@ -400,18 +425,25 @@ const tree = (tab: string, rootRef: string | null, title: string, h = 16): Prese
       mapKey: METAS_4T26_MAP,
       view: "root",
       rootDirection: "h",
+      months: METAS_4T26_MONTH_KEYS,
       ...(rootRef ? { rootRef } : {}),
     },
-  }, { x: 0, y: 0, w: 12, h });
+  }, { ...full, h });
 
-const table = (tab: string, title: string, goalTable: WidgetSettings["goalTable"], h = 10, y = 0): PresetWidget =>
-  base("tabela", tab, title, "metas", { goalTable }, { x: 0, y, w: 12, h });
+const table = (
+  tab: string,
+  title: string,
+  goalTable: NonNullable<WidgetSettings["goalTable"]>,
+  pos: PresetWidget["grid_position"] = { x: 0, y: 0, w: MAIN_W, h: SLIDE_H }
+): PresetWidget =>
+  base("tabela", tab, title, "metas", { goalTable: { ...goalTable, months: METAS_4T26_MONTH_KEYS } }, pos);
 
 const rows = (list: [string, string, boolean?][]) =>
   list.map(([indicator, label, bold]) => ({ indicator, label, ...(bold ? { bold: true } : {}) }));
 
 export const METAS_4T26_WIDGETS: PresetWidget[] = [
-  nota("capa", "titulo", "Capa", "Comercial\nMetas e desdobramentos\n\n4º trimestre de 2026", { x: 0, y: 0, w: 12, h: 10 }, { bg: "#212121", color: "#ffffff", fontSize: 36, frameless: true }),
+  nota("capa", "titulo", "Capa", "Comercial\nMetas e desdobramentos\n\n4º trimestre de 2026", full, { bg: "#212121", color: "#ffffff", fontSize: 44, frameless: true }),
+
   table("painel", "Painel estratégico", {
     mode: "indicadores",
     rows: rows([
@@ -423,8 +455,17 @@ export const METAS_4T26_WIDGETS: PresetWidget[] = [
       ["cac", "N0 CAC (R$/cliente)", true],
     ]),
     editable: true,
-    note: "MRR final = abertura + novos + expansão − perda. CAC = (Marketing + Comercial) ÷ clientes.\nMRR: Bruno; CAC: Felipe; expansão e perda: Ricardo. Marketing: R$ 52.250/mês.",
-  }, 11),
+  }),
+  lado(
+    "painel",
+    "Como ler o painel",
+    "Cada célula traz a meta do mês; abaixo dela, o realizado e o atingimento.\n\n" +
+      "MRR final = abertura + novos + expansão − perda.\n" +
+      "CAC = (Marketing + Comercial) ÷ clientes novos.\n\n" +
+      "Donos: MRR — Bruno; CAC — Felipe; expansão e perda — Ricardo.\n\n" +
+      "Marketing: R$ 52.250/mês."
+  ),
+
   table("vendedores", "Cinco vendedores em ciclo completo", {
     mode: "por_responsavel",
     indicator: "mrr_novo",
@@ -432,9 +473,16 @@ export const METAS_4T26_WIDGETS: PresetWidget[] = [
     headerLabel: "Vendedor",
     totalRowLabel: "Compromissos individuais (R$)",
     editable: true,
-    note: "Cada vendedor acompanha seus leads do primeiro contato ao fechamento. Metas individuais arredondadas — a operação segue as metas oficiais do painel.",
-  }, 11),
+  }),
+  lado(
+    "vendedores",
+    "Ciclo completo",
+    "Cada vendedor acompanha seus leads do primeiro contato ao fechamento.\n\n" +
+      "As metas individuais são arredondadas e somam mais que a meta oficial: a operação segue as metas oficiais do painel."
+  ),
+
   tree("mrr_inbound", "preset:mrr_inbound", "N1 MRR novo inbound — vendas × ticket"),
+
   table("inbound", "Inbound: demanda e conversão necessárias", {
     mode: "indicadores",
     headerLabel: "Etapa ou premissa",
@@ -448,9 +496,17 @@ export const METAS_4T26_WIDGETS: PresetWidget[] = [
       ["vendas_inbound", "Vendas inbound", true],
     ]),
     editable: true,
-    note: "SQL → venda: 23%, 24%, 25%. O novo desenho pressupõe mais atenção por lead.",
-  }, 13),
+  }),
+  lado(
+    "inbound",
+    "Premissas do inbound",
+    "SQL → venda: 23%, 24% e 25%.\n\n" +
+      "O novo desenho pressupõe mais atenção por lead.\n\n" +
+      "Taxas e capacidade são premissas. Metas operacionais inteiras arredondam para cima."
+  ),
+
   tree("mrr_outbound", "preset:mrr_outbound", "N1 MRR novo outbound — vendas × ticket"),
+
   table("outbound", "Outbound", {
     mode: "indicadores",
     headerLabel: "Etapa ou premissa",
@@ -466,32 +522,45 @@ export const METAS_4T26_WIDGETS: PresetWidget[] = [
       ["vendas_outbound", "Vendas outbound", true],
     ]),
     editable: true,
-    note: "Em média 2 pessoas por empresa em mailing.",
-  }, 15),
+  }),
+  lado(
+    "outbound",
+    "Premissas do outbound",
+    "Em média 2 pessoas por empresa em mailing.\n\n" +
+      "Taxas e capacidade são premissas. Metas operacionais inteiras arredondam para cima."
+  ),
+
   tree("clientes", "preset:clientes_novos", "N1 Clientes novos — inbound + outbound"),
-  table("investimento", "N1 investimento comercial", {
-    mode: "indicadores",
-    headerLabel: "N2 e fórmula N3 (R$)",
-    rows: rows([
-      ["invest_equipe", "Equipe: pessoas × custo médio"],
-      ["invest_comissoes", "Comissões: soma por contrato"],
-      ["invest_softwares", "Softwares: licenças × preços"],
-      ["invest_consultorias", "Consultorias: soma dos contratos"],
-      ["investimento_comercial", "N1 investimento comercial", true],
-    ]),
-    editable: true,
-    note: "O realizado sai da Base manual — lance os valores do mês no quadro ao lado.",
-  }, 10),
+
+  table(
+    "investimento",
+    "N1 investimento comercial",
+    {
+      mode: "indicadores",
+      headerLabel: "N2 e fórmula N3 (R$)",
+      rows: rows([
+        ["invest_equipe", "Equipe: pessoas × custo médio"],
+        ["invest_comissoes", "Comissões: soma por contrato"],
+        ["invest_softwares", "Softwares: licenças × preços"],
+        ["invest_consultorias", "Consultorias: soma dos contratos"],
+        ["investimento_comercial", "N1 investimento comercial", true],
+      ]),
+      editable: true,
+      note: "O realizado sai da Base manual — lance os valores do mês no quadro ao lado.",
+    },
+    { x: 0, y: 0, w: 64, h: SLIDE_H }
+  ),
   base("lancamentos", "investimento", "Lançar o realizado (Base manual)", "base_manual", {
     baseManual: {
       series: ["investimento_comercial", "marketing", "mrr_abertura", "mrr_expansao", "mrr_perda"],
-      defaultMonth: "2026-10",
+      defaultMonth: METAS_4T26_MONTH_KEYS[0],
     },
-  }, { x: 0, y: 10, w: 12, h: 8 }),
-  tree("plano_1", "preset:plano_1", "1. Implantar ciclo completo com foco no lead", 14),
-  tree("plano_2", "preset:plano_2", "2. Converter inbound com ticket e qualificação", 14),
-  tree("plano_3", "preset:plano_3", "3. Gerar outbound com listas qualificadas", 14),
-  tree("ritmo", "preset:ritmo", "Ritmo de acompanhamento e diagnóstico", 14),
+  }, { x: 65, y: 0, w: SLIDE_W - 65, h: SLIDE_H }),
+
+  tree("plano_1", "preset:plano_1", "1. Implantar ciclo completo com foco no lead"),
+  tree("plano_2", "preset:plano_2", "2. Converter inbound com ticket e qualificação"),
+  tree("plano_3", "preset:plano_3", "3. Gerar outbound com listas qualificadas"),
+  tree("ritmo", "preset:ritmo", "Ritmo de acompanhamento e diagnóstico"),
   nota(
     "fontes",
     "criterios",
@@ -502,20 +571,23 @@ export const METAS_4T26_WIDGETS: PresetWidget[] = [
       "Metas Quadrimestre — somente outubro a dezembro, colunas E:G. Fórmulas e conciliação na aba Racional Comercial 4T26.\n\n" +
       "Taxas e capacidade são premissas. Metas operacionais inteiras arredondam para cima. A fonte original e o orçamento permanecem preservados.\n\n" +
       "(Cole aqui os links das planilhas — [rótulo](https://…).)",
-    { x: 0, y: 0, w: 12, h: 10 }
+    full
   ),
-  tree("arvore", null, "Árvore completa (trabalho)", 22),
+  tree("arvore", null, "Árvore completa (trabalho)", 96),
 ];
 
 export const METAS_4T26_PRESET: PresetDashboard = {
   presetKey: METAS_4T26_KEY,
-  version: 1,
+  version: 2,
   name: "Comercial — Metas e desdobramentos 4T26",
   visible_to_roles: ["admin", "gestor"],
   settings: {
     tabs: TABS,
-    periodBar: { enabled: true, defaultPreset: "este_trimestre", scope: "global" },
-    canvas: { cols: 12, rowHeight: 30 },
+    // v1.1: barra DESLIGADA — os quadros têm meses fixos (out–dez/2026), então
+    // toda aba já abre no período certo; o padrão fica para widget novo.
+    periodBar: { enabled: false, defaultPreset: "este_trimestre", scope: "global" },
+    // v1.1: grade fina com linha quadrada (proporção de slide).
+    canvas: { gridVersion: 2 },
     presentation: { hiddenTabs: ["arvore"] },
   },
   // Reusa as dependências declaradas pelos presets Inbound/Outbound (ensure

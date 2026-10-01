@@ -1,4 +1,11 @@
-// Versão: 2.23 | Data: 01/09/2026
+// Versão: 2.24 | Data: 01/10/2026
+// v2.24 (01/10/2026): modo APRESENTAR. (a) `fitHeight` — com a altura útil da
+//   tela, a altura da LINHA vira a que faz o conteúdo da aba ocupar essa
+//   altura (`fitRowHeight`, lib/dashboards/presentation.ts: piso e teto) e o
+//   canvas acaba no último card (sem as linhas extras do canvas/MIN_ROWS). A
+//   largura já era a da tela; o que sobrava era a altura gravada em px. (b)
+//   `hideWidgetMenus` — o ⋮ dos cards some (apresentação e modo tela cheia),
+//   pelo BoardChromeProvider que os cards já leem.
 // v2.23 (01/09/2026): auto-pan de borda só ENGATA depois de 2s contínuos na
 //   zona (HOVER_PAN_ENGAGE_MS) e só com o ponteiro DIRETAMENTE sobre o espaço
 //   vazio do canvas: guarda por containment DOM (`canvasRef.contains`) no
@@ -210,6 +217,7 @@ import { ConnectorLayer, type ConnectorLayerApi } from "./connector-layer";
 import { LineLayer } from "./line-layer";
 import { FontScaleProvider } from "./font-scale-context";
 import { BoardChromeProvider } from "./board-chrome-context";
+import { fitRowHeight } from "@/lib/dashboards/presentation";
 import { WidgetCard } from "./widget-card";
 import type { ResponsibleOption } from "./charts/record-list-table";
 
@@ -475,6 +483,8 @@ export function DashboardGrid({
   onAutoEditConsumed,
   onQuickCreate,
   onWidgetDeleted,
+  fitHeight = null,
+  hideWidgetMenus = false,
 }: {
   widgets: Widget[];
   // TODOS os widgets do board (todas as abas) — alimenta só as listas
@@ -586,6 +596,11 @@ export function DashboardGrid({
   onQuickCreate?: (input: WidgetInput, opts?: { autoEdit?: boolean }) => void;
   // Avisa o shell que um widget foi excluído (remove pendente otimista).
   onWidgetDeleted?: (id: string) => void;
+  // v2.24 (01/10/2026): modo Apresentar — altura útil (px) a ocupar; null =
+  // a altura gravada (fora da apresentação).
+  fitHeight?: number | null;
+  // v2.24: esconde o menu ⋮ de todos os cards (apresentação / tela cheia).
+  hideWidgetMenus?: boolean;
 }) {
   const { pending } = useNavPending();
   const history = useDashboardHistory();
@@ -827,10 +842,14 @@ export function DashboardGrid({
   // As linhas (fora do layout do RGL) entram pelo bounding box do traçado.
   let contentRight = layout.reduce((m, l) => Math.max(m, l.x + l.w), baseCols);
   let contentBottom = layout.reduce((m, l) => Math.max(m, l.y + l.h), MIN_ROWS);
+  // v2.24: o fundo REAL do conteúdo (sem o piso MIN_ROWS) — é ele que o
+  // ajuste à tela da apresentação faz caber na altura útil.
+  let realBottom = layout.reduce((m, l) => Math.max(m, l.y + l.h), 0);
   lineWidgets.forEach((w, i) => {
     const b = lineGridBBox(lineFor(w, i));
     contentRight = Math.max(contentRight, b.x + b.w);
     contentBottom = Math.max(contentBottom, b.y + b.h);
+    realBottom = Math.max(realBottom, b.y + b.h);
   });
 
   // Tamanho efetivo do canvas (vindo das settings): nunca abaixo do conteúdo,
@@ -841,7 +860,9 @@ export function DashboardGrid({
   // as settings, então mudanças pelo menu refletem na hora).
   const [drag, setDrag] = useState<{ cols: number; rows: number } | null>(null);
   const cols = drag ? drag.cols : propCols;
-  const rows = drag ? drag.rows : propRows;
+  // v2.24: apresentando, o canvas acaba no último card (as linhas vazias
+  // abaixo dele seriam espaço morto no slide).
+  const rows = drag ? drag.rows : fitHeight && realBottom > 0 ? realBottom : propRows;
   // Limpa o override assim que as settings do servidor alcançam o valor arrastado
   // (evita "piscar" de volta ao tamanho antigo enquanto revalida). Padrão do React
   // de ajustar estado no render — sem useEffect.
@@ -929,7 +950,16 @@ export function DashboardGrid({
   // Linha default QUADRADA: altura = largura da célula (responsiva). Override
   // por dashboard em canvas.rowHeight (a conversão de board legado grava 10.5
   // explícito — fidelidade vertical do layout antigo de px fixos).
-  const ROW_H = settings.canvas?.rowHeight ?? cellW;
+  const naturalRowH = settings.canvas?.rowHeight ?? cellW;
+  // v2.24: apresentando, a linha estica (ou encolhe, com piso) até o slide
+  // ocupar a altura útil da tela.
+  const ROW_H = fitHeight ? fitRowHeight(fitHeight, rows, naturalRowH) : naturalRowH;
+  // v2.24: o texto acompanha o slide — esticar a linha sem crescer a fonte
+  // deixaria tabela e nota pequenas no topo de um card enorme. Faixa estreita:
+  // é legibilidade, não zoom.
+  const presentFontFactor = fitHeight
+    ? Math.min(1.6, Math.max(0.85, ROW_H / (naturalRowH || ROW_H || 1)))
+    : 1;
   const gridW = (c: number) => c * cellW + MX * (c + 1);
   const gridH = (r: number) => r * ROW_H + MY * (r + 1);
   // Métricas do ConnectorLayer com referência estável (objeto novo por render
@@ -1412,8 +1442,9 @@ export function DashboardGrid({
     () => ({
       hideComparisonLabels: settings.hideComparisonLabels ?? false,
       hideBusinessDayBadges: settings.hideBusinessDayBadges ?? false,
+      hideWidgetMenus,
     }),
-    [settings.hideComparisonLabels, settings.hideBusinessDayBadges]
+    [settings.hideComparisonLabels, settings.hideBusinessDayBadges, hideWidgetMenus]
   );
 
   // Em drawMode/placing o canvas renderiza mesmo vazio (é onde se desenha a
@@ -1596,7 +1627,7 @@ export function DashboardGrid({
                     ) : null}
                     {/* Escala de fonte do dashboard: só o conteúdo dos widgets
                       escala (o cromo do canvas — chips, overlays — não). */}
-                    <FontScaleProvider value={settings.fontScale ?? 1}>
+                    <FontScaleProvider value={(settings.fontScale ?? 1) * presentFontFactor}>
                       <BoardChromeProvider value={boardChrome}>
                         <WidgetCard
                         key={shown.id}

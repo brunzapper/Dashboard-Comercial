@@ -1,4 +1,6 @@
-// Versão: 1.0 | Data: 01/10/2026
+// Versão: 1.1 | Data: 01/10/2026
+// v1.1 (01/10/2026): `loadTreeIndicatorValues` respeita os meses FIXOS da
+//   Tree (`settings.tree.months`, saneados por `cleanMonthKeys`).
 // Server Actions da TABELA DE METAS (visual_type 'metas', 0149) e dos valores
 // de indicador da Tree.
 //
@@ -24,6 +26,7 @@ import {
 } from "@/lib/config/responsible-names";
 import { indicatorsByKey, loadIndicators } from "@/lib/indicators/load";
 import {
+  cleanMonthKeys,
   monthsOfRange,
   parseMonthKey,
   type IndicatorRollup,
@@ -297,7 +300,12 @@ export async function loadTreeIndicatorValues(
       return { key: r.key, responsible, responsibleId, missing: Boolean(responsible) && !responsibleId };
     });
   const today = todayBrasiliaIso();
-  const months = monthsOfRange(period?.from ?? null, period?.to ?? null, today);
+  // v1.1: meses fixos da Tree vencem o período do painel.
+  const fixedMonths = cleanMonthKeys(scoped.scope.widget.settings?.tree?.months);
+  const months =
+    fixedMonths.length > 0
+      ? fixedMonths
+      : monthsOfRange(period?.from ?? null, period?.to ?? null, today);
   const rpcClient = withRpcMemo(withRpcTtlCache(supabase, `u:${session.user.id}`));
   const resolved = await resolveIndicatorValues(supabase, rpcClient, {
     orgId,

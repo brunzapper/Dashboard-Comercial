@@ -2304,5 +2304,11 @@ This version has breaking changes — APIs, conventions, and file structure may 
   tick (23505 = no-op). Seções de DADOS do preset (`indicators`/`goals`/
   `manualFamilies`/`manualSeries`/`maps`, `lib/presets/data-sections.ts`) são
   SÓ do caminho de fábrica e ensure-if-absent. Modo Apresentar = abas como
-  slides (`lib/dashboards/presentation.ts`). Ver `docs/arquitetura.md` §4.27 e
-  invariante 42.
+  slides (`lib/dashboards/presentation.ts`). **Apresentar v2 (01/10/2026):**
+  entra pelo ⋮ do dashboard e PRÉ-RENDERIZA todos os slides (um
+  `DashboardGrid` por aba, invisíveis mas vivos) antes de começar — widget
+  novo que busca os próprios dados deve avisar `useWarmupReady`
+  (`components/dashboards/presentation-warmup.tsx`), senão o slide dele
+  aparece carregando; sem barra de período nem ⋮ dos widgets (o slide vem no
+  período certo de origem: `months` da Tabela de metas e `tree.months`). Ver
+  `docs/arquitetura.md` §4.27 e invariante 42.
