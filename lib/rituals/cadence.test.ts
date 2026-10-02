@@ -1,4 +1,5 @@
-// Versão: 1.0 | Data: 01/10/2026
+// Versão: 1.1 | Data: 02/10/2026
+// v1.1 (02/10/2026): semanal em vários dias.
 import { describe, expect, it } from "vitest";
 
 import {
@@ -88,5 +89,23 @@ describe("parse e descrição", () => {
     expect(describeSchedule({ cadence: "mensal", monthDay: "ultimo_util", anchor: "2026-10-01" })).toBe(
       "Último dia útil do mês"
     );
+  });
+});
+
+describe("v1.1: semanal em vários dias", () => {
+  it("um dia só é byte-idêntico ao legado; vários dias andam dia a dia", () => {
+    const one = [...ritualOccurrences({ cadence: "semanal", weekdays: [5], anchor: "2026-10-01", until: "2026-10-31" })];
+    const legacy = [...ritualOccurrences({ cadence: "semanal", weekday: 5, anchor: "2026-10-01", until: "2026-10-31" })];
+    expect(one).toEqual(legacy);
+    const many = [
+      ...ritualOccurrences({ cadence: "semanal", weekdays: [1, 3], anchor: "2026-10-01", until: "2026-10-14" }),
+    ].map((o) => o.date);
+    expect(many).toEqual(["2026-10-05", "2026-10-07", "2026-10-12", "2026-10-14"]);
+  });
+  it("parse ordena/deduplica e descreve", () => {
+    const s = parseRitualSchedule({ cadence: "semanal", weekdays: [5, 1, 1], anchor: "2026-10-01" });
+    expect(s?.weekdays).toEqual([1, 5]);
+    expect(describeSchedule(s!)).toBe("Toda segunda e sexta");
+    expect(parseRitualSchedule({ cadence: "semanal", weekdays: [9], anchor: "2026-10-01" })).toBeNull();
   });
 });

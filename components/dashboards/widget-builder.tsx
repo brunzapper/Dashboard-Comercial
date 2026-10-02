@@ -1,3 +1,12 @@
+// Versão: 1.32 | Data: 02/10/2026
+// v1.32 (02/10/2026): Tree compreensível pela UI. (a) MAPA escolhido numa
+//   lista dos mapas da org (+ "Novo mapa"), em vez de digitar a chave; (b)
+//   "Mostrar só o galho" por um seletor dos nós do mapa (antes: digitar
+//   `preset:<chave>`); (c) meses fixos pelo seletor de meses (antes:
+//   "2026-10, 2026-11" digitado); (d) texto que explica DE ONDE vêm os
+//   números dos cartões (metas, realizado, projetado); (e) o save PRESERVA as
+//   chaves que vivem fora deste formulário (`canvas`/`presentation`, da
+//   Aparência) — antes salvar o builder as apagava.
 // Versão: 1.31 | Data: 01/10/2026
 // v1.31 (01/10/2026): Tree — "Meses fixos" dos nós de indicador
 //   (`tree.months`, mapa livre).
@@ -134,6 +143,14 @@
 
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
+import { MonthRangePicker } from "@/components/ui/month-range-picker";
+import {
+  listTreeMaps,
+  loadTreeMapOutline,
+  type TreeMapOption,
+  type TreeOutlineNode,
+} from "@/app/(app)/dashboards/tree-actions";
 import {
   MoreVertical,
   Pencil,
@@ -321,7 +338,7 @@ import { CardModeSection } from "@/components/dashboards/card-mode-section";
 import { GoalTableSection } from "@/components/dashboards/goal-table-section";
 import { cleanMonthKeys } from "@/lib/indicators/model";
 import { sanitizeGoalTableSettings } from "@/lib/widgets/goal-table";
-import type { GoalTableSettings } from "@/lib/widgets/types";
+import type { GoalTableSettings, TreeSettings } from "@/lib/widgets/types";
 import { TargetTabChecklist } from "@/components/dashboards/target-tab-checklist";
 import { groupByLevels } from "@/lib/widgets/appearance";
 import { DATE_FORMAT_LABELS, DATE_FORMATS } from "@/lib/widgets/format";
@@ -600,10 +617,44 @@ export function WidgetBuilder({
   const [treeRootRef, setTreeRootRef] = useState<string>(
     widget?.settings?.tree?.rootRef ?? ""
   );
-  // v1.31: meses fixos dos nós de indicador (texto livre, saneado no save).
-  const [treeMonths, setTreeMonths] = useState<string>(
-    (widget?.settings?.tree?.months ?? []).join(", ")
+  // v1.31: meses fixos dos nós de indicador. v1.32: lista (seletor de meses).
+  const [treeMonths, setTreeMonths] = useState<string[]>(
+    widget?.settings?.tree?.months ?? []
   );
+  // v1.32: mapas existentes e os nós do mapa escolhido (seletor de galho).
+  const [treeMaps, setTreeMaps] = useState<TreeMapOption[] | null>(null);
+  const [treeNewMap, setTreeNewMap] = useState(false);
+  const [treeOutline, setTreeOutline] = useState<{
+    key: string;
+    nodes: TreeOutlineNode[];
+  } | null>(null);
+  useEffect(() => {
+    if (!isTreeWidget || treeSource !== "livre") return;
+    let alive = true;
+    listTreeMaps()
+      .then((m) => {
+        if (alive) setTreeMaps(m);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [isTreeWidget, treeSource]);
+  const treeOutlineKey = normalizeMapKey(treeMapKey);
+  useEffect(() => {
+    if (!isTreeWidget || treeSource !== "livre" || !treeOutlineKey) return;
+    let alive = true;
+    loadTreeMapOutline(treeOutlineKey)
+      .then((nodes) => {
+        if (alive) setTreeOutline({ key: treeOutlineKey, nodes });
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [isTreeWidget, treeSource, treeOutlineKey]);
+  const treeOutlineNodes =
+    treeOutline && treeOutline.key === treeOutlineKey ? treeOutline.nodes : null;
   // v1.30 (01/10/2026): Tabela de metas (0149).
   const isGoalTableWidget = visualType === "metas";
   const [goalTable, setGoalTable] = useState<GoalTableSettings>(
@@ -2133,7 +2184,22 @@ export function WidgetBuilder({
     // Tree: a config do widget. Só grava no tipo certo — chave de tree num
     // widget que deixou de ser tree seria lixo silencioso no jsonb.
     if (isTreeWidget) {
+      // v1.32: parte do que JÁ está gravado — `canvas`/`presentation` vivem
+      // na Aparência, e reconstruir do zero as apagava. As chaves que ESTE
+      // formulário controla são removidas antes e regravadas abaixo.
+      const {
+        recordId: _recordId,
+        mapKey: _mapKey,
+        showKinds: _showKinds,
+        view: _view,
+        rootDirection: _rootDirection,
+        rootRef: _rootRef,
+        months: _months,
+        ...keepTree
+      } = widget?.settings?.tree ?? ({} as Partial<TreeSettings>);
+      void [_recordId, _mapKey, _showKinds, _view, _rootDirection, _rootRef, _months];
       settings.tree = {
+        ...keepTree,
         source: treeSource,
         layout: treeLayout,
         // Registro fixo só no modo registro; vazio = o widget segue o registro
@@ -2163,8 +2229,8 @@ export function WidgetBuilder({
           ? { rootRef: treeRootRef.trim() }
           : {}),
         // v1.31: só AAAA-MM válidos; nenhum = os meses do período.
-        ...(treeSource === "livre" && cleanMonthKeys(treeMonths.split(",").map((m) => m.trim())).length > 0
-          ? { months: cleanMonthKeys(treeMonths.split(",").map((m) => m.trim())) }
+        ...(treeSource === "livre" && cleanMonthKeys(treeMonths).length > 0
+          ? { months: cleanMonthKeys(treeMonths) }
           : {}),
       };
     } else {
@@ -4308,42 +4374,111 @@ export function WidgetBuilder({
                 </>
               ) : (
                 <>
-                  <Label>Chave do mapa</Label>
+                  {/* v1.32: o mapa sai de uma lista; "Novo mapa" pede a chave. */}
+                  <Label>Mapa</Label>
                   <p className="text-muted-foreground text-xs">
-                    Identifica este mapa. Dois widgets com a mesma chave
-                    mostram os mesmos nós. Vazio = uma chave nova é gerada ao
-                    salvar.
+                    Dois widgets no mesmo mapa mostram os mesmos cartões —
+                    é assim que cada slide mostra um galho da mesma árvore.
                   </p>
-                  <Input
-                    value={treeMapKey}
-                    onChange={(e) => setTreeMapKey(e.target.value)}
-                    onBlur={(e) =>
-                      setTreeMapKey(normalizeMapKey(e.target.value) ?? "")
-                    }
-                    placeholder="ex.: planejamento-2026"
-                    aria-label="Chave do mapa livre"
+                  <Combobox
+                    options={[
+                      ...(treeMaps ?? []).map((m) => ({
+                        value: m.key,
+                        label: `${m.key} · ${m.nodes} cartão(ões)`,
+                      })),
+                      ...(treeMapKey &&
+                      treeMaps &&
+                      !treeMaps.some((m) => m.key === treeMapKey)
+                        ? [{ value: treeMapKey, label: `${treeMapKey} (novo)` }]
+                        : []),
+                      { value: "__novo__", label: "+ Novo mapa…" },
+                    ]}
+                    value={treeNewMap ? "__novo__" : treeMapKey}
+                    onValueChange={(v) => {
+                      if (v === "__novo__") {
+                        setTreeNewMap(true);
+                        setTreeMapKey("");
+                      } else {
+                        setTreeNewMap(false);
+                        setTreeMapKey(v);
+                      }
+                      setTreeRootRef("");
+                    }}
+                    placeholder={treeMaps ? "Escolha um mapa" : "Carregando mapas…"}
+                    aria-label="Mapa da Tree"
                   />
-                  {/* v1.30: uma árvore, várias vistas — cada widget pode
-                      mostrar um GALHO do mesmo mapa. */}
+                  {treeNewMap ? (
+                    <Input
+                      value={treeMapKey}
+                      onChange={(e) => setTreeMapKey(e.target.value)}
+                      onBlur={(e) =>
+                        setTreeMapKey(normalizeMapKey(e.target.value) ?? "")
+                      }
+                      placeholder="nome do novo mapa (ex.: planejamento-2026; vazio = gerado ao salvar)"
+                      aria-label="Chave do novo mapa"
+                    />
+                  ) : null}
+                  {/* v1.30: uma árvore, várias vistas. v1.32: seletor de nós. */}
                   <Label>Mostrar só o galho (opcional)</Label>
-                  <p className="text-muted-foreground text-xs">
-                    Id do nó onde o widget começa — o menu do nó tem
-                    &quot;Copiar id do nó&quot;. Vazio = o mapa inteiro.
-                  </p>
-                  <Input
-                    value={treeRootRef}
-                    onChange={(e) => setTreeRootRef(e.target.value)}
-                    placeholder="ex.: preset:mrr_inbound"
+                  <Combobox
+                    options={[
+                      { value: "", label: "O mapa inteiro" },
+                      ...(treeOutlineNodes ?? []).map((n) => ({
+                        value: n.ref,
+                        label: `${"· ".repeat(n.depth)}${n.label}`,
+                        cleanLabel: n.label,
+                        title: TREE_NODE_KIND_LABELS[n.kind as keyof typeof TREE_NODE_KIND_LABELS] ?? n.kind,
+                      })),
+                      // Valor gravado que o mapa não tem mais (ou é o id
+                      // lógico de um nó com chave de preset): segue visível.
+                      ...(treeRootRef &&
+                      !(treeOutlineNodes ?? []).some(
+                        (n) => n.ref === treeRootRef || n.id === treeRootRef
+                      )
+                        ? [{ value: treeRootRef, label: `${treeRootRef} (não encontrado)` }]
+                        : []),
+                    ]}
+                    value={
+                      (treeOutlineNodes ?? []).find((n) => n.id === treeRootRef)?.ref ??
+                      treeRootRef
+                    }
+                    onValueChange={setTreeRootRef}
+                    placeholder="O mapa inteiro"
                     aria-label="Galho exibido"
                   />
                   {/* v1.31: a janela dos números não depende da barra. */}
-                  <Label>Meses fixos dos indicadores (opcional)</Label>
-                  <Input
+                  <Label>Meses dos indicadores</Label>
+                  <MonthRangePicker
                     value={treeMonths}
-                    onChange={(e) => setTreeMonths(e.target.value)}
-                    placeholder="ex.: 2026-10, 2026-11, 2026-12 (vazio = período do painel)"
-                    aria-label="Meses fixos dos indicadores"
+                    onChange={setTreeMonths}
+                    periodLabel="Meses do período do painel"
+                    ariaLabel="Meses fixos dos indicadores"
                   />
+                  {/* v1.32: de onde vêm os números dos cartões. */}
+                  <div className="bg-muted/40 flex flex-col gap-1 rounded-md border p-2 text-xs">
+                    <p className="font-medium">De onde vêm os números dos cartões</p>
+                    <p className="text-muted-foreground">
+                      <b>Meta</b>: as metas mensais do indicador (globais ou do
+                      responsável do cartão), cadastradas em Configurações →
+                      Metas — ou editadas no próprio cartão.
+                    </p>
+                    <p className="text-muted-foreground">
+                      <b>Realizado</b>: a fórmula do indicador, calculada sobre
+                      os registros — ou uma métrica própria do cartão (com
+                      recorte e quebra por dimensão), no editor do cartão.
+                    </p>
+                    <p className="text-muted-foreground">
+                      <b>Projetado</b>: combina os cartões-filho indicadores
+                      (soma, multiplicação…) pela regra escolhida no cartão.
+                    </p>
+                    <Link
+                      href="/configuracoes/metas"
+                      target="_blank"
+                      className="text-primary self-start underline-offset-2 hover:underline"
+                    >
+                      Abrir indicadores e metas
+                    </Link>
+                  </div>
                 </>
               )}
 

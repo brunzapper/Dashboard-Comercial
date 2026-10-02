@@ -601,6 +601,19 @@ export interface TreeSettings {
    * sobre o fundo do tema; estilos novos: liso, sobre a superfície).
    */
   canvas?: { bg?: string; pattern?: "pontos" | "linhas" | "nenhum" };
+  /**
+   * v1.22 (02/10/2026): o que os cartões mostram AO APRESENTAR (ausente =
+   * oculto): rótulo de tipo, "+", "Agendar próxima", concluir etapa e avisos.
+   * Cada cartão ainda força o rótulo de tipo (tree_nodes.display, 0150).
+   * Resolvido em lib/tree/display.ts (`treeChrome`).
+   */
+  presentation?: {
+    kindBadge?: boolean;
+    addBranch?: boolean;
+    ritualSchedule?: boolean;
+    doneToggle?: boolean;
+    warnings?: boolean;
+  };
 }
 
 export interface RowActionSettings {

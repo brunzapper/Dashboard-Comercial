@@ -1,3 +1,8 @@
+// Versão: 2.12 | Data: 02/10/2026
+// v2.12 (02/10/2026): seção "Tree" — o que os cartões mostram AO APRESENTAR
+//   (tipo, +, "Agendar próxima", concluir, avisos; padrão = oculto) e o fundo
+//   do canvas da Root (cor + trama), que antes só existiam no JSON do preset.
+//   Ambos vivem DENTRO de settings.tree (merge no save, config preservada).
 // Versão: 2.11 | Data: 02/10/2026
 // v2.11 (02/10/2026): seção "Destaque e anotações" (destacar categorias,
 //   anotações com filete, rótulo direto e área nas linhas) e, no Card, "Número
@@ -76,6 +81,10 @@ import { ColorField } from "./appearance-controls";
 import { KanbanAppearanceSection } from "@/components/kanban/kanban-appearance-section";
 import { AgendaAppearanceSection } from "@/components/agenda/agenda-appearance-section";
 import type { AgendaAppearance } from "@/lib/agenda/types";
+import {
+  TREE_PRESENTATION_LABELS,
+  type TreePresentationSettings,
+} from "@/lib/tree/display";
 import { fieldLabel, type AvailableField } from "@/lib/widgets/fields";
 import type { ComboboxOption } from "@/components/ui/combobox";
 import { ConditionalFormatSection } from "@/components/dashboards/conditional-format-section";
@@ -93,6 +102,7 @@ import type {
   AxisSide,
   GridLines,
   TableAlign,
+  TreeSettings,
   Widget,
   WidgetData,
 } from "@/lib/widgets/types";
@@ -142,7 +152,16 @@ export function WidgetAppearanceSheet({
     widget.settings?.agenda?.appearance ?? {}
   );
 
+  // v2.12: exibição da Tree ao apresentar + canvas — dentro de settings.tree.
+  const [tpres, setTpres] = useState<TreePresentationSettings>(
+    widget.settings?.tree?.presentation ?? {}
+  );
+  const [tcanvas, setTcanvas] = useState<NonNullable<TreeSettings["canvas"]>>(
+    widget.settings?.tree?.canvas ?? {}
+  );
+
   const vt = widget.visual_type;
+  const isTree = vt === "tree";
   const isBar = vt === "barra" || vt === "barra_horizontal";
   const isChart = isBar || vt === "linha";
   const isPie = vt === "pizza" || vt === "funil";
@@ -333,6 +352,16 @@ export function WidgetAppearanceSheet({
         // o objeto — a aparência não pode se perder nem apagar a config).
         ...(isAgenda
           ? { agenda: { ...widget.settings?.agenda, appearance: aap } }
+          : {}),
+        // v2.12: Tree — exibição e canvas dentro de settings.tree.
+        ...(isTree && widget.settings?.tree
+          ? {
+              tree: {
+                ...widget.settings.tree,
+                presentation: Object.keys(tpres).length > 0 ? tpres : undefined,
+                canvas: Object.keys(tcanvas).length > 0 ? tcanvas : undefined,
+              },
+            }
           : {}),
       },
     };
@@ -628,6 +657,62 @@ export function WidgetAppearanceSheet({
                 onClear={() =>
                   patch({ calculator: { ...ap.calculator, opKeyText: undefined } })
                 }
+              />
+            </BuilderSection>
+          ) : null}
+
+          {/* ---------- Tree (v2.12) ---------- */}
+          {isTree ? (
+            <BuilderSection value="tree" title="Tree">
+              <p className="text-muted-foreground text-xs">
+                Ao apresentar, os cartões mostram só o conteúdo. Marque o que
+                deve continuar aparecendo no modo Apresentar (cada cartão
+                ainda pode forçar o próprio rótulo de tipo no editor dele).
+              </p>
+              {(Object.keys(TREE_PRESENTATION_LABELS) as (keyof TreePresentationSettings)[]).map(
+                (k) => (
+                  <CheckRow
+                    key={k}
+                    label={TREE_PRESENTATION_LABELS[k]}
+                    checked={tpres[k] === true}
+                    onChange={(c) =>
+                      setTpres((prev) => {
+                        const next = { ...prev };
+                        if (c) next[k] = true;
+                        else delete next[k];
+                        return next;
+                      })
+                    }
+                  />
+                )
+              )}
+              <div className="flex flex-col gap-1 pt-2">
+                <Label className="text-xs">Trama do fundo (visualização Root)</Label>
+                <Select
+                  value={tcanvas.pattern ?? "padrao"}
+                  onValueChange={(v) =>
+                    setTcanvas((prev) => ({
+                      ...prev,
+                      pattern: v === "padrao" ? undefined : (v as "pontos" | "linhas" | "nenhum"),
+                    }))
+                  }
+                >
+                  <SelectTrigger className="h-8 text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="padrao">Padrão do estilo</SelectItem>
+                    <SelectItem value="pontos">Pontos</SelectItem>
+                    <SelectItem value="linhas">Quadriculado</SelectItem>
+                    <SelectItem value="nenhum">Liso</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <ColorField
+                label="Cor do fundo (visualização Root)"
+                value={tcanvas.bg}
+                onChange={(v) => setTcanvas((prev) => ({ ...prev, bg: v }))}
+                onClear={() => setTcanvas((prev) => ({ ...prev, bg: undefined }))}
               />
             </BuilderSection>
           ) : null}

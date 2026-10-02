@@ -1,4 +1,18 @@
-// Versão: 1.0 | Data: 01/10/2026
+// Versão: 1.1 | Data: 02/10/2026
+// v1.1 (02/10/2026): o que o preset Metas 4T26 deixou FIXO vira dado do nó.
+//   * INDICADOR: o nível N0–N3 (enum do preset) vira ETIQUETA livre (`tag`;
+//     o `level` legado é lido como etiqueta); as linhas do cartão
+//     (meta/realizado/projetado/atingimento/composição) são configuráveis —
+//     rótulo, ordem, ocultar; o projetado pode combinar metas OU realizados
+//     dos filhos; o realizado tem FONTE própria (RealizedSource — fórmula do
+//     catálogo, métrica calculada própria, recortes e quebra); `indicator`
+//     fica opcional quando há métrica própria.
+//   * PLANO → MULTI-FATORES: lista livre de fatores (título opcional +
+//     descrição). O 5W2H gravado vira fatores com aqueles títulos NA LEITURA
+//     (nada se perde e nada precisa migrar); o molde segue disponível só como
+//     atalho do editor (`PLAN_FIELDS`).
+//   * `indicatorRequestsOf` pede POR NÓ (id do nó) — o servidor lê o payload
+//     no banco; a fórmula própria nunca vem do navegador.
 // PAYLOAD dos nós OPERACIONAIS da Tree (0149) — módulo PURO e client-safe.
 //
 // A Tree passou a desdobrar METAS, não só acompanhar registros. Três nós novos,
@@ -26,21 +40,89 @@ import {
   type ChildrenOp,
 } from "@/lib/indicators/model";
 import { parseRitualSchedule, type RitualSchedule } from "@/lib/rituals/cadence";
+import {
+  isDefaultRealized,
+  parseRealizedSource,
+  type RealizedSource,
+} from "@/lib/indicators/realized-source";
 
-export const INDICATOR_LEVELS = ["N0", "N1", "N2", "N3"] as const;
-export type IndicatorLevel = (typeof INDICATOR_LEVELS)[number];
+/** v1.1: linhas do cartão de indicador (ordem = a da lista). */
+export type IndicatorRowKind = "meta" | "realizado" | "projetado" | "atingimento" | "composicao";
+
+export const INDICATOR_ROW_LABELS: Record<IndicatorRowKind, string> = {
+  meta: "Meta",
+  realizado: "Realizado",
+  projetado: "Projetado",
+  atingimento: "Atingimento",
+  composicao: "Composição dos filhos",
+};
+
+/** Rótulo curto padrão de cada linha no cartão. */
+export const INDICATOR_ROW_DEFAULT_TEXT: Record<IndicatorRowKind, string> = {
+  meta: "Meta",
+  realizado: "Realizado",
+  projetado: "Proj.",
+  atingimento: "Ating.",
+  composicao: "Filhos",
+};
+
+export interface IndicatorRow {
+  kind: IndicatorRowKind;
+  /** Texto do rótulo no cartão (ausente = o padrão). */
+  label?: string;
+  hidden?: boolean;
+}
+
+/** As linhas de sempre (o que o cartão mostrava antes da v1.1). */
+export const DEFAULT_INDICATOR_ROWS: readonly IndicatorRow[] = [
+  { kind: "composicao" },
+  { kind: "meta" },
+  { kind: "realizado" },
+  { kind: "projetado" },
+  { kind: "atingimento", hidden: true },
+];
+
+/** Linhas efetivas: as configuradas + as que faltarem (ocultas), sem repetir. */
+export function indicatorRows(p: Pick<IndicatorNodePayload, "rows">): IndicatorRow[] {
+  const base = p.rows && p.rows.length > 0 ? p.rows : DEFAULT_INDICATOR_ROWS;
+  const seen = new Set<IndicatorRowKind>();
+  const out: IndicatorRow[] = [];
+  for (const r of base) {
+    if (seen.has(r.kind)) continue;
+    seen.add(r.kind);
+    out.push({ ...r });
+  }
+  for (const r of DEFAULT_INDICATOR_ROWS) {
+    if (!seen.has(r.kind)) out.push({ kind: r.kind, hidden: true });
+  }
+  return out;
+}
 
 export interface IndicatorNodePayload {
-  indicator: string;
-  level?: IndicatorLevel;
+  /** Chave do indicador/meta. Ausente só com métrica própria (sem meta). */
+  indicator?: string;
+  /** v1.1: etiqueta livre (ex.: "N1", "Estratégico"). Legado: `level`. */
+  tag?: string;
   /** Meta/realizado de UM responsável (nome) em vez do global. */
   responsible?: string;
   /** Como os FILHOS indicadores compõem este nó. */
   childrenOp?: ChildrenOp;
+  /** v1.1: o projetado combina as METAS (padrão) ou os REALIZADOS dos filhos. */
+  projectFrom?: "meta" | "realizado";
   /** Frase curta sob o rótulo ("SQL realizados × conversão"). */
   hint?: string;
+  /** v1.1: linhas do cartão (ausente = o padrão). */
+  rows?: IndicatorRow[];
+  /** v1.1: fonte do realizado (ausente = a fórmula do indicador). */
+  realized?: RealizedSource;
+  /** v1.1: unidade (R$, %) em cada célula (padrão) ou omitida. */
+  unitInCell?: boolean;
 }
 
+/**
+ * O molde 5W2H — v1.1: só o ATALHO "Adicionar molde 5W2H" do editor e a
+ * leitura do legado. Um Multi-fatores não é obrigado a segui-lo.
+ */
 export const PLAN_FIELDS = [
   ["oQue", "O quê"],
   ["porQue", "Por quê"],
@@ -51,17 +133,24 @@ export const PLAN_FIELDS = [
 ] as const;
 export type PlanFieldKey = (typeof PLAN_FIELDS)[number][0];
 
+export const MAX_PLAN_FACTORS = 20;
+
+/** v1.1: um fator do Multi-fatores — título opcional + descrição. */
+export interface PlanFactor {
+  id: string;
+  title?: string;
+  text: string;
+}
+
 export interface PlanNodePayload {
-  oQue?: string;
-  porQue?: string;
-  resultado?: string;
-  comoMedir?: string;
-  prazo?: string;
-  comoAcontecer?: string;
-  /** Responsável pelo plano (nome). */
+  /** v1.1: os fatores, em ordem. */
+  factors: PlanFactor[];
+  /** Responsável (nome). */
   responsible?: string;
-  /** Indicadores que o plano move (status vivo no card). */
+  /** Indicadores que o nó move (status vivo no card). */
   indicators?: string[];
+  /** v1.1: mostrar "Etapas: x/y" (branches filhas checáveis). Padrão: sim. */
+  hideSteps?: boolean;
 }
 
 export interface RitualNodePayload {
@@ -96,27 +185,67 @@ function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);
 }
 
+const ROW_KINDS = Object.keys(INDICATOR_ROW_LABELS) as IndicatorRowKind[];
+
 export function parseIndicatorPayload(raw: unknown): IndicatorNodePayload | null {
-  if (!isRecord(raw) || !isIndicatorKey(raw.indicator)) return null;
-  const out: IndicatorNodePayload = { indicator: raw.indicator };
-  if (typeof raw.level === "string" && (INDICATOR_LEVELS as readonly string[]).includes(raw.level))
-    out.level = raw.level as IndicatorLevel;
+  if (!isRecord(raw)) return null;
+  // v1.1: fonte do realizado (fail-closed: inválida ⇒ volta ao padrão).
+  const realized = raw.realized !== undefined ? parseRealizedSource(raw.realized) : null;
+  const hasIndicator = isIndicatorKey(raw.indicator);
+  // Sem indicador só vale com métrica própria (senão o nó não tem número).
+  if (!hasIndicator && !realized?.override) return null;
+  const out: IndicatorNodePayload = {};
+  if (hasIndicator) out.indicator = raw.indicator as string;
+  // v1.1: etiqueta livre; o `level` legado (N0–N3) vira etiqueta.
+  const tag = text(raw.tag, 24) ?? text(raw.level, 24);
+  if (tag) out.tag = tag;
   const responsible = text(raw.responsible, 120);
   if (responsible) out.responsible = responsible;
   if (typeof raw.childrenOp === "string" && (CHILDREN_OPS as readonly string[]).includes(raw.childrenOp))
     out.childrenOp = raw.childrenOp as ChildrenOp;
+  if (raw.projectFrom === "realizado") out.projectFrom = "realizado";
   const hint = text(raw.hint, 200);
   if (hint) out.hint = hint;
+  if (Array.isArray(raw.rows)) {
+    const rows: IndicatorRow[] = [];
+    for (const r of raw.rows.slice(0, ROW_KINDS.length)) {
+      if (!isRecord(r) || !(ROW_KINDS as string[]).includes(r.kind as string)) continue;
+      const row: IndicatorRow = { kind: r.kind as IndicatorRowKind };
+      const label = text(r.label, 24);
+      if (label) row.label = label;
+      if (r.hidden === true) row.hidden = true;
+      rows.push(row);
+    }
+    if (rows.length > 0) out.rows = rows;
+  }
+  if (realized && !isDefaultRealized(realized)) out.realized = realized;
+  if (raw.unitInCell === false) out.unitInCell = false;
   return out;
 }
 
 export function parsePlanPayload(raw: unknown): PlanNodePayload | null {
   if (!isRecord(raw)) return null;
-  const out: PlanNodePayload = {};
-  for (const [key] of PLAN_FIELDS) {
-    const v = text(raw[key]);
-    if (v) out[key] = v;
+  const factors: PlanFactor[] = [];
+  if (Array.isArray(raw.factors)) {
+    for (const [i, f] of raw.factors.entries()) {
+      if (!isRecord(f)) continue;
+      const body = text(f.text) ?? "";
+      const title = text(f.title, 120);
+      if (!body && !title) continue;
+      const id = typeof f.id === "string" && /^[a-z0-9_-]{1,40}$/i.test(f.id) ? f.id : `f${i + 1}`;
+      factors.push({ id, ...(title ? { title } : {}), text: body });
+      if (factors.length >= MAX_PLAN_FACTORS) break;
+    }
+  } else {
+    // v1.1: LEGADO 5W2H — cada campo preenchido vira um fator com o título
+    // dele, na mesma ordem. Leitura apenas: gravar de novo já sai em fatores.
+    for (const [key, title] of PLAN_FIELDS) {
+      const v = text(raw[key]);
+      if (v) factors.push({ id: key, title, text: v });
+    }
   }
+  const out: PlanNodePayload = { factors };
+  if (raw.hideSteps === true) out.hideSteps = true;
   const responsible = text(raw.responsible, 120);
   if (responsible) out.responsible = responsible;
   if (Array.isArray(raw.indicators)) {
@@ -158,18 +287,33 @@ export function parseNodePayload(
   }
 }
 
-/** Indicadores citados por uma lista de nós (o que o widget pede ao servidor). */
+/**
+ * O que o widget pede ao servidor. v1.1: nó de indicador pede POR NÓ (`nodeId`
+ * — o servidor lê o payload dele no banco: recorte e métrica própria NUNCA
+ * vêm do navegador); os indicadores citados por um Multi-fatores pedem pela
+ * chave (global).
+ */
+export interface IndicatorValueRequest {
+  key: string;
+  responsible: string | null;
+  /** id lógico do nó (`note:<uuid>`) — presente nos nós de indicador. */
+  nodeId?: string;
+}
+
 export function indicatorRequestsOf(
-  nodes: { kind: string; payload?: unknown; children: unknown[] }[]
-): { key: string; responsible: string | null }[] {
-  const out = new Map<string, { key: string; responsible: string | null }>();
-  const walk = (list: { kind: string; payload?: unknown; children: unknown[] }[]) => {
+  nodes: { id?: string; kind: string; payload?: unknown; children: unknown[] }[]
+): IndicatorValueRequest[] {
+  const out = new Map<string, IndicatorValueRequest>();
+  const walk = (list: { id?: string; kind: string; payload?: unknown; children: unknown[] }[]) => {
     for (const n of list) {
       if (n.kind === "indicator") {
         const p = parseIndicatorPayload(n.payload);
-        if (p) {
-          const r = p.responsible ?? null;
-          out.set(`${p.indicator}|${r ?? ""}`, { key: p.indicator, responsible: r });
+        if (p && n.id) {
+          out.set(`node:${n.id}`, {
+            key: p.indicator ?? "",
+            responsible: p.responsible ?? null,
+            nodeId: n.id,
+          });
         }
       } else if (n.kind === "plan") {
         for (const k of parsePlanPayload(n.payload)?.indicators ?? []) {
@@ -181,6 +325,11 @@ export function indicatorRequestsOf(
   };
   walk(nodes);
   return [...out.values()];
+}
+
+/** v1.1: chave da série de um NÓ de indicador. */
+export function nodeSeriesKey(nodeId: string): string {
+  return `node:${nodeId}`;
 }
 
 /** Chave de série usada para casar a resposta do servidor com o nó. */

@@ -1,4 +1,5 @@
-// Versão: 1.0 | Data: 30/09/2026
+// Versão: 1.1 | Data: 02/10/2026
+// v1.1 (02/10/2026): 0150 — tamanho, exibição e prazo PRÓPRIO do nó.
 // O parse das linhas de `tree_nodes` (0133 + 0148). O que se protege:
 //  - '-' é "soltar na raiz" e null é "sem exceção" — uma linha só de
 //    geometria NÃO pode mover o nó (antes do 0148 null virava raiz);
@@ -116,5 +117,31 @@ describe("tarefa de mapa", () => {
     expect(out.geometry[0].nodeRef).toBe(
       "task:00000000-0000-4000-a000-00000000000f"
     );
+  });
+});
+
+describe("0150: tamanho, exibição e prazo", () => {
+  it("tamanho e exibição entram na geometria (mesmo sem deslocamento)", () => {
+    const out = parseTreeNodeRows([
+      row({ node_ref: "task:x", width: 320, height: 180, display: { tone: "verde", x: 1 } }),
+    ]);
+    expect(out.geometry).toEqual([
+      {
+        nodeRef: "task:x",
+        offsetX: 0,
+        offsetY: 0,
+        direction: null,
+        width: 320,
+        height: 180,
+        display: { tone: "verde" },
+      },
+    ]);
+  });
+  it("anotação com prazo carrega `dueDate`; sem prazo não inventa data", () => {
+    const out = parseTreeNodeRows([
+      row({ label: "Com prazo", due_date: "2026-10-15" }),
+      row({ id: "00000000-0000-4000-a000-000000000002", label: "Sem prazo" }),
+    ]);
+    expect(out.facts.map((f) => f.dueDate ?? null)).toEqual(["2026-10-15", null]);
   });
 });

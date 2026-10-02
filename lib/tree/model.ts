@@ -1,4 +1,7 @@
-// Versão: 1.5 | Data: 01/10/2026
+// Versão: 1.6 | Data: 02/10/2026
+// v1.6 (02/10/2026): "Plano de ação" vira "Multi-fatores" (lista livre de
+//   fatores); fato com data PRÓPRIA (`dueDate`, 0150) separada da data que
+//   organiza a árvore; geometria com tamanho e exibição por cartão.
 // v1.5 (01/10/2026): nós OPERACIONAIS (0149) — `indicator` (meta × realizado
 //   de um indicador, com o operador dos filhos), `plan` (plano de ação 5W2H) e
 //   `ritual` (rotina de acompanhamento que vira tarefa). Linhas PRÓPRIAS de
@@ -49,6 +52,8 @@
 // justamente o que se quer ver ao analisar a conduta.
 //
 // Módulo PURO e client-safe: o widget é um componente client.
+import type { TreeNodeDisplay } from "./display";
+
 
 /** O que um nó é. `occurrence` é o tronco da série; `note` é digitado. */
 export type TreeNodeKind =
@@ -128,7 +133,10 @@ export const TREE_NODE_KIND_LABELS: Record<TreeNodeKind, string> = {
   field: "Campo",
   // v1.5 (01/10/2026)
   indicator: "Indicador",
-  plan: "Plano de ação",
+  // v1.6 (02/10/2026): "Multi-fatores" — o antigo "Plano de ação" era um
+  // molde fixo (o 5W2H do preset Metas 4T26). Agora é uma lista livre de
+  // fatores (título opcional + descrição); o kind no banco segue 'plan'.
+  plan: "Multi-fatores",
   ritual: "Ritual",
 };
 
@@ -173,6 +181,12 @@ export interface TreeFact {
    * ritual) — o card o parseia por `parseNodePayload` (fail-closed).
    */
   payload?: unknown;
+  /**
+   * v1.6 (02/10/2026): data PRÓPRIA (prazo) de um nó desenhado (0150). Antes
+   * a anotação exibia a data de CRIAÇÃO (`at`) como se fosse prazo — e nada a
+   * editava. `at` segue sendo a data que ORGANIZA a árvore.
+   */
+  dueDate?: string | null;
 }
 
 export interface TreeNode extends TreeFact {
@@ -232,6 +246,11 @@ export interface TreeNodeGeometry {
   offsetY: number;
   /** null = herda o padrão do widget. */
   direction: TreeDirection | null;
+  /** v1.6 (0150): tamanho escolhido ao redimensionar (null = automático). */
+  width?: number | null;
+  height?: number | null;
+  /** v1.6 (0150): escolhas de exibição do cartão (lib/tree/display.ts). */
+  display?: TreeNodeDisplay | null;
 }
 
 /** De qual árvore se fala: a de um registro ou um mapa livre. */

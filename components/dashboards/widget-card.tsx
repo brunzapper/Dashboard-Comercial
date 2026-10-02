@@ -1,4 +1,7 @@
-// Versão: 2.21 | Data: 02/10/2026
+// Versão: 2.22 | Data: 02/10/2026
+// v2.22 (02/10/2026): a Tree recebe o catálogo do editor de REALIZADO
+//   (o mesmo do gerenciador de indicadores — RealizedCatalog) e o papel
+//   admin (edição das metas no próprio nó). Só monta para widget Tree.
 // v2.21 (02/10/2026): o cromo do card segue o ESTILO do dashboard
 //   (lib/dashboards/style.ts). "nenhum" = sem moldura nem fundo (o bloco
 //   senta na página); "superficie" = um nível de fundo, sem borda nem sombra;
@@ -176,6 +179,7 @@ import type { OperandRef } from "@/lib/records/date-operands";
 import { deleteWidget, saveWidgetSettings } from "@/app/(app)/dashboards/actions";
 import { copyWidget } from "@/lib/widgets/clipboard";
 import type { QTCellValue } from "@/lib/widgets/quick-table/model";
+import type { RealizedCatalog } from "@/components/indicators/realized-source-editor";
 import { useFontScale } from "./font-scale-context";
 import { useDashboardStyle } from "./dashboard-style-context";
 import { usePresenting } from "./presenting-context";
@@ -777,6 +781,22 @@ export const WidgetCard = memo(function WidgetCard({
     goalMetrics,
     manualSeries,
   ]);
+
+  // v2.22: catálogo do editor de realizado do nó de indicador da Tree.
+  const treeCatalog: RealizedCatalog | null = useMemo(
+    () =>
+      isTree
+        ? {
+            available: availableForBuilder,
+            allFields: fields,
+            sources: sourcesCatalog,
+            metrics: goalMetrics,
+            manualSeries,
+            manualAxes,
+          }
+        : null,
+    [isTree, availableForBuilder, fields, sourcesCatalog, goalMetrics, manualSeries, manualAxes]
+  );
 
   // Dimensões dinâmicas: mede o tamanho natural do conteúdo e reporta ao grid,
   // que renderiza max(mínimo, medido). Altura das tabelas vem da medição real do
@@ -1520,6 +1540,8 @@ export const WidgetCard = memo(function WidgetCard({
               dashboardId={dashboardId}
               widgetId={widget.id}
               scopeKey={deferredScopeKey}
+              catalog={treeCatalog}
+              isAdmin={userRoles.includes("admin")}
             />
           ) : isGoalTable ? (
             snapshotReadOnly ? (

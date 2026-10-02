@@ -1,4 +1,8 @@
-// Versão: 1.3 | Data: 02/10/2026
+// Versão: 1.4 | Data: 02/10/2026
+// v1.4 (02/10/2026): `NodeDate` — nó DESENHADO na árvore (anotação,
+//   indicador, Multi-fatores, ritual) mostra a data PRÓPRIA (prazo, 0150), e
+//   nada quando não tem; antes mostrava a data de CRIAÇÃO como se fosse prazo
+//   (os nós de um preset exibiam o dia do apply, sem como editar).
 // v1.3 (02/10/2026): tamanhos de fonte fixos (10px/11px em classe) trocados
 //   pela escala nomeada text-2xs/text-micro (globals.css); guarda em
 //   tests/no-arbitrary-font-size.test.ts.
@@ -142,6 +146,23 @@ export function NodeDate({
         title={status ? DUE_STATUS_LABELS[status] : undefined}
       >
         {text}
+      </span>
+    );
+  }
+  // v1.4: nó desenhado — só a data própria; sem ela, nada.
+  const own =
+    node.kind === "note" ||
+    node.kind === "indicator" ||
+    node.kind === "plan" ||
+    node.kind === "ritual";
+  if (own) {
+    if (!node.dueDate) return null;
+    return (
+      <span
+        className="text-muted-foreground shrink-0 text-xs"
+        title={node.at ? `Criada em ${formatDateValue(node.at, DEFAULT_DATE_FORMAT)}` : undefined}
+      >
+        {formatDateValue(node.dueDate, DEFAULT_DATE_FORMAT)}
       </span>
     );
   }
