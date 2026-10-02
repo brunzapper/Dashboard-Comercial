@@ -1,4 +1,8 @@
-// Versão: 1.4 | Data: 12/09/2026
+// Versão: 1.5 | Data: 02/10/2026
+// v1.5 (02/10/2026): fontes do ESTILO DO DASHBOARD (lib/dashboards/style.ts)
+//   via @fontsource — servidas pelo próprio app, sem fetch no build (o motivo
+//   da remoção do next/font na v1.1). O @font-face só baixa o arquivo quando
+//   um texto usa a família, então quem fica no Clássico não paga nada.
 // v1.4 (12/09/2026): TOKENS DE TEMA (0141) — além de --brand-base, um conjunto
 //   curado de superfícies (fundo, texto, cartão, silenciado, borda e as três
 //   da barra lateral) pode ser recolorido, com valores próprios para claro e
@@ -36,6 +40,8 @@ import {
   themeTokenStyle,
 } from "@/lib/theme";
 
+import "@fontsource-variable/inter";
+import "@fontsource-variable/newsreader";
 import "./globals.css";
 
 export const metadata: Metadata = {

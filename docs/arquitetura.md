@@ -1,4 +1,9 @@
-<!-- Versão: 2.0 | Data: 01/10/2026 -->
+<!-- Versão: 2.1 | Data: 02/10/2026 -->
+<!-- v2.1 (02/10/2026): §4.28 + invariante 43 — ESTILO DO DASHBOARD (tokens
+     semânticos por board, cascata board → org → Clássico), bloco de texto com
+     markdown leve, tabela de metas de slide, palco 16:9 do modo Apresentar,
+     fundo por aba, `hideInPresentation`, tema de gráfico e técnica do
+     destaque, fundo do canvas da Tree. -->
 <!-- v2.0 (01/10/2026): §4.27 — modo Apresentar v2: pré-render de todos os
      slides antes de começar, ajuste à altura da tela, sem barra de período nem
      ⋮ dos widgets; "Apresentar" no menu ⋮ do dashboard; meses fixos da Tree. -->
@@ -6553,6 +6558,75 @@ dela, nó de mapa por `tree_nodes.preset_key`. Reaplicar nunca desfaz um ajuste.
 Isto AMENDA a regra antiga "metas não são deps de preset": um preset de METAS é
 exatamente o caso.
 
+### 4.28 Estilo do dashboard e apresentação como palco (02/10/2026)
+
+**Por quê.** A interface era de EDIÇÃO, não de apresentação: cada widget trazia
+o próprio chrome (moldura, faixa de título, ⋮) e as próprias cores em classes
+soltas, a nota era um único parágrafo, a tabela de metas repartia a altura do
+card entre as linhas (números de 14px em linhas de 100px) e pintava de vermelho
+a falta de dado. Personalizar widget a widget nunca dava um resultado coerente.
+
+**O estilo (`lib/dashboards/style.ts`, PURO e client-safe).** Um registry em
+código (`classico`, `editorial`, `editorial_escuro`, `executivo`) em que cada
+estilo define cores semânticas (`page/surface/ink/muted/rule/wash/accent/dim/
+good/bad/warn` + uma rampa `seq` de um tom), o par de fontes (catálogo FECHADO
+`DASHBOARD_FONTS` — Newsreader/Inter via `@fontsource`, servidas pelo app),
+a forma do card (`moldura | superficie | nenhum`), o título (`faixa |
+conclusao`), a tabela (cabeçalho `faixa | linha`, densidade, zebra), o gráfico
+(grade sólida, linha de eixo, raio de barra) e multiplicadores de fonte por
+papel. Cascata ÚNICA em `resolveDashboardStyle`: `DashboardSettings.style` do
+board ?? `organizations.ui_prefs.dashboardStyle` (Configurações → Tema e
+interface, org_admin) ?? Clássico. Sem camada de usuário: o estilo é a cara do
+trabalho, igual para todos que o veem. Opt-in total e reversível.
+
+**Como chega aos widgets.** `dashboardStyleVars` vira o `style` do CONTÊINER do
+board (`data-ds`) — tokens `--ds-*` e as variáveis do tema shadcn (`--card`,
+`--foreground`, `--border`, `--chart-n`…) redefinidas SÓ ali dentro, então
+quem já usa `bg-card`/`text-muted-foreground` herda sem ser tocado; portais
+(menus, popovers) ficam no tema do sistema. As decisões estruturais vão por
+context (`DashboardStyleProvider`/`useDashboardStyle`): `widget-card.tsx`
+(cromo), `note-widget.tsx`, `goal-table-widget.tsx`, `widget-chart.tsx`
+(grade, eixo, raio, número-herói leve, `appearance.highlight`) e
+`tree-root-view.tsx` (fundo do canvas, `TreeSettings.canvas`). Nome de variável
+só sai do módulo e cor passa por `normalizeHexColor` na ENTRADA e na SAÍDA;
+fonte é chave de catálogo, nunca string gravada. O viewer de snapshot aplica o
+mesmo estilo (padrão da org lido por service role escopado pela org do
+dashboard).
+
+**Bloco de texto (`lib/widgets/note-blocks.ts`).** Markdown leve por linha
+(`^^` kicker, `#/##/###`, listas, `>`, `---`, `(( comentário do autor ))` só no
+modo edição) + inline (`**`, `*`, `[x](https://…)` — só http/https/mailto, sem
+HTML cru), sobre as partes do `parseNoteTemplate` (o índice GLOBAL das `{=…}`
+não muda). Texto sem marcação segue no parágrafo único de sempre.
+`appearance.note.variant` (`postit | texto | comentario | rodape`), `align`,
+`valign`, `padding`.
+
+**Tabela de metas de slide.** `resolveGoalTableDisplay`
+(`lib/widgets/goal-table.ts`) é o dono do padrão: chave explícita do widget
+(`density`, `attainmentStyle`, `emptyRealized`, `unitPlacement`, `levelTags`)
+vence; ausente, o estilo decide (Clássico = o de sempre). Em qualquer estilo a
+linha secundária fica RESERVADA nas linhas que a têm (o valor de Outubro não
+sobe) e "Responsável não encontrado" some ao apresentar.
+
+**Apresentar como palco (`lib/dashboards/presentation.ts`).**
+`effectivePresentation` resolve `presentation.fit` (`palco | altura`) e
+`transition` (`suave | nenhuma`) contra o estilo. O palco é um quadro lógico
+1280×720 com margens constantes (`STAGE_PAD_X/Y`), escalado inteiro por
+`stageScale` (letterbox, sem rolagem) — 1280 de propósito: o slide fica igual ao
+dashboard numa tela de 1280px e cresce por igual no projetor. O grid mede pela
+largura de LAYOUT (`clientWidth`, imune ao transform) e o laser desfaz a escala.
+`tabs[].background` pinta o slide (capa escura); `settings.hideInPresentation`
+(⋮ do widget → Ocultar ao apresentar) tira o widget SÓ da renderização do
+slide; `usePresenting()` (`presenting-context.tsx`, separado de
+`hideWidgetMenus`) esconde barra de busca, "+", filtros rápidos e a toolbar da
+Tree; o shell esconde o sino (`AppChrome.presenting`). A entrada suave anima o
+CONTEÚDO de cada item do grid (o item carrega o transform de posição do
+react-grid-layout), escalonada por `--ds-enter-delay` na ordem de leitura
+(`enterOrder`) e desligada por `prefers-reduced-motion`.
+
+RPCs de widget INTOCADAS; nenhuma migração (`settings` jsonb e a coluna
+`organizations.ui_prefs`, já existente).
+
 ## 5. Invariantes críticas (NÃO QUEBRAR)
 
 Estas regras já causaram ou causariam bugs graves e silenciosos. Elas também estão
@@ -7270,6 +7344,18 @@ principalmente — para mantenedores humanos.
     sem `completed_at is null`). Nó operacional da Tree é linha própria
     (`note:<uuid>`) com payload re-parseado no servidor. Seções de dados de
     preset são ensure-if-absent e SÓ do caminho de fábrica.
+
+43. **Estilo do dashboard é LEITURA de tokens, escopada ao board (§4.28).** O
+    estilo nunca reescreve a config dos widgets — trocar de volta para o
+    Clássico devolve o visual anterior. Clássico não emite variável nenhuma e
+    os widgets seguem pelo ramo histórico. Tokens só no contêiner do board
+    (`data-ds`), nunca no `<html>`; nome de variável só de
+    `lib/dashboards/style.ts`, cor só por `normalizeHexColor` (entrada e saída),
+    fonte só por chave de `DASHBOARD_FONTS`. A cascata vive SÓ em
+    `resolveDashboardStyle` (board → org → Clássico, sem camada de usuário). O
+    padrão de exibição da tabela de metas vive SÓ em `resolveGoalTableDisplay`
+    e o do modo Apresentar SÓ em `effectivePresentation`. Widget novo que pinta
+    cor fixa deve ler o token (`var(--ds-*, <tema>)`) em vez de classe solta.
 
 ## 6. Convenções do projeto
 

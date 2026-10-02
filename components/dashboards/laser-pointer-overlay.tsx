@@ -1,4 +1,7 @@
-// Versão: 1.2 | Data: 05/08/2026
+// Versão: 1.3 | Data: 02/10/2026
+// v1.3 (02/10/2026): coordenadas locais DESFAZEM a escala do palco do modo
+//   Apresentar (o slide 16:9 é um transform: scale) — sem isso a bolinha e o
+//   traço ficavam deslocados do cursor. Sem escala, o fator é 1 (inalterado).
 // Overlay do Ponteiro Laser (modo apresentação): a bolinha colorida segue o
 // cursor SEMPRE; o traço só é desenhado com o botão esquerdo pressionado
 // (traços independentes por pressionada, esmaecendo em TRAIL_TTL_MS —
@@ -124,8 +127,8 @@ export function LaserPointerOverlay({
       const r = ref.current?.getBoundingClientRect();
       if (!r) return;
       const p = {
-        x: clientRef.current.x - r.left,
-        y: clientRef.current.y - r.top,
+        x: (clientRef.current.x - r.left) / scaleOf(ref.current, r),
+        y: (clientRef.current.y - r.top) / scaleOf(ref.current, r),
         t: performance.now(),
       };
       setDot({ x: p.x, y: p.y });
@@ -158,7 +161,8 @@ export function LaserPointerOverlay({
 
   const localPoint = (e: React.PointerEvent) => {
     const r = ref.current!.getBoundingClientRect();
-    return { x: e.clientX - r.left, y: e.clientY - r.top, t: performance.now() };
+    const k = scaleOf(ref.current, r);
+    return { x: (e.clientX - r.left) / k, y: (e.clientY - r.top) / k, t: performance.now() };
   };
 
   return (
@@ -243,4 +247,11 @@ export function LaserPointerOverlay({
       </svg>
     </div>
   );
+}
+
+// v1.3: fator de escala visual do elemento (largura renderizada ÷ largura de
+// layout). 1 fora do palco; nunca 0 (elemento destacado).
+function scaleOf(el: HTMLElement | null, r: DOMRect): number {
+  const w = el?.offsetWidth ?? 0;
+  return w > 0 && r.width > 0 ? r.width / w : 1;
 }

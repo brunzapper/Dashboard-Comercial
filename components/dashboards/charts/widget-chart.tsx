@@ -1,4 +1,10 @@
-// Versão: 3.6 | Data: 18/09/2026
+// Versão: 3.7 | Data: 02/10/2026
+// v3.7 (02/10/2026): TEMA DE GRÁFICO do estilo do dashboard
+//   (lib/dashboards/style.ts): grade sólida e suave em vez de tracejada, sem
+//   linha de eixo nem tracinhos, raio de barra do estilo e fontes × o
+//   multiplicador do estilo. E a TÉCNICA DO DESTAQUE (appearance.highlight):
+//   séries/categorias fora do destaque em cinza (--ds-dim), a de destaque na
+//   cor do estilo. Clássico = ramo de sempre.
 // v3.6 (18/09/2026): BUG corrigido — a linha "Total geral" da tabela agregada
 //   não pegava a cor gravada em appearance.table.rowColors. renderSubtotalRow
 //   calcula a chave de cor como `__grp:${opts?.keyId ?? label}`, e o chamador
@@ -153,6 +159,8 @@ import {
   type ResolvedCondStyle,
 } from "@/lib/widgets/conditional";
 import { useFontScale } from "../font-scale-context";
+import { useDashboardStyle } from "../dashboard-style-context";
+import { isClassicStyle } from "@/lib/dashboards/style";
 import { useBoardChrome } from "../board-chrome-context";
 import { FONT_DEFAULTS, fontStyle, resolveFontNum } from "@/lib/widgets/fonts";
 import { measureTextWidth } from "@/lib/widgets/measure-text";
@@ -380,18 +388,72 @@ export const WidgetChart = memo(function WidgetChart({
   // Tamanhos de fonte efetivos (appearance.fonts × escala do dashboard).
   // Auto + escala 1 ⇒ styles undefined (render idêntico ao anterior).
   const fontScale = useFontScale();
+  // v3.7: estilo do board (Clássico ⇒ multiplicadores 1 e o tema de sempre).
+  const dstyle = useDashboardStyle();
+  const styled = !isClassicStyle(dstyle);
+  const fsMul = dstyle.fontScale;
   const fonts = appearance?.fonts;
-  const chartPx = resolveFontNum(fonts?.chart, FONT_DEFAULTS.chart, fontScale);
-  const valueStyle = fontStyle(fonts?.value, FONT_DEFAULTS.value, fontScale);
-  const valueMultiStyle = fontStyle(
+  const chartPx = resolveFontNum(
+    fonts?.chart,
+    FONT_DEFAULTS.chart,
+    fontScale,
+    fsMul.chart
+  );
+  // v3.7: número-herói nos estilos novos — peso LEVE na fonte de exibição
+  // (número grande em negrito pesa; leve e grande é o que parece desenhado).
+  const heroFace: React.CSSProperties | undefined = styled
+    ? {
+        fontFamily: "var(--ds-font-display)",
+        fontWeight: dstyle.weights.regular,
+        letterSpacing: "-0.01em",
+      }
+    : undefined;
+  const valueStyleBase = fontStyle(
+    fonts?.value,
+    FONT_DEFAULTS.value,
+    fontScale,
+    fsMul.value
+  );
+  const valueStyle = heroFace ? { ...valueStyleBase, ...heroFace } : valueStyleBase;
+  const valueMultiStyleBase = fontStyle(
     fonts?.value,
     FONT_DEFAULTS.valueMulti,
-    fontScale
+    fontScale,
+    fsMul.value
   );
-  const labelsStyle = fontStyle(fonts?.labels, FONT_DEFAULTS.labels, fontScale);
-  const axisProps = {
-    tick: { fontSize: chartPx, fill: "var(--muted-foreground)" },
-    stroke: "var(--border)",
+  const valueMultiStyle = heroFace
+    ? { ...valueMultiStyleBase, ...heroFace }
+    : valueMultiStyleBase;
+  const labelsStyle = fontStyle(
+    fonts?.labels,
+    FONT_DEFAULTS.labels,
+    fontScale,
+    fsMul.labels
+  );
+  const axisProps = styled && !dstyle.chart.axisLine
+    ? {
+        tick: { fontSize: chartPx, fill: "var(--muted-foreground)" },
+        stroke: "var(--border)",
+        axisLine: false,
+        tickLine: false,
+      }
+    : {
+        tick: { fontSize: chartPx, fill: "var(--muted-foreground)" },
+        stroke: "var(--border)",
+      };
+  // v3.7: grade do estilo (sólida e suave) × tracejada (Clássico).
+  const gridDash = styled && dstyle.chart.solidGrid ? undefined : "3 3";
+  const barR = styled ? dstyle.chart.barRadius : 4;
+  // v3.7: técnica do destaque — fora do destaque, cinza; no destaque, a cor do
+  // estilo. Sem `highlight`, a cor de sempre (resolveSeriesColor).
+  const hlSeries = appearance?.highlight?.series;
+  const hlCats = appearance?.highlight?.categories;
+  const seriesColor = (key: string, i: number): string => {
+    if (hlSeries) {
+      return key === hlSeries ? "var(--ds-accent, var(--chart-1))" : "var(--ds-dim, var(--muted-foreground))";
+    }
+    if (hlCats && hlCats.length > 0) return "var(--ds-dim, var(--muted-foreground))";
+    return resolveSeriesColor(appearance ?? {}, key, i);
   };
   // Largura dos eixos Y acompanha ticks maiores p/ não cortar os rótulos.
   const axisScale = Math.max(1, chartPx / FONT_DEFAULTS.chart);
@@ -1167,7 +1229,7 @@ export const WidgetChart = memo(function WidgetChart({
         }}
       >
         <CartesianGrid
-          strokeDasharray="3 3"
+          strokeDasharray={gridDash}
           stroke="var(--border)"
           horizontal={grid.horizontal}
           vertical={grid.vertical}
@@ -1205,7 +1267,7 @@ export const WidgetChart = memo(function WidgetChart({
                 type="monotone"
                 dataKey={s.cmpKey}
                 name={`${s.name} (comparação)`}
-                stroke={resolveSeriesColor(ap, s.dataKey, s.baseIndex)}
+                stroke={seriesColor(s.dataKey, s.baseIndex)}
                 strokeWidth={2}
                 strokeDasharray="4 4"
                 strokeOpacity={0.55}
@@ -1221,7 +1283,7 @@ export const WidgetChart = memo(function WidgetChart({
             type="monotone"
             dataKey={s.dataKey}
             name={s.name}
-            stroke={resolveSeriesColor(ap, s.dataKey, s.baseIndex)}
+            stroke={seriesColor(s.dataKey, s.baseIndex)}
             strokeWidth={2}
             dot={false}
             isAnimationActive={false}
@@ -1694,7 +1756,7 @@ export const WidgetChart = memo(function WidgetChart({
       barCategoryGap={barCategoryGap}
     >
       <CartesianGrid
-        strokeDasharray="3 3"
+        strokeDasharray={gridDash}
         stroke="var(--border)"
         horizontal={grid.horizontal}
         vertical={grid.vertical}
@@ -1754,26 +1816,30 @@ export const WidgetChart = memo(function WidgetChart({
                   : {})}
               dataKey={s.cmpKey}
               name={`${s.name} (comparação)`}
-              fill={resolveSeriesColor(ap, s.dataKey, s.baseIndex)}
+              fill={seriesColor(s.dataKey, s.baseIndex)}
               fillOpacity={0.35}
-              radius={horizontal ? [0, 4, 4, 0] : [4, 4, 0, 0]}
+              radius={horizontal ? [0, barR, barR, 0] : [barR, barR, 0, 0]}
               isAnimationActive={false}
             />
           ))
         : null}
       {plotSeries.map((s) => {
-        const base = resolveSeriesColor(ap, s.dataKey, s.baseIndex);
+        const base = seriesColor(s.dataKey, s.baseIndex);
         // Cor por categoria (colorByCategory, série única): cada barra pega a
         // cor do seu ÍNDICE na paleta do widget (mesmo mecanismo das fatias de
         // pizza) — barras de fontes/categorias diferentes ficam distinguíveis.
         // Off por padrão; cor manual (categoryColors) e condicional vencem.
         const colorByCat = Boolean(ap.colorByCategory) && singleSeries;
+        // v3.7: destaque por categoria também pinta barra a barra.
+        const hlCatSet =
+          singleSeries && hlCats && hlCats.length > 0 ? new Set(hlCats) : null;
         const perColumn =
           singleSeries &&
           (colorByCat ||
             ap.fillMode === "gradient" ||
             hasCatColors ||
-            chartCondActive);
+            chartCondActive ||
+            hlCatSet !== null);
         // Empilhado: um stack único (métricas) ou, sob o pivot, um stack POR
         // MÉTRICA (as sub-bases empilham dentro dele); só o segmento do topo
         // mantém o canto arredondado.
@@ -1782,8 +1848,8 @@ export const WidgetChart = memo(function WidgetChart({
           stacked && !s.lastInStack
             ? [0, 0, 0, 0]
             : horizontal
-              ? [0, 4, 4, 0]
-              : [4, 4, 0, 0];
+              ? [0, barR, barR, 0]
+              : [barR, barR, 0, 0];
         return (
           <Bar
             key={s.dataKey}
@@ -1806,7 +1872,13 @@ export const WidgetChart = memo(function WidgetChart({
                     fill={
                       ap.categoryColors?.[catName(r)]?.fill ??
                       barCondFill(r, s.dataKey) ??
-                      (colorByCat ? paletteColor(ap.palette, idx) : base)
+                      (hlCatSet
+                        ? hlCatSet.has(catName(r))
+                          ? "var(--ds-accent, var(--chart-1))"
+                          : "var(--ds-dim, var(--muted-foreground))"
+                        : colorByCat
+                          ? paletteColor(ap.palette, idx)
+                          : base)
                     }
                     fillOpacity={
                       ap.fillMode === "gradient"

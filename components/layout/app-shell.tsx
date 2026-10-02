@@ -1,4 +1,7 @@
-// Versão: 1.8 | Data: 01/10/2026
+// Versão: 1.9 | Data: 02/10/2026
+// v1.9 (02/10/2026): `presenting` — o dashboard avisa que está no modo
+//   Apresentar e o controle flutuante do topo-direito (sino de tarefas) some.
+//   Antes ele só sumia no modo tela cheia, e aparecia sobre a capa do slide.
 // v1.8 (01/10/2026): a barra lateral ROLA quando os itens não cabem (antes,
 //   com muitos fixados, o fim da lista ficava fora da tela). Fixada, ela é
 //   sticky com a altura da tela — rola sozinha, não junto com a página.
@@ -66,6 +69,9 @@ interface AppChrome {
   chromeHidden: boolean;
   setChromeHidden: (v: boolean) => void;
   toggleFullscreen: () => void;
+  /** v1.9: modo Apresentar ativo (some o controle do topo-direito). */
+  presenting?: boolean;
+  setPresenting?: (v: boolean) => void;
 }
 
 const AppChromeContext = createContext<AppChrome | null>(null);
@@ -110,6 +116,7 @@ export function AppShell({
   // de `hovering` para o mouse-leave não fechar o que o clique abriu.
   const [openedByButton, setOpenedByButton] = useState(false);
   const [chromeHidden, setChromeHidden] = useState(false);
+  const [presenting, setPresenting] = useState(false);
   const [, startTransition] = useTransition();
 
   // Marca "app aberto nesta sessão do navegador" em QUALQUER página (inclui
@@ -187,8 +194,14 @@ export function AppShell({
   // (setHovering) — objeto novo por render re-renderizava todos os
   // consumidores de useAppChrome (páginas inteiras) a cada hover.
   const chromeValue = useMemo<AppChrome>(
-    () => ({ chromeHidden, setChromeHidden, toggleFullscreen }),
-    [chromeHidden, toggleFullscreen]
+    () => ({
+      chromeHidden,
+      setChromeHidden,
+      toggleFullscreen,
+      presenting,
+      setPresenting,
+    }),
+    [chromeHidden, toggleFullscreen, presenting]
   );
 
   return (
@@ -310,7 +323,7 @@ export function AppShell({
           </button>
         ) : null}
 
-        {!chromeHidden ? topRight : null}
+        {!chromeHidden && !presenting ? topRight : null}
 
         <main
           // data-app-main: âncora da regra que consome --app-surface /

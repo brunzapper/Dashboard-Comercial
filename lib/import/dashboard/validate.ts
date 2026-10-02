@@ -1,3 +1,8 @@
+// Versão: 1.10 | Data: 02/10/2026
+// v1.10 (02/10/2026): `dashboard.settings.style` (estilo do board) saneado pelo
+//   parse único de lib/dashboards/style.ts — inválido vira AVISO + descarte
+//   (o board herda o padrão da organização), nunca erro duro. Fundo por aba
+//   (`tabs[].background`) e `presentation.fit/transition` passam com whitelist.
 // Versão: 1.9 | Data: 01/10/2026
 // v1.9 (01/10/2026): `settings.goalTable` (Tabela de metas, 0149) saneado pela
 //   régua única de lib/widgets/goal-table.ts.
@@ -62,6 +67,10 @@
 // (perRecordCalcOperands / buildAggOperandCatalog) — para que uma fórmula
 // aceita aqui seja exatamente a que os editores aceitariam. Nenhum I/O aqui:
 // client-safe e testável (npx tsx) sem banco.
+import {
+  DASHBOARD_STYLE_KEYS,
+  normalizeDashboardStyleSetting,
+} from "@/lib/dashboards/style";
 import type {
   PresetCorrespondence,
   PresetDashboard,
@@ -798,6 +807,34 @@ export function validateDashboardImport(
     }
     tabIds.add(id);
   });
+  // v1.10 (02/10/2026): estilo do board — parse ÚNICO (whitelist de chave,
+  // cores #RRGGBB, fonte do catálogo). Inválido = aviso + herda o da org.
+  if (settings.style !== undefined) {
+    const style = normalizeDashboardStyleSetting(settings.style);
+    if (style) settings.style = style;
+    else {
+      warnings.push(
+        `dashboard.settings.style inválido — descartado (o dashboard usa o estilo padrão da organização). Válidos: ${DASHBOARD_STYLE_KEYS.join(", ")}.`
+      );
+      delete settings.style;
+    }
+  }
+  if (settings.presentation !== undefined) {
+    const pres = isRecord(settings.presentation)
+      ? (settings.presentation as NonNullable<DashboardSettings["presentation"]>)
+      : {};
+    const next: NonNullable<DashboardSettings["presentation"]> = {};
+    if (Array.isArray(pres.hiddenTabs)) {
+      next.hiddenTabs = pres.hiddenTabs.filter(
+        (t): t is string => typeof t === "string"
+      );
+    }
+    if (pres.fit === "palco" || pres.fit === "altura") next.fit = pres.fit;
+    if (pres.transition === "suave" || pres.transition === "nenhuma") {
+      next.transition = pres.transition;
+    }
+    settings.presentation = next;
+  }
   const pb = settings.periodBar;
   if (pb?.fieldBySource && subRemap.size > 0) {
     // Keys de Sub-bases remapeadas também no campo de data por Base.

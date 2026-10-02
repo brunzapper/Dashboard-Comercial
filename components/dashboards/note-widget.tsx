@@ -1,3 +1,12 @@
+// Versão: 1.3 | Data: 02/10/2026
+// v1.3 (02/10/2026): BLOCO DE TEXTO de apresentação. (a) MARKDOWN LEVE
+//   (lib/widgets/note-blocks.ts): kicker ^^, títulos #/##/###, listas,
+//   citação, filete ---, **negrito**, *itálico*, link externo [x](https://…)
+//   e o comentário de autor (( … )) que só aparece no modo edição. Texto sem
+//   marcação segue no parágrafo único de sempre. (b) appearance.note.variant
+//   (postit | texto | comentario | rodape), align, valign e padding. (c) Num
+//   board com ESTILO, nota sem cor própria usa a superfície e a tinta do
+//   estilo (sem o amarelo), e os títulos saem na fonte de exibição.
 // Versão: 1.2 | Data: 07/08/2026
 // v1.2 (07/08/2026): save OTIMISTA em background (useBackgroundSave): o editor
 // fecha na hora com o texto novo em tela; os {=…} novos mostram "…" até o
@@ -47,6 +56,14 @@ import { useBackgroundSave } from "@/lib/feedback/use-background-save";
 import { saveWidgetSettings } from "@/app/(app)/dashboards/actions";
 import { useFocusWidget } from "./focus-context";
 import { useFontScale } from "./font-scale-context";
+import { useDashboardStyle } from "./dashboard-style-context";
+import { isClassicStyle, isSerifDisplay } from "@/lib/dashboards/style";
+import {
+  buildNoteBlocks,
+  hasNoteMarkup,
+  type NoteBlock,
+  type NoteRun,
+} from "@/lib/widgets/note-blocks";
 import { WidgetLinkPicker } from "./widget-link-picker";
 
 const DEFAULT_NOTE_BG = "#fef9c3"; // amarelo post-it
@@ -82,6 +99,8 @@ export function NoteWidget({
 }) {
   const focus = useFocusWidget();
   const fontScale = useFontScale();
+  const dstyle = useDashboardStyle();
+  const styled = !isClassicStyle(dstyle);
   const { save: backgroundSave, hasPending: saving } = useBackgroundSave();
 
   // Texto otimista: após salvar, o texto novo vale até o refresh trazer a prop
@@ -238,11 +257,27 @@ export function NoteWidget({
     });
   };
 
+  // v1.3: papel do bloco. Ausente = post-it (Clássico) — num board com
+  // estilo, o post-it sem cor própria vira texto sobre a superfície.
+  const variant = appearance?.variant ?? "postit";
+  const paperless = variant !== "postit" || (styled && !appearance?.bg);
   const style: React.CSSProperties = {
-    background: appearance?.bg ?? DEFAULT_NOTE_BG,
-    color: appearance?.color ?? "#1f2937",
+    background: appearance?.bg ?? (paperless ? undefined : DEFAULT_NOTE_BG),
+    color:
+      appearance?.color ??
+      (variant === "comentario" || variant === "rodape"
+        ? "var(--muted-foreground)"
+        : paperless
+          ? undefined
+          : "#1f2937"),
     // Px explícito é absoluto; Auto acompanha a escala de fonte do dashboard.
-    fontSize: appearance?.fontSize ?? Math.round(14 * fontScale),
+    fontSize:
+      appearance?.fontSize ??
+      Math.round(
+        (variant === "rodape" ? 12 : 14) *
+          fontScale *
+          (styled ? dstyle.fontScale.labels : 1)
+      ),
   };
 
   if (editing) {
@@ -397,17 +432,106 @@ export function NoteWidget({
     );
   }
 
+  const markup = hasNoteMarkup(text);
+  const showAuthorComments = editMode && canEdit;
+  const hasLayout =
+    appearance?.variant != null ||
+    appearance?.align != null ||
+    appearance?.valign != null ||
+    appearance?.padding != null;
+  const padding = appearance?.padding;
+  const renderRun = (run: NoteRun, i: number) => {
+    const cls = cn(run.bold && "font-semibold", run.italic && "italic");
+    if (run.kind === "text") {
+      return (
+        <span key={i} className={cls || undefined}>
+          {run.text}
+        </span>
+      );
+    }
+    if (run.kind === "expr") {
+      return (
+        <span key={i} className={cn("font-semibold tabular-nums", run.italic && "italic")}>
+          {formatResult(valueBySource.get(run.source))}
+        </span>
+      );
+    }
+    if (run.kind === "url") {
+      return (
+        <a
+          key={i}
+          href={run.href}
+          target="_blank"
+          rel="noopener noreferrer"
+          className={cn("underline underline-offset-2", cls)}
+          style={{ color: appearance?.linkColor ?? (styled ? "var(--ds-accent)" : "#1d4ed8") }}
+          onClick={(e) => {
+            if (editMode && canEdit) e.preventDefault();
+            else e.stopPropagation();
+          }}
+        >
+          {run.label}
+        </a>
+      );
+    }
+    return (
+      <button
+        key={i}
+        type="button"
+        className={cn("cursor-pointer underline underline-offset-2", cls)}
+        style={{ color: appearance?.linkColor ?? (styled ? "var(--ds-accent)" : "#1d4ed8") }}
+        onClick={(e) => {
+          if (editMode && canEdit) return; // clique edita, não navega
+          e.stopPropagation();
+          focus(run.target);
+        }}
+      >
+        {run.label}
+      </button>
+    );
+  };
+
   return (
     <div
       className={cn(
-        "h-full overflow-auto p-3",
+        "h-full overflow-auto",
+        padding == null && "p-3",
+        hasLayout && "flex flex-col",
+        variant === "comentario" && "border-l-2",
+        variant === "rodape" && "border-t",
         editMode && canEdit && "cursor-text"
       )}
-      style={style}
+      style={{
+        ...style,
+        ...(padding != null ? { padding } : {}),
+        ...(variant === "comentario" && padding == null
+          ? { paddingLeft: "1.6em" }
+          : {}),
+        justifyContent:
+          appearance?.valign === "center"
+            ? "center"
+            : appearance?.valign === "bottom"
+              ? "flex-end"
+              : undefined,
+        textAlign: appearance?.align,
+      }}
       onClick={startEditing}
       title={editMode && canEdit ? "Clique para editar a nota" : undefined}
     >
-      {text.trim() ? (
+      {text.trim() && markup ? (
+        <NoteBlocks
+          blocks={buildNoteBlocks(parsed.parts)}
+          renderRun={renderRun}
+          showAuthorComments={showAuthorComments}
+          displayWeight={
+            styled
+              ? isSerifDisplay(dstyle)
+                ? dstyle.weights.regular
+                : dstyle.weights.strong
+              : 600
+          }
+        />
+      ) : text.trim() ? (
         <p className="break-words whitespace-pre-wrap">
           {parsed.parts.map((part, i) => {
             if (part.kind === "text") return <span key={i}>{part.text}</span>;
@@ -444,4 +568,124 @@ export function NoteWidget({
       )}
     </div>
   );
+}
+
+// v1.3 (02/10/2026): render dos blocos do markdown leve. Tamanhos em EM sobre
+// o fontSize do bloco — a escala inteira acompanha o tamanho escolhido (e o
+// fator do modo Apresentar). Títulos usam .ds-display (a fonte de exibição do
+// estilo; no Clássico, a fonte normal em negrito).
+const BLOCK_SIZE: Partial<Record<NoteBlock["type"], string>> = {
+  h1: "3em",
+  h2: "1.85em",
+  h3: "1.3em",
+};
+
+function NoteBlocks({
+  blocks,
+  renderRun,
+  showAuthorComments,
+  displayWeight,
+}: {
+  blocks: NoteBlock[];
+  renderRun: (run: NoteRun, i: number) => React.ReactNode;
+  showAuthorComments: boolean;
+  displayWeight: number;
+}) {
+  const out: React.ReactNode[] = [];
+  let list: { ordered: boolean; items: NoteBlock[] } | null = null;
+  const flushList = () => {
+    if (!list) return;
+    const items = list.items;
+    out.push(
+      list.ordered ? (
+        <ol key={`l${out.length}`} className="my-[0.35em] list-decimal pl-[1.4em]">
+          {items.map((b, i) => (
+            <li key={i} className="my-[0.15em] pl-[0.2em]">
+              {b.runs.map(renderRun)}
+            </li>
+          ))}
+        </ol>
+      ) : (
+        <ul key={`l${out.length}`} className="my-[0.35em] list-disc pl-[1.2em]">
+          {items.map((b, i) => (
+            <li key={i} className="my-[0.15em] pl-[0.2em]">
+              {b.runs.map(renderRun)}
+            </li>
+          ))}
+        </ul>
+      )
+    );
+    list = null;
+  };
+  blocks.forEach((b, i) => {
+    if (b.type === "li" || b.type === "oli") {
+      const ordered = b.type === "oli";
+      if (list && list.ordered !== ordered) flushList();
+      if (!list) list = { ordered, items: [] };
+      list.items.push(b);
+      return;
+    }
+    flushList();
+    const key = `b${i}`;
+    switch (b.type) {
+      case "blank":
+        out.push(<div key={key} className="h-[0.6em]" aria-hidden />);
+        break;
+      case "rule":
+        out.push(<hr key={key} className="my-[0.6em] border-current opacity-20" />);
+        break;
+      case "comment":
+        if (showAuthorComments) {
+          out.push(
+            <p key={key} className="text-[0.85em] italic opacity-50" title="Comentário do autor — não aparece fora do modo edição">
+              (( {b.runs.map(renderRun)} ))
+            </p>
+          );
+        }
+        break;
+      case "kicker":
+        out.push(
+          <p
+            key={key}
+            className="ds-kicker mb-[0.3em] text-[0.72em] font-semibold tracking-[0.12em] uppercase opacity-75"
+            // A cor acompanha o TEXTO do bloco (capa escura, comentário…), não
+            // o cinza fixo do kicker do estilo — sobre fundo escuro ele sumia.
+            style={{ color: "inherit" }}
+          >
+            {b.runs.map(renderRun)}
+          </p>
+        );
+        break;
+      case "h1":
+      case "h2":
+      case "h3":
+        out.push(
+          <p
+            key={key}
+            role="heading"
+            aria-level={b.type === "h1" ? 1 : b.type === "h2" ? 2 : 3}
+            className="ds-display mt-[0.15em] mb-[0.25em] leading-[1.08] tracking-tight"
+            style={{ fontSize: BLOCK_SIZE[b.type], fontWeight: displayWeight }}
+          >
+            {b.runs.map(renderRun)}
+          </p>
+        );
+        break;
+      case "quote":
+        out.push(
+          <blockquote key={key} className="my-[0.3em] border-l-2 border-current/30 pl-[0.8em] opacity-80">
+            {b.runs.map(renderRun)}
+          </blockquote>
+        );
+        break;
+      default:
+        out.push(
+          <p key={key} className="leading-[1.45] break-words">
+            {b.runs.map(renderRun)}
+          </p>
+        );
+    }
+  });
+  flushList();
+  return <div className="break-words">{out}</div>;
 }

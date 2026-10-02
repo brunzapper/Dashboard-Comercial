@@ -1,4 +1,12 @@
-// Versão: 2.20 | Data: 01/10/2026
+// Versão: 2.21 | Data: 02/10/2026
+// v2.21 (02/10/2026): o cromo do card segue o ESTILO do dashboard
+//   (lib/dashboards/style.ts). "nenhum" = sem moldura nem fundo (o bloco
+//   senta na página); "superficie" = um nível de fundo, sem borda nem sombra;
+//   título "conclusao" = sem a faixa e sem a divisória, na fonte de exibição,
+//   com o kicker opcional (appearance.title.kicker) acima; o ⋮ aparece em
+//   hover fora do modo edição. Nota com `variant` texto/comentário/rodapé é
+//   sem cromo; nota sem cor própria num board com estilo perde o amarelo.
+//   Clássico = ramo histórico, byte-idêntico.
 // v2.20 (01/10/2026): o menu ⋮ some quando o shell pede
 //   (`chrome.hideWidgetMenus` — modo Apresentar e modo tela cheia).
 // v2.19 (01/10/2026): (a) widget 'metas' — GoalTableWidget (Tabela de metas,
@@ -94,6 +102,7 @@ import {
   Pencil,
   Trash2,
   Ungroup,
+  MonitorOff,
   X,
 } from "lucide-react";
 
@@ -116,6 +125,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { notifyOnError } from "@/lib/feedback/notify";
+import { useBackgroundSave } from "@/lib/feedback/use-background-save";
 import type { FieldDefinition, RecordRow } from "@/lib/records/types";
 import { isCoreDef } from "@/lib/records/core-defs";
 import { hasAnyRole, type RoleKey } from "@/lib/auth/roles";
@@ -163,10 +173,14 @@ import { useSnapshotMode } from "@/components/snapshots/snapshot-mode";
 import { useGoalMetrics } from "@/components/goal-metrics-context";
 import { useManualAxes, useManualSeries } from "@/components/manual-series-context";
 import type { OperandRef } from "@/lib/records/date-operands";
-import { deleteWidget } from "@/app/(app)/dashboards/actions";
+import { deleteWidget, saveWidgetSettings } from "@/app/(app)/dashboards/actions";
 import { copyWidget } from "@/lib/widgets/clipboard";
 import type { QTCellValue } from "@/lib/widgets/quick-table/model";
 import { useFontScale } from "./font-scale-context";
+import { useDashboardStyle } from "./dashboard-style-context";
+import { usePresenting } from "./presenting-context";
+import { isClassicStyle, isSerifDisplay } from "@/lib/dashboards/style";
+import { cn } from "@/lib/utils";
 import { useBoardChrome } from "./board-chrome-context";
 import { ImageWidget } from "./image-widget";
 import { NoteWidget } from "./note-widget";
@@ -493,15 +507,57 @@ export const WidgetCard = memo(function WidgetCard({
   // espelho do grupo kpi.
   const filterAp = isFilter || isFieldFilter ? appearance?.filter : undefined;
   const noteAp = isNote ? appearance?.note : undefined;
+  // v2.21: estilo do board (Clássico ⇒ ramo histórico intacto).
+  const dstyle = useDashboardStyle();
+  const styled = !isClassicStyle(dstyle);
+  const cardVariant = styled ? dstyle.card : "moldura";
+  const conclusionTitle = styled && dstyle.title === "conclusao";
+  // Nota com papel de TEXTO (sem papel/moldura) não tem cromo de card.
+  const noteChromeless =
+    isNote && noteAp?.variant != null && noteAp.variant !== "postit";
   // Sem cromo de card: forma e imagem sempre (fundo transparente — PNG com
-  // alpha aparece limpo); nota quando "Sem moldura" (Aparência).
-  const frameless = isShape || isImage || (isNote && noteAp?.frameless === true);
+  // alpha aparece limpo); nota quando "Sem moldura" (Aparência) ou com papel
+  // de texto (v2.21).
+  const frameless =
+    isShape ||
+    isImage ||
+    (isNote && (noteAp?.frameless === true || noteChromeless));
   const title = appearance?.title;
   // "Ocultar barra de título" (Aparência → Título e borda): some SÓ a barra;
   // borda/corpo/abinha ficam. No frameless não se aplica (já não há barra).
   const titleHidden = !frameless && title?.hidden === true;
   // Barra de busca/filtro embutida nas tabelas (ocultável na config do widget).
-  const showTableBar = isTable && widget.settings?.showFilterBar !== false;
+  // v2.21: apresentando, a interface de trabalho do card some (barra de
+  // busca, "+", filtros rápidos) — o slide é conteúdo.
+  const presenting = usePresenting();
+  // v2.21: "Ocultar ao apresentar" — otimista (useBackgroundSave + revert).
+  const serverHide = widget.settings?.hideInPresentation === true;
+  const [hideSeed, setHideSeed] = useState(serverHide);
+  const [hideInPres, setHideInPres] = useState(serverHide);
+  if (hideSeed !== serverHide) {
+    setHideSeed(serverHide);
+    setHideInPres(serverHide);
+  }
+  const { save: saveInBackground } = useBackgroundSave();
+  const toggleHideInPresentation = () => {
+    const next = !hideInPres;
+    setHideInPres(next);
+    saveInBackground({
+      key: `hide-pres:${widget.id}`,
+      context: "Não foi possível salvar",
+      action: () =>
+        saveWidgetSettings(widget.id, dashboardId, {
+          ...widget.settings,
+          // A aparência otimista em tela é a que vale (o settings da prop pode
+          // estar atrás dela até o refresh).
+          ...(appearance ? { appearance } : {}),
+          hideInPresentation: next ? true : undefined,
+        }),
+      revert: () => setHideInPres(!next),
+    });
+  };
+  const showTableBar =
+    isTable && widget.settings?.showFilterBar !== false && !presenting;
   // Botão "+" de criação manual (settings.showAddRecord, 12/08/2026): re-checa
   // o gate do builder em runtime — lista de registros + edit_record_values +
   // exatamente UMA Base raiz com manual_entry (import da IA pode trazer a chave
@@ -526,7 +582,7 @@ export const WidgetCard = memo(function WidgetCard({
         (isAdminRole || hasAnyRole(userRoles, f.visible_to_roles as RoleKey[]))
     );
   }, [addRecordDef, fields, userRoles, sourcesCatalog]);
-  const addRecordButton = addRecordDef ? (
+  const addRecordButton = addRecordDef && !presenting ? (
     <WidgetAddRecordButton
       source={{ key: addRecordDef.key, label: addRecordDef.label }}
       recordType={addRecordDef.recordType}
@@ -1010,6 +1066,19 @@ export const WidgetCard = memo(function WidgetCard({
                   <Ungroup className="size-4" /> Desfazer mescla
                 </DropdownMenuItem>
               ) : null}
+              {/* v2.21: widget de TRABALHO fora dos slides (formulário de
+                  lançamento, tabela de conferência). Otimista. */}
+              {!snapshotReadOnly ? (
+                <DropdownMenuItem
+                  onSelect={(e) => {
+                    e.preventDefault();
+                    toggleHideInPresentation();
+                  }}
+                >
+                  <MonitorOff className="size-4" />{" "}
+                  {hideInPres ? "Mostrar ao apresentar" : "Ocultar ao apresentar"}
+                </DropdownMenuItem>
+              ) : null}
             </>
           ) : null}
           {showExportItems ? (
@@ -1214,19 +1283,31 @@ export const WidgetCard = memo(function WidgetCard({
       // `group` SÓ com a barra oculta: o ⋮ flutuante aparece em hover do card
       // (padrão do frameless); sempre presente dispararia group-hover: de
       // descendentes em todos os widgets.
-      className={`bg-card relative flex h-full flex-col overflow-hidden rounded-lg border${
-        titleHidden ? " group" : ""
-      }`}
+      className={
+        cardVariant === "moldura"
+          ? `bg-card relative flex h-full flex-col overflow-hidden rounded-lg border${
+              titleHidden ? " group" : ""
+            }`
+          : // v2.21: estilos sem moldura — `group` sempre (o ⋮ é de hover).
+            cn(
+              "group relative flex h-full flex-col overflow-hidden",
+              cardVariant === "superficie" && "bg-card",
+              (title?.border ?? kpi?.border ?? filterAp?.border) && "border"
+            )
+      }
       style={{
         background:
           kpi?.bg ??
           filterAp?.bg ??
           (isNote
-            ? (noteAp?.bg ?? "#fef9c3")
+            ? // v2.21: num board com estilo, nota sem cor própria não é
+              // post-it amarelo — o texto senta na superfície do estilo.
+              (noteAp?.bg ?? (styled ? undefined : "#fef9c3"))
             : isCalculator
               ? appearance?.calculator?.bg
               : undefined),
         borderColor: title?.border ?? kpi?.border ?? filterAp?.border,
+        borderRadius: cardVariant === "moldura" ? undefined : "var(--ds-radius)",
       }}
     >
       {kpi?.accent || filterAp?.accent ? (
@@ -1253,6 +1334,54 @@ export const WidgetCard = memo(function WidgetCard({
             </div>
           ) : null}
         </>
+      ) : conclusionTitle ? (
+        // v2.21: título-CONCLUSÃO — sem faixa nem divisória, fonte de
+        // exibição, kicker opcional acima. O ⋮ só em hover (fora da edição):
+        // é interface de trabalho, não conteúdo.
+        <div
+          className="flex items-end gap-2 px-2 pt-1.5 pb-0.5"
+          style={{ background: title?.bg }}
+        >
+          {editMode ? (
+            <span className="widget-drag text-muted-foreground mb-0.5 cursor-move">
+              <GripVertical className="size-4" />
+            </span>
+          ) : null}
+          <div className="flex min-w-0 flex-1 flex-col">
+            {title?.kicker ? (
+              <span className="ds-kicker truncate">{title.kicker}</span>
+            ) : null}
+            <span
+              className="ds-display truncate leading-tight"
+              style={{
+                color: title?.color,
+                fontWeight: isSerifDisplay(dstyle)
+                  ? dstyle.weights.regular
+                  : dstyle.weights.strong,
+                ...fontStyle(
+                  fonts?.title,
+                  FONT_DEFAULTS.title,
+                  fontScale,
+                  dstyle.fontScale.title
+                ),
+              }}
+            >
+              {widget.title ?? "Sem título"}
+            </span>
+          </div>
+          {!showTableBar ? addRecordButton : null}
+          {menu ? (
+            <div
+              className={cn(
+                "flex items-center",
+                !editMode &&
+                  "opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100"
+              )}
+            >
+              {menu}
+            </div>
+          ) : null}
+        </div>
       ) : (
         <div
           className="flex items-center gap-2 border-b px-3 py-2"
@@ -1318,7 +1447,7 @@ export const WidgetCard = memo(function WidgetCard({
         ) : null}
         {/* Filtros rápidos: lado a lado, abaixo da barra de busca (tabelas) ou
             no topo do card (gráficos/KPI/calculado). */}
-        {quickFilters && quickFilters.entries.length > 0 ? (
+        {quickFilters && quickFilters.entries.length > 0 && !presenting ? (
           <QuickFiltersBar
             dashboardId={dashboardId}
             widgetId={widget.id}

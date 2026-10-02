@@ -1,3 +1,8 @@
+// Versão: 1.9 | Data: 02/10/2026
+// v1.9 (02/10/2026): ESTILO do dashboard (`style`), apresentação como palco
+//   (`presentation.fit/transition`), fundo por aba, `hideInPresentation`,
+//   `note.variant/align/valign/padding`, `title.kicker` e o markdown leve do
+//   texto da nota documentados para a IA.
 // Versão: 1.8 | Data: 01/10/2026
 // v1.8 (01/10/2026): `goalTable` (Tabela de metas, 0149) e
 //   `presentation` (modo Apresentar) documentados para a IA.
@@ -37,6 +42,10 @@
 // trata settings como passthrough, então este arquivo é a única ponte entre os
 // tipos reais e o que a IA sabe gerar. Guarda textual:
 // lib/import/dashboard/instructions.test.ts.
+import {
+  DASHBOARD_FONTS,
+  DASHBOARD_STYLE_KEYS,
+} from "@/lib/dashboards/style";
 import type {
   AppearanceSettings,
   DashboardSettings,
@@ -214,11 +223,12 @@ ${renderDocBlock(APPEARANCE_TABLE_DOC, "  ")}
   kpi: `"kpi": { "bg": "#ffffff", "border": "#e2e8f0", "accent": "#2563eb" },  // Card: fundo, borda e abinha superior`,
   filter: `// widgets de filtro (filtro / filtro_campo):
 "filter": { "bg": "#f8fafc", "border": "#e2e8f0", "accent": "#2563eb" },  // fundo/borda do card + abinha superior`,
-  title: `"title": { "color": "#0f172a", "bg": "#f8fafc", "border": "#e2e8f0", "hidden": false },  // barra de título / contorno do card (todos os tipos); "hidden": true oculta a barra (borda e corpo ficam)`,
+  title: `"title": { "color": "#0f172a", "bg": "#f8fafc", "border": "#e2e8f0", "hidden": false, "kicker": "SEÇÃO" },  // barra de título / contorno do card (todos os tipos); "hidden": true oculta a barra (borda e corpo ficam); "kicker" = rótulo pequeno em caixa-alta acima do título (só nos estilos com título-conclusão)`,
   hideBusinessDayBadge: `"hideBusinessDayBadge": true,            // selo "Nº dia útil": omitir = herda o padrão do dashboard; true oculta; false força exibir`,
-  note: `"note": { "bg": "#fef9c3", "color": "#1f2937", "fontSize": 14 },  // aparência da nota (post-it); "frameless": true = sem cromo do card`,
+  note: `"note": { "variant": "texto", "align": "left", "valign": "top", "padding": 12, "bg": "#fef9c3", "color": "#1f2937", "fontSize": 14 },  // aparência da nota. "variant": postit (padrão, papel amarelo) | texto (sem fundo nem moldura) | comentario (coluna de notas com filete à esquerda) | rodape (pequeno, filete em cima); "align": left|center|right; "valign": top|center|bottom; "frameless": true = sem cromo do card`,
   shape: `"shape": { "fill": "#eef2ff", "stroke": "#6366f1", "strokeWidth": 2, "textColor": "#312e81" },  // aparência da forma`,
   calculator: null, // cores da calculadora (visor/teclas) — estética de nicho, edite na UI
+  highlight: `"highlight": { "series": "metric_0", "categories": ["Outubro"] },  // técnica do destaque (barra/linha): tudo em cinza e só a série ("series" = metric_<n>) ou as categorias ("categories" = valores da dimensão, série única) que sustentam a conclusão na cor de destaque do estilo`,
   fonts: `"fonts": { "title": 14, "value": 30, "labels": 12, "table": 14, "chart": 11 },  // px por elemento; ausente = auto (× fontScale do dashboard)`,
 } satisfies Record<keyof AppearanceSettings, string | null>;
 
@@ -280,7 +290,7 @@ export const WIDGET_SETTINGS_DOC = {
   showAddRecord: `"showAddRecord": true,                     // tabela modo lista: botão "+" de criação manual (só com UMA Base raiz com manual_entry)`,
   card: `"card": { "mode": "topn", "labelField": "responsible_id",       // Card: ${enumKeys(CARD_MODE_LABELS)}
           "metric": { "field": "mrr", "agg": "sum" }, "limit": 5 },`,
-  note: `"note": { "text": "Texto livre da nota." },  // widget "nota": texto do post-it`,
+  note: `"note": { "text": "^^ SEÇÃO\\n# Título\\n- item com **negrito**\\n[Planilha](https://…)" },  // widget "nota": texto. Markdown leve por linha: ^^ kicker, # / ## / ### títulos, - ou 1. listas, > citação, --- filete; inline **negrito**, *itálico*, [rótulo](https://…); (( … )) = comentário do autor (só no modo edição)`,
   shape: `"shape": { "kind": "retangulo", "text": "Etapa 1" },  // widget "forma"; kind: ${enumKeys(SHAPE_KIND_LABELS)}`,
   image: `"image": { "url": "https://…", "fit": "contain", "alt": "Logo" },  // widget "imagem" (só https); fit: ${enumKeys(IMAGE_FIT_LABELS)}`,
   coexistSubSources: `"coexistSubSources": ["<key de Sub-base>"],  // Sub-bases a manter como série/perna PRÓPRIA (conviver com a Base-mãe); ausente/vazio = absorvidas (padrão)`,
@@ -354,6 +364,7 @@ export const WIDGET_SETTINGS_DOC = {
   "showRealized": true, "showAttainment": true, "totalColumn": true,
   "headerLabel": "Indicador", "editable": false, "note": "rodapé (regra de cálculo, donos)"
 }`,
+  hideInPresentation: `"hideInPresentation": true,              // fora dos slides do modo Apresentar (formulários de lançamento, tabelas de conferência); a computação segue igual`,
   appearance: `"appearance": {                            // aparência (tudo opcional; TUDO NO NÍVEL RAIZ — NÃO existe sub-objeto "chart")
 ${renderDocBlock(APPEARANCE_DOC, "  ")}
 }`,
@@ -362,7 +373,8 @@ ${renderDocBlock(APPEARANCE_DOC, "  ")}
 // ---------- dashboard.settings ----------
 
 export const DASHBOARD_SETTINGS_DOC = {
-  tabs: `"tabs": [ { "id": "geral", "name": "Visão geral", "color": "#eef2ff" } ],`,
+  tabs: `"tabs": [ { "id": "geral", "name": "Visão geral", "color": "#eef2ff" },
+           { "id": "capa", "name": "Capa", "background": { "mode": "solid", "color": "#1c1b19" } } ],  // "background" (opcional) = fundo PRÓPRIO da aba (ex.: capa escura); mesma forma do "background" do dashboard`,
   periodBar: `"periodBar": {
   "enabled": true,
   "defaultPreset": "este_mes",       // ${[...Object.keys(PERIOD_PRESETS), PERIOD_ALL].join("|")}
@@ -387,5 +399,7 @@ export const DASHBOARD_SETTINGS_DOC = {
   preset: null, // identidade de preset — o SERVIDOR gerencia; a IA nunca envia
   sourceScope: null, // recorte de Bases do board (⋮ → Bases) — config manual, fora do import
   // v1.8 (01/10/2026): modo Apresentar — abas fora dos slides.
-  presentation: `"presentation": { "hiddenTabs": ["<tabId>"] },   // abas de trabalho que o modo Apresentar pula (ausente = todas são slides)`,
+  presentation: `"presentation": { "hiddenTabs": ["<tabId>"], "fit": "palco", "transition": "suave" },   // hiddenTabs = abas de trabalho que o modo Apresentar pula; fit: palco (slide 16:9 escalado à tela, sem rolagem) | altura (só as linhas se ajustam); transition: suave | nenhuma. fit/transition ausentes = padrão do estilo`,
+  // v1.9 (02/10/2026): estilo visual do board (lib/dashboards/style.ts).
+  style: `"style": { "key": "editorial", "overrides": { "accent": "#b4532a" } },   // estilo do dashboard: ${DASHBOARD_STYLE_KEYS.join(" | ")}. classico = visual de sempre; editorial = papel off-white, títulos em serifa, divisórias finas; editorial_escuro = quase-preto quente (capas/projetor); executivo = sans, superfícies brancas. overrides (opcional): accent/page/surface/ink (#RRGGBB) e fontDisplay/fontBody (${Object.keys(DASHBOARD_FONTS).join(" | ")}). Ausente = padrão da organização`,
 } satisfies Record<keyof DashboardSettings, string | null>;

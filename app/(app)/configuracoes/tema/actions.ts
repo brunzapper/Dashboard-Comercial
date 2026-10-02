@@ -1,3 +1,8 @@
+// Versão: 1.3 | Data: 02/10/2026
+// v1.3 (02/10/2026): `saveOrgDashboardStyle` — estilo padrão dos dashboards
+//   da org (ui_prefs.dashboardStyle). saveOrgUiPrefs PRESERVA a chave (o form
+//   de preferências não a envia; sem isso cada save de interface apagaria o
+//   estilo escolhido).
 // Versão: 1.2 | Data: 12/09/2026
 // v1.2 (12/09/2026): TOKENS DE TEMA (0141) — o trio passou a quarteto: as duas
 //   actions gravam também o conjunto curado de cores por modo, e o cookie
@@ -50,6 +55,7 @@ import {
   type UiPrefs,
 } from "@/lib/config/ui-prefs";
 import type { UserAppSettings } from "@/app/(app)/dashboards/actions";
+import { isDashboardStyleKey } from "@/lib/dashboards/style";
 
 export interface ThemeActionState {
   ok?: boolean;
@@ -223,6 +229,10 @@ export async function saveOrgUiPrefs(input: {
         values: parsed.values,
         locked: [...parsed.locked],
         operacaoDescriptions: parsed.operacaoDescriptions,
+        // v1.3: chave fora deste form — preservada da linha atual.
+        ...(org.uiPrefs.dashboardStyle
+          ? { dashboardStyle: org.uiPrefs.dashboardStyle }
+          : {}),
       },
     })
     .eq("id", org.id);
@@ -308,4 +318,37 @@ export async function propagateUiPrefs(
         ? "Ninguém tinha escolha própria nessas preferências."
         : `Aplicado a ${affected} pessoa(s).`,
   };
+}
+
+/**
+ * v1.3 (02/10/2026): estilo PADRÃO dos dashboards da organização. `null` =
+ * volta ao padrão do app (Clássico). Dashboards com estilo próprio não mudam —
+ * só os que herdam. Só org_admin (RLS de organizations é a muralha).
+ */
+export async function saveOrgDashboardStyle(
+  key: string | null
+): Promise<ThemeActionState> {
+  const org = await getActiveOrg();
+  if (!org) return { ok: false, message: "Organização não encontrada." };
+  if (!org.isOrgAdmin) {
+    return { ok: false, message: "Apenas o Administrador de Organização." };
+  }
+  const style = isDashboardStyleKey(key) ? key : null;
+  const current = org.uiPrefs;
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("organizations")
+    .update({
+      ui_prefs: {
+        values: current.values,
+        locked: [...current.locked],
+        operacaoDescriptions: current.operacaoDescriptions,
+        ...(style ? { dashboardStyle: style } : {}),
+      },
+    })
+    .eq("id", org.id);
+  if (error) return { ok: false, message: error.message };
+  // Sem revalidate dentro do await: o controle é otimista (useBackgroundSave)
+  // e reconcilia pelo refresh debounced do próprio hook.
+  return { ok: true, message: "Estilo padrão dos dashboards salvo." };
 }

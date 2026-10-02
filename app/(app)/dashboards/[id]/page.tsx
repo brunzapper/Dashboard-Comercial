@@ -1,3 +1,7 @@
+// Versão: 3.6 | Data: 02/10/2026
+// v3.6 (02/10/2026): entrega o estilo PADRÃO dos dashboards da org
+//   (organizations.ui_prefs.dashboardStyle) ao DashboardClient — o board sem
+//   estilo próprio herda dele (resolveDashboardStyle, lib/dashboards/style.ts).
 // Versão: 3.5 | Data: 01/10/2026
 // Página de um dashboard: computa os dados de cada widget (server, via RLS) e
 // entrega ao shell client (grid + charts). Fase 6A.
@@ -186,6 +190,7 @@ import { DashboardClient } from "@/components/dashboards/dashboard-client";
 import { TrackLastView } from "@/components/layout/track-last-view";
 import type { ResponsibleOption } from "@/components/dashboards/charts/record-list-table";
 import { loadOrgAiConfigPublic } from "@/lib/ai/config";
+import { getActiveOrg } from "@/lib/auth/org";
 
 // O painel "Editar com IA" (AiEditPanel → runAiEditTurn) roda como server
 // action DESTA rota; o laço de autocorreção pode levar alguns segundos.
@@ -342,6 +347,8 @@ export default async function DashboardPage({
   const laserColor = resolveLaserColor(
     userSettings as { laserColor?: string | null }
   );
+  // v3.6: estilo padrão da org (cache() — o layout já leu a org nesta request).
+  const orgStyleKey = (await getActiveOrg())?.uiPrefs.dashboardStyle ?? null;
 
   // Último período consultado pelo usuário neste dashboard (se houver). No modo
   // "por aba", cada aba guarda o seu em `lastPeriodByTab` (chave = id da aba).
@@ -1606,6 +1613,7 @@ export default async function DashboardPage({
         initialTabId={str(sp.tab) || (focusWidget ? widgetTab(focusWidget) : "")}
         focusWidgetId={focusWidget ? focusId : undefined}
         laserColor={laserColor}
+        orgStyleKey={orgStyleKey}
       />
       </ManualBaseStampProvider>
     </SourcesProvider>

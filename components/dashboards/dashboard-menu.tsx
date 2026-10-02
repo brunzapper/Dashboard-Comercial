@@ -1,3 +1,8 @@
+// Versão: 1.6 | Data: 02/10/2026
+// v1.6 (02/10/2026): item "Estilo e apresentação" (DashboardStyleSheet) — o
+//   estilo do board (lib/dashboards/style.ts) e o comportamento do modo
+//   Apresentar. Recebe o estilo padrão da org só para o rótulo "Padrão da
+//   organização (…)".
 // Versão: 1.5 | Data: 01/10/2026
 // v1.5 (01/10/2026): "Apresentar" mora aqui, logo abaixo de "Modo tela cheia"
 //   (antes era um botão ao lado do título). Quem NÃO edita também ganha o
@@ -35,6 +40,7 @@ import {
   MoreVertical,
   Palette,
   Presentation,
+  Type,
   Users,
 } from "lucide-react";
 
@@ -79,6 +85,7 @@ import { SnapshotsPanel, type SnapshotPeriodCapture } from "./snapshots-panel";
 import { BoardSourcesDialog } from "./board-sources-dialog";
 import { ManualBaseSheet } from "@/components/manual-base/manual-base-sheet";
 import { BoardAccessDialog } from "./board-access-dialog";
+import { DashboardStyleSheet } from "./dashboard-style-sheet";
 
 type BgMode = "none" | "solid" | "gradient";
 // O entorno tem uma opção a mais: herdar a cor INTERNA. É ela que faz "definir
@@ -95,8 +102,11 @@ export function DashboardMenu({
   snapshotPeriod,
   onPresent,
   canEdit = true,
+  orgStyleKey = null,
 }: {
   dashboardId: string;
+  /** v1.6: estilo padrão dos dashboards da org (rótulo da herança). */
+  orgStyleKey?: string | null;
   /** v1.5: abre o modo Apresentar (o shell prepara os slides). */
   onPresent?: () => void;
   /** v1.5: false = só as entradas de exibição (tela cheia / Apresentar). */
@@ -108,6 +118,7 @@ export function DashboardMenu({
 }) {
   const { toggleFullscreen } = useAppChrome();
   const [bgOpen, setBgOpen] = useState(false);
+  const [styleOpen, setStyleOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const [canvasOpen, setCanvasOpen] = useState(false);
   const [snapshotsOpen, setSnapshotsOpen] = useState(false);
@@ -270,6 +281,14 @@ export function DashboardMenu({
           {canEdit ? (
           <>
           <DropdownMenuSeparator />
+          <DropdownMenuItem
+            onSelect={(e) => {
+              e.preventDefault();
+              setStyleOpen(true);
+            }}
+          >
+            <Type className="size-4" /> Estilo e apresentação
+          </DropdownMenuItem>
           <DropdownMenuItem
             onSelect={(e) => {
               e.preventDefault();
@@ -519,6 +538,15 @@ export function DashboardMenu({
 
       {/* Bases: escopo de bases do board (settings.sourceScope). */}
       <ManualBaseSheet open={manualBaseOpen} onOpenChange={setManualBaseOpen} />
+      {styleOpen ? (
+        <DashboardStyleSheet
+          open={styleOpen}
+          onOpenChange={setStyleOpen}
+          dashboardId={dashboardId}
+          settings={settings}
+          orgStyleKey={orgStyleKey}
+        />
+      ) : null}
       <BoardSourcesDialog
         boardId={dashboardId}
         kanban={false}

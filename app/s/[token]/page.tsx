@@ -1,4 +1,7 @@
-// Versão: 1.8 | Data: 01/10/2026
+// Versão: 1.9 | Data: 02/10/2026
+// v1.9 (02/10/2026): estilo do dashboard no link público — o padrão da org
+//   (organizations.ui_prefs.dashboardStyle) sai de leitura service ESCOPADA
+//   pela org do dashboard e vai ao SnapshotClient junto do settings congelado.
 // v1.8 (01/10/2026): Tabela de metas (visual_type 'metas', 0149) fora dos
 //   widgets de engine do snapshot (o card exibe aviso no link público).
 // Versão: 1.7 | Data: 29/07/2026
@@ -49,6 +52,7 @@ import { after } from "next/server";
 import type { Metadata } from "next";
 
 import { createServiceClient } from "@/lib/supabase/service";
+import { normalizeOrgUiPrefs } from "@/lib/config/ui-prefs";
 import { snapshotClient } from "@/lib/snapshots/db-adapter";
 import { loadManualAxes, loadManualSeries } from "@/lib/manual-base/load";
 import { mergeGoalMetrics } from "@/lib/metas/metrics";
@@ -301,7 +305,7 @@ async function SnapshotContent({
   // mergeSourceLabels (mesmo split do layout autenticado) p/ buscar em
   // paralelo com loadSources; partner rows entram na mesma leva (antes: três
   // awaits seriais).
-  const [allSources, sourceLabelsValue, { data: partnerRows }] = await Promise.all(
+  const [allSources, sourceLabelsValue, { data: partnerRows }, orgStyleKey] = await Promise.all(
     [
       loadSources(service, orgId),
       loadSourceLabelsValue(service, orgId),
@@ -317,7 +321,10 @@ async function SnapshotContent({
         .select("id")
         .eq("snapshot_id", snap.id)
         .eq("partner_only", true),
-    ]
+      // v1.9: estilo padrão dos dashboards da org do DASHBOARD (service role
+      // com escopo explícito; falha ⇒ Clássico).
+      loadOrgDashboardStyle(service, orgId),
+    ] as const
   );
   const dashSettings = gridNorm.settings;
   // Escopo de BASES do board (⋮ → "Bases"), congelado no settings do bundle:
@@ -1103,6 +1110,7 @@ async function SnapshotContent({
     <SourcesProvider sources={sources}>
       <SourceLabelsProvider labels={sourceLabels}>
         <SnapshotClient
+          orgStyleKey={orgStyleKey}
           snapshotName={snap.name}
           dashboardName={cfg.dashboard.name}
           tabName={cfg.tabName}
@@ -1138,4 +1146,23 @@ async function SnapshotContent({
       </SourceLabelsProvider>
     </SourcesProvider>
   );
+}
+
+// v1.9 (02/10/2026): estilo padrão da org (organizations.ui_prefs), service
+// role ESCOPADO pela org do dashboard. Qualquer falha ⇒ null (Clássico).
+async function loadOrgDashboardStyle(
+  service: ReturnType<typeof createServiceClient>,
+  orgId: string | null
+): Promise<string | null> {
+  if (!orgId) return null;
+  try {
+    const { data } = await service
+      .from("organizations")
+      .select("ui_prefs")
+      .eq("id", orgId)
+      .maybeSingle();
+    return normalizeOrgUiPrefs(data?.ui_prefs).dashboardStyle ?? null;
+  } catch {
+    return null;
+  }
 }

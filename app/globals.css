@@ -1,4 +1,12 @@
-/* Versão: 1.4 | Data: 12/09/2026 */
+/* Versão: 1.6 | Data: 02/10/2026 */
+/* v1.6 (02/10/2026): ESTILO DO DASHBOARD (lib/dashboards/style.ts). O
+   contêiner do board com estilo não-Clássico ganha [data-ds] e as variáveis
+   --ds-* (cores semânticas, par de fontes, raio, pesos) — e redefine as do
+   tema shadcn só ali dentro. As regras abaixo dão ao board a tipografia do
+   estilo (texto na fonte do corpo, títulos na display), o cromo na cor de
+   tinta do estilo quando a janela é a página do estilo ([data-ds-outer]) e a
+   entrada suave dos slides (.ds-enter, respeitando prefers-reduced-motion).
+   As fontes vêm de @fontsource (app/layout.tsx), servidas pelo app. */
 /* v1.5 (12/09/2026): a superfície externa do dashboard deixou de pintar `color`
    no <main> — a herança descia até os widgets e quebrava as cores de gráficos,
    textos e tabelas. Só o cromo (cabeçalho/abas/barra de período) recebe cor, e
@@ -144,6 +152,19 @@
   --color-sidebar-ring: var(--sidebar-ring);
   --color-brand: var(--brand);
   --color-brand-foreground: var(--brand-foreground);
+  /* v1.6: tokens do estilo do dashboard como utilitários (font-display,
+     text-ds-muted, border-ds-rule…) — fora de um board com estilo, caem nas
+     variáveis do tema. */
+  --font-display: var(--ds-font-display, var(--font-sans));
+  --color-ds-ink: var(--ds-ink, var(--foreground));
+  --color-ds-muted: var(--ds-muted, var(--muted-foreground));
+  --color-ds-rule: var(--ds-rule, var(--border));
+  --color-ds-wash: var(--ds-wash, var(--muted));
+  --color-ds-accent: var(--ds-accent, var(--chart-1));
+  --color-ds-dim: var(--ds-dim, var(--muted-foreground));
+  --color-ds-good: var(--ds-good, var(--chart-2));
+  --color-ds-bad: var(--ds-bad, var(--destructive));
+  --color-ds-warn: var(--ds-warn, var(--chart-4));
 }
 
 @layer base {
@@ -184,6 +205,78 @@ main[data-app-main] {
 }
 [data-board-chrome] .text-muted-foreground {
   color: var(--app-surface-muted, var(--muted-foreground));
+}
+
+/* v1.6: board com ESTILO. Texto na fonte do corpo, tinta do estilo, números
+   com algarismos de largura fixa (colunas alinham sem tabular-nums caso a
+   caso). Títulos de bloco e textos de exibição usam .ds-display. */
+[data-ds] {
+  font-family: var(--ds-font-body);
+  color: var(--ds-ink);
+  font-feature-settings: "tnum" 1, "lnum" 1;
+}
+[data-ds] .ds-display {
+  font-family: var(--ds-font-display);
+  font-feature-settings: "lnum" 1;
+}
+/* Tabelas (shadcn) num board com estilo: cabeçalho em rótulo pequeno,
+   caixa-alta e espaçado, com um filete embaixo — sem a faixa de fundo. Cor de
+   cabeçalho escolhida no widget (style inline) continua vencendo. */
+[data-ds] [data-slot="table-head"] {
+  font-size: 0.72em;
+  font-weight: var(--ds-w-strong);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+[data-ds] [data-slot="table-row"]:hover {
+  background: var(--ds-wash);
+}
+/* Rótulo pequeno em caixa-alta acima do título (o "kicker" da seção). */
+[data-ds] .ds-kicker {
+  font-family: var(--ds-font-body);
+  font-size: 0.72em;
+  font-weight: var(--ds-w-strong);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ds-muted);
+}
+/* Janela = página do estilo (sem fundo externo escolhido à mão): o cromo usa a
+   tinta do estilo, não a cor "legível" genérica derivada do fundo. */
+[data-ds][data-ds-outer] [data-board-chrome] {
+  color: var(--ds-ink);
+}
+[data-ds][data-ds-outer] [data-board-chrome] .text-muted-foreground {
+  color: var(--ds-muted);
+}
+/* Entrada do slide: fade + deslocamento curto, ease-out, escalonado pelo
+   --ds-enter-delay de cada bloco. Só na entrada (as camadas já estavam
+   montadas); sem animação para quem pediu menos movimento. */
+@keyframes ds-enter {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.ds-enter {
+  animation: ds-enter 420ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation-delay: var(--ds-enter-delay, 0ms);
+}
+/* No slide, quem anima é o CONTEÚDO do item do grid — o item em si carrega o
+   transform de posição do react-grid-layout. O atraso vem de cada item
+   (--ds-enter-delay, pela ordem de leitura; dashboard-grid.tsx). */
+[data-slide-enter] .react-grid-item > :not(.react-resizable-handle) {
+  animation: ds-enter 420ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation-delay: var(--ds-enter-delay, 0ms);
+}
+@media (prefers-reduced-motion: reduce) {
+  .ds-enter,
+  [data-slide-enter] .react-grid-item > :not(.react-resizable-handle) {
+    animation: none;
+  }
 }
 
 /* Grade de cards do hub / painel de Operação (components/ui/card-grid.tsx): o

@@ -1,8 +1,15 @@
-// Versão: 1.1 | Data: 01/10/2026
+// Versão: 1.2 | Data: 02/10/2026
+// v1.2 (02/10/2026): palco 16:9 (stageScale), padrão do modo pelo estilo
+//   (effectivePresentation) e ordem de leitura da entrada (enterOrder).
 // v1.1 (01/10/2026): pré-render (ordem e prontidão) e ajuste à tela.
 import { describe, expect, it } from "vitest";
 
 import {
+  STAGE_H,
+  STAGE_W,
+  effectivePresentation,
+  enterOrder,
+  stageScale,
   fitRowHeight,
   FIT_MAX_FACTOR,
   FIT_MIN_FACTOR,
@@ -65,5 +72,31 @@ describe("ajuste à tela (v1.1)", () => {
   it("sem medida ou sem conteúdo devolve a natural", () => {
     expect(fitRowHeight(0, 80, 10)).toBe(10);
     expect(fitRowHeight(900, 0, 10)).toBe(10);
+  });
+});
+
+describe("palco 16:9", () => {
+  it("cabe pelo menor eixo (letterbox)", () => {
+    expect(stageScale(1920, 1080)).toBeCloseTo(1.5);
+    expect(stageScale(1366, 768)).toBeCloseTo(1366 / STAGE_W);
+    expect(stageScale(1000, 1000)).toBeCloseTo(1000 / STAGE_W);
+    expect(stageScale(2560, 1080)).toBeCloseTo(1080 / STAGE_H);
+    expect(stageScale(0, 0)).toBe(1);
+  });
+
+  it("padrão pelo estilo; o que o dashboard fixou vence", () => {
+    expect(effectivePresentation(undefined, false)).toEqual({ fit: "altura", transition: "nenhuma" });
+    expect(effectivePresentation(undefined, true)).toEqual({ fit: "palco", transition: "suave" });
+    expect(effectivePresentation({ fit: "altura" }, true)).toEqual({ fit: "altura", transition: "suave" });
+    expect(effectivePresentation({ fit: "xpto" }, false).fit).toBe("altura");
+  });
+
+  it("entrada na ordem de leitura (linha, depois coluna)", () => {
+    const rank = enterOrder([
+      { id: "c", x: 60, y: 10 },
+      { id: "a", x: 0, y: 0 },
+      { id: "b", x: 0, y: 10 },
+    ]);
+    expect([rank.get("a"), rank.get("b"), rank.get("c")]).toEqual([0, 1, 2]);
   });
 });

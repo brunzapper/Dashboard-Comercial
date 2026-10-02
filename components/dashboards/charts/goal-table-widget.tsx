@@ -1,4 +1,15 @@
-// Versão: 1.1 | Data: 01/10/2026
+// Versão: 1.2 | Data: 02/10/2026
+// v1.2 (02/10/2026): TABELA DE SLIDE (lib/widgets/goal-table.ts
+//   resolveGoalTableDisplay). Num board com estilo: linhas de altura fixa (não
+//   repartem mais o card — números sem presença em linhas de 100px), colunas de
+//   mês iguais, cabeçalho em rótulo pequeno com filete, unidade só no rótulo,
+//   nível "N0/N1" como etiqueta, linha em negrito vira a CONCLUSÃO (filete em
+//   cima), atingimento como barrinha + texto e mês sem realizado como "—"
+//   neutro (falta de dado não é desvio). Em qualquer estilo, a linha secundária
+//   fica RESERVADA nas linhas que a têm (o valor de Outubro não sobe mais) e o
+//   aviso "Responsável não encontrado" some ao apresentar. Cada escolha pode
+//   ser fixada no widget (density/attainmentStyle/emptyRealized/
+//   unitPlacement/levelTags).
 // v1.1 (01/10/2026): (a) a tabela OCUPA o card — as linhas dividem a altura
 //   (antes ficavam no topo, com o resto do card vazio, que é o que fazia o
 //   slide parecer usar só parte da tela); (b) a fonte segue a escala do
@@ -20,12 +31,20 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Loader2 } from "lucide-react";
+import { Loader2, TriangleAlert } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { useBackgroundSave } from "@/lib/feedback/use-background-save";
 import { useFontScale } from "../font-scale-context";
 import { useWarmupReady } from "../presentation-warmup";
+import { useDashboardStyle } from "../dashboard-style-context";
+import { usePresenting } from "../presenting-context";
+import { isClassicStyle } from "@/lib/dashboards/style";
+import {
+  labelHasUnit,
+  resolveGoalTableDisplay,
+  splitLevelTag,
+} from "@/lib/widgets/goal-table";
 import {
   BUS_REFETCH_DELAY_MS,
   useRefetchOrigin,
@@ -34,6 +53,7 @@ import { useDataChanged } from "@/lib/tasks/events";
 import {
   formatAttainment,
   formatIndicatorValue,
+  indicatorUnitSymbol,
   INDICATOR_STATUS_LABELS,
   monthLabel,
   rollupMonths,
@@ -82,6 +102,9 @@ export function GoalTableWidget({
   const [editing, setEditing] = useState<string | null>(null);
   const { save, pendingKeys } = useBackgroundSave();
   const fontScale = useFontScale();
+  const dstyle = useDashboardStyle();
+  const styled = !isClassicStyle(dstyle);
+  const presenting = usePresenting();
 
   useDataChanged((d) => {
     if (d.kind === "record") setTick((t) => t + 1);
@@ -202,35 +225,185 @@ export function GoalTableWidget({
     );
   }
 
+  // v1.2: exibição resolvida contra o estilo (Clássico = o de sempre).
+  const disp = resolveGoalTableDisplay(settings, {
+    styled,
+    header: dstyle.table.header,
+    zebra: dstyle.table.zebra,
+  });
+  const fill = disp.density === "preencher";
+  const cellPad =
+    disp.density === "compacta"
+      ? "px-3 py-[0.35em]"
+      : disp.density === "confortavel"
+        ? "px-3 py-[0.65em]"
+        : "px-3 py-2";
+  const lineHeader = disp.header === "linha";
+  const thBg = dstyle.card === "superficie" ? "bg-card" : "bg-background";
+  const thClass = (align: "left" | "right", edge?: "l" | "r") =>
+    lineHeader
+      ? cn(
+          thBg,
+          "text-muted-foreground sticky top-0 border-b px-3 pt-1 pb-[0.55em] text-[0.72em] font-semibold tracking-[0.1em] uppercase",
+          align === "left" ? "text-left" : "text-right"
+        )
+      : cn(
+          "bg-primary/10 sticky top-0 px-3 py-2 font-semibold",
+          align === "left" ? "text-left" : "text-right",
+          edge === "l" && "rounded-tl-md",
+          edge === "r" && "rounded-tr-md"
+        );
+  const valueOpts = { unit: disp.unitPlacement !== "rotulo" };
+  const toneText: Record<IndicatorStatus, string> = {
+    ok: "text-ds-good",
+    atencao: "text-ds-warn",
+    fora: "text-ds-bad",
+    sem_dado: "text-muted-foreground",
+  };
+  const barTone: Record<IndicatorStatus, string> = {
+    ok: "bg-ds-good",
+    atencao: "bg-ds-warn",
+    fora: "bg-ds-bad",
+    sem_dado: "bg-muted-foreground",
+  };
+  // Realizado "vazio": sem número ou zero num mês decorrido. Com "traco", é
+  // falta de dado — não desvio de meta, então nada de vermelho.
+  const realizedEmpty = (v: number | null | undefined) =>
+    disp.emptyRealized === "traco" && (v == null || v === 0);
+
+  // Linha secundária da célula (realizado · atingimento). `reserve` mantém a
+  // altura mesmo vazia: é o que alinha o valor principal entre os meses.
+  const subLine = (
+    show: boolean,
+    realized: number | null | undefined,
+    attainment: number | null | undefined,
+    status: IndicatorStatus,
+    unit: GoalTableResult["rows"][number]["unit"],
+    error?: string,
+    reserve = false
+  ) => {
+    if (!show) {
+      return reserve ? <div className="mt-0.5 text-[0.8em]" aria-hidden>&nbsp;</div> : null;
+    }
+    if (realizedEmpty(realized) && !error) {
+      return (
+        <div className="text-muted-foreground mt-0.5 text-[0.8em] font-normal" title="Ainda sem realizado">
+          —
+        </div>
+      );
+    }
+    const pct =
+      showAttainment && attainment != null ? (
+        disp.attainmentStyle === "pilula" ? (
+          <span
+            className={cn("rounded px-1", STATUS_TONE[status])}
+            title={INDICATOR_STATUS_LABELS[status]}
+          >
+            {formatAttainment(attainment)}
+          </span>
+        ) : (
+          <span className={toneText[status]} title={INDICATOR_STATUS_LABELS[status]}>
+            {formatAttainment(attainment)}
+          </span>
+        )
+      ) : null;
+    return (
+      <>
+        {disp.attainmentStyle === "barra" && showAttainment && attainment != null ? (
+          <div className="bg-border mt-[0.3em] ml-auto h-[2px] w-[5.5em] overflow-hidden rounded-full" aria-hidden>
+            <div
+              className={cn("h-full", barTone[status])}
+              style={{ width: `${Math.max(0, Math.min(100, attainment))}%` }}
+            />
+          </div>
+        ) : null}
+        <div className="text-muted-foreground mt-0.5 flex items-center justify-end gap-1 text-[0.8em] font-normal">
+          <span title={error ?? "Realizado"}>
+            {error ? "erro" : formatIndicatorValue(realized, unit, valueOpts)}
+          </span>
+          {pct ? (disp.attainmentStyle === "pilula" ? pct : <>· {pct}</>) : null}
+        </div>
+      </>
+    );
+  };
+
+  const labelCell = (row: GoalTableResult["rows"][number]) => {
+    const raw = row.label;
+    const { tag, text } = disp.levelTags ? splitLevelTag(raw) : { tag: null, text: raw };
+    const unitSym =
+      disp.unitPlacement === "rotulo" && !labelHasUnit(raw)
+        ? indicatorUnitSymbol(row.unit)
+        : "";
+    return (
+      <>
+        {tag ? (
+          <span className="text-muted-foreground mr-[0.6em] font-mono text-[0.7em] font-normal tracking-wide">
+            {tag}
+          </span>
+        ) : null}
+        {text}
+        {unitSym ? (
+          <span className="text-muted-foreground ml-[0.35em] text-[0.8em] font-normal">
+            ({unitSym})
+          </span>
+        ) : null}
+        {row.responsibleMissing && !presenting ? (
+          styled ? (
+            <span
+              className="text-ds-warn ml-[0.4em] inline-flex align-middle"
+              title="Responsável não encontrado — confira o nome na configuração (não aparece ao apresentar)"
+            >
+              <TriangleAlert className="size-[0.85em]" />
+            </span>
+          ) : (
+            <span className="text-destructive block text-[0.8em] font-normal">
+              Responsável não encontrado
+            </span>
+          )
+        ) : null}
+      </>
+    );
+  };
+
   return (
     <div
       className={cn("relative flex h-full flex-col gap-2 overflow-auto", refreshing && "opacity-70")}
       // v1.1: 14px × escala do dashboard; os textos menores são em `em`.
-      style={{ fontSize: Math.round(14 * fontScale * 10) / 10 }}
+      // v1.2: × o multiplicador de tabela do estilo.
+      style={{
+        fontSize:
+          Math.round(14 * fontScale * (styled ? dstyle.fontScale.table : 1) * 10) / 10,
+      }}
     >
       {refreshing ? (
         <div className="text-muted-foreground absolute top-1 right-1 flex items-center gap-1 text-[0.85em]">
           <Loader2 className="size-3 animate-spin" /> Atualizando…
         </div>
       ) : null}
-      {/* v1.1: flex-1 + h-full — as linhas repartem a altura do card. */}
-      <table className="h-full w-full flex-1 border-separate border-spacing-0">
+      {/* v1.1: flex-1 + h-full — as linhas repartem a altura do card.
+          v1.2: só na densidade "preencher"; as outras têm linha de altura fixa
+          e colunas de mês iguais. */}
+      <table
+        className={cn(
+          "w-full border-separate border-spacing-0",
+          fill ? "h-full flex-1" : "table-fixed"
+        )}
+      >
+        {!fill ? (
+          <colgroup>
+            <col style={{ width: "34%" }} />
+          </colgroup>
+        ) : null}
         <thead>
           {/* v1.1: o cabeçalho fica justo; a sobra de altura vai às linhas. */}
           <tr className="h-px">
-            <th className="bg-primary/10 sticky top-0 rounded-tl-md px-3 py-2 text-left font-semibold">
-              {header}
-            </th>
+            <th className={thClass("left", "l")}>{header}</th>
             {data.months.map((m) => (
-              <th key={m} className="bg-primary/10 sticky top-0 px-3 py-2 text-right font-semibold">
+              <th key={m} className={thClass("right")}>
                 {monthLabel(m)}
               </th>
             ))}
-            {showTotal ? (
-              <th className="bg-primary/10 sticky top-0 rounded-tr-md px-3 py-2 text-right font-semibold">
-                Total
-              </th>
-            ) : null}
+            {showTotal ? <th className={thClass("right", "r")}>Total</th> : null}
           </tr>
         </thead>
         <tbody>
@@ -238,22 +411,31 @@ export function GoalTableWidget({
             const targets = data.months.map((_, mi) =>
               targetOf(row.id, mi, row.cells[mi]?.target ?? null)
             );
+            // v1.2: linha em destaque (a conclusão) num board com estilo —
+            // filete em cima e corpo um pouco maior, além do peso.
+            const emphasis = styled && row.bold;
+            const emphasisStyle = emphasis
+              ? { borderTop: "1px solid var(--foreground)", fontSize: "1.08em" }
+              : undefined;
+            const reserve = showRealized && row.hasRealized;
             return (
-              <tr key={row.id} className={cn(row.bold && "font-semibold")}>
-                <td className="border-b px-3 py-2 align-middle">
-                  {row.label}
-                  {row.responsibleMissing ? (
-                    <span className="text-destructive block text-[0.8em] font-normal">
-                      Responsável não encontrado
-                    </span>
-                  ) : null}
+              <tr
+                key={row.id}
+                className={cn(row.bold && "font-semibold", disp.zebra && "even:bg-muted/70")}
+              >
+                <td className={cn("border-b align-middle", cellPad)} style={emphasisStyle}>
+                  {labelCell(row)}
                 </td>
                 {row.cells.map((cell, mi) => {
                   const k = `${row.id}|${data.months[mi]}`;
                   const target = targets[mi];
                   const isEditing = editing === k;
                   return (
-                    <td key={k} className="border-b px-3 py-2 text-right align-middle tabular-nums">
+                    <td
+                      key={k}
+                      className={cn("border-b text-right align-middle tabular-nums", cellPad)}
+                      style={emphasisStyle}
+                    >
                       {isEditing ? (
                         <input
                           autoFocus
@@ -272,43 +454,58 @@ export function GoalTableWidget({
                           title={data.canEdit ? "Clique para editar a meta" : "Meta"}
                           onClick={() => setEditing(k)}
                           className={cn(
-                            "inline-flex items-center gap-1 rounded px-1",
+                            // -mx-1: o respiro do botão não desloca o número
+                            // da borda direita da coluna (alinha com o cabeçalho).
+                            "-mx-1 inline-flex items-center gap-1 rounded px-1",
                             data.canEdit && "hover:bg-muted cursor-text"
                           )}
                         >
                           {pendingKeys.has(k) ? <Loader2 className="size-3 animate-spin" /> : null}
-                          {formatIndicatorValue(target, row.unit)}
+                          {formatIndicatorValue(target, row.unit, valueOpts)}
                         </button>
                       )}
-                      {showRealized && row.hasRealized && cell.elapsed > 0 ? (
-                        <div className="text-muted-foreground mt-0.5 flex items-center justify-end gap-1 text-[0.8em] font-normal">
-                          <span title={row.errors?.[cell.month] ?? "Realizado"}>
-                            {row.errors?.[cell.month] ? "erro" : formatIndicatorValue(cell.realized, row.unit)}
-                          </span>
-                          {showAttainment && cell.attainment != null ? (
-                            <span
-                              className={cn("rounded px-1", STATUS_TONE[cell.status])}
-                              title={INDICATOR_STATUS_LABELS[cell.status]}
-                            >
-                              {formatAttainment(cell.attainment)}
-                            </span>
-                          ) : null}
-                        </div>
-                      ) : null}
+                      {subLine(
+                        showRealized && row.hasRealized && cell.elapsed > 0,
+                        cell.realized,
+                        cell.attainment,
+                        cell.status,
+                        row.unit,
+                        row.errors?.[cell.month],
+                        reserve
+                      )}
                     </td>
                   );
                 })}
                 {showTotal ? (
-                  <td className="border-b px-3 py-2 text-right align-middle tabular-nums">
-                    {formatIndicatorValue(rollupMonths(targets, row.rollup), row.unit)}
-                    {showRealized && row.hasRealized && row.total.realized != null ? (
-                      <div className="text-muted-foreground mt-0.5 text-[0.8em] font-normal">
-                        {formatIndicatorValue(row.total.realized, row.unit)}
-                        {showAttainment && row.total.attainment != null
-                          ? ` · ${formatAttainment(row.total.attainment)}`
-                          : ""}
-                      </div>
-                    ) : null}
+                  <td
+                    className={cn("border-b text-right align-middle tabular-nums", cellPad)}
+                    style={emphasisStyle}
+                  >
+                    {formatIndicatorValue(rollupMonths(targets, row.rollup), row.unit, valueOpts)}
+                    {disp.attainmentStyle === "pilula" && disp.emptyRealized === "zero" ? (
+                      showRealized && row.hasRealized && row.total.realized != null ? (
+                        <div className="text-muted-foreground mt-0.5 text-[0.8em] font-normal">
+                          {formatIndicatorValue(row.total.realized, row.unit)}
+                          {showAttainment && row.total.attainment != null
+                            ? ` · ${formatAttainment(row.total.attainment)}`
+                            : ""}
+                        </div>
+                      ) : reserve ? (
+                        <div className="mt-0.5 text-[0.8em]" aria-hidden>&nbsp;</div>
+                      ) : null
+                    ) : (
+                      subLine(
+                        showRealized && row.hasRealized && row.total.realized != null,
+                        row.total.realized,
+                        row.total.attainment,
+                        // O servidor não manda o status do total (a régua
+                        // de tolerância é por mês) — total em tom neutro.
+                        "sem_dado",
+                        row.unit,
+                        undefined,
+                        reserve
+                      )
+                    )}
                   </td>
                 ) : null}
               </tr>
@@ -316,17 +513,30 @@ export function GoalTableWidget({
           })}
           {data.totalRow && totalRowTargets ? (
             <tr className="font-semibold">
-              <td className="px-3 py-2">{data.totalRow.label}</td>
+              <td
+                className={cellPad}
+                style={styled ? { borderTop: "1px solid var(--foreground)" } : undefined}
+              >
+                {data.totalRow.label}
+              </td>
               {totalRowTargets.map((t, mi) => (
-                <td key={mi} className="px-3 py-2 text-right tabular-nums">
-                  {formatIndicatorValue(t, data.rows[0]?.unit ?? "quantidade")}
+                <td
+                  key={mi}
+                  className={cn("text-right tabular-nums", cellPad)}
+                  style={styled ? { borderTop: "1px solid var(--foreground)" } : undefined}
+                >
+                  {formatIndicatorValue(t, data.rows[0]?.unit ?? "quantidade", valueOpts)}
                 </td>
               ))}
               {showTotal ? (
-                <td className="px-3 py-2 text-right tabular-nums">
+                <td
+                  className={cn("text-right tabular-nums", cellPad)}
+                  style={styled ? { borderTop: "1px solid var(--foreground)" } : undefined}
+                >
                   {formatIndicatorValue(
                     rollupMonths(totalRowTargets, "soma"),
-                    data.rows[0]?.unit ?? "quantidade"
+                    data.rows[0]?.unit ?? "quantidade",
+                    valueOpts
                   )}
                 </td>
               ) : null}
@@ -335,8 +545,16 @@ export function GoalTableWidget({
         </tbody>
       </table>
       {settings?.note ? (
-        <p className="text-muted-foreground shrink-0 px-1 text-[0.85em] whitespace-pre-line">{settings.note}</p>
+        <p
+          className={cn(
+            "text-muted-foreground shrink-0 px-1 text-[0.85em] whitespace-pre-line",
+            styled && "border-t pt-2"
+          )}
+        >
+          {settings.note}
+        </p>
       ) : null}
     </div>
   );
 }
+

@@ -1,4 +1,9 @@
-// Versão: 1.0 | Data: 01/10/2026
+// Versão: 1.1 | Data: 02/10/2026
+// v1.1 (02/10/2026): chaves de EXIBIÇÃO (density, attainmentStyle,
+//   emptyRealized, unitPlacement, levelTags) saneadas aqui e resolvidas contra o
+//   estilo do dashboard por `resolveGoalTableDisplay` (dono único do padrão:
+//   Clássico = o comportamento de sempre; estilos novos = tabela de slide) e
+//   `splitLevelTag` (prefixo "N0 "/"N1 " do rótulo).
 // Tabela de metas (visual_type 'metas', 0149) — módulo PURO e client-safe.
 //
 // A régua ÚNICA do `settings.goalTable`: a action que computa a tabela, o
@@ -95,6 +100,20 @@ export function sanitizeGoalTableSettings(
   for (const key of ["showRealized", "showAttainment", "totalColumn", "editable"] as const) {
     if (src[key] !== undefined) out[key] = src[key] === true;
   }
+  // v1.1: exibição — valor fora da whitelist some (cai no padrão do estilo).
+  if (src.density === "preencher" || src.density === "confortavel" || src.density === "compacta") {
+    out.density = src.density;
+  }
+  if (src.attainmentStyle === "pilula" || src.attainmentStyle === "texto" || src.attainmentStyle === "barra") {
+    out.attainmentStyle = src.attainmentStyle;
+  }
+  if (src.emptyRealized === "zero" || src.emptyRealized === "traco") {
+    out.emptyRealized = src.emptyRealized;
+  }
+  if (src.unitPlacement === "celula" || src.unitPlacement === "rotulo") {
+    out.unitPlacement = src.unitPlacement;
+  }
+  if (typeof src.levelTags === "boolean") out.levelTags = src.levelTags;
   const headerLabel = str(src.headerLabel, 60);
   if (headerLabel) out.headerLabel = headerLabel;
   const note = str(src.note, 1000);
@@ -140,4 +159,49 @@ export function goalTableRequests(s: GoalTableSettings | undefined): GoalTableRe
 export function sumColumn(values: (number | null)[]): number | null {
   const nums = values.filter((v): v is number => v != null && Number.isFinite(v));
   return nums.length === 0 ? null : nums.reduce((a, b) => a + b, 0);
+}
+
+// ---------------------------------------------------------------------------
+// v1.1 (02/10/2026): exibição resolvida contra o estilo do dashboard.
+
+export interface GoalTableDisplay {
+  density: "preencher" | "confortavel" | "compacta";
+  attainmentStyle: "pilula" | "texto" | "barra";
+  emptyRealized: "zero" | "traco";
+  unitPlacement: "celula" | "rotulo";
+  levelTags: boolean;
+  /** Cabeçalho em faixa (Clássico) ou rótulo pequeno com filete. */
+  header: "faixa" | "linha";
+  zebra: boolean;
+}
+
+/**
+ * Dono ÚNICO do padrão: chave explícita do widget vence; ausente, o estilo
+ * decide. `styled` = estilo não-Clássico (lib/dashboards/style.ts).
+ */
+export function resolveGoalTableDisplay(
+  s: GoalTableSettings | undefined,
+  style: { styled: boolean; header: "faixa" | "linha"; zebra: boolean }
+): GoalTableDisplay {
+  const st = style.styled;
+  return {
+    density: s?.density ?? (st ? "confortavel" : "preencher"),
+    attainmentStyle: s?.attainmentStyle ?? (st ? "barra" : "pilula"),
+    emptyRealized: s?.emptyRealized ?? (st ? "traco" : "zero"),
+    unitPlacement: s?.unitPlacement ?? (st ? "rotulo" : "celula"),
+    levelTags: s?.levelTags ?? st,
+    header: st ? style.header : "faixa",
+    zebra: st ? style.zebra : false,
+  };
+}
+
+/** "N1 MRR novo" → { tag: "N1", text: "MRR novo" }; sem prefixo ⇒ tag null. */
+export function splitLevelTag(label: string): { tag: string | null; text: string } {
+  const m = /^(N\d{1,2})\s+(.+)$/.exec(label.trim());
+  return m ? { tag: m[1], text: m[2] } : { tag: null, text: label };
+}
+
+/** O rótulo já diz a unidade? ("(R$)", "R$", "%" no texto.) */
+export function labelHasUnit(label: string): boolean {
+  return /R\$|%/.test(label);
 }

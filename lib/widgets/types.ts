@@ -1,3 +1,11 @@
+// Versão: 1.20 | Data: 02/10/2026
+// v1.20 (02/10/2026): ESTILO DO DASHBOARD (lib/dashboards/style.ts) —
+//   DashboardSettings.style (tokens semânticos por board, com padrão da org);
+//   presentation.fit/transition (palco 16:9 e entrada suave); tabs[].background
+//   e tabs[].headline (fundo e título-conclusão por slide);
+//   WidgetSettings.hideInPresentation; AppearanceSettings.note ganha
+//   variant/align/valign/padding e AppearanceSettings.title ganha kicker.
+//   Ausentes = render byte-idêntico ao anterior.
 // Versão: 1.19 | Data: 01/10/2026
 // v1.19 (01/10/2026): TreeSettings.months — meses FIXOS dos nós de indicador.
 // v1.18 (01/10/2026): (a) visual_type 'metas' — a TABELA DE METAS (0149):
@@ -513,6 +521,21 @@ export interface GoalTableSettings {
   editable?: boolean;
   /** Rodapé (regra de cálculo, donos). */
   note?: string;
+  // v1.20 (02/10/2026): EXIBIÇÃO (ausentes = padrão do estilo do dashboard;
+  // no Clássico, o comportamento de sempre).
+  /** "preencher" reparte a altura do card entre as linhas (Clássico);
+   * "confortavel"/"compacta" usam altura de linha fixa. */
+  density?: "preencher" | "confortavel" | "compacta";
+  /** Atingimento como pílula colorida (Clássico), texto discreto ou barrinha
+   * de progresso de 2px sob a meta. */
+  attainmentStyle?: "pilula" | "texto" | "barra";
+  /** Mês decorrido sem realizado (zero): "zero" mostra "R$ 0 · 0%" (Clássico);
+   * "traco" mostra "—" neutro — falta de dado não é desvio de meta. */
+  emptyRealized?: "zero" | "traco";
+  /** Unidade em cada célula (Clássico) ou só no rótulo da linha. */
+  unitPlacement?: "celula" | "rotulo";
+  /** Prefixo de nível no rótulo ("N0 ", "N1 "…) vira etiqueta discreta. */
+  levelTags?: boolean;
 }
 
 /** Configuração do widget Tree (0134). */
@@ -563,6 +586,13 @@ export interface TreeSettings {
    * do período do dashboard.
    */
   months?: string[];
+  /**
+   * v1.20 (02/10/2026): fundo do canvas da Root. `pattern` = trama do fundo
+   * (pontos = a de sempre; linhas = quadriculado; nenhum = liso) e `bg` = cor
+   * (#RRGGBB). Ausentes = padrão do estilo do dashboard (Clássico: pontos
+   * sobre o fundo do tema; estilos novos: liso, sobre a superfície).
+   */
+  canvas?: { bg?: string; pattern?: "pontos" | "linhas" | "nenhum" };
 }
 
 export interface RowActionSettings {
@@ -1191,6 +1221,15 @@ export interface AppearanceSettings {
     linkColor?: string; // cor dos hyperlinks
     fontSize?: number; // px (default 14)
     frameless?: boolean; // sem cromo do card (só o papel)
+    // v1.20 (02/10/2026): papel do bloco de texto. Ausente = "postit" (o
+    // papel amarelo de sempre). "texto" = sem superfície nem moldura (o texto
+    // senta direto no slide); "comentario" = coluna de notas: sem fundo,
+    // filete vertical à esquerda, texto secundário; "rodape" = pequeno,
+    // secundário, com filete em cima (fontes e critérios).
+    variant?: "postit" | "texto" | "comentario" | "rodape";
+    align?: "left" | "center" | "right";
+    valign?: "top" | "center" | "bottom";
+    padding?: number; // px (default 12; 0–96)
   };
   // --- forma ---
   shape?: {
@@ -1209,12 +1248,22 @@ export interface AppearanceSettings {
     // em modo edição o card ganha grip flutuante + ⋮ em hover (padrão do
     // layout frameless do WidgetCard).
     hidden?: boolean;
+    // v1.20 (02/10/2026): rótulo pequeno em caixa-alta acima do título
+    // ("kicker" — o nome da seção). Só aparece nos estilos com título-
+    // conclusão (lib/dashboards/style.ts).
+    kicker?: string;
   };
   // Selo "Nº dia útil" (26/07/2026) — cards e gráficos mensais com
   // businessDayAlign/periodWindow: ausente = herda
   // DashboardSettings.hideBusinessDayBadges; true oculta o selo (o dropdown
   // da janela e o toggle dia útil × dia cheio ficam); false força exibir.
   hideBusinessDayBadge?: boolean;
+  // v1.20 (02/10/2026): TÉCNICA DO DESTAQUE (gráficos de barra/linha): tudo
+  // em cinza e só o que sustenta a conclusão na cor de destaque. `series` =
+  // chave da série (metric_<n>) em destaque; `categories` = valores da
+  // dimensão em destaque (série única). Cor manual/condicional seguem
+  // vencendo. Ausente = cores de sempre.
+  highlight?: { series?: string; categories?: string[] };
   // --- formatação condicional (tabelas, listas, Card, gráficos) ---
   conditional?: ConditionalFormatting;
   // Casas decimais do widget inteiro (18/07/2026): 0–4; undefined = "Auto"
@@ -1262,6 +1311,10 @@ export type WidgetSettings = KpiSettings &
     presetKey?: string;
     // Config do widget kanban (visual_type 'kanban', 0064).
     kanban?: KanbanSettings;
+    // v1.20 (02/10/2026): fora dos slides do modo Apresentar (interface de
+    // trabalho: formulário de lançamento, tabela de conferência…). Só a
+    // RENDERIZAÇÃO do slide o omite — a computação de dados segue igual.
+    hideInPresentation?: boolean;
   /** Widget 'tree' — a árvore de acompanhamento ou o mapa mental. */
   tree?: TreeSettings;
   /** Widget "Base do Dashboard" (0142). */
@@ -1313,7 +1366,30 @@ export interface DashboardSettings {
   kanban?: KanbanSettings;
   // v1.18 (01/10/2026): modo Apresentar — abas (ids de `tabs`) que ficam FORA
   // dos slides (abas de trabalho). Ausente = todas as abas são slides.
-  presentation?: { hiddenTabs?: string[] };
+  presentation?: {
+    hiddenTabs?: string[];
+    // v1.20 (02/10/2026): "palco" = slide 16:9 (1920×1080) escalado inteiro
+    // à tela (letterbox, sem rolagem); "altura" = só a altura das linhas se
+    // ajusta (o comportamento da 0149). Ausente = padrão do ESTILO.
+    fit?: "palco" | "altura";
+    // v1.20: entrada do slide. "suave" = fade + deslocamento curto escalonado
+    // por widget (respeita prefers-reduced-motion). Ausente = padrão do estilo.
+    transition?: "suave" | "nenhuma";
+  };
+  // v1.20 (02/10/2026): estilo visual do board (lib/dashboards/style.ts).
+  // Ausente = herda o padrão da organização; sem ele, "classico" (visual
+  // histórico, byte-idêntico). Só tokens — nunca reescreve os widgets.
+  style?: {
+    key: "classico" | "editorial" | "editorial_escuro" | "executivo";
+    overrides?: {
+      accent?: string;
+      page?: string;
+      surface?: string;
+      ink?: string;
+      fontDisplay?: "newsreader" | "inter" | "serif_sistema" | "sistema";
+      fontBody?: "newsreader" | "inter" | "serif_sistema" | "sistema";
+    };
+  };
   periodBar?: {
     enabled?: boolean; // default true (barra global visível)
     defaultPreset?: string; // preset inicial da barra global
@@ -1410,7 +1486,20 @@ export interface DashboardSettings {
   // Abas do dashboard: cada aba tem nome e cor de fundo do "chip" do nome. Os
   // widgets são associados por `WidgetSettings.tab` (id). Ausente/vazio = uma tela
   // única (todos os widgets numa aba padrão implícita).
-  tabs?: { id: string; name: string; color?: string }[];
+  tabs?: {
+    id: string;
+    name: string;
+    color?: string;
+    // v1.20 (02/10/2026): fundo PRÓPRIO da aba (ex.: capa escura num deck
+    // claro). Mesma forma de `background`; ausente = o do dashboard.
+    background?: {
+      mode: "solid" | "gradient";
+      color?: string;
+      from?: string;
+      to?: string;
+      angle?: number;
+    };
+  }[];
   // Conectores entre widgets (linhas retas/curvas estilo n8n). Ver Connector.
   connectors?: Connector[];
   // Marcador de PRESET (20/07/2026): identifica um dashboard gerado por preset
