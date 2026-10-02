@@ -1,3 +1,7 @@
+// Versão: 1.1 | Data: 02/10/2026
+// v1.1 (02/10/2026): tamanhos de fonte fixos (10px/11px em classe) trocados
+//   pela escala nomeada text-2xs/text-micro (globals.css); guarda em
+//   tests/no-arbitrary-font-size.test.ts.
 // Versão: 1.0 | Data: 01/10/2026
 // Nós OPERACIONAIS da Tree (0149): o corpo do cartão (Lista e Root) e o editor
 // de cada um.
@@ -119,7 +123,7 @@ export function OperationalBody({ node }: { node: TreeNode }) {
 
 function MissingConfig({ text }: { text: string }) {
   return (
-    <p className="text-muted-foreground flex items-center gap-1 text-[11px]">
+    <p className="text-muted-foreground flex items-center gap-1 text-micro">
       <TriangleAlert className="size-3" /> {text}
     </p>
   );
@@ -152,10 +156,10 @@ function IndicatorBody({ node }: { node: TreeNode }) {
       : null;
 
   return (
-    <div className="flex h-full flex-col gap-1 text-[11px]">
+    <div className="flex h-full flex-col gap-1 text-micro">
       <div className="flex items-center gap-1">
         {p.level ? (
-          <Badge variant="secondary" className="h-4 px-1 text-[10px]">
+          <Badge variant="secondary" className="h-4 px-1 text-2xs">
             {p.level}
           </Badge>
         ) : null}
@@ -245,7 +249,7 @@ function PlanBody({ node }: { node: TreeNode }) {
     return { s, cell: cells[cells.length - 1] ?? null };
   };
   return (
-    <div className="flex h-full flex-col gap-1 text-[11px]">
+    <div className="flex h-full flex-col gap-1 text-micro">
       {p.responsible ? (
         <span className="text-muted-foreground">Responsável: {p.responsible}</span>
       ) : null}
@@ -292,11 +296,11 @@ function RitualBody({ node }: { node: TreeNode }) {
   const open = (ops?.ritualOccurrences[node.id] ?? []).filter((o) => !o.done).length;
   const busy = ops?.scheduling.has(node.id) ?? false;
   return (
-    <div className="flex h-full flex-col gap-1 text-[11px]">
+    <div className="flex h-full flex-col gap-1 text-micro">
       <div className="flex items-center gap-1">
         <span className="font-medium">{describeSchedule(p.schedule)}</span>
         {p.auto ? (
-          <Badge variant="secondary" className="h-4 px-1 text-[10px]">
+          <Badge variant="secondary" className="h-4 px-1 text-2xs">
             automático
           </Badge>
         ) : null}
@@ -313,7 +317,7 @@ function RitualBody({ node }: { node: TreeNode }) {
             type="button"
             size="sm"
             variant="outline"
-            className="ml-auto h-6 gap-1 px-1.5 text-[11px]"
+            className="ml-auto h-6 gap-1 px-1.5 text-micro"
             data-no-drag
             disabled={busy}
             onClick={() => ops.onScheduleRitual(node)}

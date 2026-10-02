@@ -1,4 +1,6 @@
-<!-- Versão: 1.43 | Data: 02/10/2026 -->
+<!-- Versão: 1.44 | Data: 02/10/2026 -->
+<!-- v1.44 (02/10/2026): §5.18 — esqueleto de slide, aviso de transbordo e
+     Exportar PDF; §5.19 — anotações, rótulo direto, área e número em escala. -->
 <!-- v1.43 (02/10/2026): §5.19 — Estilo do dashboard (⋮ → Estilo e
      apresentação; padrão da organização em Configurações); §5.8 — formatação
      do texto da Nota, papéis do bloco e alinhamento; §5.18 — palco 16:9,
@@ -1751,6 +1753,23 @@ ao apresentar**, sem deixar de existir no dashboard. Ao apresentar também somem
 a barra de busca e o "+" das tabelas, os filtros rápidos, a barra de
 ferramentas da Tree, o aviso "Responsável não encontrado" e o sino de tarefas.
 
+**Esqueleto de slide (02/10/2026).** Em **⋮ → Estilo e apresentação →
+Esqueleto de slide** defina o **rótulo da seção**, o **rodapé** (a fonte dos
+dados), se aparece a **data no topo** e o **número do slide**; para cada aba,
+o **título-conclusão** (a frase que o slide defende, ex.: "MRR final chega a
+R$ 585 mil em dezembro") e, se quiser, um rótulo próprio. Marque **Sem
+esqueleto nesta aba** na capa ou em divisórias. Topo, título e rodapé ficam
+sempre nas mesmas posições em todos os slides; no modo normal o rótulo e o
+título aparecem acima dos blocos da aba.
+
+**Aviso de transbordo.** Editando um dashboard que apresenta em palco, uma
+faixa âmbar avisa quando a aba não cabe num slide (o fim seria cortado):
+divida o conteúdo em outra aba ou reduza a altura dos blocos.
+
+**Exportar PDF.** Na barra da apresentação, o botão de PDF abre a impressão do
+navegador com um slide por página 16:9 — escolha "Salvar como PDF". Bom também
+para conferir como o slide fica fora do monitor.
+
 ### 5.19 Estilo do dashboard
 
 **⋮ do dashboard → Estilo e apresentação** escolhe a linguagem visual do
@@ -1774,6 +1793,16 @@ conclusão (filete em cima), atingimento como barrinha e mês sem realizado como
 sem linha de eixo, e cores de um tom só. Nos gráficos com 2+ séries,
 **Aparência → Cores das séries → Destacar uma série** deixa só ela na cor de
 destaque e as demais em cinza.
+
+**Destaque e anotações** (Aparência dos gráficos de barra e linha):
+**Destacar categorias** (série única: só as marcadas na cor de destaque),
+**Anotações** (até 6 — escolha o ponto e escreva um texto curto; ele aparece
+com um filete fino até o ponto), e, nas linhas, **Nomes das séries** (rótulo
+direto no fim de cada linha em vez de legenda — padrão nos estilos novos com
+2 a 4 linhas) e **Preencher a área sob a linha**. No **Card**, **Número em
+escala** mostra "4,2 mi" / "830 mil"; nos estilos novos o símbolo e a unidade
+saem menores e em cinza ao lado do número, e a variação vira texto discreto
+("+18%" com cor só no sinal).
 
 O dashboard pode **usar o padrão da organização** (definido pelo
 Administrador em Configurações → Tema e interface → Estilo padrão dos

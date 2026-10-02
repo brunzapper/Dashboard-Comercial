@@ -1,3 +1,6 @@
+// Versão: 1.11 | Data: 02/10/2026
+// v1.11 (02/10/2026): `dashboard.settings.slide` (esqueleto de slide) saneado —
+//   textos curtos aparados e os dois flags; o resto é descartado.
 // Versão: 1.10 | Data: 02/10/2026
 // v1.10 (02/10/2026): `dashboard.settings.style` (estilo do board) saneado pelo
 //   parse único de lib/dashboards/style.ts — inválido vira AVISO + descarte
@@ -818,6 +821,23 @@ export function validateDashboardImport(
       );
       delete settings.style;
     }
+  }
+  // v1.11 (02/10/2026): esqueleto de slide — só textos curtos e dois flags.
+  if (settings.slide !== undefined) {
+    const raw = isRecord(settings.slide)
+      ? (settings.slide as Record<string, unknown>)
+      : {};
+    const text = (v: unknown, max: number) =>
+      typeof v === "string" && v.trim() ? v.trim().slice(0, max) : undefined;
+    const next: NonNullable<DashboardSettings["slide"]> = {};
+    const kicker = text(raw.kicker, 60);
+    const footer = text(raw.footer, 160);
+    if (kicker) next.kicker = kicker;
+    if (footer) next.footer = footer;
+    if (raw.showDate === true) next.showDate = true;
+    if (raw.showNumber === true) next.showNumber = true;
+    if (Object.keys(next).length > 0) settings.slide = next;
+    else delete settings.slide;
   }
   if (settings.presentation !== undefined) {
     const pres = isRecord(settings.presentation)

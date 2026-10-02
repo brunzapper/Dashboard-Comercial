@@ -1,3 +1,7 @@
+// Versão: 2.6 | Data: 02/10/2026
+// v2.6 (02/10/2026): tamanhos de fonte fixos (10px/11px em classe) trocados
+//   pela escala nomeada text-2xs/text-micro (globals.css); guarda em
+//   tests/no-arbitrary-font-size.test.ts.
 // Versão: 2.5 | Data: 17/09/2026
 // v2.5 (17/09/2026): MetricRow ganha `isManual` (métrica da Base manual,
 //   0142). O valor da linha É a soma dos lançamentos que caem no recorte
@@ -355,7 +359,7 @@ export function DimensionRow({
             )}
             Expressão condicional
             {hasCase ? (
-              <Badge variant="secondary" className="ml-1 text-[10px]">
+              <Badge variant="secondary" className="ml-1 text-2xs">
                 ativa
               </Badge>
             ) : null}

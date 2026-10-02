@@ -1,4 +1,6 @@
-// Versão: 1.2 | Data: 02/10/2026
+// Versão: 1.3 | Data: 02/10/2026
+// v1.3 (02/10/2026): esqueleto de slide (headline em toda aba-slide, capa sem
+//   esqueleto) e o slide Destaque (recorte, destaque e anotação coerentes).
 // v1.2 (02/10/2026): estilo Editorial + palco, abas de trabalho fora dos
 //   slides (árvore e lançamentos), nenhum placeholder visível em slide e a
 //   Base manual fora da apresentação.
@@ -140,6 +142,30 @@ describe("integridade das referências", () => {
     expect(METAS_4T26_PRESET.settings?.presentation?.hiddenTabs).toEqual(["arvore", "lancamentos"]);
   });
 
+  it("v1.3: esqueleto de slide — toda aba-slide (menos a capa) tem headline", () => {
+    const st = METAS_4T26_PRESET.settings;
+    expect(st?.slide?.showNumber).toBe(true);
+    const hidden = new Set(st?.presentation?.hiddenTabs ?? []);
+    const slides = (st?.tabs ?? []).filter((t) => !hidden.has(t.id));
+    for (const t of slides) {
+      if (t.frame === false || t.id === "fontes") continue;
+      expect(t.headline?.trim(), t.id).toBeTruthy();
+    }
+    expect(slides.find((t) => t.id === "capa")?.frame).toBe(false);
+  });
+
+  it("v1.3: slide Destaque — dados do recorte Inbound, destaque e anotação coerentes", () => {
+    const ws = METAS_4T26_PRESET.widgets.filter((w) => w.settings?.tab === "destaque");
+    const bar = ws.find((w) => w.visual_type === "barra")!;
+    expect(bar.sources).toEqual(["vendas_assinadas", "vendas_site"]);
+    const ap = bar.settings?.appearance;
+    // A anotação aponta para uma categoria destacada (o mês que o slide defende).
+    expect(ap?.highlight?.categories).toContain(ap?.annotations?.[0]?.x);
+    const kpi = ws.find((w) => w.visual_type === "kpi")!;
+    expect(kpi.metrics[0]?.field).toBe("unified:mrr_venda");
+    expect(kpi.settings?.appearance?.kpiCompact).toBe(true);
+  });
+
   it("v1.2: estilo de apresentação e nenhum texto de trabalho vazando no slide", () => {
     const st = METAS_4T26_PRESET.settings;
     expect(st?.style?.key).toBe("editorial");
@@ -178,8 +204,10 @@ describe("slides ocupam a tela e já vêm no período certo (v1.1)", () => {
       // largura coberta (com o vão de 1 célula entre colunas)
       const right = Math.max(...ws.map((w) => w.grid_position.x + w.grid_position.w));
       expect(right, tab.id).toBe(120);
-      // mesma altura em todos os quadros do slide
-      expect(new Set(ws.map((w) => w.grid_position.h)).size, tab.id).toBe(1);
+      // v1.3: o slide ocupa a altura inteira — antes "mesma altura em todos
+      // os quadros", o que proibia empilhar (KPI sobre a nota, no Destaque).
+      const bottom = Math.max(...ws.map((w) => w.grid_position.y + w.grid_position.h));
+      expect(bottom, tab.id).toBe(64);
       for (let i = 0; i < ws.length; i++)
         for (let j = i + 1; j < ws.length; j++) {
           const a = ws[i].grid_position;

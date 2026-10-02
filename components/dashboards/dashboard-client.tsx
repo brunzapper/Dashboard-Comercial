@@ -1,3 +1,9 @@
+// Versão: 3.7 | Data: 02/10/2026
+// v3.7 (02/10/2026): ESQUELETO DE SLIDE (SlideFrame: kicker/data no topo,
+//   headline, rodapé com fonte e nº — o grid recebe a altura que sobra; fora da
+//   apresentação, kicker + headline acima do grid), AVISO DE TRANSBORDO no modo
+//   edição de board em palco e as camadas de slide marcadas p/ a impressão em
+//   PDF.
 // Versão: 3.6 | Data: 02/10/2026
 // v3.6 (02/10/2026): ESTILO DO DASHBOARD (lib/dashboards/style.ts). O estilo
 //   efetivo (board ?? padrão da org ?? Clássico) entra como variáveis CSS no
@@ -117,6 +123,7 @@ import {
   Spline,
   Undo2,
   Wand2,
+  TriangleAlert,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -178,6 +185,7 @@ import {
 } from "@/lib/dashboards/style";
 
 import { DashboardStyleProvider } from "./dashboard-style-context";
+import { SlideFrame } from "./slide-frame";
 import { PresentingProvider } from "./presenting-context";
 import {
   createWidget,
@@ -201,6 +209,9 @@ import {
   STAGE_PAD_Y,
   STAGE_W,
   effectivePresentation,
+  slideFrameContent,
+  slideFrameHeight,
+  slideOverflows,
   slideTabIds,
   stageScale,
   stepSlide,
@@ -1309,6 +1320,30 @@ export function DashboardClient({
   // Fundo interno em caixa (rounded p-3): no palco o fundo vai no próprio
   // quadro do slide — a caixa ficaria fora do transform.
   const innerBox = !!backgroundCss && !stage;
+  // v3.7: esqueleto de slide por aba (só nas abas que são slides).
+  const frameOf = (tabId: string) =>
+    slideIds.includes(tabId)
+      ? slideFrameContent(settings.slide, tabs.find((t) => t.id === tabId))
+      : null;
+  const activeFrame = frameOf(activeTabId);
+  // v3.7: aviso de TRANSBORDO (só editando um board que apresenta em palco):
+  // a aba não cabe nem com o piso do ajuste — no slide, o fim seria cortado.
+  const overflowWarning = (() => {
+    if (!editMode || pres.fit !== "palco" || !slideIds.includes(activeTabId)) {
+      return false;
+    }
+    const shown = visibleWidgets.filter((w) => !w.settings?.hideInPresentation);
+    const contentRows = shown.reduce((max, w, i) => {
+      const p = posOf(w, i);
+      return Math.max(max, p.y + p.h);
+    }, 0);
+    return slideOverflows({
+      contentRows,
+      baseCols: settings.canvas?.baseCols ?? BASE_COLS,
+      innerW: STAGE_W - 2 * STAGE_PAD_X,
+      innerH: STAGE_H - 2 * STAGE_PAD_Y - slideFrameHeight(activeFrame),
+    });
+  })();
 
   return (
     <DashboardHistoryProvider dashboardId={dashboardId} seed={historySeed}>
@@ -1557,6 +1592,14 @@ export function DashboardClient({
           </Button>
         ) : null}
 
+        {overflowWarning ? (
+          <div className="flex items-center gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-800 dark:text-amber-200">
+            <TriangleAlert className="size-4 shrink-0" />
+            Esta aba não cabe num slide: na apresentação o fim ficaria cortado.
+            Divida o conteúdo em outra aba ou reduza a altura dos blocos.
+          </div>
+        ) : null}
+
         {placeError ? (
           <div className="border-destructive/50 bg-destructive/10 text-destructive flex items-center justify-between gap-2 rounded-md border px-3 py-2 text-sm">
             <span>{placeError}</span>
@@ -1599,9 +1642,12 @@ export function DashboardClient({
               >
                 {warmupOrder(slideIds, activeTabId).map((tabId) => {
                   const current = tabId === activeTabId;
+                  const frame = frameOf(tabId);
                   return (
                     <div
                       key={tabId || "_"}
+                      // v3.7: camada de slide — a impressão em PDF mostra todas.
+                      data-slide-layer=""
                       aria-hidden={current ? undefined : true}
                       inert={!current}
                       // v3.6: a entrada suave dispara quando o slide PASSA a
@@ -1626,32 +1672,53 @@ export function DashboardClient({
                           : undefined
                       }
                     >
-                      <DashboardGrid
-                        {...gridProps}
-                        widgets={
-                          // v3.6: widget de trabalho (hideInPresentation)
-                          // fica fora do slide — só da RENDERIZAÇÃO.
-                          (tabs.length === 0
-                            ? allWidgets
-                            : allWidgets.filter((w) => widgetTab(w) === tabId)
-                          ).filter((w) => !w.settings?.hideInPresentation)
-                        }
-                        activeTabId={tabId}
-                        laserMode={current && laserMode}
-                        fitHeight={presentFitHeight}
-                      />
+                      {/* v3.7: esqueleto de slide (topo/headline/rodapé) — o
+                          grid fica com a altura que sobra. */}
+                      <SlideFrame
+                        content={frame}
+                        index={slideIds.indexOf(tabId)}
+                        total={slideIds.length}
+                      >
+                        <DashboardGrid
+                          {...gridProps}
+                          widgets={
+                            // v3.6: widget de trabalho (hideInPresentation)
+                            // fica fora do slide — só da RENDERIZAÇÃO.
+                            (tabs.length === 0
+                              ? allWidgets
+                              : allWidgets.filter((w) => widgetTab(w) === tabId)
+                            ).filter((w) => !w.settings?.hideInPresentation)
+                          }
+                          activeTabId={tabId}
+                          laserMode={current && laserMode}
+                          fitHeight={
+                            presentFitHeight != null
+                              ? Math.max(120, presentFitHeight - slideFrameHeight(frame))
+                              : null
+                          }
+                        />
+                      </SlideFrame>
                     </div>
                   );
                 })}
               </div>
             </PresentationWarmupProvider>
           ) : (
-            <DashboardGrid
-              {...gridProps}
-              widgets={visibleWidgets}
-              activeTabId={activeTabId}
-              laserMode={laserMode}
-            />
+            // v3.7: fora da apresentação, o kicker e a headline da aba
+            // aparecem acima do grid — o que se edita é o que se apresenta.
+            <SlideFrame
+              content={activeFrame}
+              index={slideIds.indexOf(activeTabId)}
+              total={slideIds.length}
+              compact
+            >
+              <DashboardGrid
+                {...gridProps}
+                widgets={visibleWidgets}
+                activeTabId={activeTabId}
+                laserMode={laserMode}
+              />
+            </SlideFrame>
           )}
           </WidgetFocusProvider>
           </PresentingProvider>

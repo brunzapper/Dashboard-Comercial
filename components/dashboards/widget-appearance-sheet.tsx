@@ -1,3 +1,7 @@
+// Versão: 2.11 | Data: 02/10/2026
+// v2.11 (02/10/2026): seção "Destaque e anotações" (destacar categorias,
+//   anotações com filete, rótulo direto e área nas linhas) e, no Card, "Número
+//   em escala" (kpiCompact).
 // Versão: 2.10 | Data: 02/10/2026
 // v2.10 (02/10/2026): controles do ESTILO DE APRESENTAÇÃO — "Kicker" (rótulo
 //   acima do título-conclusão) em Título e borda; na Nota, o papel do bloco
@@ -48,6 +52,7 @@ import { useState } from "react";
 import { useBackgroundSave } from "@/lib/feedback/use-background-save";
 
 import { Accordion } from "@/components/ui/accordion";
+import { X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { BuilderSection } from "@/components/dashboards/widget-builder-rows";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -160,6 +165,11 @@ export function WidgetAppearanceSheet({
 
   const metrics = data.metrics;
   const dimKey = data.dimensions[0]?.key;
+  // v2.11: categorias do gráfico (como aparecem no eixo) — alvo de destaque e
+  // de anotação.
+  const catOptions = dimKey
+    ? Array.from(new Set(data.rows.map((r) => String(r[dimKey] ?? "—"))))
+    : [];
   // Fatias na MESMA ordem do chart (orderCategories compartilhado) — senão os
   // índices de sliceColors apontariam p/ fatias trocadas.
   const slicesBase =
@@ -1071,6 +1081,149 @@ export function WidgetAppearanceSheet({
                 ) : null}
               </BuilderSection>
 
+              {/* v2.11: o que guia o olhar no slide — destaque de categorias,
+                  anotações, rótulo direto e área. */}
+              <BuilderSection value="destaque" title="Destaque e anotações">
+                {metrics.length === 1 && catOptions.length > 0 ? (
+                  <div className="flex flex-col gap-1">
+                    <Label className="text-xs">Destacar categorias</Label>
+                    <div className="flex max-h-32 flex-wrap gap-x-3 gap-y-1 overflow-y-auto">
+                      {catOptions.map((c) => (
+                        <CheckRow
+                          key={c}
+                          label={c}
+                          checked={ap.highlight?.categories?.includes(c) ?? false}
+                          onChange={(on) => {
+                            const cur = new Set(ap.highlight?.categories ?? []);
+                            if (on) cur.add(c);
+                            else cur.delete(c);
+                            patch({
+                              highlight:
+                                cur.size > 0
+                                  ? { categories: [...cur] }
+                                  : undefined,
+                            });
+                          }}
+                        />
+                      ))}
+                    </div>
+                    <p className="text-muted-foreground text-xs">
+                      As demais barras ficam em cinza.
+                    </p>
+                  </div>
+                ) : null}
+                <div className="flex flex-col gap-1.5">
+                  <Label className="text-xs">Anotações</Label>
+                  {(ap.annotations ?? []).map((a, i) => (
+                    <div key={i} className="flex items-center gap-1">
+                      <Select
+                        value={a.x}
+                        onValueChange={(x) =>
+                          patch({
+                            annotations: (ap.annotations ?? []).map((it, j) =>
+                              j === i ? { ...it, x } : it
+                            ),
+                          })
+                        }
+                      >
+                        <SelectTrigger className="h-8 w-32 shrink-0">
+                          <SelectValue placeholder="Ponto" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {catOptions.map((c) => (
+                            <SelectItem key={c} value={c}>
+                              {c}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <input
+                        type="text"
+                        maxLength={60}
+                        value={a.text}
+                        placeholder="Ex.: Greve de transportes"
+                        onChange={(e) =>
+                          patch({
+                            annotations: (ap.annotations ?? []).map((it, j) =>
+                              j === i ? { ...it, text: e.target.value } : it
+                            ),
+                          })
+                        }
+                        className="border-input h-8 min-w-0 flex-1 rounded-md border bg-transparent px-2 text-xs outline-none"
+                        aria-label="Texto da anotação"
+                      />
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="size-7 shrink-0"
+                        aria-label="Remover anotação"
+                        onClick={() => {
+                          const next = (ap.annotations ?? []).filter((_, j) => j !== i);
+                          patch({ annotations: next.length > 0 ? next : undefined });
+                        }}
+                      >
+                        <X className="size-3.5" />
+                      </Button>
+                    </div>
+                  ))}
+                  {catOptions.length > 0 && (ap.annotations?.length ?? 0) < 6 ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="h-7 self-start text-xs"
+                      onClick={() =>
+                        patch({
+                          annotations: [
+                            ...(ap.annotations ?? []),
+                            { x: catOptions[catOptions.length - 1], text: "" },
+                          ],
+                        })
+                      }
+                    >
+                      Adicionar anotação
+                    </Button>
+                  ) : null}
+                  <p className="text-muted-foreground text-xs">
+                    Um texto curto com um filete até o ponto que explica a
+                    conclusão.
+                  </p>
+                </div>
+                {vt === "linha" ? (
+                  <>
+                    <div className="flex flex-col gap-1">
+                      <Label className="text-xs">Nomes das séries</Label>
+                      <Select
+                        value={ap.legendMode ?? "auto"}
+                        onValueChange={(v) =>
+                          patch({
+                            legendMode:
+                              v === "auto" ? undefined : (v as "legenda" | "direto"),
+                          })
+                        }
+                      >
+                        <SelectTrigger className="h-8">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="auto">Padrão do estilo</SelectItem>
+                          <SelectItem value="direto">
+                            Rótulo direto no fim de cada linha
+                          </SelectItem>
+                          <SelectItem value="legenda">Legenda</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <CheckRow
+                      label="Preencher a área sob a linha"
+                      checked={ap.area === true}
+                      onChange={(c) => patch({ area: c ? true : undefined })}
+                    />
+                  </>
+                ) : null}
+              </BuilderSection>
+
               {metrics.length >= 2 ? (
                 <BuilderSection value="eixos" title="Eixo por série (combo)">
                   {metrics.map((m) => (
@@ -1310,6 +1463,12 @@ export function WidgetAppearanceSheet({
           {/* ---------- KPI ---------- */}
           {isKpi ? (
             <BuilderSection value="kpi" title="Card">
+              {/* v2.11: número em escala ("4,2 mi") — o número-herói. */}
+              <CheckRow
+                label="Número em escala (4,2 mi · 830 mil)"
+                checked={ap.kpiCompact === true}
+                onChange={(c) => patch({ kpiCompact: c ? true : undefined })}
+              />
               <ColorField
                 label="Fundo"
                 value={ap.kpi?.bg}

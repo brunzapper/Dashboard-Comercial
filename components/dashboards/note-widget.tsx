@@ -1,3 +1,7 @@
+// Versão: 1.4 | Data: 02/10/2026
+// v1.4 (02/10/2026): tamanhos de fonte fixos (10px/11px em classe) trocados
+//   pela escala nomeada text-2xs/text-micro (globals.css); guarda em
+//   tests/no-arbitrary-font-size.test.ts.
 // Versão: 1.3 | Data: 02/10/2026
 // v1.3 (02/10/2026): BLOCO DE TEXTO de apresentação. (a) MARKDOWN LEVE
 //   (lib/widgets/note-blocks.ts): kicker ^^, títulos #/##/###, listas,
@@ -422,7 +426,7 @@ export function NoteWidget({
             Salvar
           </Button>
         </div>
-        <p className="text-muted-foreground text-[10px] leading-snug">
+        <p className="text-muted-foreground text-2xs leading-snug">
           Variação vs. período anterior: {"{=VARPCT([MRR])}"} (%, já ×100),
           {" {=VARABS(...)}"} (absoluta) e {"{=ANTERIOR(...)}"} (valor do
           período anterior). 2º argumento opcional: &quot;anterior&quot; ou

@@ -1,3 +1,7 @@
+// Versão: 1.5 | Data: 02/10/2026
+// v1.5 (02/10/2026): tamanhos de fonte fixos (10px/11px em classe) trocados
+//   pela escala nomeada text-2xs/text-micro (globals.css); guarda em
+//   tests/no-arbitrary-font-size.test.ts.
 // Versão: 1.4 | Data: 02/10/2026
 // v1.4 (02/10/2026): fundo do canvas configurável (`canvas` — TreeSettings.
 //   canvas: cor + trama pontos/linhas/nenhum) com padrão do ESTILO do
@@ -954,7 +958,7 @@ export function TreeRootView({
           </Button>
         ) : null}
         {toolbarExtra}
-        <span className="text-muted-foreground ml-auto hidden text-[11px] xl:inline">
+        <span className="text-muted-foreground ml-auto hidden text-micro xl:inline">
           Clique direito no canvas cria uma branch · arraste para mover · solte
           sobre um nó para depender dele
         </span>
@@ -1230,7 +1234,7 @@ function TreeContextMenu({
             <span className="flex flex-col">
               <span>{item.label}</span>
               {item.disabled ? (
-                <span className="text-muted-foreground text-[11px]">{item.disabled}</span>
+                <span className="text-muted-foreground text-micro">{item.disabled}</span>
               ) : null}
             </span>
           </button>
@@ -1357,10 +1361,10 @@ function DraftTile({
       }}
     >
       <div className="flex items-center gap-1">
-        <Badge variant="outline" className="h-4 shrink-0 px-1 text-[10px]">
+        <Badge variant="outline" className="h-4 shrink-0 px-1 text-2xs">
           {TREE_BRANCH_LABELS[draft.kind]}
         </Badge>
-        <span className="text-muted-foreground truncate text-[10px]">
+        <span className="text-muted-foreground truncate text-2xs">
           clique direito muda o tipo
         </span>
       </div>
@@ -1383,7 +1387,7 @@ function DraftTile({
             type="button"
             size="sm"
             variant="ghost"
-            className="h-6 px-2 text-[11px]"
+            className="h-6 px-2 text-micro"
             disabled={draft.saving}
             onClick={() => onSave(false)}
           >
@@ -1394,7 +1398,7 @@ function DraftTile({
               type="button"
               size="sm"
               variant="secondary"
-              className="h-6 gap-1 px-2 text-[11px]"
+              className="h-6 gap-1 px-2 text-micro"
               disabled={draft.saving}
               title="Salva o comentário e pede à IA que avalie o que ele muda nas tarefas deste registro."
               onClick={() => onSave(true)}
@@ -1424,7 +1428,7 @@ function ProgressBar({ progress }: { progress: TreeProgress }) {
           style={{ width: `${pct}%` }}
         />
       </span>
-      <span className="text-muted-foreground shrink-0 text-[10px] tabular-nums">
+      <span className="text-muted-foreground shrink-0 text-2xs tabular-nums">
         {progress.done}/{progress.total}
       </span>
     </span>
@@ -1511,11 +1515,11 @@ function RootNodeTile({
       }}
     >
       <div className="flex items-center gap-1">
-        <Badge variant="outline" className="h-4 shrink-0 px-1 text-[10px]">
+        <Badge variant="outline" className="h-4 shrink-0 px-1 text-2xs">
           {TREE_NODE_KIND_LABELS[node.kind]}
         </Badge>
         {node.goal ? (
-          <Badge className="h-4 shrink-0 gap-0.5 bg-amber-500 px-1 text-[10px] text-white">
+          <Badge className="h-4 shrink-0 gap-0.5 bg-amber-500 px-1 text-2xs text-white">
             <Star className="size-2.5" /> Resultado
           </Badge>
         ) : null}
@@ -1543,7 +1547,7 @@ function RootNodeTile({
             onClick={onToggleCollapsed}
             aria-label={collapsed ? "Expandir branch" : "Recolher branch"}
             title={collapsed ? "Expandir branch" : "Recolher branch"}
-            className="text-muted-foreground hover:text-foreground flex items-center rounded text-[10px]"
+            className="text-muted-foreground hover:text-foreground flex items-center rounded text-2xs"
           >
             {collapsed ? (
               <>
@@ -1651,7 +1655,7 @@ function SelectedBar({
   return (
     <div className="bg-muted/40 flex flex-col gap-1.5 border-b px-2 py-1.5 text-xs">
       <div className="flex flex-wrap items-center gap-2">
-        <Badge variant="outline" className="shrink-0 text-[10px]">
+        <Badge variant="outline" className="shrink-0 text-2xs">
           {TREE_NODE_KIND_LABELS[node.kind]}
         </Badge>
         <span className="min-w-0 flex-1 truncate font-medium" title={node.label}>
