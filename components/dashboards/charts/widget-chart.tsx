@@ -1,3 +1,12 @@
+// Versão: 3.8 | Data: 02/10/2026
+// v3.8 (02/10/2026): tamanhos de fonte fixos (10px/11px em classe) trocados
+//   pela escala nomeada text-2xs/text-micro (globals.css); guarda em
+//   tests/no-arbitrary-font-size.test.ts. E o deck: ANOTAÇÕES (appearance.
+//   annotations — texto com filete até o ponto, em barra e linha), RÓTULO
+//   DIRETO no fim das linhas (legendMode "direto"; padrão dos estilos novos
+//   com 2–4 linhas), ÁREA sob a linha (appearance.area — ComposedChart só
+//   então) e o NÚMERO-HERÓI dos cards (HeroValue: unidade pequena e cinza,
+//   escala com appearance.kpiCompact).
 // Versão: 3.7 | Data: 02/10/2026
 // v3.7 (02/10/2026): TEMA DE GRÁFICO do estilo do dashboard
 //   (lib/dashboards/style.ts): grade sólida e suave em vez de tracejada, sem
@@ -57,6 +66,7 @@
 import { memo, useMemo, useState } from "react";
 import { ChevronDown, ChevronRight, GripVertical } from "lucide-react";
 import {
+  Area,
   Bar,
   BarChart,
   CartesianGrid,
@@ -70,6 +80,7 @@ import {
   LineChart,
   Pie,
   PieChart,
+  ReferenceDot,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -160,6 +171,7 @@ import {
 } from "@/lib/widgets/conditional";
 import { useFontScale } from "../font-scale-context";
 import { useDashboardStyle } from "../dashboard-style-context";
+import { HeroValue } from "./hero-value";
 import { isClassicStyle } from "@/lib/dashboards/style";
 import { useBoardChrome } from "../board-chrome-context";
 import { FONT_DEFAULTS, fontStyle, resolveFontNum } from "@/lib/widgets/fonts";
@@ -352,6 +364,9 @@ function EmptyState() {
 
 // React.memo: sob o WidgetCard memoizado, o chart (recharts) só re-renderiza
 // quando dados/aparência mudam — não a cada medição/drag/hover do grid.
+/** v3.8: teto de anotações por gráfico (mais que isso vira ruído). */
+const MAX_ANNOTATIONS = 6;
+
 export const WidgetChart = memo(function WidgetChart({
   visualType,
   data,
@@ -753,7 +768,7 @@ export const WidgetChart = memo(function WidgetChart({
               </span>
             ) : null}
             {cmp && !hideCmpLabel ? (
-              <span className="text-muted-foreground/70 text-[10px]">
+              <span className="text-muted-foreground/70 text-2xs">
                 {cmp.label}
               </span>
             ) : null}
@@ -789,7 +804,16 @@ export const WidgetChart = memo(function WidgetChart({
               }}
             >
               <CondIcon style={cs} />
-              {c.valueText ?? "—"}
+              {c.valueText != null ? (
+                <HeroValue
+                  text={c.valueText}
+                  value={typeof c.value === "number" ? c.value : null}
+                  styled={styled}
+                  compact={appearance?.kpiCompact === true}
+                />
+              ) : (
+                "—"
+              )}
             </span>
           )}
           {c.subText ? (
@@ -831,7 +855,16 @@ export const WidgetChart = memo(function WidgetChart({
         return (
           <div className="flex h-full flex-col justify-center p-1">
             <span className="text-3xl font-semibold tabular-nums" style={valueStyle}>
-              {k.valueText ?? "—"}
+              {k.valueText != null ? (
+                <HeroValue
+                  text={k.valueText}
+                  value={typeof k.value === "number" ? k.value : null}
+                  styled={styled}
+                  compact={appearance?.kpiCompact === true}
+                />
+              ) : (
+                "—"
+              )}
             </span>
             <span className="text-muted-foreground text-xs" style={labelsStyle}>
               {k.label}
@@ -853,7 +886,16 @@ export const WidgetChart = memo(function WidgetChart({
               />
             ) : (
               <span className="text-3xl font-semibold tabular-nums" style={valueStyle}>
-                {k.valueText ?? (k.value == null ? "—" : fmt(k.value, apDecimals))}
+                {k.valueText != null || k.value != null ? (
+                  <HeroValue
+                    text={k.valueText ?? fmt(k.value as number, apDecimals)}
+                    value={k.value}
+                    styled={styled}
+                    compact={appearance?.kpiCompact === true}
+                  />
+                ) : (
+                  "—"
+                )}
               </span>
             )}
             <span className="text-muted-foreground text-xs" style={labelsStyle}>
@@ -888,7 +930,12 @@ export const WidgetChart = memo(function WidgetChart({
       return (
         <div className="flex h-full flex-col justify-center gap-1 p-1">
           <span className="text-3xl font-semibold tabular-nums" style={valueStyle}>
-            {k.realizadoText ?? fmt(k.realizado, apDecimals)}
+            <HeroValue
+              text={k.realizadoText ?? fmt(k.realizado, apDecimals)}
+              value={k.realizado}
+              styled={styled}
+              compact={appearance?.kpiCompact === true}
+            />
           </span>
           <span className="text-muted-foreground text-xs" style={labelsStyle}>
             {k.label}
@@ -1202,6 +1249,77 @@ export const WidgetChart = memo(function WidgetChart({
       return n == null ? s : s + n;
     }, 0);
 
+  // v3.8: ANOTAÇÕES — texto curto com filete fino até o ponto que explica a
+  // conclusão. Categoria/valor ausentes são ignorados (nunca quebra o
+  // gráfico). Em barras horizontais os eixos trocam de papel.
+  const annotations = (ap.annotations ?? []).slice(0, MAX_ANNOTATIONS);
+  // Com rótulo de dado no topo, a anotação sobe acima dele (não se encostam).
+  const annLift = ap.dataLabels?.show ? Math.round(chartPx * 1.4) : 0;
+  const annotationTop = annotations.length > 0 ? 22 + annLift : 0;
+  const renderAnnotations = (horizontal: boolean) =>
+    annotations.flatMap((a, i) => {
+      const row = chartRows.find((r) => catName(r) === a.x);
+      const series =
+        plotSeries.find((p) => p.dataKey === a.series) ?? plotSeries[0];
+      if (!row || !series) return [];
+      const value = numOrNull(row[series.dataKey]);
+      if (value == null) return [];
+      // Ancoragem pelo lugar do ponto no eixo: perto da borda direita o texto
+      // cresce para a esquerda (e vice-versa) — senão ele sai do gráfico.
+      const pos = chartRows.indexOf(row) / Math.max(1, chartRows.length - 1);
+      const anchor = horizontal
+        ? "start"
+        : pos > 0.66
+          ? "end"
+          : pos < 0.34
+            ? "start"
+            : "middle";
+      return [
+        <ReferenceDot
+          key={`ann-${i}`}
+          // O tipo do Recharts fixa x numérico/y categórico; nas barras
+          // verticais e na linha os papéis se invertem (categoria no x).
+          {...((horizontal
+            ? { x: value, y: a.x }
+            : { x: a.x, y: value, yAxisId: axisOf(series.metricKey) }) as unknown as {
+            x: number;
+            y: string;
+          })}
+          // Com rótulo de dado, o ponto ficaria sobre o número: só o filete.
+          r={annLift ? 0 : 3}
+          fill="var(--foreground)"
+          stroke="none"
+          ifOverflow="visible"
+          label={(props: { viewBox?: { x?: number; y?: number; width?: number; height?: number } }) => {
+            const vb = props.viewBox ?? {};
+            const cx = (vb.x ?? 0) + (vb.width ?? 0) / 2;
+            const cy = (vb.y ?? 0) + (vb.height ?? 0) / 2;
+            return (
+              <g pointerEvents="none">
+                <line
+                  x1={cx}
+                  y1={cy - 5 - annLift}
+                  x2={cx}
+                  y2={cy - 16 - annLift}
+                  stroke="var(--muted-foreground)"
+                  strokeWidth={1}
+                />
+                <text
+                  x={anchor === "end" ? cx + 4 : anchor === "start" ? cx - 4 : cx}
+                  y={cy - 20 - annLift}
+                  textAnchor={anchor}
+                  fontSize={chartPx}
+                  fill="var(--muted-foreground)"
+                >
+                  {a.text}
+                </text>
+              </g>
+            );
+          }}
+        />,
+      ];
+    });
+
   function wrapCat(chartEl: React.ReactNode) {
     if (!editable) return withBg(chartEl);
     return (
@@ -1218,12 +1336,23 @@ export const WidgetChart = memo(function WidgetChart({
   }
 
   if (visualType === "linha") {
+    // v3.8: rótulo DIRETO (nome da série no fim da linha, sem legenda) e
+    // ÁREA sob o traço. ComposedChart só com área (LineChart não desenha
+    // <Area>) — sem ela, o container de sempre.
+    const directLabels =
+      ap.legendMode === "direto" ||
+      (ap.legendMode == null &&
+        styled &&
+        plotSeries.length >= 2 &&
+        plotSeries.length <= 4);
+    const LineContainer = ap.area ? ComposedChart : LineChart;
+    const lastIdx = chartRows.length - 1;
     return wrapCat(
-      <LineChart
+      <LineContainer
         data={chartRows}
         margin={{
-          top: 8 + chartInset,
-          right: 12 + chartInset,
+          top: 8 + chartInset + annotationTop,
+          right: 12 + chartInset + (directLabels ? 96 : 0),
           bottom: 4 + chartInset,
           left: chartInset,
         }}
@@ -1258,7 +1387,23 @@ export const WidgetChart = memo(function WidgetChart({
             )
           }
         />
-        {showLegend ? <Legend wrapperStyle={legendStyle} /> : null}
+        {showLegend && !directLabels ? <Legend wrapperStyle={legendStyle} /> : null}
+        {ap.area
+          ? plotSeries.map((s) => (
+              <Area
+                key={`${s.dataKey}__area`}
+                yAxisId={axisOf(s.metricKey)}
+                type="monotone"
+                dataKey={s.dataKey}
+                stroke="none"
+                fill={seriesColor(s.dataKey, s.baseIndex)}
+                fillOpacity={0.12}
+                legendType="none"
+                tooltipType="none"
+                isAnimationActive={false}
+              />
+            ))
+          : null}
         {ghost
           ? plotSeries.map((s) => (
               <Line
@@ -1301,8 +1446,27 @@ export const WidgetChart = memo(function WidgetChart({
                 }
               />
             ) : null}
+            {directLabels ? (
+              <LabelList
+                dataKey={s.dataKey}
+                content={(p: { index?: number; x?: number | string; y?: number | string }) =>
+                  p.index === lastIdx && p.x != null && p.y != null ? (
+                    <text
+                      x={Number(p.x) + 6}
+                      y={Number(p.y)}
+                      dy={4}
+                      fontSize={chartPx}
+                      fill={seriesColor(s.dataKey, s.baseIndex)}
+                    >
+                      {s.name}
+                    </text>
+                  ) : null
+                }
+              />
+            ) : null}
           </Line>
         ))}
+        {renderAnnotations(false)}
         {goal ? (
           <Line
             key="__goal"
@@ -1317,7 +1481,7 @@ export const WidgetChart = memo(function WidgetChart({
             isAnimationActive={false}
           />
         ) : null}
-      </LineChart>
+      </LineContainer>
     );
   }
 
@@ -1727,7 +1891,7 @@ export const WidgetChart = memo(function WidgetChart({
   const vertTopVar =
     !horizontal && cmp?.settings.chartLabels ? chartPx + 6 : 0;
   const barMargin = {
-    top: 8 + chartInset + vertTopLabels + vertTopVar,
+    top: 8 + chartInset + vertTopLabels + vertTopVar + annotationTop,
     right:
       12 +
       chartInset +
@@ -1945,6 +2109,7 @@ export const WidgetChart = memo(function WidgetChart({
           isAnimationActive={false}
         />
       ) : null}
+      {renderAnnotations(horizontal)}
     </BarContainer>
   );
 });
@@ -2540,7 +2705,7 @@ function AppearanceTable({
                       : dimDisplay(r[c.key], c.key)}
                   </span>
                   {isMetric && cmpInline ? (
-                    <span className="flex flex-wrap items-center gap-x-1 text-[10px] leading-tight">
+                    <span className="flex flex-wrap items-center gap-x-1 text-2xs leading-tight">
                       <VariationBadge
                         cur={numOrNull(r[c.key])}
                         prev={cmpValOf(r, c.key)}
@@ -2677,7 +2842,7 @@ function AppearanceTable({
               <>
                 {metricAggCellText(rs, c.key, opts?.isGrand ?? false, dec)}
                 {cmpInline && !calcByKey[c.key] ? (
-                  <span className="ml-1 text-[10px]">
+                  <span className="ml-1 text-2xs">
                     <VariationBadge
                       cur={sumMetric(rs, c.key)}
                       prev={sumCmp(rs, c.key)}

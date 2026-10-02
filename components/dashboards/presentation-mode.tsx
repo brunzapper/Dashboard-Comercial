@@ -1,3 +1,6 @@
+// Versão: 1.2 | Data: 02/10/2026
+// v1.2 (02/10/2026): botão "Exportar PDF" na barra (printSlides: um slide por
+//   página 16:9 pela impressão do navegador; regras em globals.css).
 // Versão: 1.1 | Data: 01/10/2026
 // v1.1 (01/10/2026): `ready` — enquanto os slides preparam (pré-render, ver
 //   presentation-warmup.tsx) só a saída responde ao teclado. A tela cheia é
@@ -13,7 +16,7 @@
 "use client";
 
 import { useEffect } from "react";
-import { ChevronLeft, ChevronRight, MousePointer2, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, FileDown, MousePointer2, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -141,6 +144,19 @@ export function PresentationBar({
       >
         <MousePointer2 className="size-4" />
       </Button>
+      {/* v1.2: um slide por página 16:9 (impressão do navegador → PDF). Os
+          slides já estão todos montados pelo pré-render. */}
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon"
+        className="size-8 rounded-full"
+        aria-label="Exportar PDF"
+        title="Exportar PDF (um slide por página)"
+        onClick={printSlides}
+      >
+        <FileDown className="size-4" />
+      </Button>
       <Button
         type="button"
         variant="ghost"
@@ -154,4 +170,22 @@ export function PresentationBar({
       </Button>
     </div>
   );
+}
+
+/**
+ * v1.2 (02/10/2026): imprime os slides — `body[data-printing="slides"]` liga as
+ * regras de impressão de globals.css (só as camadas de slide aparecem, uma por
+ * página 1280×720, com as cores de fundo). O navegador oferece "Salvar como
+ * PDF". A marca sai no `afterprint` (e logo após o print, que bloqueia).
+ */
+export function printSlides() {
+  if (typeof window === "undefined") return;
+  const body = document.body;
+  const clear = () => {
+    delete body.dataset.printing;
+    window.removeEventListener("afterprint", clear);
+  };
+  body.dataset.printing = "slides";
+  window.addEventListener("afterprint", clear);
+  window.print();
 }

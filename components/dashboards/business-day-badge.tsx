@@ -1,3 +1,7 @@
+// Versão: 1.1 | Data: 02/10/2026
+// v1.1 (02/10/2026): tamanhos de fonte fixos (10px/11px em classe) trocados
+//   pela escala nomeada text-2xs/text-micro (globals.css); guarda em
+//   tests/no-arbitrary-font-size.test.ts.
 // Versão: 1.0 | Data: 21/07/2026
 // Badge "Nº dia útil": mostra qual referência de dia útil o alinhamento
 // (businessDayAlign) está exibindo no momento — N único, compartilhado entre
@@ -20,7 +24,7 @@ export function BusinessDayBadge({
       : `hoje (${refDay})`;
   return (
     <span
-      className="text-muted-foreground rounded-full border border-dashed px-2 py-0.5 text-[10px] font-semibold"
+      className="text-muted-foreground rounded-full border border-dashed px-2 py-0.5 text-2xs font-semibold"
       title={`Meses comparados até o ${businessDayOrdinalLabel(bdRef.n)} — referência: ${refLabel}`}
     >
       {businessDayOrdinalLabel(bdRef.n)}

@@ -1,4 +1,6 @@
-// Versão: 1.2 | Data: 02/10/2026
+// Versão: 1.3 | Data: 02/10/2026
+// v1.3 (02/10/2026): esqueleto de slide (conteúdo, altura, aba sem esqueleto)
+//   e aviso de transbordo.
 // v1.2 (02/10/2026): palco 16:9 (stageScale), padrão do modo pelo estilo
 //   (effectivePresentation) e ordem de leitura da entrada (enterOrder).
 // v1.1 (01/10/2026): pré-render (ordem e prontidão) e ajuste à tela.
@@ -11,6 +13,12 @@ import {
   enterOrder,
   stageScale,
   fitRowHeight,
+  SLIDE_FOOTER_H,
+  SLIDE_HEADER_H,
+  SLIDE_HEADLINE_H,
+  slideFrameContent,
+  slideFrameHeight,
+  slideOverflows,
   FIT_MAX_FACTOR,
   FIT_MIN_FACTOR,
   presentationKeyAction,
@@ -98,5 +106,40 @@ describe("palco 16:9", () => {
       { id: "b", x: 0, y: 10 },
     ]);
     expect([rank.get("a"), rank.get("b"), rank.get("c")]).toEqual([0, 1, 2]);
+  });
+});
+
+describe("esqueleto de slide", () => {
+  const slide = { kicker: "Comercial", footer: "Fonte: CRM", showDate: true, showNumber: true };
+  it("kicker da aba vence o do dashboard; headline só da aba", () => {
+    const c = slideFrameContent(slide, { headline: "MRR cresce", kicker: "Receita" });
+    expect(c).toEqual({ kicker: "Receita", headline: "MRR cresce", footer: "Fonte: CRM", date: true, number: true });
+    expect(slideFrameContent(slide, {})?.kicker).toBe("Comercial");
+  });
+  it("aba sem esqueleto (capa) e dashboard sem nada ⇒ null", () => {
+    expect(slideFrameContent(slide, { frame: false, headline: "x" })).toBeNull();
+    expect(slideFrameContent(undefined, {})).toBeNull();
+    expect(slideFrameContent({}, { headline: "  " })).toBeNull();
+  });
+  it("altura descontada do palco soma só as faixas presentes", () => {
+    expect(slideFrameHeight(null)).toBe(0);
+    expect(slideFrameHeight(slideFrameContent(slide, { headline: "h" }))).toBe(
+      SLIDE_HEADER_H + SLIDE_HEADLINE_H + SLIDE_FOOTER_H
+    );
+    expect(slideFrameHeight(slideFrameContent({ footer: "f" }, {}))).toBe(SLIDE_FOOTER_H);
+  });
+});
+
+describe("aviso de transbordo", () => {
+  const base = { baseCols: 120, innerW: 1152, innerH: 624 };
+  it("cabe enquanto o piso do ajuste acomoda as linhas", () => {
+    // linha natural = 9,6px; piso 0,6 ⇒ 5,76px/linha ⇒ 108 linhas em 624px
+    expect(slideOverflows({ ...base, contentRows: 64 })).toBe(false);
+    expect(slideOverflows({ ...base, contentRows: 108 })).toBe(false);
+    expect(slideOverflows({ ...base, contentRows: 140 })).toBe(true);
+  });
+  it("sem conteúdo ou medida ⇒ sem aviso", () => {
+    expect(slideOverflows({ ...base, contentRows: 0 })).toBe(false);
+    expect(slideOverflows({ ...base, contentRows: 200, innerH: 0 })).toBe(false);
   });
 });

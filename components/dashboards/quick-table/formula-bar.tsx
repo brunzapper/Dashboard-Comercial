@@ -1,3 +1,7 @@
+// Versão: 1.1 | Data: 02/10/2026
+// v1.1 (02/10/2026): tamanhos de fonte fixos (10px/11px em classe) trocados
+//   pela escala nomeada text-2xs/text-micro (globals.css); guarda em
+//   tests/no-arbitrary-font-size.test.ts.
 // Versão: 1.0 | Data: 06/09/2026
 // Barra de fórmula ("fx") da Tabela Livre — a superfície que faltava para o
 // cálculo entre células ser descobrível: mostra o ENDEREÇO da célula
@@ -141,7 +145,7 @@ function FormulaHelp() {
 
 function Code({ children }: { children: React.ReactNode }) {
   return (
-    <code className="bg-muted rounded px-1 py-px font-mono text-[11px]">
+    <code className="bg-muted rounded px-1 py-px font-mono text-micro">
       {children}
     </code>
   );

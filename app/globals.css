@@ -1,4 +1,7 @@
-/* Versão: 1.6 | Data: 02/10/2026 */
+/* Versão: 1.7 | Data: 02/10/2026 */
+/* v1.7 (02/10/2026): escala nomeada --text-2xs (10px) e --text-micro (11px)
+   no lugar dos text-[10px]/text-[11px] soltos; impressão dos SLIDES em PDF
+   (body[data-printing="slides"], página nomeada `slide` 1280×720). */
 /* v1.6 (02/10/2026): ESTILO DO DASHBOARD (lib/dashboards/style.ts). O
    contêiner do board com estilo não-Clássico ganha [data-ds] e as variáveis
    --ds-* (cores semânticas, par de fontes, raio, pesos) — e redefine as do
@@ -156,6 +159,13 @@
      text-ds-muted, border-ds-rule…) — fora de um board com estilo, caem nas
      variáveis do tema. */
   --font-display: var(--ds-font-display, var(--font-sans));
+  /* v1.7: os dois degraus abaixo de text-xs que a interface usa (selos, dicas,
+     nós da Tree) — nome em vez de px solto (guarda em
+     tests/no-arbitrary-font-size.test.ts). */
+  --text-2xs: 0.625rem;
+  --text-2xs--line-height: 0.875rem;
+  --text-micro: 0.6875rem;
+  --text-micro--line-height: 1rem;
   --color-ds-ink: var(--ds-ink, var(--foreground));
   --color-ds-muted: var(--ds-muted, var(--muted-foreground));
   --color-ds-rule: var(--ds-rule, var(--border));
@@ -376,4 +386,52 @@ main[data-app-main] {
 }
 @page {
   margin: 14mm;
+}
+
+/* v1.7: impressão dos SLIDES (modo Apresentar → "Exportar PDF"): só as
+   camadas de slide aparecem, uma por página 16:9 (página nomeada `slide`),
+   com fundo e cores preservados. O `:has` mantém a cadeia de ancestrais das
+   camadas e esconde todo o resto (barra, laser, cabeçalho, barra lateral) —
+   sem ocupar espaço, senão sobrariam páginas em branco. */
+@page slide {
+  size: 1280px 720px;
+  margin: 0;
+}
+@media print {
+  body[data-printing="slides"]
+    :not(:has([data-slide-layer])):not([data-slide-layer]):not(
+      [data-slide-layer] *
+    ) {
+    display: none !important;
+  }
+  body[data-printing="slides"] :has([data-slide-layer]) {
+    position: static !important;
+    inset: auto !important;
+    transform: none !important;
+    overflow: visible !important;
+    width: auto !important;
+    height: auto !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    background: transparent !important;
+  }
+  body[data-printing="slides"] [data-slide-layer] {
+    page: slide;
+    position: relative !important;
+    inset: auto !important;
+    visibility: visible !important;
+    width: 1280px !important;
+    height: 720px !important;
+    break-after: page;
+    overflow: hidden;
+    background-color: var(--background);
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  /* Só a CAMADA volta a ser visível (as não-atuais têm `invisible`); os
+     filhos herdam — forçar em todos revelaria o que o próprio widget esconde
+     (ex.: o tooltip do gráfico). */
+  body[data-printing="slides"] [data-slide-layer] * {
+    animation: none !important;
+  }
 }

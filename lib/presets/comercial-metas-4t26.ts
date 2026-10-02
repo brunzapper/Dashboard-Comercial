@@ -1,3 +1,8 @@
+// Versão: 1.3 | Data: 02/10/2026
+// v1.3 (02/10/2026): ESQUELETO DE SLIDE no deck (settings.slide + headline e
+//   kicker por aba; capa com frame false) e o slide DESTAQUE — KPI em escala +
+//   MRR por mês com destaque de outubro e anotação, no recorte do preset
+//   Inbound fixado em 2026. Versão do preset → 4.
 // Versão: 1.2 | Data: 02/10/2026
 // v1.2 (02/10/2026): PROVA do estilo de apresentação (lib/dashboards/style.ts).
 //   O deck nasce no estilo "Editorial" (papel off-white, títulos em serifa,
@@ -380,21 +385,89 @@ export const METAS_4T26_NODES: PresetMapNode[] = NODES.map((n) =>
 // v1.2: cores da capa escura (quase-preto quente, texto a ~90%).
 const COVER_BG = "#1c1b19";
 const COVER_INK = "#ebe7e0";
+// v1.3: cada aba-slide tem um TÍTULO-CONCLUSÃO (headline) — a frase que o
+// slide defende, no topo do esqueleto de slide. A capa fica sem esqueleto.
 const TABS: NonNullable<NonNullable<PresetDashboard["settings"]>["tabs"]> = [
-  { id: "capa", name: "Capa", background: { mode: "solid", color: COVER_BG } },
-  { id: "painel", name: "Painel estratégico" },
-  { id: "vendedores", name: "Vendedores" },
-  { id: "mrr_inbound", name: "MRR inbound" },
-  { id: "inbound", name: "Inbound: demanda e conversão" },
-  { id: "mrr_outbound", name: "MRR outbound" },
-  { id: "outbound", name: "Outbound" },
-  { id: "clientes", name: "Clientes novos" },
-  { id: "investimento", name: "Investimento" },
-  { id: "plano_1", name: "Plano 1 · Ciclo completo" },
-  { id: "plano_2", name: "Plano 2 · Inbound" },
-  { id: "plano_3", name: "Plano 3 · Outbound" },
-  { id: "ritmo", name: "Ritmo" },
-  { id: "fontes", name: "Fontes e critérios" },
+  { id: "capa", name: "Capa", frame: false, background: { mode: "solid", color: COVER_BG } },
+  {
+    id: "destaque",
+    name: "Destaque",
+    kicker: "Receita",
+    headline: "O trimestre se decide em MRR novo: R$ 115 mil de meta oficial",
+  },
+  {
+    id: "painel",
+    name: "Painel estratégico",
+    kicker: "Painel estratégico",
+    headline: "MRR final chega a R$ 585 mil em dezembro com CAC abaixo de R$ 2,5 mil",
+  },
+  {
+    id: "vendedores",
+    name: "Vendedores",
+    kicker: "Equipe",
+    headline: "Cinco vendedores em ciclo completo, do primeiro contato ao fechamento",
+  },
+  {
+    id: "mrr_inbound",
+    name: "MRR inbound",
+    kicker: "Inbound",
+    headline: "Inbound responde por R$ 102 mil de MRR novo: vendas × ticket",
+  },
+  {
+    id: "inbound",
+    name: "Inbound: demanda e conversão",
+    kicker: "Inbound",
+    headline: "A meta pede mais SQL com conversão crescente até 25%",
+  },
+  {
+    id: "mrr_outbound",
+    name: "MRR outbound",
+    kicker: "Outbound",
+    headline: "Outbound soma R$ 13 mil de MRR novo no trimestre",
+  },
+  {
+    id: "outbound",
+    name: "Outbound",
+    kicker: "Outbound",
+    headline: "Outbound depende de listas qualificadas e de comparecimento",
+  },
+  {
+    id: "clientes",
+    name: "Clientes novos",
+    kicker: "Clientes",
+    headline: "106 clientes novos no trimestre, somando inbound e outbound",
+  },
+  {
+    id: "investimento",
+    name: "Investimento",
+    kicker: "Investimento",
+    headline: "Investimento comercial estável em torno de R$ 42 mil por mês",
+  },
+  {
+    id: "plano_1",
+    name: "Plano 1 · Ciclo completo",
+    kicker: "Plano de ação",
+    headline: "1. Implantar o ciclo completo com foco no lead",
+  },
+  {
+    id: "plano_2",
+    name: "Plano 2 · Inbound",
+    kicker: "Plano de ação",
+    headline: "2. Converter inbound com ticket e qualificação",
+  },
+  {
+    id: "plano_3",
+    name: "Plano 3 · Outbound",
+    kicker: "Plano de ação",
+    headline: "3. Gerar outbound com listas qualificadas",
+  },
+  {
+    id: "ritmo",
+    name: "Ritmo",
+    kicker: "Acompanhamento",
+    headline: "Ritmo de acompanhamento e diagnóstico",
+  },
+  { id: "fontes", name: "Fontes e critérios", kicker: "Fontes" },
   { id: "arvore", name: "Árvore completa" },
   // v1.2: aba de TRABALHO — o lançamento do realizado não é slide.
   { id: "lancamentos", name: "Lançamentos (trabalho)" },
@@ -423,6 +496,19 @@ const base = (key: string, tab: string, title: string, visual: PresetWidget["vis
   settings: { tab, ...settings },
   grid_position: pos,
 });
+
+// v1.3: recorte de dados do slide Destaque — o MESMO do preset Inbound
+// (vendas assinadas + vendas do site; MRR pelo campo unificado; data de
+// referência unificada), fixado em 2026 (a barra de período deste board é
+// desligada).
+const VENDAS_MRR_2026: Pick<PresetWidget, "sources" | "metrics" | "filters"> = {
+  sources: ["vendas_assinadas", "vendas_site"],
+  metrics: [{ field: "unified:mrr_venda", agg: "sum", label: "MRR novo" }],
+  filters: [
+    { field: "unified:data_ref", op: "gte", value: `${YEAR}-01-01` },
+    { field: "unified:data_ref", op: "lte", value: `${YEAR}-12-31` },
+  ],
+};
 
 const nota = (tab: string, key: string, title: string, text: string, pos: PresetWidget["grid_position"], ap?: NonNullable<WidgetSettings["appearance"]>["note"]) =>
   base(key, tab, title, "nota", { note: { text }, ...(ap ? { appearance: { note: ap } } : {}) }, pos);
@@ -475,6 +561,38 @@ export const METAS_4T26_WIDGETS: PresetWidget[] = [
     full,
     { variant: "texto", valign: "bottom", color: COVER_INK, fontSize: 30, padding: 24 }
   ),
+
+  // v1.3: slide DESTAQUE — número-herói + gráfico com a técnica do destaque
+  // e uma anotação. A métrica/dimensão é a mesma do preset Inbound (vendas
+  // assinadas + site, MRR por data de referência) — nada novo no engine.
+  {
+    ...base("kpi_mrr_ano", "destaque", "MRR novo em 2026", "kpi", {
+      appearance: { kpiCompact: true, title: { kicker: "Acumulado do ano" } },
+    }, { x: 0, y: 0, w: 36, h: 24 }),
+    ...VENDAS_MRR_2026,
+    dimensions: [],
+  },
+  nota(
+    "destaque",
+    "meta_trimestre",
+    "Meta do trimestre",
+    "^^ Meta oficial do trimestre\n" +
+      "**R$ 115 mil** de MRR novo: outubro R$ 33,8 mil, novembro R$ 38,7 mil e dezembro R$ 42,8 mil.\n\n" +
+      "As metas individuais somam mais (R$ 120 mil): a operação segue a oficial.",
+    { x: 0, y: 27, w: 36, h: 37 },
+    { variant: "comentario", valign: "top" }
+  ),
+  {
+    ...base("mrr_por_mes", "destaque", "MRR novo por mês em 2026", "barra", {
+      appearance: {
+        highlight: { categories: ["Outubro/26"] },
+        annotations: [{ x: "Outubro/26", text: "Novo desenho comercial" }],
+        dataLabels: { show: true, position: "top" },
+      },
+    }, { x: 38, y: 0, w: SLIDE_W - 38, h: SLIDE_H }),
+    ...VENDAS_MRR_2026,
+    dimensions: [{ field: "unified:data_ref", transform: "month_year", label: "Mês" }],
+  },
 
   table("painel", "Painel estratégico", {
     mode: "indicadores",
@@ -634,7 +752,8 @@ export const METAS_4T26_WIDGETS: PresetWidget[] = [
 export const METAS_4T26_PRESET: PresetDashboard = {
   presetKey: METAS_4T26_KEY,
   // v1.2: 3 — estilo Editorial, palco 16:9 e a composição de slide nova.
-  version: 3,
+  // v1.3: 4 — esqueleto de slide, headlines por aba e o slide Destaque.
+  version: 4,
   name: "Comercial — Metas e desdobramentos 4T26",
   visible_to_roles: ["admin", "gestor"],
   settings: {
@@ -648,6 +767,13 @@ export const METAS_4T26_PRESET: PresetDashboard = {
     presentation: { hiddenTabs: ["arvore", "lancamentos"], fit: "palco", transition: "suave" },
     // v1.2: estilo Editorial (papel off-white, serifa nos títulos, um destaque).
     style: { key: "editorial" },
+    // v1.3: esqueleto de slide — o mesmo topo e rodapé em todas as abas-slide.
+    slide: {
+      kicker: "Comercial · 4T26",
+      footer: "Fontes: Metas Quadrimestre, Novo Desenho Comercial e CRM",
+      showDate: true,
+      showNumber: true,
+    },
   },
   // Reusa as dependências declaradas pelos presets Inbound/Outbound (ensure
   // por key — nunca sobrescreve): sub-bases de MQL/SQL/vendas/reuniões e o

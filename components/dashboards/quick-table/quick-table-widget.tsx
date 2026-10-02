@@ -1,3 +1,7 @@
+// Versão: 1.6 | Data: 02/10/2026
+// v1.6 (02/10/2026): tamanhos de fonte fixos (10px/11px em classe) trocados
+//   pela escala nomeada text-2xs/text-micro (globals.css); guarda em
+//   tests/no-arbitrary-font-size.test.ts.
 // Versão: 1.5 | Data: 08/09/2026
 // v1.5 (08/09/2026): o "Atualizando…" (dim + spinner) ficou restrito ao
 //   refetch causado pelo USUÁRIO (useRefetchOrigin sobre scopeKey+config). O
@@ -1093,7 +1097,7 @@ export function QuickTableWidget({
                   >
                     <span className="flex items-center gap-1">
                       {showRuler ? (
-                        <span className="text-muted-foreground/70 text-[10px] font-normal">
+                        <span className="text-muted-foreground/70 text-2xs font-normal">
                           {colLetter(ci)}
                         </span>
                       ) : null}
@@ -1181,7 +1185,7 @@ export function QuickTableWidget({
                     >
                       <span
                         className={cn(
-                          "text-muted-foreground/70 block text-center text-[10px]",
+                          "text-muted-foreground/70 block text-center text-2xs",
                           structureEdit && "group-hover:hidden"
                         )}
                       >

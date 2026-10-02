@@ -1,4 +1,7 @@
-<!-- Versão: 2.1 | Data: 02/10/2026 -->
+<!-- Versão: 2.2 | Data: 02/10/2026 -->
+<!-- v2.2 (02/10/2026): §4.28 — etapa 2 do deck: esqueleto de slide, anotação,
+     rótulo direto, área, número-herói, aviso de transbordo, PDF dos slides e
+     a escala tipográfica nomeada (guarda estática); invariante 43 ampliada. -->
 <!-- v2.1 (02/10/2026): §4.28 + invariante 43 — ESTILO DO DASHBOARD (tokens
      semânticos por board, cascata board → org → Clássico), bloco de texto com
      markdown leve, tabela de metas de slide, palco 16:9 do modo Apresentar,
@@ -6627,6 +6630,31 @@ react-grid-layout), escalonada por `--ds-enter-delay` na ordem de leitura
 RPCs de widget INTOCADAS; nenhuma migração (`settings` jsonb e a coluna
 `organizations.ui_prefs`, já existente).
 
+**Etapa 2 — o deck (02/10/2026).**
+- **Esqueleto de slide:** `DashboardSettings.slide` (`kicker`, `footer`,
+  `showDate`, `showNumber`) + `tabs[].headline`/`kicker`/`frame:false`.
+  `slideFrameContent`/`slideFrameHeight` (presentation.ts, puros) decidem o que
+  desenhar e quanto do palco o topo/headline/rodapé tomam — o grid recebe o
+  resto no `fitHeight`. `SlideFrame` (`components/dashboards/slide-frame.tsx`)
+  é só layout. Fora da apresentação, kicker + headline aparecem acima do grid
+  (modo `compact`).
+- **Gráficos:** `appearance.annotations` (texto + filete até o ponto;
+  `ReferenceDot` com label custom, categoria inexistente ignorada, teto 6),
+  `legendMode: "direto"` (nome da série no fim da linha; padrão dos estilos
+  novos com 2–4 linhas) e `area` (ComposedChart só então).
+- **Número-herói:** `HeroValue` (`charts/hero-value.tsx`) parte o valor JÁ
+  formatado em símbolo · número · unidade (`splitValueText`) e, com
+  `appearance.kpiCompact`, o reescreve em escala (`compactNumber`) — nunca
+  recalcula valor. A variação vira texto discreto com cor só no sinal.
+- **Transbordo e PDF:** `slideOverflows` (o piso do `fitRowHeight` não cabe)
+  alimenta um aviso no modo edição de board em palco; "Exportar PDF" na barra
+  da apresentação imprime as camadas `[data-slide-layer]` (já montadas pelo
+  pré-render) uma por página nomeada `slide` 1280×720 — `:has` mantém só a
+  cadeia de ancestrais das camadas.
+- **Escala tipográfica nomeada:** `text-2xs`/`text-micro` (globals.css
+  `@theme`) substituíram os px soltos; `tests/no-arbitrary-font-size.test.ts`
+  barra `text-[Npx]` em `components/dashboards/**`.
+
 ## 5. Invariantes críticas (NÃO QUEBRAR)
 
 Estas regras já causaram ou causariam bugs graves e silenciosos. Elas também estão
@@ -7356,6 +7384,11 @@ principalmente — para mantenedores humanos.
     padrão de exibição da tabela de metas vive SÓ em `resolveGoalTableDisplay`
     e o do modo Apresentar SÓ em `effectivePresentation`. Widget novo que pinta
     cor fixa deve ler o token (`var(--ds-*, <tema>)`) em vez de classe solta.
+    O esqueleto de slide sai SÓ de `slideFrameContent`/`slideFrameHeight` (o
+    grid nunca calcula a própria altura descontando faixas à mão), o
+    número-herói só RE-APRESENTA o texto já formatado (`splitValueText`) e
+    tamanho de fonte em `components/dashboards` é da escala nomeada, nunca
+    `text-[Npx]`.
 
 ## 6. Convenções do projeto
 

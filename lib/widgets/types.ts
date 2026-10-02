@@ -1,3 +1,8 @@
+// Versão: 1.21 | Data: 02/10/2026
+// v1.21 (02/10/2026): ESQUELETO DE SLIDE (DashboardSettings.slide,
+//   tabs[].headline/kicker);
+//   AppearanceSettings.annotations/legendMode/area/kpiCompact (anotação, rótulo
+//   direto, área e KPI em escala).
 // Versão: 1.20 | Data: 02/10/2026
 // v1.20 (02/10/2026): ESTILO DO DASHBOARD (lib/dashboards/style.ts) —
 //   DashboardSettings.style (tokens semânticos por board, com padrão da org);
@@ -1264,6 +1269,18 @@ export interface AppearanceSettings {
   // dimensão em destaque (série única). Cor manual/condicional seguem
   // vencendo. Ausente = cores de sempre.
   highlight?: { series?: string; categories?: string[] };
+  // v1.21 (02/10/2026): ANOTAÇÕES (barra/linha) — texto curto com um filete
+  // fino apontando para o ponto que explica a conclusão ("Greve de
+  // transportes"). `x` = rótulo da categoria como aparece no eixo; `series` =
+  // chave da série (metric_<n>; ausente = a primeira). Teto MAX_ANNOTATIONS.
+  annotations?: { x: string; text: string; series?: string }[];
+  // v1.21: "direto" = nome da série no fim de cada linha, sem legenda.
+  // Ausente = padrão do estilo (estilos novos com 2–4 linhas: direto).
+  legendMode?: "legenda" | "direto";
+  // v1.21: linha com ÁREA de baixa opacidade sob o traço.
+  area?: boolean;
+  // v1.21: número do Card/KPI em ESCALA ("4,2 mi", "830 mil").
+  kpiCompact?: boolean;
   // --- formatação condicional (tabelas, listas, Card, gráficos) ---
   conditional?: ConditionalFormatting;
   // Casas decimais do widget inteiro (18/07/2026): 0–4; undefined = "Auto"
@@ -1375,6 +1392,17 @@ export interface DashboardSettings {
     // v1.20: entrada do slide. "suave" = fade + deslocamento curto escalonado
     // por widget (respeita prefers-reduced-motion). Ausente = padrão do estilo.
     transition?: "suave" | "nenhuma";
+  };
+  // v1.21 (02/10/2026): ESQUELETO DE SLIDE — o mesmo topo e rodapé em todas
+  // as abas (é a repetição que faz o conjunto parecer projetado): filete com
+  // o kicker à esquerda e a data à direita, a headline da aba
+  // (`tabs[].headline`), e o rodapé com a fonte e o nº do slide. Ausente =
+  // sem esqueleto. Só aparece nas abas que são slides (fora de hiddenTabs).
+  slide?: {
+    kicker?: string;
+    footer?: string;
+    showDate?: boolean;
+    showNumber?: boolean;
   };
   // v1.20 (02/10/2026): estilo visual do board (lib/dashboards/style.ts).
   // Ausente = herda o padrão da organização; sem ele, "classico" (visual
@@ -1490,6 +1518,13 @@ export interface DashboardSettings {
     id: string;
     name: string;
     color?: string;
+    // v1.21 (02/10/2026): título-CONCLUSÃO da aba (a frase que o slide
+    // defende, no topo do esqueleto de slide) e o kicker próprio da aba
+    // (substitui o `slide.kicker` do dashboard). Ausentes = sem título/kicker.
+    headline?: string;
+    kicker?: string;
+    // v1.21: false = esta aba NÃO leva o esqueleto de slide (capa, divisória).
+    frame?: boolean;
     // v1.20 (02/10/2026): fundo PRÓPRIO da aba (ex.: capa escura num deck
     // claro). Mesma forma de `background`; ausente = o do dashboard.
     background?: {

@@ -1,3 +1,7 @@
+// Versão: 1.3 | Data: 02/10/2026
+// v1.3 (02/10/2026): ESQUELETO DE SLIDE (slideFrameContent, slideFrameHeight,
+//   slideDateLabel e as alturas fixas do topo/headline/rodapé) e AVISO DE
+//   TRANSBORDO (slideOverflows: nem o piso do ajuste cabe).
 // Versão: 1.2 | Data: 02/10/2026
 // v1.2 (02/10/2026): PALCO 16:9 — o slide é desenhado num quadro lógico fixo
 //   (STAGE_W × STAGE_H, com margens constantes) e escalado inteiro à tela por
@@ -190,4 +194,87 @@ export function enterOrder(
 ): Map<string, number> {
   const sorted = [...items].sort((a, b) => a.y - b.y || a.x - b.x);
   return new Map(sorted.map((it, i) => [it.id, i]));
+}
+
+// ---------------------------------------------------------------------------
+// v1.3 (02/10/2026): esqueleto de slide e aviso de transbordo
+
+/** Alturas fixas (px do palco) do topo e do rodapé do esqueleto de slide. */
+export const SLIDE_HEADER_H = 26;
+export const SLIDE_HEADLINE_H = 44;
+export const SLIDE_FOOTER_H = 22;
+
+export interface SlideSettings {
+  kicker?: string;
+  footer?: string;
+  showDate?: boolean;
+  showNumber?: boolean;
+}
+
+export interface SlideFrameContent {
+  kicker: string | null;
+  headline: string | null;
+  footer: string | null;
+  date: boolean;
+  number: boolean;
+}
+
+/**
+ * O que o esqueleto mostra numa aba. Kicker da aba vence o do dashboard;
+ * headline é só da aba. `null` = a aba não tem esqueleto nenhum (nada a
+ * desenhar — o slide fica como era).
+ */
+export function slideFrameContent(
+  slide: SlideSettings | undefined,
+  tab: { headline?: string; kicker?: string; frame?: boolean } | undefined
+): SlideFrameContent | null {
+  // Aba marcada sem esqueleto (capa, divisória): nada a desenhar.
+  if (tab?.frame === false) return null;
+  const clean = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : null);
+  const content: SlideFrameContent = {
+    kicker: clean(tab?.kicker) ?? clean(slide?.kicker),
+    headline: clean(tab?.headline),
+    footer: clean(slide?.footer),
+    date: slide?.showDate === true,
+    number: slide?.showNumber === true,
+  };
+  const any =
+    content.kicker || content.headline || content.footer || content.date || content.number;
+  return any ? content : null;
+}
+
+/** Altura que o esqueleto tira do palco (o grid fica com o resto). */
+export function slideFrameHeight(c: SlideFrameContent | null): number {
+  if (!c) return 0;
+  const top = c.kicker || c.date ? SLIDE_HEADER_H : 0;
+  const head = c.headline ? SLIDE_HEADLINE_H : 0;
+  const foot = c.footer || c.number ? SLIDE_FOOTER_H : 0;
+  return top + head + foot;
+}
+
+/** "2 de outubro de 2026" — a data do topo do slide. */
+export function slideDateLabel(d: Date): string {
+  return d.toLocaleDateString("pt-BR", {
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  });
+}
+
+/**
+ * A aba cabe num slide? Não cabe quando nem o PISO do ajuste (FIT_MIN_FACTOR ×
+ * a linha natural) acomoda as linhas de conteúdo na altura útil — no palco,
+ * `fitRowHeight` cortaria o fim. `innerW/innerH` = área do grid no palco.
+ */
+export function slideOverflows(p: {
+  contentRows: number;
+  baseCols: number;
+  innerW: number;
+  innerH: number;
+}): boolean {
+  if (p.contentRows <= 0 || p.baseCols <= 0 || p.innerW <= 0 || p.innerH <= 0) {
+    return false;
+  }
+  const naturalRow = p.innerW / p.baseCols;
+  return p.contentRows * naturalRow * FIT_MIN_FACTOR > p.innerH + 0.5;
 }

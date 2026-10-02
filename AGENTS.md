@@ -2277,7 +2277,16 @@ This version has breaking changes — APIs, conventions, and file structure may 
   cheia); `settings.hideInPresentation` tira o widget só da RENDERIZAÇÃO do
   slide. Markdown leve da Nota em `lib/widgets/note-blocks.ts` (sem HTML cru;
   link externo só http/https/mailto; `(( … ))` só no modo edição; índice global
-  das `{=…}` preservado). RPCs intocadas, sem migração.
+  das `{=…}` preservado). RPCs intocadas, sem migração. **Etapa 2
+  (02/10/2026):** esqueleto de slide SÓ por `slideFrameContent`/
+  `slideFrameHeight` (`settings.slide` + `tabs[].headline/kicker/frame`;
+  `SlideFrame` é só layout); `appearance.annotations/legendMode/area/
+  kpiCompact` no `widget-chart`; número-herói por `HeroValue` sobre
+  `splitValueText`/`compactNumber` (re-apresenta o texto formatado, nunca
+  recalcula); PDF dos slides = impressão das camadas `[data-slide-layer]`
+  (página nomeada `slide`); tamanho de fonte em `components/dashboards` só da
+  escala nomeada (`text-2xs`/`text-micro`) — `text-[Npx]` é barrado por
+  `tests/no-arbitrary-font-size.test.ts`.
 - **Lixeira de registros (0121): `deleted_at` só muda por ADMIN e toda leitura
   nova de `records` decide EXPLICITAMENTE sobre a lixeira (07/08/2026):**
   soft delete de 30 dias — enviar/restaurar/purgar SÓ pelas actions de

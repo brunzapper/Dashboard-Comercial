@@ -1,3 +1,7 @@
+// Versão: 1.3 | Data: 02/10/2026
+// v1.3 (02/10/2026): tamanhos de fonte fixos (10px/11px em classe) trocados
+//   pela escala nomeada text-2xs/text-micro (globals.css); guarda em
+//   tests/no-arbitrary-font-size.test.ts.
 // Versão: 1.2 | Data: 01/10/2026
 // v1.2 (01/10/2026): nós OPERACIONAIS (0149) — ícones/tom de Indicador,
 //   Plano de ação e Ritual; `NodeActions` ganha "Editar" (abre o editor do nó,
@@ -128,7 +132,7 @@ export function NodeDate({
     return (
       <span
         className={cn(
-          "shrink-0 rounded px-1.5 py-0.5 text-[11px] whitespace-nowrap",
+          "shrink-0 rounded px-1.5 py-0.5 text-micro whitespace-nowrap",
           status === "atrasada" &&
             "bg-destructive/10 text-destructive font-medium",
           status === "em_breve" &&
@@ -592,7 +596,7 @@ export function AddBranchMenu({
                 <Icon className="size-3.5" /> {TREE_BRANCH_LABELS[kind]}
               </span>
               {reason ? (
-                <span className="text-muted-foreground text-[11px]">{reason}</span>
+                <span className="text-muted-foreground text-micro">{reason}</span>
               ) : null}
             </DropdownMenuItem>
           );

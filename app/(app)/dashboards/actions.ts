@@ -1,3 +1,6 @@
+// Versão: 1.17 | Data: 02/10/2026
+// v1.17 (02/10/2026): `settings.slide` (esqueleto de slide) é seção GERIDA no
+//   update in-place do preset.
 // Versão: 1.16 | Data: 02/10/2026
 // v1.16 (02/10/2026): `settings.style` (estilo do board) também é seção
 //   GERIDA no update in-place do preset; `updateDashboardStyle` grava a
@@ -2859,6 +2862,8 @@ async function applyPresetDefinition(
     // v1.16 (02/10/2026): o estilo do board é seção gerida — reaplicar o
     // preset (ou a edição por IA que o traz) o reconduz.
     if (managed.style !== undefined) next.style = managed.style;
+    // v1.17 (02/10/2026): o esqueleto de slide também é seção gerida.
+    if (managed.slide !== undefined) next.slide = managed.slide;
     if (managed.tabs) {
       const presetTabIds = new Set(managed.tabs.map((t) => t.id));
       next.tabs = [

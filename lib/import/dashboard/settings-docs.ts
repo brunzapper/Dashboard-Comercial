@@ -1,3 +1,6 @@
+// Versão: 1.10 | Data: 02/10/2026
+// v1.10 (02/10/2026): esqueleto de slide (slide, tabs[].headline/kicker),
+//   anotações, rótulo direto, área e KPI em escala documentados para a IA.
 // Versão: 1.9 | Data: 02/10/2026
 // v1.9 (02/10/2026): ESTILO do dashboard (`style`), apresentação como palco
 //   (`presentation.fit/transition`), fundo por aba, `hideInPresentation`,
@@ -228,6 +231,10 @@ ${renderDocBlock(APPEARANCE_TABLE_DOC, "  ")}
   note: `"note": { "variant": "texto", "align": "left", "valign": "top", "padding": 12, "bg": "#fef9c3", "color": "#1f2937", "fontSize": 14 },  // aparência da nota. "variant": postit (padrão, papel amarelo) | texto (sem fundo nem moldura) | comentario (coluna de notas com filete à esquerda) | rodape (pequeno, filete em cima); "align": left|center|right; "valign": top|center|bottom; "frameless": true = sem cromo do card`,
   shape: `"shape": { "fill": "#eef2ff", "stroke": "#6366f1", "strokeWidth": 2, "textColor": "#312e81" },  // aparência da forma`,
   calculator: null, // cores da calculadora (visor/teclas) — estética de nicho, edite na UI
+  annotations: `"annotations": [ { "x": "Outubro", "text": "Greve de transportes", "series": "metric_0" } ],  // anotações (barra/linha): texto curto com filete até o ponto; "x" = rótulo da categoria como aparece no eixo; "series" opcional (padrão: a 1ª); máx. 6`,
+  legendMode: `"legendMode": "direto",                 // "direto" = nome da série no fim de cada linha, sem legenda; "legenda" = legenda clássica; ausente = padrão do estilo`,
+  area: `"area": true,                           // linha com área de baixa opacidade sob o traço`,
+  kpiCompact: `"kpiCompact": true,                     // número do Card/KPI em escala ("4,2 mi", "830 mil")`,
   highlight: `"highlight": { "series": "metric_0", "categories": ["Outubro"] },  // técnica do destaque (barra/linha): tudo em cinza e só a série ("series" = metric_<n>) ou as categorias ("categories" = valores da dimensão, série única) que sustentam a conclusão na cor de destaque do estilo`,
   fonts: `"fonts": { "title": 14, "value": 30, "labels": 12, "table": 14, "chart": 11 },  // px por elemento; ausente = auto (× fontScale do dashboard)`,
 } satisfies Record<keyof AppearanceSettings, string | null>;
@@ -374,7 +381,8 @@ ${renderDocBlock(APPEARANCE_DOC, "  ")}
 
 export const DASHBOARD_SETTINGS_DOC = {
   tabs: `"tabs": [ { "id": "geral", "name": "Visão geral", "color": "#eef2ff" },
-           { "id": "capa", "name": "Capa", "background": { "mode": "solid", "color": "#1c1b19" } } ],  // "background" (opcional) = fundo PRÓPRIO da aba (ex.: capa escura); mesma forma do "background" do dashboard`,
+           { "id": "capa", "name": "Capa", "background": { "mode": "solid", "color": "#1c1b19" } },
+           { "id": "receita", "name": "Receita", "headline": "MRR cresce 13% no trimestre", "kicker": "Receita" } ],  // "background" (opcional) = fundo PRÓPRIO da aba (ex.: capa escura); "headline" = título-conclusão da aba no esqueleto de slide; "kicker" = rótulo da seção (substitui o slide.kicker); "frame": false = aba SEM esqueleto (capa, divisória)`,
   periodBar: `"periodBar": {
   "enabled": true,
   "defaultPreset": "este_mes",       // ${[...Object.keys(PERIOD_PRESETS), PERIOD_ALL].join("|")}
@@ -400,6 +408,8 @@ export const DASHBOARD_SETTINGS_DOC = {
   sourceScope: null, // recorte de Bases do board (⋮ → Bases) — config manual, fora do import
   // v1.8 (01/10/2026): modo Apresentar — abas fora dos slides.
   presentation: `"presentation": { "hiddenTabs": ["<tabId>"], "fit": "palco", "transition": "suave" },   // hiddenTabs = abas de trabalho que o modo Apresentar pula; fit: palco (slide 16:9 escalado à tela, sem rolagem) | altura (só as linhas se ajustam); transition: suave | nenhuma. fit/transition ausentes = padrão do estilo`,
+  // v1.10 (02/10/2026): esqueleto de slide.
+  slide: `"slide": { "kicker": "Comercial · 4T26", "footer": "Fonte: CRM", "showDate": true, "showNumber": true },   // ESQUELETO DE SLIDE: o mesmo topo (filete com kicker à esquerda e data à direita) e rodapé (fonte + nº do slide) em todas as abas-slide; o título-conclusão de cada aba vai em "tabs[].headline" e o kicker próprio da aba em "tabs[].kicker"`,
   // v1.9 (02/10/2026): estilo visual do board (lib/dashboards/style.ts).
   style: `"style": { "key": "editorial", "overrides": { "accent": "#b4532a" } },   // estilo do dashboard: ${DASHBOARD_STYLE_KEYS.join(" | ")}. classico = visual de sempre; editorial = papel off-white, títulos em serifa, divisórias finas; editorial_escuro = quase-preto quente (capas/projetor); executivo = sans, superfícies brancas. overrides (opcional): accent/page/surface/ink (#RRGGBB) e fontDisplay/fontBody (${Object.keys(DASHBOARD_FONTS).join(" | ")}). Ausente = padrão da organização`,
 } satisfies Record<keyof DashboardSettings, string | null>;

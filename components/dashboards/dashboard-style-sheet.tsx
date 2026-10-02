@@ -1,4 +1,8 @@
 "use client";
+// Versão: 1.1 | Data: 02/10/2026
+// v1.1 (02/10/2026): seção "Esqueleto de slide" — rótulo da seção, rodapé,
+//   data, nº do slide e o título-conclusão/kicker por aba-slide (tabs preservam
+//   id/nome/cor/fundo).
 // Versão: 1.0 | Data: 02/10/2026
 // v1.0 (02/10/2026): ⋮ → "Estilo e apresentação". Escolhe o ESTILO do board
 //   (lib/dashboards/style.ts) — ou volta a herdar o padrão da organização —,
@@ -25,6 +29,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
+import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
 import { ColorField } from "./appearance-controls";
 import {
@@ -75,6 +80,23 @@ export function DashboardStyleSheet({
   const [transition, setTransition] = useState<string>(
     settings.presentation?.transition ?? AUTO
   );
+  // v1.1: esqueleto de slide (dashboard) + headline/kicker por aba.
+  const [slideKicker, setSlideKicker] = useState(settings.slide?.kicker ?? "");
+  const [slideFooter, setSlideFooter] = useState(settings.slide?.footer ?? "");
+  const [slideDate, setSlideDate] = useState(settings.slide?.showDate === true);
+  const [slideNumber, setSlideNumber] = useState(settings.slide?.showNumber === true);
+  const hidden = new Set(settings.presentation?.hiddenTabs ?? []);
+  const slideTabs = (settings.tabs ?? []).filter((t) => !hidden.has(t.id));
+  const [tabText, setTabText] = useState<
+    Record<string, { headline: string; kicker: string; noFrame: boolean }>
+  >(() =>
+    Object.fromEntries(
+      (settings.tabs ?? []).map((t) => [
+        t.id,
+        { headline: t.headline ?? "", kicker: t.kicker ?? "", noFrame: t.frame === false },
+      ])
+    )
+  );
   const [pending, startTransition] = useTransition();
 
   const effectiveKey: DashboardStyleKey =
@@ -104,11 +126,33 @@ export function DashboardStyleSheet({
           ? transition
           : undefined,
     };
+    const slide: DashboardSettings["slide"] = {
+      ...(slideKicker.trim() ? { kicker: slideKicker.trim() } : {}),
+      ...(slideFooter.trim() ? { footer: slideFooter.trim() } : {}),
+      ...(slideDate ? { showDate: true } : {}),
+      ...(slideNumber ? { showNumber: true } : {}),
+    };
+    // Abas: só headline/kicker mudam — id, nome, cor e fundo são preservados.
+    const tabsNext = settings.tabs?.map((t) => {
+      const txt = tabText[t.id];
+      const { headline: _h, kicker: _k, frame: _f, ...rest } = t;
+      void _h;
+      void _k;
+      void _f;
+      return {
+        ...rest,
+        ...(txt?.headline.trim() ? { headline: txt.headline.trim() } : {}),
+        ...(txt?.kicker.trim() ? { kicker: txt.kicker.trim() } : {}),
+        ...(txt?.noFrame ? { frame: false } : {}),
+      };
+    });
     startTransition(async () => {
       await updateDashboardSettings(dashboardId, {
         ...settings,
         style,
         presentation,
+        slide: Object.keys(slide).length > 0 ? slide : undefined,
+        ...(tabsNext ? { tabs: tabsNext } : {}),
       });
       onOpenChange(false);
     });
@@ -222,6 +266,104 @@ export function DashboardStyleSheet({
             </div>
           </div>
 
+          {/* v1.1: ESQUELETO DE SLIDE — o mesmo topo e rodapé em todas as
+              abas-slide; o título-conclusão é por aba. */}
+          <div className="flex flex-col gap-3 border-t pt-3">
+            <Label className="text-xs">Esqueleto de slide</Label>
+            <p className="text-muted-foreground text-xs">
+              Topo com o rótulo da seção e a data, título-conclusão de cada aba e
+              rodapé com a fonte e o número do slide — sempre nas mesmas
+              posições.
+            </p>
+            <TextField
+              label="Rótulo da seção (kicker)"
+              value={slideKicker}
+              onChange={setSlideKicker}
+              placeholder="Ex.: Comercial · 4T26"
+            />
+            <TextField
+              label="Rodapé (fonte dos dados)"
+              value={slideFooter}
+              onChange={setSlideFooter}
+              placeholder="Ex.: Fonte: CRM e planilha de metas"
+            />
+            <label className="flex items-center gap-2 text-sm">
+              <Checkbox checked={slideDate} onCheckedChange={(v) => setSlideDate(v === true)} />
+              Data no topo
+            </label>
+            <label className="flex items-center gap-2 text-sm">
+              <Checkbox
+                checked={slideNumber}
+                onCheckedChange={(v) => setSlideNumber(v === true)}
+              />
+              Número do slide no rodapé
+            </label>
+            {slideTabs.length > 0 ? (
+              <div className="flex flex-col gap-2">
+                <span className="text-muted-foreground text-xs">
+                  Título-conclusão por aba (a frase que o slide defende)
+                </span>
+                {slideTabs.map((t) => (
+                  <div key={t.id} className="flex flex-col gap-1 rounded-md border p-2">
+                    <span className="text-xs font-medium">{t.name}</span>
+                    <input
+                      type="text"
+                      maxLength={140}
+                      value={tabText[t.id]?.headline ?? ""}
+                      placeholder="Ex.: MRR final chega a R$ 585 mil em dezembro"
+                      onChange={(e) =>
+                        setTabText((prev) => ({
+                          ...prev,
+                          [t.id]: {
+                            headline: e.target.value,
+                            kicker: prev[t.id]?.kicker ?? "",
+                            noFrame: prev[t.id]?.noFrame ?? false,
+                          },
+                        }))
+                      }
+                      className="border-input h-8 rounded-md border bg-transparent px-2 text-xs outline-none"
+                      aria-label={`Título-conclusão — ${t.name}`}
+                    />
+                    <input
+                      type="text"
+                      maxLength={60}
+                      value={tabText[t.id]?.kicker ?? ""}
+                      placeholder="Rótulo próprio desta aba (opcional)"
+                      onChange={(e) =>
+                        setTabText((prev) => ({
+                          ...prev,
+                          [t.id]: {
+                            kicker: e.target.value,
+                            headline: prev[t.id]?.headline ?? "",
+                            noFrame: prev[t.id]?.noFrame ?? false,
+                          },
+                        }))
+                      }
+                      className="border-input h-8 rounded-md border bg-transparent px-2 text-xs outline-none"
+                      aria-label={`Kicker — ${t.name}`}
+                    />
+                    <label className="flex items-center gap-2 text-xs">
+                      <Checkbox
+                        checked={tabText[t.id]?.noFrame ?? false}
+                        onCheckedChange={(v) =>
+                          setTabText((prev) => ({
+                            ...prev,
+                            [t.id]: {
+                              headline: prev[t.id]?.headline ?? "",
+                              kicker: prev[t.id]?.kicker ?? "",
+                              noFrame: v === true,
+                            },
+                          }))
+                        }
+                      />
+                      Sem esqueleto nesta aba (capa, divisória)
+                    </label>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+          </div>
+
           <Button onClick={save} disabled={pending} className="self-start">
             {pending ? "Salvando…" : "Salvar"}
           </Button>
@@ -332,5 +474,32 @@ function StyleOption({
         <span className="text-muted-foreground text-xs">{subtitle}</span>
       </div>
     </button>
+  );
+}
+
+function TextField({
+  label,
+  value,
+  onChange,
+  placeholder,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  placeholder?: string;
+}) {
+  return (
+    <div className="flex flex-col gap-1">
+      <span className="text-muted-foreground text-xs">{label}</span>
+      <input
+        type="text"
+        maxLength={160}
+        value={value}
+        placeholder={placeholder}
+        onChange={(e) => onChange(e.target.value)}
+        className="border-input h-8 rounded-md border bg-transparent px-2 text-xs outline-none"
+        aria-label={label}
+      />
+    </div>
   );
 }

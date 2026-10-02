@@ -1,4 +1,8 @@
 "use client";
+// Versão: 1.4 | Data: 02/10/2026
+// v1.4 (02/10/2026): tamanhos de fonte fixos (10px/11px em classe) trocados
+//   pela escala nomeada text-2xs/text-micro (globals.css); guarda em
+//   tests/no-arbitrary-font-size.test.ts.
 // Versão: 1.3 | Data: 07/08/2026
 // v1.3 (07/08/2026): persistência OTIMISTA em background (useBackgroundSave,
 // revalidate:false): o controle responde na hora, o spinner é LOCAL e o
@@ -118,7 +122,7 @@ export function PeriodWindowControl({
         <button
           type="button"
           className={
-            "rounded-full border px-2 py-0.5 text-[10px] font-semibold transition-colors " +
+            "rounded-full border px-2 py-0.5 text-2xs font-semibold transition-colors " +
             (bd
               ? "border-brand bg-brand/10 text-brand"
               : "text-muted-foreground border-dashed")

@@ -1,3 +1,7 @@
+// Versão: 1.4 | Data: 02/10/2026
+// v1.4 (02/10/2026): tamanhos de fonte fixos (10px/11px em classe) trocados
+//   pela escala nomeada text-2xs/text-micro (globals.css); guarda em
+//   tests/no-arbitrary-font-size.test.ts.
 // Versão: 1.3 | Data: 17/09/2026
 // v1.3 (17/09/2026): bloco de IA EXTERNA (copiar prompt → colar JSON), que o
 //   painel não tinha de forma alguma — todo o resto do sistema (operações,
@@ -492,14 +496,14 @@ export function AiEditPanel({
                       readOnly
                       value={promptFallback}
                       onFocus={(e) => e.currentTarget.select()}
-                      className="h-24 shrink-0 font-mono text-[11px]"
+                      className="h-24 shrink-0 font-mono text-micro"
                     />
                   ) : null}
                   <Textarea
                     value={pasted}
                     onChange={(e) => setPasted(e.target.value)}
                     placeholder="Cole aqui o JSON devolvido pela IA externa…"
-                    className="h-20 shrink-0 font-mono text-[11px]"
+                    className="h-20 shrink-0 font-mono text-micro"
                   />
                   <Button
                     type="button"
