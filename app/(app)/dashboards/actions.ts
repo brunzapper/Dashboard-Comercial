@@ -1,4 +1,14 @@
-// Versão: 1.18 | Data: 02/10/2026
+// Versão: 1.19 | Data: 02/10/2026
+// v1.19 (02/10/2026): IA de dashboards alcança os NÓS da Tree.
+//   (a) `applyDashboardEditJson`/`importDashboardJson` aplicam a seção `mapas`
+//       (lib/import/dashboard/tree-maps.ts) pelos choke points da Tree
+//       (lib/tree/ai-maps.ts) — antes "ocultar o Realizado dos cartões" virava
+//       uma chave sem efeito em `settings.tree`;
+//   (b) `applyPresetDefinition` pula UPDATE de widget idêntico e conta
+//       `unchanged` — a mensagem deixa de dizer "8 atualizados" quando nada
+//       mudou;
+//   (c) o snapshot pré-turno da IA (`captureDashboardSnapshot` com
+//       `includeTreeMaps`) guarda os nós dos mapas e o restore os repõe.
 // v1.18 (02/10/2026): Tabela de metas legada lida já convertida em Tabela
 //   Livre (normalizeLegacyWidget) em `saveQuickTableCells`; `saveWidgetSettings`
 //   valida a fonte do realizado das linhas de meta e converte o tipo da linha
@@ -208,6 +218,20 @@ import {
 } from "@/lib/import/dashboard/export";
 import { loadExportFkNames } from "@/lib/import/dashboard/export-fk-names";
 import { normalizeImportRaw } from "@/lib/import/dashboard/rewrite";
+import {
+  mergeMapDeltas,
+  sameJson,
+  treeMapKeysInJson,
+  validateTreeMaps,
+  type TreeMapPlanMap,
+} from "@/lib/import/dashboard/tree-maps";
+import { stripCodeFence } from "@/lib/import/dashboard/validate";
+import {
+  applyTreeMapPlan,
+  captureTreeMapRows,
+  loadBoardTreeMaps,
+  restoreTreeMapRows,
+} from "@/lib/tree/ai-maps";
 
 export interface ActionState {
   ok?: boolean;
@@ -2246,7 +2270,9 @@ export interface PresetApplyResult {
   presetKey: string;
   dashboard: "created" | "updated";
   dashboardId: string; // p/ a aba Presets linkar "Abrir dashboard"
-  widgets: { created: number; updated: number; deleted: number };
+  // v1.x (02/10/2026): `unchanged` — UPDATE idêntico é pulado e contado à
+  // parte (antes todo widget reaplicado contava como "atualizado").
+  widgets: { created: number; updated: number; deleted: number; unchanged: number };
   fieldsCreated: number;
   subSourcesCreated: number;
   subSourcesSkipped: number;
@@ -2688,6 +2714,60 @@ async function ensureGoalMetricKeys(
   );
 }
 
+// v1.19 (02/10/2026): o UPDATE in-place compara com a linha atual — nada a
+// gravar ⇒ o widget conta como "sem mudança" (era sempre "atualizado").
+// `sort_order` fica FORA: numa edição parcial ele é o índice no JSON (não a
+// posição real) e faria todo widget reenviado parecer alterado.
+const WIDGET_COMPARE_COLS = [
+  "title",
+  "visual_type",
+  "sources",
+  "split_by_source",
+  "dimensions",
+  "metrics",
+  "filters",
+  "settings",
+  "grid_position",
+] as const;
+
+function widgetRowUnchanged(
+  current: Record<string, unknown>,
+  next: Record<string, unknown>
+): boolean {
+  return WIDGET_COMPARE_COLS.every((c) => sameJson(current[c] ?? null, next[c] ?? null));
+}
+
+/** v1.19: lê a seção `mapas` de um JSON já normalizado (sem validar o resto). */
+function mapasOf(normalized: string): { parsed: Record<string, unknown>; mapas: unknown } {
+  try {
+    const parsed = JSON.parse(stripCodeFence(normalized));
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return { parsed, mapas: (parsed as Record<string, unknown>).mapas };
+    }
+  } catch {
+    /* o validador já reportou */
+  }
+  return { parsed: {}, mapas: undefined };
+}
+
+/** v1.19: frase dos nós da Tree na mensagem final. */
+function treeMapMessage(r: { updated: number; created: number; errors: string[] } | null): string {
+  if (!r) return "";
+  const parts: string[] = [];
+  if (r.updated > 0) parts.push(`${r.updated} nó(s) da Tree atualizado(s)`);
+  if (r.created > 0) parts.push(`${r.created} nó(s) da Tree criado(s)`);
+  return parts.length > 0 ? `, ${parts.join(", ")}` : "";
+}
+
+/** v1.19: aplica o plano dos mapas quando há algo a escrever. */
+async function applyMapPlanIfAny(
+  plan: TreeMapPlanMap[],
+  nodeIdByKey: Map<string, string>
+): Promise<{ updated: number; created: number; errors: string[] } | null> {
+  if (!plan.some((m) => m.updates.length + m.creates.length > 0)) return null;
+  return applyTreeMapPlan(plan, nodeIdByKey);
+}
+
 async function applyPresetDefinition(
   supabase: Awaited<ReturnType<typeof createClient>>,
   userId: string,
@@ -2922,9 +3002,15 @@ async function applyPresetDefinition(
   //    presetKeys deste preset que sumiram da definição.
   const { data: widgetRows } = await supabase
     .from("widgets")
-    .select("id, settings")
+    .select(
+      "id, title, visual_type, sources, split_by_source, dimensions, metrics, filters, settings, grid_position, sort_order"
+    )
     .eq("dashboard_id", dashId);
   const existingByKey = new Map<string, string>(); // presetKey → widget id
+  // 02/10/2026: a linha atual por id — UPDATE que não muda nada é pulado.
+  const existingRowById = new Map<string, Record<string, unknown>>(
+    (widgetRows ?? []).map((r) => [r.id as string, r as Record<string, unknown>])
+  );
   // Chaves LOCAIS do widget: nunca viajam no JSON (o export as remove — ids
   // não sobrevivem a um import-como-novo) e por isso precisam ser PRESERVADAS
   // do settings existente no update in-place, senão qualquer edição por IA
@@ -2951,7 +3037,7 @@ async function applyPresetDefinition(
     }
   }
   const wantedKeys = new Set(preset.widgets.map((w) => w.presetKey));
-  const counts = { created: 0, updated: 0, deleted: 0 };
+  const counts = { created: 0, updated: 0, deleted: 0, unchanged: 0 };
   for (let i = 0; i < preset.widgets.length; i++) {
     const w = preset.widgets[i];
     const keptPages = existingPagesByKey.get(w.presetKey);
@@ -2984,6 +3070,12 @@ async function applyPresetDefinition(
     };
     const existingId = existingByKey.get(w.presetKey);
     if (existingId) {
+      // 02/10/2026: nada a gravar ⇒ não escreve nem conta como atualizado.
+      const current = existingRowById.get(existingId);
+      if (current && widgetRowUnchanged(current, row)) {
+        counts.unchanged += 1;
+        continue;
+      }
       const { error } = await supabase
         .from("widgets")
         .update(row)
@@ -3156,11 +3248,29 @@ export async function importDashboardJson(
     raw,
     await loadImportContext(supabase)
   );
-  if (!validation.ok || !validation.preset) {
+  // v1.19: `mapas` de widgets Tree do PRÓPRIO JSON (o mapa pode já existir —
+  // é compartilhado por chave; os nós existentes entram como base).
+  const { parsed: parsedJson, mapas } = mapasOf(raw);
+  const jsonMapKeys = treeMapKeysInJson(parsedJson);
+  const jsonMaps =
+    mapas !== undefined
+      ? await loadBoardTreeMaps(
+          supabase,
+          jsonMapKeys.map((mapKey) => ({
+            visual_type: "tree",
+            settings: { tree: { source: "livre", mapKey } },
+          }))
+        )
+      : null;
+  const mapCheck = validateTreeMaps(mergeMapDeltas(jsonMaps?.mapas, mapas), {
+    existing: jsonMaps?.mapas ?? [],
+    allowedMapKeys: new Set(jsonMapKeys),
+  });
+  if (!validation.ok || !validation.preset || mapCheck.errors.length > 0) {
     return {
       ok: false,
       message: "O JSON tem problemas — corrija (ou devolva os erros à IA) e tente de novo.",
-      errors: validation.errors,
+      errors: [...validation.errors, ...mapCheck.errors],
       warnings: validation.warnings,
     };
   }
@@ -3180,16 +3290,21 @@ export async function importDashboardJson(
       warnings: validation.warnings,
     };
   }
+  const treeRes = jsonMaps
+    ? await applyMapPlanIfAny(mapCheck.plan, jsonMaps.nodeIdByKey)
+    : null;
   revalidatePath("/");
   revalidatePath(`/dashboards/${result.dashboardId}`);
   const w = result.widgets;
   return {
     ok: true,
     id: result.dashboardId,
-    warnings: validation.warnings,
+    warnings: [...validation.warnings, ...mapCheck.warnings, ...(treeRes?.errors ?? [])],
     message:
       `Dashboard "${validation.preset.name}" ${result.dashboard === "created" ? "criado" : "atualizado"}: ` +
       `${w.created} widget(s) criado(s), ${w.updated} atualizado(s), ${w.deleted} removido(s)` +
+      (w.unchanged > 0 ? `, ${w.unchanged} sem mudança` : "") +
+      treeMapMessage(treeRes) +
       (result.fieldsCreated > 0 ? `, ${result.fieldsCreated} campo(s)` : "") +
       (result.subSourcesCreated > 0 ? `, ${result.subSourcesCreated} sub-base(s)` : "") +
       (result.correspondencesCreated > 0
@@ -3271,6 +3386,9 @@ export async function applyDashboardEditJson(
     fkNames: await loadExportFkNames(supabase, baseWidgets),
   });
 
+  // v1.19: mapas da Tree do board — base do merge por nó e do plano de escrita.
+  const boardMaps = await loadBoardTreeMaps(supabase, baseWidgets);
+
   // Identidade canônica + injeções protetivas (roles/tabs/canvas v2) + base do
   // merge por widget ANTES de validar.
   const normalized = normalizeImportRaw(raw, {
@@ -3281,25 +3399,37 @@ export async function applyDashboardEditJson(
     currentCanvas: exported.json.dashboard.settings?.canvas as
       | Record<string, unknown>
       | undefined,
+    baseMaps: boardMaps.mapas,
   });
 
   const validation = validateDashboardImport(
     normalized,
     await loadImportContext(supabase)
   );
-  if (!validation.ok || !validation.preset) {
+  const { parsed: parsedJson, mapas } = mapasOf(normalized);
+  const mapCheck = validateTreeMaps(mapas, {
+    existing: boardMaps.mapas,
+    allowedMapKeys: new Set([...boardMaps.mapKeys, ...treeMapKeysInJson(parsedJson)]),
+  });
+  if (!validation.ok || !validation.preset || mapCheck.errors.length > 0) {
     return {
       ok: false,
       message: "O JSON tem problemas — corrija (ou devolva os erros à IA).",
-      errors: validation.errors,
+      errors: [...validation.errors, ...mapCheck.errors],
       warnings: validation.warnings,
     };
   }
   const gateError = importSectionGateError(session, validation.declares);
   if (gateError) return { ok: false, message: gateError };
 
-  // Snapshot ANTES de qualquer escrita (Desfazer).
-  const snapshot = await captureDashboardSnapshot(dashboardId);
+  // Snapshot ANTES de qualquer escrita (Desfazer) — com os nós dos mapas que
+  // a resposta toca (v1.19).
+  const touchedMaps = mapCheck.plan
+    .filter((m) => m.updates.length + m.creates.length > 0)
+    .map((m) => m.mapKey);
+  const snapshot = await captureDashboardSnapshot(dashboardId, {
+    treeMapKeys: touchedMaps,
+  });
 
   // Adoção: carimba settings.presetKey nos widgets cujo valor difere do
   // canônico (mesmo mapeamento do export — keys do JSON casam 1:1).
@@ -3341,17 +3471,22 @@ export async function applyDashboardEditJson(
       snapshot: snapshot ?? undefined,
     };
   }
+  // v1.19: nós da Tree, pelos choke points (depois dos widgets: um widget
+  // Tree novo do mesmo JSON já existe quando o mapa dele recebe nós).
+  const treeRes = await applyMapPlanIfAny(mapCheck.plan, boardMaps.nodeIdByKey);
   revalidatePath("/");
   revalidatePath(`/dashboards/${dashboardId}`);
   const w = result.widgets;
   return {
     ok: true,
     id: dashboardId,
-    warnings: validation.warnings,
+    warnings: [...validation.warnings, ...mapCheck.warnings, ...(treeRes?.errors ?? [])],
     snapshot: snapshot ?? undefined,
     message:
       `Dashboard "${validation.preset.name}" atualizado: ` +
       `${w.created} widget(s) criado(s), ${w.updated} atualizado(s)` +
+      (w.unchanged > 0 ? `, ${w.unchanged} sem mudança` : "") +
+      treeMapMessage(treeRes) +
       (result.fieldsCreated > 0 ? `, ${result.fieldsCreated} campo(s)` : "") +
       (result.subSourcesCreated > 0
         ? `, ${result.subSourcesCreated} sub-base(s)`
@@ -3473,7 +3608,10 @@ export async function saveShapeLine(
 // capturar as poucas mudanças que não revalidam as props (ex.: arrastar/
 // redimensionar via saveLayout). Leitura barata; não computa dados de widget.
 export async function captureDashboardSnapshot(
-  dashboardId: string
+  dashboardId: string,
+  // v1.19 (02/10/2026): o snapshot pré-turno da IA inclui os nós dos mapas da
+  // Tree que a resposta toca (Desfazer). Ausente = como sempre.
+  opts: { treeMapKeys?: string[] } = {}
 ): Promise<DashboardSnapshot | null> {
   const session = await getSessionInfo();
   if (!session) return null;
@@ -3512,7 +3650,11 @@ export async function captureDashboardSnapshot(
     widgets
   );
 
-  return buildDashboardSnapshot(
+  const treeMaps =
+    opts.treeMapKeys && opts.treeMapKeys.length > 0
+      ? await captureTreeMapRows(supabase, opts.treeMapKeys)
+      : null;
+  const snap = buildDashboardSnapshot(
     dash.name as string,
     norm.settings,
     norm.widgets,
@@ -3527,6 +3669,7 @@ export async function captureDashboardSnapshot(
         c.row_key !== CALC_ROW_KEY
     )
   );
+  return treeMaps ? { ...snap, treeMaps } : snap;
 }
 
 // Grava de volta um snapshot inteiro (Desfazer/Refazer). Reconcilia por linha:
@@ -3603,6 +3746,12 @@ export async function restoreDashboardSnapshot(
       }))
     );
     if (insErr) return { ok: false, message: insErr.message };
+  }
+
+  // v1.19: nós dos mapas da Tree (só snapshots pré-turno da IA os trazem).
+  if (snap.treeMaps) {
+    const tm = await restoreTreeMapRows(supabase, snap.treeMaps);
+    if (!tm.ok) return { ok: false, message: tm.message };
   }
 
   revalidatePath(`/dashboards/${dashboardId}`);

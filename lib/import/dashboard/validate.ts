@@ -1,4 +1,9 @@
-// Versão: 1.13 | Data: 02/10/2026
+// Versão: 1.14 | Data: 02/10/2026
+// v1.14 (02/10/2026): (a) `settings.tree` deixa de ser passthrough — saneado
+//   por lib/import/dashboard/tree-settings.ts (chave inventada = aviso +
+//   descarte; foi uma `settings.tree.rows` gravada em silêncio que fez a IA
+//   dizer "8 atualizados" sem mudar nada); (b) resposta só com `mapas` (nós da
+//   Tree, tree-maps.ts) dispensa widgets.
 // v1.13 (02/10/2026): a Tabela de metas foi absorvida pela Tabela Livre —
 //   `"visual_type": "metas"` + `goalTable` segue ACEITO como atalho e é
 //   convertido aqui (aviso) pelo MESMO conversor da leitura
@@ -134,6 +139,7 @@ import {
 } from "@/lib/import/dashboard/kanban-settings";
 import { slugify } from "@/lib/records/slug";
 import { sanitizeGoalTableSettings } from "@/lib/widgets/goal-table";
+import { sanitizeTreeSettings } from "@/lib/import/dashboard/tree-settings";
 import { isCoreDef } from "@/lib/records/core-defs";
 import { ROLE_LABELS } from "@/lib/auth/roles";
 import {
@@ -960,7 +966,11 @@ export function validateDashboardImport(
 
   // --- widgets ---
   const widgetSpecs = asArray(parsed.widgets);
-  if (widgetSpecs.length === 0) {
+  // v1.14 (02/10/2026): uma resposta que só mexe nos NÓS da Tree (`mapas`)
+  // não precisa de widget — "ocultar o Realizado dos cartões" não toca widget
+  // nenhum. A seção é validada por lib/import/dashboard/tree-maps.ts.
+  const hasMapas = asArray(parsed.mapas).length > 0;
+  if (widgetSpecs.length === 0 && !hasMapas) {
     errors.push('"widgets" precisa de pelo menos 1 widget.');
   }
   const presetWidgets: PresetWidget[] = [];
@@ -1485,6 +1495,14 @@ export function validateDashboardImport(
       });
       if (bm) wSettings.baseManual = bm;
       else delete (wSettings as Record<string, unknown>).baseManual;
+    }
+
+    // v1.14 (02/10/2026): Tree — régua própria (tree-settings.ts). As linhas
+    // do cartão NÃO moram aqui (são do nó — seção `mapas`).
+    if ((wSettings as Record<string, unknown>).tree !== undefined) {
+      const tree = sanitizeTreeSettings(wSettings.tree, { where, warnings });
+      if (tree) wSettings.tree = tree;
+      else delete (wSettings as Record<string, unknown>).tree;
     }
 
     // v1.9 (01/10/2026): Tabela de metas (0149) — régua ÚNICA

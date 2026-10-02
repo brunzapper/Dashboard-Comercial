@@ -1,3 +1,8 @@
+// Versão: 1.2 | Data: 02/10/2026
+// v1.2 (02/10/2026): "Regras gerais" vira CABEÇALHO — é o que separa as duas seções escolhíveis
+//   ("quadro"/"automacoes") do núcleo na orquestração por tópicos
+//   (lib/ai/topics/catalogs.ts). Sem ele as regras gerais iriam junto do último
+//   tópico e sumiriam num turno que só carregasse o quadro.
 // Versão: 1.1 | Data: 12/09/2026
 // v1.1 (12/09/2026): diz à IA como uma condição de DATA compara (por DIA de
 //   Brasília, valor em "AAAA-MM-DD"). Sem isso ela emitiria o valor em formato
@@ -132,7 +137,8 @@ Ações (uma por regra):
   núcleo não editáveis e o campo-espelho da fase deste quadro NÃO são alvos
   válidos; use a lista "campos_graváveis" do catálogo.
 
-Regras gerais:
+## Regras gerais
+
 1. Use SEMPRE refs e keys EXATAS do catálogo — nunca invente campo, Base ou
    coluna, e nunca invente ids (a regra é reconhecida pelo NOME).
 2. Mocks nunca são movidos, e uma regra cujo alvo sumiu fica inerte com erro

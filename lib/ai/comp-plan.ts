@@ -1,3 +1,7 @@
+// Versão: 1.1 | Data: 02/10/2026
+// v1.1 (02/10/2026): passa o catálogo de tópicos (COMP_TOPIC_CATALOG) ao laço de
+//   geração — orquestração por tópicos (lib/ai/topics): roteador antes da
+//   geração e escalonamento ao prompt inteiro se a resposta não validar.
 // Versão: 1.0 | Data: 08/09/2026
 // NÚCLEO do assistente de IA de REMUNERAÇÃO (escopo `remuneracao` do painel da
 // Operação). Padrão §4.17 — a IA NUNCA escreve: o core valida e devolve
@@ -22,6 +26,7 @@ import { getActiveOrgId } from "@/lib/auth/org";
 import { createClient } from "@/lib/supabase/server";
 import { loadOrgAiConfig } from "@/lib/ai/config";
 import { aiSection, runJsonGenerationLoop } from "@/lib/ai/json-loop";
+import { COMP_TOPIC_CATALOG } from "@/lib/ai/topics/catalogs";
 import { loadSources } from "@/lib/config/sources";
 import { loadCorrespondences } from "@/lib/correspondences";
 import { loadGoalMetrics } from "@/lib/config/goal-metrics";
@@ -330,6 +335,8 @@ export async function generateCompEditCore(input: {
   }
 
   const result = await runJsonGenerationLoop<CompEditResolved>({
+    // v1.1 (02/10/2026): catálogo de tópicos — orquestração (lib/ai/topics).
+    topics: COMP_TOPIC_CATALOG,
     config: aiConfig,
     system,
     priorTurns: input.priorTurns ?? [],

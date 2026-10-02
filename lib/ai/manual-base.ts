@@ -1,3 +1,7 @@
+// Versão: 1.2 | Data: 02/10/2026
+// v1.2 (02/10/2026): passa o catálogo de tópicos (MANUAL_BASE_TOPIC_CATALOG) ao laço de
+//   geração — orquestração por tópicos (lib/ai/topics): roteador antes da
+//   geração e escalonamento ao prompt inteiro se a resposta não validar.
 // Versão: 1.1 | Data: 17/09/2026
 // v1.1 (17/09/2026): a serialização dos lançamentos do catálogo saiu daqui para
 //   `lib/manual-base/model.ts` — o dump do modelo do construtor de dashboards
@@ -31,6 +35,7 @@ import { getSessionInfo } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
 import { loadOrgAiConfig } from "@/lib/ai/config";
 import { aiSection, runJsonGenerationLoop } from "@/lib/ai/json-loop";
+import { MANUAL_BASE_TOPIC_CATALOG } from "@/lib/ai/topics/catalogs";
 import {
   loadManualBase,
   loadManualDeclarations,
@@ -296,6 +301,8 @@ export async function generateManualBaseCore(
     parsed: ParsedManualBaseEdit;
     warnings: string[];
   }>({
+    // v1.2 (02/10/2026): catálogo de tópicos — orquestração (lib/ai/topics).
+    topics: MANUAL_BASE_TOPIC_CATALOG,
     config: aiConfig,
     system,
     priorTurns: input.priorTurns ?? [],

@@ -1,3 +1,7 @@
+// Versão: 1.2 | Data: 02/10/2026
+// v1.2 (02/10/2026): passa o catálogo de tópicos (RECORDS_UPDATE_TOPIC_CATALOG) ao laço de
+//   geração — orquestração por tópicos (lib/ai/topics): roteador antes da
+//   geração e escalonamento ao prompt inteiro se a resposta não validar.
 // Versão: 1.1 | Data: 07/08/2026
 // v1.1 (07/08/2026): MODO SELEÇÃO — cores paralelos p/ alvo = registros
 //   SELECIONADOS na tabela (checkboxes): generateRecordsSelectionUpdateCore /
@@ -31,6 +35,7 @@ import { getActiveOrgId } from "@/lib/auth/org";
 import { createClient } from "@/lib/supabase/server";
 import { loadOrgAiConfig } from "@/lib/ai/config";
 import { aiSection, runJsonGenerationLoop } from "@/lib/ai/json-loop";
+import { RECORDS_UPDATE_TOPIC_CATALOG } from "@/lib/ai/topics/catalogs";
 import { todayBrasiliaIso } from "@/lib/date/today";
 import { DATA_TYPE_LABELS, type DataType, type FieldDefinition, type RecordRow } from "@/lib/records/types";
 import { primaryOperationId } from "@/lib/sync/shared";
@@ -441,6 +446,8 @@ export async function generateRecordsUpdateCore(
     update: ParsedRecordsUpdate;
     warnings: string[];
   }>({
+    // v1.2 (02/10/2026): catálogo de tópicos — orquestração (lib/ai/topics).
+    topics: RECORDS_UPDATE_TOPIC_CATALOG,
     config: aiConfig,
     system,
     priorTurns: input.priorTurns ?? [],
@@ -820,6 +827,8 @@ export async function generateRecordsSelectionUpdateCore(
     update: ParsedRecordsUpdate;
     warnings: string[];
   }>({
+    // v1.2 (02/10/2026): catálogo de tópicos — orquestração (lib/ai/topics).
+    topics: RECORDS_UPDATE_TOPIC_CATALOG,
     config: aiConfig,
     system,
     priorTurns: input.priorTurns ?? [],

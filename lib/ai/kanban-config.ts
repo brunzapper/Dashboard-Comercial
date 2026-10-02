@@ -1,3 +1,7 @@
+// Versão: 1.1 | Data: 02/10/2026
+// v1.1 (02/10/2026): passa o catálogo de tópicos (KANBAN_TOPIC_CATALOG) ao laço de
+//   geração — orquestração por tópicos (lib/ai/topics): roteador antes da
+//   geração e escalonamento ao prompt inteiro se a resposta não validar.
 // Versão: 1.0 | Data: 07/09/2026
 // NÚCLEO do assistente de IA do QUADRO KANBAN ("Configurar com IA" das páginas
 // /kanbans/[id] e /kanbans/w/[widgetId]). Padrão §4.17 — a IA NUNCA escreve:
@@ -22,6 +26,7 @@ import {
   updateBoardSettings,
 } from "@/app/(app)/dashboards/actions";
 import { aiSection, runJsonGenerationLoop } from "@/lib/ai/json-loop";
+import { KANBAN_TOPIC_CATALOG } from "@/lib/ai/topics/catalogs";
 import {
   getAutomationFieldOptions,
   listAutomations,
@@ -220,6 +225,8 @@ export async function generateKanbanConfigCore(
     value: ParsedKanbanConfig;
     warnings: string[];
   }>({
+    // v1.1 (02/10/2026): catálogo de tópicos — orquestração (lib/ai/topics).
+    topics: KANBAN_TOPIC_CATALOG,
     config: aiConfig,
     system,
     priorTurns: input.priorTurns ?? [],

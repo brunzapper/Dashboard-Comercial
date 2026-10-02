@@ -1,3 +1,7 @@
+// Versão: 1.1 | Data: 02/10/2026
+// v1.1 (02/10/2026): passa o catálogo de tópicos (WORKFLOW_FORM_TOPIC_CATALOG) ao laço de
+//   geração — orquestração por tópicos (lib/ai/topics): roteador antes da
+//   geração e escalonamento ao prompt inteiro se a resposta não validar.
 // Versão: 1.0 | Data: 12/09/2026
 // "Preencher com IA" um formulário do Workflow: o usuário descreve o lead em
 // texto livre e este core devolve as RESPOSTAS que vão para as caixas da tela.
@@ -33,6 +37,7 @@ import { loadWorkflowSchemaByKey } from "@/lib/workflow/schemas";
 import { visibleFields } from "@/lib/workflow/types";
 
 import { aiSection, runJsonGenerationLoop } from "./json-loop";
+import { WORKFLOW_FORM_TOPIC_CATALOG } from "@/lib/ai/topics/catalogs";
 import { loadOrgAiConfig } from "./config";
 
 export interface FillFormInput {
@@ -182,6 +187,8 @@ export async function fillWorkflowFormCore(
     values: FormFillValues;
     warnings: string[];
   }>({
+    // v1.1 (02/10/2026): catálogo de tópicos — orquestração (lib/ai/topics).
+    topics: WORKFLOW_FORM_TOPIC_CATALOG,
     config: aiConfig,
     system,
     priorTurns: input.priorTurns ?? [],

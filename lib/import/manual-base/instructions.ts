@@ -1,3 +1,6 @@
+// Versão: 1.2 | Data: 02/10/2026
+// v1.2 (02/10/2026): a seção de famílias e as regras viram CABEÇALHOS — famílias é um tópico
+//   escolhível da orquestração (lib/ai/topics/catalogs.ts); regras, núcleo.
 // Versão: 1.1 | Data: 18/09/2026
 // SPEC do assistente da BASE MANUAL — módulo PURO e DERIVADO das constantes
 // reais (formato/versão/tetos de ./types, os modos de contagem de
@@ -105,7 +108,7 @@ ${modosLista}
 - "modo" (opcional): ${MANUAL_ENTRY_MODES.map((m) => `"${m}"`).join(" ou ")}.
   Omitido, vale "substituir".
 
-REPARTIR O MESMO NÚMERO (famílias)
+## Repartir o mesmo número (famílias)
 
 Uma "família" é uma maneira de dividir o MESMO número. "Total de interações:
 1000", "dessas, 500 por ligação e 500 por e-mail" e "200 do Paulo, 400 da
@@ -124,7 +127,8 @@ ${MANUAL_BASE_FAMILY_EXAMPLE}
 - Sem "coordenadas", o lançamento é o TOTAL do dado.
 - Duas famílias no mesmo lançamento são o CRUZAMENTO ("100 ligações do Paulo").
 
-Regras:
+## Regras
+
 1. Identifique dados, operações e responsáveis SEMPRE pelo NOME EXATO do
    catálogo — nunca invente ids. Nome que não existe no catálogo faz o
    lançamento ser RECUSADO; se a tabela citar um, diga isso em "notas".

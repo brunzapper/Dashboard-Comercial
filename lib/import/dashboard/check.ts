@@ -1,3 +1,9 @@
+// Versão: 1.1 | Data: 02/10/2026
+// v1.1 (02/10/2026): (a) a prévia passou a ser HONESTA — widget cujo delta não
+//   muda nada sai como "sem mudança" (antes todo widget de key existente era
+//   "atualiza", e "8 atualizados" sem efeito virou a queixa); (b) a seção
+//   `mapas` (nós da Tree) é validada aqui pelo MESMO módulo do apply
+//   (tree-maps.ts) e entra no resumo.
 // Versão: 1.0 | Data: 17/09/2026
 // Normalizar + validar + resumir um JSON de dashboard, no contexto de um modo.
 //
@@ -15,8 +21,16 @@
 // `lib/ai/operacao/scopes.ts` de `handlers.ts`.
 import { IMPORT_PRESET_PREFIX, type DashboardImportContext } from "./types";
 import { normalizeImportRaw } from "./rewrite";
-import { validateDashboardImport } from "./validate";
+import { stripCodeFence, validateDashboardImport } from "./validate";
 import type { ImportWidgetSpec } from "./types";
+import {
+  sameJson,
+  treeMapKeysInJson,
+  treeMapSummary,
+  validateTreeMaps,
+  type ImportMapSpec,
+  type TreeMapPlanMap,
+} from "./tree-maps";
 
 /**
  * O que a checagem precisa do modo. É um subconjunto ESTRUTURAL do contexto de
@@ -33,10 +47,23 @@ export interface DashboardCheckContext {
   currentCanvas?: Record<string, unknown>;
   /** Keys de widget que já existem no board — decide "novo" × "atualiza". */
   existingKeys: ReadonlySet<string>;
+  /** v1.1: mapas da Tree exportados do board (base do merge por nó). */
+  baseMaps?: ImportMapSpec[];
+  /** v1.1: mapas dos widgets Tree (modo livre) do board. */
+  boardMapKeys?: string[];
 }
 
 export type DashboardCheckResult =
-  | { ok: true; normalized: string; summary: string[]; warnings: string[] }
+  | {
+      ok: true;
+      normalized: string;
+      summary: string[];
+      warnings: string[];
+      /** v1.1: plano de escrita dos nós da Tree (vazio sem `mapas`). */
+      treeMaps: TreeMapPlanMap[];
+      /** v1.1: quantos itens a resposta de fato altera (widgets + nós). */
+      changedCount: number;
+    }
   | { ok: false; errors: string[] };
 
 export function checkDashboardJson(
@@ -54,19 +81,73 @@ export function checkDashboardJson(
     baseWidgets: ctx.baseWidgets,
     refWidgets: ctx.refWidgets,
     currentCanvas: ctx.currentCanvas,
+    baseMaps: ctx.baseMaps,
   });
 
   const validation = validateDashboardImport(normalized, importCtx);
-  if (!validation.ok || !validation.preset) {
-    return { ok: false, errors: validation.errors };
+  let parsed: unknown = null;
+  try {
+    parsed = JSON.parse(stripCodeFence(normalized));
+  } catch {
+    parsed = null;
   }
-  // Resumo por widget (prévia e mensagem): novo × atualiza.
+  const parsedObj =
+    parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : {};
+  const maps = validateTreeMaps(parsedObj.mapas, {
+    existing: ctx.baseMaps ?? [],
+    allowedMapKeys: new Set([
+      ...(ctx.boardMapKeys ?? []),
+      ...treeMapKeysInJson(parsedObj),
+    ]),
+  });
+  if (!validation.ok || !validation.preset || maps.errors.length > 0) {
+    return { ok: false, errors: [...validation.errors, ...maps.errors] };
+  }
+  // Resumo por widget (prévia e mensagem): novo × atualiza × sem mudança.
   const prefix = `${IMPORT_PRESET_PREFIX}${ctx.chave}.`;
+  const baseByKey = new Map(
+    (ctx.baseWidgets ?? []).map((w) => [w.key ?? "", w] as const)
+  );
+  const aiByKey = new Map<string, unknown>();
+  for (const w of Array.isArray(parsedObj.widgets) ? parsedObj.widgets : []) {
+    if (w && typeof w === "object" && typeof (w as { key?: unknown }).key === "string") {
+      aiByKey.set((w as { key: string }).key, w);
+    }
+  }
+  const unchanged: string[] = [];
+  let changedCount = 0;
   const summary = validation.preset.widgets.map((w) => {
     const key = w.presetKey.startsWith(prefix)
       ? w.presetKey.slice(prefix.length)
       : w.presetKey;
-    return `${ctx.existingKeys.has(key) ? "atualiza" : "novo"}: ${w.title}`;
+    if (!ctx.existingKeys.has(key)) {
+      changedCount += 1;
+      return `novo: ${w.title}`;
+    }
+    const base = baseByKey.get(key);
+    if (base && sameJson(aiByKey.get(key), base)) {
+      unchanged.push(w.title);
+      return `sem mudança: ${w.title}`;
+    }
+    changedCount += 1;
+    return `atualiza: ${w.title}`;
   });
-  return { ok: true, normalized, summary, warnings: validation.warnings };
+  summary.push(...treeMapSummary(maps.plan));
+  for (const m of maps.plan) changedCount += m.updates.length + m.creates.length;
+  const warnings = [...validation.warnings, ...maps.warnings];
+  if (unchanged.length > 0) {
+    warnings.push(
+      `A resposta não altera nada em ${unchanged.length} widget(s) (${unchanged.join(", ")}) — se o pedido era mudar algo neles, ele pode estar fora do que o JSON alcança.`
+    );
+  }
+  return {
+    ok: true,
+    normalized,
+    summary,
+    warnings,
+    treeMaps: maps.plan,
+    changedCount,
+  };
 }

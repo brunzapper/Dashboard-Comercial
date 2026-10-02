@@ -1,3 +1,7 @@
+// Versão: 1.1 | Data: 02/10/2026
+// v1.1 (02/10/2026): passa o catálogo de tópicos (CSV_MAPPING_TOPIC_CATALOG) ao laço de
+//   geração — orquestração por tópicos (lib/ai/topics): roteador antes da
+//   geração e escalonamento ao prompt inteiro se a resposta não validar.
 // Versão: 1.0 | Data: 30/07/2026
 // NÚCLEO da sugestão de mapeamento de CSV por IA (wizard de /registros/
 // importar, etapa 3). A IA resolve colunas com nomes diferentes dos campos e
@@ -14,6 +18,7 @@ import { getActiveOrgId } from "@/lib/auth/org";
 import { createClient } from "@/lib/supabase/server";
 import { loadOrgAiConfig } from "@/lib/ai/config";
 import { runJsonGenerationLoop } from "@/lib/ai/json-loop";
+import { CSV_MAPPING_TOPIC_CATALOG } from "@/lib/ai/topics/catalogs";
 import { loadSources } from "@/lib/config/sources";
 import { fieldAppliesToSource } from "@/lib/sources";
 import { isCoreDef } from "@/lib/records/core-defs";
@@ -122,6 +127,8 @@ export async function suggestCsvMappingCore(
   const result = await runJsonGenerationLoop<
     Extract<CsvMappingValidation, { ok: true }>
   >({
+    // v1.1 (02/10/2026): catálogo de tópicos — orquestração (lib/ai/topics).
+    topics: CSV_MAPPING_TOPIC_CATALOG,
     config: aiConfig,
     system,
     priorTurns: [],

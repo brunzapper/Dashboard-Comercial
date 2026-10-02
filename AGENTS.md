@@ -498,6 +498,35 @@ This version has breaking changes — APIs, conventions, and file structure may 
   exemplo do SPEC aceito pelo validador REAL e contagens `**Label (N)**` do
   §16.2 do manual — o conteúdo do manual segue humano (regra do topo), só as
   contagens são conferidas.
+- **Orquestração por TÓPICOS: o prompt é UM texto particionado, e feature
+  voltada à IA tem caminho estruturado (02/10/2026):** todo assistente de IA
+  roda em duas fases — o roteador (`lib/ai/topics/router.ts`, FAIL-OPEN: erro
+  ⇒ prompt inteiro; palavras-chave/itens citados/tipo do widget SOMAM, nunca
+  subtraem) escolhe os tópicos e, em dashboards, os ITENS do estado (widgets e
+  mapas da Tree); a 1ª tentativa recebe só o recorte e as seguintes, se a
+  resposta não validar, o prompt INTEIRO (escalonamento). Os tópicos são
+  PARTIÇÃO do mesmo texto (`splitPrompt` por cabeçalho mapeado ou marcador
+  `@@topic:<chave>@@`; `renderChunks(.., "all")` = o prompt da IA externa, sem
+  marcadores) — NUNCA uma segunda redação. Catálogos ÚNICOS em
+  `lib/ai/topics/catalogs.ts` (dashboards: `lib/import/dashboard/topics.ts`,
+  com `WIDGET_SETTINGS_TOPIC`/`DASHBOARD_SETTINGS_TOPIC`/`VISUAL_TYPE_TOPICS`
+  exaustivos por `satisfies` — chave/tipo novo sem tópico quebra o
+  typecheck). Todo `runJsonGenerationLoop` passa `topics:` (guarda estática).
+  Seção NOVA de prompt (cabeçalho de nível 1–2) sem classificação quebra
+  `lib/ai/topics/catalogs.test.ts`; `null` em dicionário de settings só com
+  justificativa na allowlist do mesmo teste. Ao criar feature que a IA se
+  propõe a facilitar, entregue JUNTO: dicionário/SPEC derivado, tópico,
+  validador, export (round-trip) e apply pelo choke point — e o prompt externo
+  sai atualizado sozinho. **Nós da Tree pela IA:** o que aparece DENTRO do
+  cartão (linhas Meta/Realizado/Projetado, fonte do realizado, fatores,
+  cadência) é do NÓ — seção `mapas` do contrato dashboard-import
+  (`lib/import/dashboard/tree-maps.ts` puro + `lib/tree/ai-maps.ts`; delta por
+  nó, `payload.rows` mescla por `kind`; apply SÓ por `updateTreeNode`/
+  `updateTreeNote`/`createTreeNode`/`createTreeNote`/`setTreeNodeParent`;
+  edita e cria, NUNCA exclui; Desfazer cobre os nós). `settings.tree` é
+  SANEADO (`tree-settings.ts` — chave inventada = aviso + descarte) e a prévia
+  diz "sem mudança" quando o delta não altera o widget. Ver
+  `docs/arquitetura.md` §4.11.4 e invariante 44.
 - **Kanban/Agenda no import: settings SANEADO, vínculo local NUNCA no JSON
   (07/09/2026):** `WidgetSettings.kanban`/`.agenda` deixaram de ser `null` no
   dicionário (a IA CONFIGURA quadro e calendário) e deixaram de ser

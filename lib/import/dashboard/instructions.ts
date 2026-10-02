@@ -1,3 +1,14 @@
+// Versão: 1.14 | Data: 02/10/2026
+// v1.14 (02/10/2026): (a) seção "mapas" — os NÓS da Tree (indicador,
+//   Multi-fatores, ritual, anotação) entram no contrato, com as linhas do
+//   cartão (payload.rows) derivadas de INDICATOR_ROW_LABELS e a cadência de
+//   RITUAL_CADENCE_LABELS; (b) o SPEC ganha MARCADORES de tópico
+//   (`@@topic:<chave>@@`, lib/ai/topics/split.ts) e os blocos de settings saem
+//   AGRUPADOS por tópico (WIDGET_SETTINGS_TOPIC/DASHBOARD_SETTINGS_TOPIC de
+//   topics.ts). O texto é o mesmo para a IA externa (marcadores removidos); a
+//   interna recebe só os tópicos que o roteador escolher; (c) o modelo da Base
+//   manual vira seção própria ("BASE MANUAL — …"), para poder ficar de fora
+//   quando o pedido não a usa.
 // Versão: 1.13 | Data: 18/09/2026
 // v1.13 (18/09/2026): a seção de FAMÍLIAS ganha as duas frases que faltavam —
 //   o valor de um filtro de coordenada é a CHAVE do membro (rótulo passa na
@@ -94,10 +105,30 @@ import {
   formulaFuncsIn,
   renderDocBlock,
 } from "./settings-docs";
+import {
+  DASHBOARD_SETTINGS_TOPIC,
+  DASHBOARD_TOPICS,
+  WIDGET_SETTINGS_TOPIC,
+} from "./topics";
+import { topicMarker } from "@/lib/ai/topics/split";
+import {
+  INDICATOR_ROW_LABELS,
+  PLAN_FIELDS,
+} from "@/lib/tree/payload";
+import { CHILDREN_OPS } from "@/lib/indicators/model";
+import { RITUAL_CADENCE_LABELS } from "@/lib/rituals/cadence";
+import {
+  MAX_NEW_MAP_NODES,
+  TREE_MAP_NODE_KINDS,
+  TREE_NOTE_STATUSES,
+} from "./tree-maps";
 
 export interface ImportPromptParts {
   basesLabel: string; // ex.: 'Leads do Bitrix ("leads"), Deals do Bitrix ("deals")'
   baseModelJson: string; // JSON do modelo das Bases (campos/tipos/opções/subs/conexões)
+  // v1.14: Base manual (dados, famílias, lançamentos) em seção PRÓPRIA — vazio
+  // = org sem Base manual (sem seção).
+  manualModelJson?: string;
   sampleJson: string; // JSON das amostras (por Base; ~20 linhas com cobertura cada)
   sampleNote: string; // observações das amostras (colunas sem dado etc.)
   manual?: string; // variante "completo": manual de construção inteiro
@@ -126,6 +157,86 @@ const filterOpList = FILTER_OPS.map((o) => `${o.op} (${o.label})`).join(" | ");
 const paletteList = Object.entries(PALETTES)
   .map(([k, v]) => `${k} (${v.label})`)
   .join(" | ");
+
+/**
+ * v1.14 (02/10/2026): renderiza um dicionário de settings AGRUPADO por tópico
+ * — cada grupo precedido do marcador dele (lib/ai/topics/split.ts). A IA
+ * externa vê as mesmas linhas (marcadores removidos); a interna, só os grupos
+ * dos tópicos escolhidos. Termina devolvendo o texto ao tópico `returnTo`.
+ */
+function renderDocBlockByTopic<K extends string>(
+  doc: Record<K, string | null>,
+  topicOf: Record<K, string>,
+  returnTo = "nucleo"
+): string {
+  const order = ["core", ...DASHBOARD_TOPICS.map((t) => t.key)];
+  const groups = new Map<string, Record<string, string | null>>();
+  for (const k of Object.keys(doc) as K[]) {
+    const t = topicOf[k];
+    if (!groups.has(t)) groups.set(t, {});
+    (groups.get(t) as Record<string, string | null>)[k] = doc[k];
+  }
+  const out: string[] = [];
+  for (const t of order) {
+    const g = groups.get(t);
+    if (!g || !Object.values(g).some((v) => v != null)) continue;
+    out.push(topicMarker(t === "core" ? returnTo : t));
+    out.push(renderDocBlock(g));
+  }
+  out.push(topicMarker(returnTo));
+  return out.join("\n");
+}
+
+const indicatorRowList = Object.entries(INDICATOR_ROW_LABELS)
+  .map(([k, l]) => `"${k}" (${l})`)
+  .join(", ");
+
+// v1.14: os NÓS da Tree. Derivado dos enums reais (lib/tree/payload.ts,
+// lib/rituals/cadence.ts, lib/indicators/model.ts, tree-maps.ts).
+const TREE_MAPS_SPEC = String.raw`### "mapas" — nós da Tree (indicadores, Multi-fatores, rituais, anotações)
+
+Um widget "tree" no modo "livre" DESENHA um mapa ("settings.tree.mapKey"); os
+NÓS moram no MAPA, não no widget — tudo que aparece DENTRO dos cartões (as
+linhas Meta/Realizado/Projetado, a fonte do realizado, os fatores de um plano,
+a cadência de um ritual) é do nó. No ESTADO ATUAL eles vêm em "mapas":
+
+"mapas": [ { "mapKey": "metas_4t26", "nodes": [
+  { "key": "mrr_inbound", "parentKey": "mrr_total", "kind": "indicator", "label": "MRR novo inbound",
+    "payload": { "indicator": "mrr_inbound", "tag": "N1", "childrenOp": "×",
+      "rows": [ { "kind": "composicao" }, { "kind": "meta" }, { "kind": "realizado" },
+                { "kind": "projetado" }, { "kind": "atingimento", "hidden": true } ] } }
+] } ]
+
+- "kind": ${TREE_MAP_NODE_KINDS.join(" | ")} (anotação | indicador | Multi-fatores | ritual).
+- EDITAR um nó: "mapKey" + a "key" do nó + SÓ o que muda (delta, como nos
+  widgets) — o resto do nó é preservado pelo servidor.
+- LINHAS DO CARTÃO de um indicador: "payload.rows", kinds ${indicatorRowList}.
+  "hidden": true OCULTA a linha, "hidden": false a mostra, "label" troca o
+  rótulo curto. Mande só as linhas que mudam — ex.: ocultar o Realizado de um
+  nó = { "key": "<key>", "payload": { "rows": [ { "kind": "realizado", "hidden": true } ] } }.
+  Para "todos os cartões", repita o delta para CADA nó "indicator" de cada mapa.
+  Mandar as ${String(Object.keys(INDICATOR_ROW_LABELS).length)} linhas define também a ORDEM.
+- payload de "indicator": "indicator" (chave de goal_metrics), "tag" (etiqueta
+  livre, ex. "N1"), "responsible" (nome — meta/realizado de UMA pessoa),
+  "childrenOp" (${CHILDREN_OPS.join(" ")} — como os filhos compõem o projetado),
+  "projectFrom" ("meta" | "realizado"), "hint" (frase sob o rótulo),
+  "unitInCell" (false omite a unidade), "realized" (fonte própria do realizado
+  — COPIE do estado se precisar mantê-la; não invente tokens).
+- payload de "plan" (Multi-fatores): "factors": [ { "title": "…", "text": "…" } ]
+  (molde clássico: ${PLAN_FIELDS.map(([, l]) => l).join(", ")}), "responsible",
+  "indicators": [chaves], "hideSteps".
+- payload de "ritual": "schedule": { "cadence": ${Object.keys(RITUAL_CADENCE_LABELS).join(" | ")},
+  "anchor": "AAAA-MM-DD", "weekday"/"weekdays" (0=dom … 6=sáb), "monthDay"
+  (1–31 | "ultimo_util"), "everyDays", "until" }, "responsible", "reading",
+  "auto", "lookahead" (1–5).
+- anotação ("note"): "label", "body", "status" (${TREE_NOTE_STATUSES.join(" | ")}),
+  "goal" (true = Resultado esperado), "dueDate" (AAAA-MM-DD).
+- CRIAR: "key" nova + "kind" + "label" + "parentKey" (key de nó existente ou
+  novo desta resposta; ausente = raiz) + o "payload" completo. Até
+  ${String(MAX_NEW_MAP_NODES)} nós novos por resposta.
+- Re-pendurar: troque "parentKey". Trocar o "kind" não é possível. Você NÃO
+  exclui nós (omitir não apaga).
+- Pedido só sobre nós: responda com "mapas" e "widgets": [] — é válido.`;
 
 // Exemplo mínimo do SPEC — exportado para o teste de paridade VALIDÁ-LO com o
 // validador real (instructions.test.ts): se o validador evoluir e o exemplo
@@ -221,12 +332,14 @@ quer; você responde com O JSON e nada mais.
 ## Settings do dashboard
 
 "settings": {
-${renderDocBlock(DASHBOARD_SETTINGS_DOC)}
+${renderDocBlockByTopic(DASHBOARD_SETTINGS_DOC, DASHBOARD_SETTINGS_TOPIC)}
 }
+${topicMarker("dashboard_geral")}
 
 REGRA IMPORTANTE: em dashboard multi-Base, configure "fieldBySource" para cada
 Base filtrar pela SUA coluna de data (ex.: negócios por "closed_at", leads por
 "source_created_at") — sem isso, registros sem a data primária somem.
+${topicMarker("core")}
 
 ## "fields" — campos personalizados a criar
 
@@ -416,58 +529,78 @@ promovida a tipo próprio).
 ### Settings do widget (todos opcionais; omitir = padrão)
 
 "settings": {
-${renderDocBlock(WIDGET_SETTINGS_DOC)}
+${renderDocBlockByTopic(WIDGET_SETTINGS_DOC, WIDGET_SETTINGS_TOPIC)}
 }
+${topicMarker("aparencia")}
 Paletas: ${paletteList}.
+${topicMarker("tree")}
+
+${TREE_MAPS_SPEC}
+${topicMarker("nucleo")}
 
 ### REGRAS SEMÂNTICAS (não viole)
 
+${topicMarker("comparacao_metas")}
 1. Comparação e businessDayAlign são MUTUAMENTE EXCLUSIVOS (align vence).
+${topicMarker("comparacao_metas")}
 2. businessDayAlign / periodWindow / goalLine exigem dimensão de data MENSAL
    ("month_name" ou "month_year") e período ativo (defaultPreset ≠ "all").
+${topicMarker("comparacao_metas")}
 3. Comparação não funciona com período "all" (não há base de comparação).
+${topicMarker("formulas")}
 4. Fórmula de totais NUNCA usa [Data atual]; fórmula por registro NUNCA usa
    agregados/SOMASE nem [Meta: …]; [Meta: …] nunca dentro de SOMASE/CONT.SE/
    MÉDIASE (é um valor por consulta, não uma coluna).
+${topicMarker("metricas")}
 5. Widget kpi/calculado: use UMA métrica (a primeira é a exibida).
+${topicMarker("filtros")}
 6. Filtro por operação/responsável em widget: filtro FIXO usa o NOME exato do
    cadastro como "value" (ex.: { "field": "responsible_id", "op": "eq",
    "value": "Maria Silva" }); quando o LEITOR deve escolher, prefira
    quickFilters. Nunca invente UUID.
+${topicMarker("filtros")}
 7. Condições de SOMASE/CONT.SE sobre responsible_id/operation_id comparam por
    NOME exato do cadastro (ex.: [responsible_id] = "Maria Silva").
+${topicMarker("nucleo")}
 8. Grid: SEM "settings.canvas.gridVersion" o JSON usa a escala CLÁSSICA de 12
    colunas — w×h típicos: cards 4×4, gráficos/tabelas 6×8; organize por linhas
    (y crescente), sem sobreposição (o sistema converte para a grade fina ao
    aplicar). Se o ESTADO ATUAL trouxer "settings.canvas.gridVersion": 2, as
    posições dele estão na grade FINA (120 colunas; cards ~39×15, gráficos/
    tabelas ~59×31) — use a MESMA escala do estado e não misture as duas.
+${topicMarker("subbases")}
 9. Se a análise precisa de um recorte fixo reutilizável com data própria
    (ex.: reuniões), crie uma Sub-base em "subSources" e use a key dela em
    "sources" — não replique o filtro em cada widget.
+${topicMarker("nucleo")}
 10. Campos que os widgets referenciam DEVEM existir no MODELO DAS BASES
     abaixo ou ser declarados em "fields"/"correspondences".
+${topicMarker("subbases")}
 11. Dashboard com 2+ Bases: configure SEMPRE "periodBar.fieldBySource" com o
     campo de data de CADA Base (sem isso, registros sem a data primária
     somem); para agrupar/filtrar um conceito que existe nas duas Bases, use
     um campo unificado ("unified:<key>" — existente no modelo ou declarado em
     "correspondences"), nunca o campo de uma Base só; refs "match:<base>:<ref>"
     só funcionam entre Bases com Conexão listada no modelo ("conexoes").
+${topicMarker("dimensoes")}
 12. EIXO DE TEMPO: para "por mês/trimestre/semana", basta a dimensão com um
     campo de DATA + "transform" — o agrupamento pelo bucket é automático.
     NUNCA use "dateAgg" em gráficos ou tabelas agregadas (ele é EXCLUSIVO de
     tabela com "rowMode": "records", e nunca com métrica de fórmula) — o
     validador o remove com aviso.
+${topicMarker("metricas")}
 13. MOEDA DO RESULTADO: use "resultCurrency" SOMENTE quando precisar
     CONVERTER moedas (exige taxas cadastradas em Campos → Moedas; sem
     taxa o widget exibe "—"). Para razões e valores já em R$, OMITA
     (resultado numérico é o seguro); percentual = "resultPercent": true.
+${topicMarker("subbases")}
 14. SUB-BASES: REUTILIZE as Sub-bases existentes do MODELO quando o recorte
     desejado for o mesmo — use a key EXISTENTE em "sources"/escopos "@" e NÃO
     declare de novo (nunca crie variantes tipo "_v2"). O escopo "@sub" das
     fórmulas deve apontar para as MESMAS keys usadas em "sources" da métrica.
     (O validador descarta Sub-bases de recorte idêntico e remapeia as
     referências, com aviso.)
+${topicMarker("core")}
 
 ## Exemplo mínimo completo
 
@@ -495,6 +628,14 @@ export function buildImportPromptText(parts: ImportPromptParts): string {
       "MODELO DAS BASES (campos disponíveis — use estas refs)",
       parts.baseModelJson
     ),
+    ...(parts.manualModelJson
+      ? [
+          section(
+            "BASE MANUAL — DADOS, FAMÍLIAS E LANÇAMENTOS (números digitados; ver a seção da Base manual)",
+            parts.manualModelJson
+          ),
+        ]
+      : []),
     section(
       "AMOSTRAS DE DADOS (por Base; ~20 registros reais cada, escolhidos para cobrir todas as colunas)",
       `${parts.sampleNote}\n\n${parts.sampleJson}`
