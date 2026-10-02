@@ -1,4 +1,9 @@
-// Versão: 1.3 | Data: 01/10/2026
+// Versão: 1.4 | Data: 02/10/2026
+// v1.4 (02/10/2026): fundo do canvas configurável (`canvas` — TreeSettings.
+//   canvas: cor + trama pontos/linhas/nenhum) com padrão do ESTILO do
+//   dashboard (Clássico: pontos, como sempre; estilos novos: liso sobre a
+//   superfície, sem moldura). Ao apresentar, a barra de ferramentas e a barra
+//   do nó selecionado somem — no slide, a árvore é conteúdo.
 // v1.3 (01/10/2026): merge com a main — a v1.2 dela (clique direito na
 //   prévia vazia) chega aqui renumerada como v1.3; as duas mudanças convivem.
 // v1.3 (01/10/2026): o clique direito na PRÉVIA ainda vazia abre o menu de tipo.
@@ -57,6 +62,10 @@
 //    uma segunda cópia.
 "use client";
 
+import { useDashboardStyle } from "../dashboard-style-context";
+import { usePresenting } from "../presenting-context";
+import { isClassicStyle } from "@/lib/dashboards/style";
+import { normalizeHexColor } from "@/lib/theme";
 import {
   useCallback,
   useEffect,
@@ -242,6 +251,8 @@ export interface RootCreateInput {
 }
 
 export interface TreeRootViewProps {
+  /** v1.4: fundo do canvas (ausente = padrão do estilo). */
+  canvas?: { bg?: string; pattern?: "pontos" | "linhas" | "nenhum" };
   nodes: TreeNode[];
   geometry: TreeNodeGeometry[];
   defaultDirection: TreeDirection;
@@ -310,7 +321,14 @@ export function TreeRootView({
   sizeOf,
   renderBody,
   onCreateOperational,
+  canvas,
 }: TreeRootViewProps) {
+  // v1.4: estilo do board e modo Apresentar.
+  const dstyle = useDashboardStyle();
+  const styled = !isClassicStyle(dstyle);
+  const presenting = usePresenting();
+  const pattern = canvas?.pattern ?? (styled ? "nenhum" : "pontos");
+  const canvasBg = normalizeHexColor(canvas?.bg) ?? undefined;
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [size, setSize] = useState({ w: 0, h: 0 });
   const [view, setView] = useState<View | null>(null);
@@ -862,14 +880,22 @@ export function TreeRootView({
   };
 
   const shell = cn(
-    "bg-background relative flex min-h-0 flex-col overflow-hidden rounded-md border",
+    "relative flex min-h-0 flex-col overflow-hidden rounded-md",
+    // v1.4: num board com estilo o canvas senta na superfície, sem moldura.
+    styled && !fullscreen ? "bg-transparent" : "bg-background border",
     fullscreen ? "fixed inset-4 z-50 shadow-2xl" : "h-full min-h-[240px] flex-1"
   );
 
   const body = (
     <div className={shell}>
-      {/* Barra da Root: zoom, encaixe, nova branch, tela cheia. */}
-      <div className="bg-background/90 flex flex-wrap items-center gap-1 border-b px-2 py-1">
+      {/* Barra da Root: zoom, encaixe, nova branch, tela cheia.
+          v1.4: some ao apresentar (interface de trabalho). */}
+      <div
+        className={cn(
+          "bg-background/90 flex flex-wrap items-center gap-1 border-b px-2 py-1",
+          presenting && "hidden"
+        )}
+      >
         <Button
           type="button"
           variant="ghost"
@@ -952,7 +978,7 @@ export function TreeRootView({
         </Button>
       </div>
 
-      {selectedNode && selectedNode.id !== ROOT_DRAFT_ID ? (
+      {selectedNode && selectedNode.id !== ROOT_DRAFT_ID && !presenting ? (
         <SelectedBar
           node={selectedNode}
           parent={parents.get(selectedNode.id) ?? null}
@@ -974,9 +1000,13 @@ export function TreeRootView({
         ref={containerRef}
         className={cn(
           "relative min-h-0 flex-1 touch-none overflow-hidden select-none",
-          "bg-[radial-gradient(circle,var(--border)_1px,transparent_1px)] [background-size:20px_20px]",
+          pattern === "pontos" &&
+            "bg-[radial-gradient(circle,var(--border)_1px,transparent_1px)] [background-size:20px_20px]",
+          pattern === "linhas" &&
+            "bg-[linear-gradient(var(--border)_1px,transparent_1px),linear-gradient(90deg,var(--border)_1px,transparent_1px)] [background-size:24px_24px]",
           "cursor-grab active:cursor-grabbing"
         )}
+        style={canvasBg ? { backgroundColor: canvasBg } : undefined}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}

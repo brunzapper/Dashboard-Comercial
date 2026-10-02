@@ -1,3 +1,8 @@
+// Versão: 1.2 | Data: 02/10/2026
+// v1.2 (02/10/2026): `dashboardStyle` — estilo PADRÃO dos dashboards da org
+//   (lib/dashboards/style.ts). Chave SÓ de organização, fora de UiPrefs: o
+//   estilo de um board é o mesmo para todos que o veem, então não existe
+//   override pessoal nem trava. Ausente = Clássico (padrão do app).
 // Versão: 1.1 | Data: 12/09/2026
 // v1.1 (12/09/2026): `hubCardHeight`/`operacaoCardHeight` — altura mínima do
 //   card. Em LISTA o card nasce de uma linha só e ficava fino demais para
@@ -19,6 +24,8 @@
 // Chave legada: `sidebarPinned` vivia solta na raiz de user_settings.settings
 // (Fase 10). normalizeUiPrefs a ACEITA na raiz e a promove — a linha antiga
 // nunca é reescrita às cegas (mesmo trato do lastView "/agenda" na Home).
+
+import { isDashboardStyleKey, type DashboardStyleKey } from "@/lib/dashboards/style";
 
 export type HubLayout = "grid" | "list" | "preview";
 export const HUB_SORT_OPTIONS = [
@@ -194,6 +201,8 @@ export interface OrgUiPrefs {
   locked: ReadonlySet<UiPrefKey>;
   /** Override de descrição dos cards de Operação (catálogo é código). */
   operacaoDescriptions: Record<string, string>;
+  /** v1.2: estilo padrão dos dashboards (ausente = Clássico). */
+  dashboardStyle?: DashboardStyleKey;
 }
 
 export const EMPTY_ORG_UI_PREFS: OrgUiPrefs = {
@@ -223,7 +232,15 @@ export function normalizeOrgUiPrefs(v: unknown): OrgUiPrefs {
       operacaoDescriptions[k] = val.trim();
     }
   }
-  return { values: normalizeUiPrefs(raw.values), locked, operacaoDescriptions };
+  const out: OrgUiPrefs = {
+    values: normalizeUiPrefs(raw.values),
+    locked,
+    operacaoDescriptions,
+  };
+  if (isDashboardStyleKey(raw.dashboardStyle)) {
+    out.dashboardStyle = raw.dashboardStyle;
+  }
+  return out;
 }
 
 export interface ResolvedUiPrefs {

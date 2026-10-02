@@ -1,3 +1,6 @@
+// Versão: 1.13 | Data: 02/10/2026
+// v1.13 (02/10/2026): repassa `settings.canvas` (fundo do canvas da Root) ao
+//   TreeRootView.
 // Versão: 1.12 | Data: 01/10/2026
 // v1.12 (01/10/2026): (a) avisa prontidão ao pré-render do modo Apresentar
 //   (`useWarmupReady`): pronta quando a árvore E os números dos indicadores
@@ -1218,6 +1221,7 @@ export function TreeWidget({
             DENTRO do canvas, que vai junto para a tela cheia. */}
         <TreeRootView
           key={scopeId}
+          canvas={settings?.canvas}
           nodes={visibleNodes}
           geometry={data.geometry}
           defaultDirection={rootDirection}

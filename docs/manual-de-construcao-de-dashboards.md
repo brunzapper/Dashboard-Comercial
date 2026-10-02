@@ -1,4 +1,8 @@
-<!-- Versão: 1.42 | Data: 01/10/2026 -->
+<!-- Versão: 1.43 | Data: 02/10/2026 -->
+<!-- v1.43 (02/10/2026): §5.19 — Estilo do dashboard (⋮ → Estilo e
+     apresentação; padrão da organização em Configurações); §5.8 — formatação
+     do texto da Nota, papéis do bloco e alinhamento; §5.18 — palco 16:9,
+     entrada suave, fundo por aba e "Ocultar ao apresentar". -->
 <!-- v1.42 (01/10/2026): §5.18 — "Apresentar" no menu ⋮ do dashboard,
      preparação dos slides antes de começar, ajuste à tela, sem barra de
      período nem ⋮ dos widgets; §5.17 — meses fixos dos indicadores da Tree. -->
@@ -1323,8 +1327,21 @@ Recursos dentro do texto:
   meio do texto — uma nota pode dizer "Fechamos {= SOMA…} este mês".
 - **Links**: o botão "Link…" transforma palavras selecionadas em atalhos para
   um widget (de qualquer dashboard/aba — modo foco, §3.7).
-- Aparência: cor do papel (padrão amarelo), cor do texto/links, tamanho da
-  fonte, opção "Sem moldura (só o papel)".
+- **Formatação** (02/10/2026), linha a linha: `^^ SEÇÃO` (rótulo pequeno em
+  caixa-alta, o "kicker"), `# Título`, `## Subtítulo`, `### Menor`,
+  `- item` / `1. item` (listas), `> citação`, `---` (filete) e, dentro da
+  linha, `**negrito**`, `*itálico*` e `[rótulo](https://…)` (link externo,
+  abre em nova aba). Uma linha inteira entre `(( ))` é **comentário do autor**:
+  só aparece no modo edição — use para lembretes ("cole aqui os links") que
+  não podem vazar no slide. Texto sem nenhuma marcação continua como antes.
+- Aparência ("Nota / texto"): **Papel do bloco** — *Post-it* (papel colorido,
+  o padrão), *Texto* (sem fundo nem moldura: o texto senta direto no slide),
+  *Comentário* (coluna de notas com filete à esquerda, texto secundário) e
+  *Rodapé* (pequeno, com filete em cima); **Alinhamento**, **Posição
+  vertical** (topo/meio/base) e **Respiro interno**; cor do papel, do texto e
+  dos links, tamanho da fonte e "Sem moldura (só o papel)". Num dashboard com
+  estilo (§5.19), a nota sem cor própria perde o amarelo e usa a superfície do
+  estilo.
 
 ### 5.9 Forma (`forma`)
 
@@ -1720,6 +1737,49 @@ Home/End vão às pontas e Esc sai. Os widgets continuam vivos — filtros,
 árvores e tabelas respondem durante a apresentação — e o ponteiro laser está na
 barra flutuante. Abas de trabalho podem ficar fora dos slides
 (`dashboard.settings.presentation.hiddenTabs`).
+
+**Palco 16:9 e entrada suave (02/10/2026).** Em **⋮ → Estilo e apresentação**
+escolha o **Enquadramento**: *Palco 16:9* desenha cada slide num quadro fixo,
+com margens constantes, e o escala inteiro à tela (sem rolagem — o slide fica
+igual em qualquer monitor ou projetor); *Só a altura* é o comportamento
+anterior. A **Entrada do slide** *Suave* faz os blocos aparecerem em sequência
+(fade curto; desligado para quem pediu menos movimento no sistema). Nos
+estilos novos o padrão já é palco + suave. Cada aba pode ter **fundo próprio**
+(ex.: capa escura — `tabs[].background`). Um widget de trabalho (formulário de
+lançamento, tabela de conferência) sai do slide pelo **⋮ do widget → Ocultar
+ao apresentar**, sem deixar de existir no dashboard. Ao apresentar também somem
+a barra de busca e o "+" das tabelas, os filtros rápidos, a barra de
+ferramentas da Tree, o aviso "Responsável não encontrado" e o sino de tarefas.
+
+### 5.19 Estilo do dashboard
+
+**⋮ do dashboard → Estilo e apresentação** escolhe a linguagem visual do
+dashboard inteiro — tipografia, cores, blocos, tabelas e gráficos:
+
+- **Clássico** — o visual de sempre (blocos com moldura e faixa de título);
+- **Editorial** — papel off-white quente, títulos em serifa, divisórias finas
+  em vez de caixas e um único destaque de cor;
+- **Editorial escuro** — quase-preto quente com texto a ~90% de brilho (capas,
+  projetor);
+- **Executivo** — sans neutra, superfícies brancas de um nível sobre cinza
+  frio.
+
+Nos estilos novos: o título do bloco vira um **título-conclusão** (sem faixa,
+na fonte de exibição; o ⋮ aparece ao passar o mouse) com **kicker** opcional
+(Aparência → Título e borda → Kicker); tabelas ganham cabeçalho em rótulo
+pequeno com filete; a **Tabela de metas** usa linhas de altura fixa, unidade
+só no rótulo ("(R$)"), nível "N0/N1" como etiqueta, linha em negrito como
+conclusão (filete em cima), atingimento como barrinha e mês sem realizado como
+"—" neutro (cada escolha pode ser fixada no widget); gráficos usam grade suave,
+sem linha de eixo, e cores de um tom só. Nos gráficos com 2+ séries,
+**Aparência → Cores das séries → Destacar uma série** deixa só ela na cor de
+destaque e as demais em cinza.
+
+O dashboard pode **usar o padrão da organização** (definido pelo
+Administrador em Configurações → Tema e interface → Estilo padrão dos
+dashboards) ou fixar o próprio, com ajustes de cor de destaque e fontes.
+Trocar de estilo nunca altera a configuração dos widgets: voltar ao Clássico
+devolve o visual de antes.
 
 ## 6. O editor de widget, seção por seção
 

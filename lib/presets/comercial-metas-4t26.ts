@@ -1,4 +1,14 @@
-// Versão: 1.1 | Data: 01/10/2026
+// Versão: 1.2 | Data: 02/10/2026
+// v1.2 (02/10/2026): PROVA do estilo de apresentação (lib/dashboards/style.ts).
+//   O deck nasce no estilo "Editorial" (papel off-white, títulos em serifa,
+//   divisórias finas) e apresenta em PALCO 16:9 com entrada suave. Capa escura
+//   própria (fundo por aba) com kicker, filete, título grande e subtítulo;
+//   notas laterais viram COLUNA DE COMENTÁRIO (sem fundo cinza, com filete);
+//   "Fontes e critérios" vira um slide de texto com títulos e listas, e o
+//   placeholder dos links é um comentário de AUTOR (( … )) — não vaza mais no
+//   slide. As linhas N0 do painel são a conclusão (destaque). A Base manual
+//   saiu do slide de Investimento para uma aba de TRABALHO ("Lançamentos"),
+//   fora da apresentação. Versão do preset → 3.
 // v1.1 (01/10/2026): slides que OCUPAM a tela. (a) grade FINA (gridVersion 2,
 //   linha quadrada): cada slide é um bloco 120 × 64 células, ~16:9 em
 //   qualquer largura — antes as posições eram do espaço legado com linha de
@@ -367,8 +377,11 @@ export const METAS_4T26_NODES: PresetMapNode[] = NODES.map((n) =>
 );
 
 // ---- widgets / abas = slides ---------------------------------------------
-const TABS = [
-  { id: "capa", name: "Capa" },
+// v1.2: cores da capa escura (quase-preto quente, texto a ~90%).
+const COVER_BG = "#1c1b19";
+const COVER_INK = "#ebe7e0";
+const TABS: NonNullable<NonNullable<PresetDashboard["settings"]>["tabs"]> = [
+  { id: "capa", name: "Capa", background: { mode: "solid", color: COVER_BG } },
   { id: "painel", name: "Painel estratégico" },
   { id: "vendedores", name: "Vendedores" },
   { id: "mrr_inbound", name: "MRR inbound" },
@@ -383,6 +396,8 @@ const TABS = [
   { id: "ritmo", name: "Ritmo" },
   { id: "fontes", name: "Fontes e critérios" },
   { id: "arvore", name: "Árvore completa" },
+  // v1.2: aba de TRABALHO — o lançamento do realizado não é slide.
+  { id: "lancamentos", name: "Lançamentos (trabalho)" },
 ];
 
 /** v1.1: os meses da apresentação, fixos (nada depende da barra de período). */
@@ -412,10 +427,18 @@ const base = (key: string, tab: string, title: string, visual: PresetWidget["vis
 const nota = (tab: string, key: string, title: string, text: string, pos: PresetWidget["grid_position"], ap?: NonNullable<WidgetSettings["appearance"]>["note"]) =>
   base(key, tab, title, "nota", { note: { text }, ...(ap ? { appearance: { note: ap } } : {}) }, pos);
 
-/** v1.1: a nota "como ler" ao lado da tabela (sem px fixo — escala no slide). */
-const SIDE_NOTE = { bg: "#f1f5f9", color: "#0f172a" } as const;
+/** v1.1: a nota "como ler" ao lado da tabela (sem px fixo — escala no slide).
+ * v1.2: COLUNA DE COMENTÁRIO — sem fundo, filete à esquerda, texto secundário;
+ * o título vira o kicker do próprio texto (a variante não tem barra). */
 const lado = (tab: string, title: string, text: string) =>
-  nota(tab, "como_ler", title, text, { x: SIDE_X, y: 0, w: SIDE_W, h: SLIDE_H }, SIDE_NOTE);
+  nota(
+    tab,
+    "como_ler",
+    title,
+    `^^ ${title.toLocaleUpperCase("pt-BR")}\n${text}`,
+    { x: SIDE_X, y: 0, w: SIDE_W, h: SLIDE_H },
+    { variant: "comentario", valign: "center" }
+  );
 
 const tree = (tab: string, rootRef: string | null, title: string, h = SLIDE_H): PresetWidget =>
   base("tree", tab, title, "tree", {
@@ -442,7 +465,16 @@ const rows = (list: [string, string, boolean?][]) =>
   list.map(([indicator, label, bold]) => ({ indicator, label, ...(bold ? { bold: true } : {}) }));
 
 export const METAS_4T26_WIDGETS: PresetWidget[] = [
-  nota("capa", "titulo", "Capa", "Comercial\nMetas e desdobramentos\n\n4º trimestre de 2026", full, { bg: "#212121", color: "#ffffff", fontSize: 44, frameless: true }),
+  // v1.2: capa — kicker, filete, título grande em serifa e o período, no
+  // terço inferior (valign bottom) sobre o fundo escuro da aba.
+  nota(
+    "capa",
+    "titulo",
+    "Capa",
+    "^^ Comercial · 4T26\n---\n# Metas e desdobramentos\n4º trimestre de 2026 · outubro a dezembro",
+    full,
+    { variant: "texto", valign: "bottom", color: COVER_INK, fontSize: 30, padding: 24 }
+  ),
 
   table("painel", "Painel estratégico", {
     mode: "indicadores",
@@ -451,7 +483,8 @@ export const METAS_4T26_WIDGETS: PresetWidget[] = [
       ["mrr_novo_outbound", "N1 MRR novo outbound (R$)"],
       ["investimento_comercial", "N1 Investimento comercial (R$)"],
       ["clientes_novos", "N1 Clientes novos"],
-      ["mrr_final", "N0 MRR final (R$)"],
+      // v1.2: as linhas N0 são a CONCLUSÃO do painel (destaque com filete).
+      ["mrr_final", "N0 MRR final (R$)", true],
       ["cac", "N0 CAC (R$/cliente)", true],
     ]),
     editable: true,
@@ -546,39 +579,62 @@ export const METAS_4T26_WIDGETS: PresetWidget[] = [
         ["investimento_comercial", "N1 investimento comercial", true],
       ]),
       editable: true,
-      note: "O realizado sai da Base manual — lance os valores do mês no quadro ao lado.",
-    },
-    { x: 0, y: 0, w: 64, h: SLIDE_H }
+    }
   ),
-  base("lancamentos", "investimento", "Lançar o realizado (Base manual)", "base_manual", {
+  lado(
+    "investimento",
+    "De onde vem o realizado",
+    "O realizado sai da **Base manual**: os valores do mês são lançados na aba *Lançamentos*, que fica fora da apresentação.\n\n" +
+      "Investimento comercial = equipe + comissões + softwares + consultorias."
+  ),
+  // v1.2: interface de trabalho na aba própria (fora dos slides) — também
+  // marcada para não aparecer caso a aba seja incluída na apresentação.
+  base("lancamentos", "lancamentos", "Lançar o realizado (Base manual)", "base_manual", {
     baseManual: {
       series: ["investimento_comercial", "marketing", "mrr_abertura", "mrr_expansao", "mrr_perda"],
       defaultMonth: METAS_4T26_MONTH_KEYS[0],
     },
-  }, { x: 65, y: 0, w: SLIDE_W - 65, h: SLIDE_H }),
+    hideInPresentation: true,
+  }, full),
 
   tree("plano_1", "preset:plano_1", "1. Implantar ciclo completo com foco no lead"),
   tree("plano_2", "preset:plano_2", "2. Converter inbound com ticket e qualificação"),
   tree("plano_3", "preset:plano_3", "3. Gerar outbound com listas qualificadas"),
   tree("ritmo", "preset:ritmo", "Ritmo de acompanhamento e diagnóstico"),
+  // v1.2: slide de TEXTO com hierarquia — título, fontes em lista com o nome
+  // em negrito, e os critérios numa coluna de comentário ao lado. O lembrete
+  // dos links é comentário de autor: aparece só no modo edição.
   nota(
     "fontes",
     "criterios",
     "Fontes e critérios de cálculo",
-    "Cálculos auditáveis, com metas oficiais separadas das propostas.\n\n" +
-      "Metas e desdobramentos — regras: slides 2, 4, 5 e 6. Metas: slide 9. Árvores e plano: slides 11–19.\n" +
-      "Novo Desenho Comercial — papéis, cadências e listas. Metas por vendedor: slides 16–18.\n" +
-      "Metas Quadrimestre — somente outubro a dezembro, colunas E:G. Fórmulas e conciliação na aba Racional Comercial 4T26.\n\n" +
-      "Taxas e capacidade são premissas. Metas operacionais inteiras arredondam para cima. A fonte original e o orçamento permanecem preservados.\n\n" +
-      "(Cole aqui os links das planilhas — [rótulo](https://…).)",
-    full
+    "^^ Fontes\n" +
+      "# Cálculos auditáveis, com metas oficiais separadas das propostas\n\n" +
+      "- **Metas e desdobramentos** — regras: slides 2, 4, 5 e 6. Metas: slide 9. Árvores e plano: slides 11–19.\n" +
+      "- **Novo Desenho Comercial** — papéis, cadências e listas. Metas por vendedor: slides 16–18.\n" +
+      "- **Metas Quadrimestre** — somente outubro a dezembro, colunas E:G. Fórmulas e conciliação na aba *Racional Comercial 4T26*.\n\n" +
+      "(( Cole aqui os links das planilhas no formato [rótulo](https://…) — este lembrete só aparece no modo edição. ))",
+    { x: 0, y: 0, w: MAIN_W, h: SLIDE_H },
+    { variant: "texto", valign: "center", fontSize: 18 }
+  ),
+  nota(
+    "fontes",
+    "premissas",
+    "Premissas",
+    "^^ Premissas\n" +
+      "Taxas e capacidade são premissas.\n\n" +
+      "Metas operacionais inteiras arredondam para cima.\n\n" +
+      "A fonte original e o orçamento permanecem preservados.",
+    { x: SIDE_X, y: 0, w: SIDE_W, h: SLIDE_H },
+    { variant: "comentario", valign: "center" }
   ),
   tree("arvore", null, "Árvore completa (trabalho)", 96),
 ];
 
 export const METAS_4T26_PRESET: PresetDashboard = {
   presetKey: METAS_4T26_KEY,
-  version: 2,
+  // v1.2: 3 — estilo Editorial, palco 16:9 e a composição de slide nova.
+  version: 3,
   name: "Comercial — Metas e desdobramentos 4T26",
   visible_to_roles: ["admin", "gestor"],
   settings: {
@@ -588,7 +644,10 @@ export const METAS_4T26_PRESET: PresetDashboard = {
     periodBar: { enabled: false, defaultPreset: "este_trimestre", scope: "global" },
     // v1.1: grade fina com linha quadrada (proporção de slide).
     canvas: { gridVersion: 2 },
-    presentation: { hiddenTabs: ["arvore"] },
+    // v1.2: palco 16:9 com entrada suave; a aba de lançamentos é trabalho.
+    presentation: { hiddenTabs: ["arvore", "lancamentos"], fit: "palco", transition: "suave" },
+    // v1.2: estilo Editorial (papel off-white, serifa nos títulos, um destaque).
+    style: { key: "editorial" },
   },
   // Reusa as dependências declaradas pelos presets Inbound/Outbound (ensure
   // por key — nunca sobrescreve): sub-bases de MQL/SQL/vendas/reuniões e o

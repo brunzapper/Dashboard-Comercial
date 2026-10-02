@@ -1,3 +1,6 @@
+// Versão: 1.3 | Data: 02/10/2026
+// v1.3 (02/10/2026): "Estilo padrão dos dashboards" (org_admin) — o estilo que
+//   todo dashboard sem estilo próprio herda (lib/dashboards/style.ts).
 // Versão: 1.2 | Data: 12/09/2026
 // v1.2 (12/09/2026): a aba virou "Tema e interface" (0141) — além das cores,
 //   ela reúne o padrão de INTERFACE da organização (disposição dos cards do
@@ -20,6 +23,7 @@ import {
   normalizeThemeTokens,
 } from "@/lib/theme";
 import { OrgUiPrefsForm } from "@/components/configuracoes/org-ui-prefs-form";
+import { OrgDashboardStyleForm } from "@/components/configuracoes/org-dashboard-style-form";
 import {
   OrgThemeDefaultForm,
   TemaForm,
@@ -97,6 +101,23 @@ export default async function TemaPage() {
             initialValues={org.uiPrefs.values}
             initialLocked={[...org.uiPrefs.locked]}
           />
+        </div>
+      ) : null}
+
+      {org?.isOrgAdmin ? (
+        <div className="flex flex-col gap-4 border-t pt-6">
+          <div>
+            <h2 className="text-lg font-semibold">
+              Estilo padrão dos dashboards
+            </h2>
+            <p className="text-muted-foreground text-sm">
+              A linguagem visual — tipografia, cores, blocos, tabelas e
+              gráficos — de todo dashboard que não escolheu um estilo próprio
+              (⋮ → Estilo e apresentação). Nenhum dashboard é reescrito: voltar
+              ao Clássico devolve o visual de antes.
+            </p>
+          </div>
+          <OrgDashboardStyleForm initial={org.uiPrefs.dashboardStyle ?? null} />
         </div>
       ) : null}
     </div>

@@ -1,4 +1,9 @@
-// Versão: 2.9 | Data: 06/09/2026
+// Versão: 2.10 | Data: 02/10/2026
+// v2.10 (02/10/2026): controles do ESTILO DE APRESENTAÇÃO — "Kicker" (rótulo
+//   acima do título-conclusão) em Título e borda; na Nota, o papel do bloco
+//   (post-it / texto / comentário / rodapé), alinhamento, posição vertical,
+//   respiro e a cola do markdown leve; nos gráficos, a técnica do destaque
+//   (uma série em cor, o resto em cinza).
 // v2.9 (06/09/2026): Tabela Livre — caixa "Barra de fórmula e régua A/B/C"
 //   (appearance.table.formulaBar; ausente = visível p/ quem pode digitar).
 // v2.8 (07/08/2026): "Aplicar" OTIMISTA em background (useBackgroundSave): o
@@ -487,6 +492,28 @@ export function WidgetAppearanceSheet({
               onChange={(v) => patch({ title: { ...ap.title, border: v } })}
               onClear={() => patch({ title: { ...ap.title, border: undefined } })}
             />
+            {/* v2.10: rótulo pequeno em caixa-alta acima do título (só nos
+                estilos com título-conclusão). */}
+            <div className="flex flex-col gap-1">
+              <Label className="text-xs">Kicker (rótulo acima do título)</Label>
+              <input
+                type="text"
+                maxLength={60}
+                value={ap.title?.kicker ?? ""}
+                placeholder="Ex.: RECEITA"
+                onChange={(e) =>
+                  patch({
+                    title: { ...ap.title, kicker: e.target.value || undefined },
+                  })
+                }
+                className="border-input h-8 rounded-md border bg-transparent px-2 text-xs outline-none"
+                aria-label="Kicker"
+              />
+              <p className="text-muted-foreground text-xs">
+                Aparece nos estilos Editorial e Executivo (⋮ do dashboard →
+                Estilo e apresentação).
+              </p>
+            </div>
             {isKpi || isChart ? (
               <div className="flex flex-col gap-1.5">
                 <Label className="text-xs">Selo &quot;Nº dia útil&quot;</Label>
@@ -597,7 +624,115 @@ export function WidgetAppearanceSheet({
 
           {/* ---------- Nota (post-it) ---------- */}
           {isNote ? (
-            <BuilderSection value="nota" title="Nota (post-it)">
+            <BuilderSection value="nota" title="Nota / texto">
+              {/* v2.10: papel do bloco, alinhamento e respiro. */}
+              <div className="flex flex-col gap-1">
+                <Label className="text-xs">Papel do bloco</Label>
+                <Select
+                  value={ap.note?.variant ?? "postit"}
+                  onValueChange={(v) =>
+                    patch({
+                      note: {
+                        ...ap.note,
+                        variant:
+                          v === "postit"
+                            ? undefined
+                            : (v as "texto" | "comentario" | "rodape"),
+                      },
+                    })
+                  }
+                >
+                  <SelectTrigger className="h-8">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="postit">Post-it (papel colorido)</SelectItem>
+                    <SelectItem value="texto">Texto (sem fundo nem moldura)</SelectItem>
+                    <SelectItem value="comentario">Comentário (coluna com filete)</SelectItem>
+                    <SelectItem value="rodape">Rodapé (pequeno, filete em cima)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div className="flex flex-col gap-1">
+                  <Label className="text-xs">Alinhamento</Label>
+                  <Select
+                    value={ap.note?.align ?? "left"}
+                    onValueChange={(v) =>
+                      patch({
+                        note: {
+                          ...ap.note,
+                          align: v === "left" ? undefined : (v as "center" | "right"),
+                        },
+                      })
+                    }
+                  >
+                    <SelectTrigger className="h-8">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="left">Esquerda</SelectItem>
+                      <SelectItem value="center">Centro</SelectItem>
+                      <SelectItem value="right">Direita</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="flex flex-col gap-1">
+                  <Label className="text-xs">Posição vertical</Label>
+                  <Select
+                    value={ap.note?.valign ?? "top"}
+                    onValueChange={(v) =>
+                      patch({
+                        note: {
+                          ...ap.note,
+                          valign: v === "top" ? undefined : (v as "center" | "bottom"),
+                        },
+                      })
+                    }
+                  >
+                    <SelectTrigger className="h-8">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="top">Topo</SelectItem>
+                      <SelectItem value="center">Meio</SelectItem>
+                      <SelectItem value="bottom">Base</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              <div className="flex flex-col gap-1">
+                <Label className="text-xs">Respiro interno (px)</Label>
+                <input
+                  type="number"
+                  min={0}
+                  max={96}
+                  value={ap.note?.padding ?? ""}
+                  placeholder="12"
+                  onChange={(e) => {
+                    const n = Number(e.target.value);
+                    patch({
+                      note: {
+                        ...ap.note,
+                        padding:
+                          e.target.value === "" || !Number.isFinite(n)
+                            ? undefined
+                            : Math.max(0, Math.min(96, Math.round(n))),
+                      },
+                    });
+                  }}
+                  className="border-input h-8 w-24 rounded-md border bg-transparent px-2 text-xs tabular-nums outline-none"
+                  aria-label="Respiro interno"
+                />
+              </div>
+              <p className="text-muted-foreground text-xs leading-relaxed">
+                Formatação no texto: <code>^^ SEÇÃO</code> (kicker),{" "}
+                <code># Título</code>, <code>## Subtítulo</code>,{" "}
+                <code>- item</code>, <code>**negrito**</code>,{" "}
+                <code>*itálico*</code>, <code>---</code> (filete),{" "}
+                <code>[rótulo](https://…)</code> e <code>(( nota do autor ))</code>{" "}
+                — esta última só aparece no modo edição.
+              </p>
               <ColorField
                 label="Fundo do papel"
                 value={ap.note?.bg}
@@ -885,6 +1020,40 @@ export function WidgetAppearanceSheet({
               </BuilderSection>
 
               <BuilderSection value="series" title="Cores das séries">
+                {/* v2.10: técnica do destaque — uma série na cor do estilo,
+                    as demais em cinza. */}
+                {metrics.length >= 2 ? (
+                  <div className="flex flex-col gap-1">
+                    <Label className="text-xs">Destacar uma série</Label>
+                    <Select
+                      value={ap.highlight?.series ?? "__none__"}
+                      onValueChange={(v) =>
+                        patch({
+                          highlight:
+                            v === "__none__"
+                              ? undefined
+                              : { ...ap.highlight, series: v, categories: undefined },
+                        })
+                      }
+                    >
+                      <SelectTrigger className="h-8">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__none__">Nenhuma (cores normais)</SelectItem>
+                        {metrics.map((m) => (
+                          <SelectItem key={m.key} value={m.key}>
+                            {m.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <p className="text-muted-foreground text-xs">
+                      As outras séries ficam em cinza — o olhar vai para a que
+                      sustenta a conclusão.
+                    </p>
+                  </div>
+                ) : null}
                 {metrics.map((m) => (
                   <ColorField
                     key={m.key}

@@ -1,4 +1,8 @@
-// Versão: 2.24 | Data: 01/10/2026
+// Versão: 2.25 | Data: 02/10/2026
+// v2.25 (02/10/2026): apresentando, cada item ganha `--ds-enter-delay` pela
+//   ordem de LEITURA (enterOrder): é o que escalona a entrada suave do slide
+//   (a regra [data-slide-enter] de globals.css anima o conteúdo do item, nunca
+//   o item — o transform do item é a posição do react-grid-layout).
 // v2.24 (01/10/2026): modo APRESENTAR. (a) `fitHeight` — com a altura útil da
 //   tela, a altura da LINHA vira a que faz o conteúdo da aba ocupar essa
 //   altura (`fitRowHeight`, lib/dashboards/presentation.ts: piso e teto) e o
@@ -217,7 +221,7 @@ import { ConnectorLayer, type ConnectorLayerApi } from "./connector-layer";
 import { LineLayer } from "./line-layer";
 import { FontScaleProvider } from "./font-scale-context";
 import { BoardChromeProvider } from "./board-chrome-context";
-import { fitRowHeight } from "@/lib/dashboards/presentation";
+import { enterOrder, fitRowHeight } from "@/lib/dashboards/presentation";
 import { WidgetCard } from "./widget-card";
 import type { ResponsibleOption } from "./charts/record-list-table";
 
@@ -1586,7 +1590,14 @@ export function DashboardGrid({
               onDragStop={onDragStop}
               onResizeStop={onResizeStop}
             >
-              {gridWidgets.map((w, gi) => {
+              {(() => {
+                // v2.25: ordem de leitura só apresentando (fitHeight).
+                const enterRank = fitHeight
+                  ? enterOrder(
+                      gridWidgets.map((w, gi) => ({ id: w.id, ...basePos(w, gi) }))
+                    )
+                  : null;
+                return gridWidgets.map((w, gi) => {
                 // Páginas de widget: o HOST renderiza a página ativa no espaço
                 // dele (ids mortos em `pages` são pulados — membro excluído/
                 // movido não quebra o pager). O key do card = widget EXIBIDO:
@@ -1611,6 +1622,13 @@ export function DashboardGrid({
                     key={w.id}
                     id={widgetDomId(w.id)}
                     className="pointer-events-auto cursor-auto"
+                    style={
+                      enterRank
+                        ? ({
+                            "--ds-enter-delay": `${Math.min(8, enterRank.get(w.id) ?? 0) * 60}ms`,
+                          } as React.CSSProperties)
+                        : undefined
+                    }
                   >
                     {pagesOf && pagesOf.length > 1 ? (
                       <WidgetPager
@@ -1690,7 +1708,8 @@ export function DashboardGrid({
                     </FontScaleProvider>
                   </div>
                 );
-              })}
+              });
+              })()}
             </RGL>
             {drawMode && onDrawDone && onDrawCancel ? (
               <DrawToCreateOverlay

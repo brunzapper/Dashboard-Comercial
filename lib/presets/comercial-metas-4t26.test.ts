@@ -1,4 +1,7 @@
-// Versão: 1.1 | Data: 01/10/2026
+// Versão: 1.2 | Data: 02/10/2026
+// v1.2 (02/10/2026): estilo Editorial + palco, abas de trabalho fora dos
+//   slides (árvore e lançamentos), nenhum placeholder visível em slide e a
+//   Base manual fora da apresentação.
 // v1.1 (01/10/2026): os slides ocupam a tela (grade fina, sem sobreposição,
 //   sem sobra) e o período é fixo (meses nas tabelas e na Tree, barra off).
 // O preset de metas 4T26 é DADO — este teste confere que os números batem com
@@ -133,8 +136,27 @@ describe("integridade das referências", () => {
         expect(warnings, w.presetKey).toEqual([]);
       }
     }
-    // A aba de trabalho fica fora dos slides.
-    expect(METAS_4T26_PRESET.settings?.presentation?.hiddenTabs).toEqual(["arvore"]);
+    // As abas de trabalho ficam fora dos slides.
+    expect(METAS_4T26_PRESET.settings?.presentation?.hiddenTabs).toEqual(["arvore", "lancamentos"]);
+  });
+
+  it("v1.2: estilo de apresentação e nenhum texto de trabalho vazando no slide", () => {
+    const st = METAS_4T26_PRESET.settings;
+    expect(st?.style?.key).toBe("editorial");
+    expect(st?.presentation?.fit).toBe("palco");
+    // Placeholder só como comentário de AUTOR (( … )) — linha solta "(Cole…)"
+    // apareceria no slide.
+    for (const w of METAS_4T26_PRESET.widgets) {
+      const text = w.settings?.note?.text ?? "";
+      for (const line of text.split("\n")) {
+        if (/cole aqui/i.test(line)) expect(line.trim()).toMatch(/^\(\(.*\)\)$/);
+      }
+    }
+    // Interface de trabalho nunca num slide.
+    const hidden = new Set(st?.presentation?.hiddenTabs ?? []);
+    for (const w of METAS_4T26_PRESET.widgets.filter((x) => x.visual_type === "base_manual")) {
+      expect(hidden.has(w.settings?.tab ?? "") || w.settings?.hideInPresentation === true, w.presetKey).toBe(true);
+    }
   });
 });
 

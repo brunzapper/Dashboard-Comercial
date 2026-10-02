@@ -1,3 +1,11 @@
+// Versão: 3.6 | Data: 02/10/2026
+// v3.6 (02/10/2026): ESTILO DO DASHBOARD (lib/dashboards/style.ts). O estilo
+//   efetivo (board ?? padrão da org ?? Clássico) entra como variáveis CSS no
+//   CONTÊINER do board (data-ds) e como context (DashboardStyleProvider) para
+//   as decisões estruturais dos widgets. Num estilo não-Clássico sem fundo
+//   externo escolhido, a janela assume o papel da página do estilo. O sinal
+//   "apresentando" ganhou context próprio (PresentingProvider) — separado de
+//   hideWidgetMenus, que também liga na tela cheia.
 // Versão: 3.5 | Data: 01/10/2026
 // v3.5 (01/10/2026): modo Apresentar v2. (a) PRÉ-RENDER: ao pedir, TODOS os
 //   slides montam de uma vez (um DashboardGrid por aba; os que não estão na
@@ -164,6 +172,14 @@ import {
 } from "@/lib/widgets/appearance";
 import type { DashboardSnapshot } from "@/lib/widgets/history";
 import {
+  dashboardStyleVars,
+  isClassicStyle,
+  resolveDashboardStyle,
+} from "@/lib/dashboards/style";
+
+import { DashboardStyleProvider } from "./dashboard-style-context";
+import { PresentingProvider } from "./presenting-context";
+import {
   createWidget,
   renameDashboard,
   saveLayout,
@@ -180,7 +196,13 @@ import { DashboardTabs } from "./dashboard-tabs";
 import { cn } from "@/lib/utils";
 import { PresentationBar, usePresentationMode } from "./presentation-mode";
 import {
+  STAGE_H,
+  STAGE_PAD_X,
+  STAGE_PAD_Y,
+  STAGE_W,
+  effectivePresentation,
   slideTabIds,
+  stageScale,
   stepSlide,
   warmupOrder,
   warmupState,
@@ -279,6 +301,7 @@ export function DashboardClient({
   initialTabId,
   focusWidgetId,
   laserColor,
+  orgStyleKey = null,
 }: {
   previewCapture?: { scope: string };
   dashboardId: string;
@@ -362,6 +385,8 @@ export function DashboardClient({
   focusWidgetId?: string;
   // Cor do Ponteiro Laser (Configurações → Tema; resolveLaserColor na page).
   laserColor?: string;
+  // v3.6: estilo padrão dos dashboards da org (null = Clássico).
+  orgStyleKey?: string | null;
 }) {
   const [editMode, setEditMode] = useState(false);
   // Modo "Conectar" (criar linhas entre widgets); só faz sentido em editMode.
@@ -500,11 +525,19 @@ export function DashboardClient({
   const [pending, startTransition] = useTransition();
   const router = useRouter();
 
-  const backgroundCss = dashboardBackgroundCss(settings.background);
-  const outerCss = outerBackgroundCss(
-    settings.outerBackground,
-    settings.background
+  // v3.6: estilo efetivo do board e as variáveis dele (Clássico ⇒ {}).
+  const boardStyle = useMemo(
+    () => resolveDashboardStyle(settings.style, orgStyleKey),
+    [settings.style, orgStyleKey]
   );
+  const styleVars = useMemo(() => dashboardStyleVars(boardStyle), [boardStyle]);
+  const styled = !isClassicStyle(boardStyle);
+  const backgroundCss = dashboardBackgroundCss(settings.background);
+  // v3.6: sem fundo externo escolhido, o estilo pinta a janela com a página
+  // dele — um fundo só, em vez da janela branca em volta do papel.
+  const outerCss =
+    outerBackgroundCss(settings.outerBackground, settings.background) ??
+    (styled ? boardStyle.colors?.page : undefined);
   // Só há cor de texto derivável de um SÓLIDO — gradiente e ausência mantêm a
   // cor do tema (chutar contraste sobre gradiente erraria numa das pontas).
   const outerText = readableTextColor(outerCss);
@@ -1157,9 +1190,14 @@ export function DashboardClient({
   });
   // v3.5: altura útil da janela para o ajuste à tela (só apresentando).
   const [viewportH, setViewportH] = useState(0);
+  // v3.6: a largura também — o palco 16:9 escala pelo menor dos dois eixos.
+  const [viewportW, setViewportW] = useState(0);
   useEffect(() => {
     if (!presenting) return;
-    const measure = () => setViewportH(window.innerHeight);
+    const measure = () => {
+      setViewportH(window.innerHeight);
+      setViewportW(window.innerWidth);
+    };
     const raf = window.requestAnimationFrame(measure);
     window.addEventListener("resize", measure);
     return () => {
@@ -1170,6 +1208,13 @@ export function DashboardClient({
   // v3.5: modo tela cheia do app também esconde o ⋮ dos widgets.
   const appChrome = useAppChromeOptional();
   const hideWidgetMenus = presenting || (appChrome?.chromeHidden ?? false);
+  // v3.6: o shell esconde o sino do topo-direito enquanto se apresenta.
+  const setShellPresenting = appChrome?.setPresenting;
+  useEffect(() => {
+    if (!setShellPresenting) return;
+    setShellPresenting(presenting);
+    return () => setShellPresenting(false);
+  }, [presenting, setShellPresenting]);
 
   // Pendente excluído antes do refresh viraria fantasma (o id nunca chega do
   // servidor para a reconciliação) — o WidgetCard avisa a exclusão por aqui.
@@ -1248,10 +1293,22 @@ export function DashboardClient({
   } satisfies Partial<React.ComponentProps<typeof DashboardGrid>>;
   // v3.5: altura útil do slide — janela menos as margens do modo (pt-4 +
   // pb-16) e o respiro do fundo interno (p-3), quando há.
-  const presentFitHeight =
-    presenting && viewportH > 0
+  // v3.6: modo Apresentar resolvido contra o estilo (palco × só altura;
+  // entrada suave × nenhuma) e o fundo PRÓPRIO da aba (ex.: capa escura).
+  const pres = effectivePresentation(settings.presentation, styled);
+  const stage = presenting && pres.fit === "palco";
+  const stageK = stage ? stageScale(viewportW, viewportH) : 1;
+  const tabBgCss = (id: string) =>
+    dashboardBackgroundCss(tabs.find((t) => t.id === id)?.background);
+  const currentTabBg = presenting ? tabBgCss(activeTabId) : undefined;
+  const presentFitHeight = stage
+    ? STAGE_H - 2 * STAGE_PAD_Y
+    : presenting && viewportH > 0
       ? Math.max(200, viewportH - 16 - 64 - (backgroundCss ? 24 : 0))
       : null;
+  // Fundo interno em caixa (rounded p-3): no palco o fundo vai no próprio
+  // quadro do slide — a caixa ficaria fora do transform.
+  const innerBox = !!backgroundCss && !stage;
 
   return (
     <DashboardHistoryProvider dashboardId={dashboardId} seed={historySeed}>
@@ -1272,9 +1329,24 @@ export function DashboardClient({
         // v3.4: apresentando, o painel cobre a janela (com ou sem a API de
         // tela cheia — iframe/permissão podem negá-la).
         // v3.5: margens enxutas — o slide ocupa a altura útil (fitHeight).
-        presenting && "bg-background fixed inset-0 z-50 overflow-auto px-6 pt-4 pb-16"
+        presenting &&
+          (stage
+            ? "bg-background fixed inset-0 z-50 overflow-hidden"
+            : "bg-background fixed inset-0 z-50 overflow-auto px-6 pt-4 pb-16")
       )}
       data-presenting={presenting || undefined}
+      data-ds={styled ? boardStyle.key : undefined}
+      data-ds-outer={
+        styled && !settings.outerBackground ? "" : undefined
+      }
+      style={
+        styled || currentTabBg
+          ? ({
+              ...(styled ? styleVars : {}),
+              ...(currentTabBg ? { background: currentTabBg } : {}),
+            } as React.CSSProperties)
+          : undefined
+      }
       data-preview-ready={!engineLoading && (engineIds.length === 0 || engineData !== null)}
     >
       {/* data-board-chrome = cabeçalho + abas. O marcador NÃO pode envolver o
@@ -1418,6 +1490,7 @@ export function DashboardClient({
               settings={settings}
               snapshotPeriod={snapshotPeriod}
               onPresent={startPresenting}
+              orgStyleKey={orgStyleKey}
             />
           </div>
         ) : (
@@ -1499,15 +1572,31 @@ export function DashboardClient({
         </div>
 
         <div
-          className={backgroundCss ? "rounded-lg p-3" : undefined}
-          style={backgroundCss ? { background: backgroundCss } : undefined}
+          className={innerBox ? "rounded-lg p-3" : undefined}
+          style={innerBox ? { background: backgroundCss } : undefined}
         >
+          <DashboardStyleProvider value={boardStyle}>
+          <PresentingProvider value={presenting}>
           <WidgetFocusProvider focus={focusWidget}>
           {presenting ? (
             // v3.5: todos os slides montados — o atual visível, os demais
             // invisíveis mas medidos (mesma largura) e vivos.
             <PresentationWarmupProvider report={reportWarm}>
-              <div className="relative">
+              {/* v3.6: no PALCO o slide é um quadro 16:9 fixo, com margens
+                  constantes, escalado inteiro à tela (letterbox). */}
+              <div
+                className={stage ? "absolute top-1/2 left-1/2" : "relative"}
+                style={
+                  stage
+                    ? {
+                        width: STAGE_W,
+                        height: STAGE_H,
+                        transform: `translate(-50%, -50%) scale(${stageK})`,
+                        background: currentTabBg ?? backgroundCss ?? undefined,
+                      }
+                    : undefined
+                }
+              >
                 {warmupOrder(slideIds, activeTabId).map((tabId) => {
                   const current = tabId === activeTabId;
                   return (
@@ -1515,16 +1604,37 @@ export function DashboardClient({
                       key={tabId || "_"}
                       aria-hidden={current ? undefined : true}
                       inert={!current}
+                      // v3.6: a entrada suave dispara quando o slide PASSA a
+                      // ser o atual (o seletor volta a casar e a animação
+                      // reinicia; ver [data-slide-enter] em globals.css).
+                      data-slide-enter={
+                        current && presentPhase === "on" && pres.transition === "suave"
+                          ? ""
+                          : undefined
+                      }
                       className={cn(
                         !current && "pointer-events-none invisible absolute inset-x-0 top-0"
                       )}
+                      style={
+                        stage
+                          ? {
+                              ...(current ? {} : { position: "absolute", inset: 0 }),
+                              padding: `${STAGE_PAD_Y}px ${STAGE_PAD_X}px`,
+                              height: STAGE_H,
+                              background: tabBgCss(tabId) ?? undefined,
+                            }
+                          : undefined
+                      }
                     >
                       <DashboardGrid
                         {...gridProps}
                         widgets={
-                          tabs.length === 0
+                          // v3.6: widget de trabalho (hideInPresentation)
+                          // fica fora do slide — só da RENDERIZAÇÃO.
+                          (tabs.length === 0
                             ? allWidgets
                             : allWidgets.filter((w) => widgetTab(w) === tabId)
+                          ).filter((w) => !w.settings?.hideInPresentation)
                         }
                         activeTabId={tabId}
                         laserMode={current && laserMode}
@@ -1544,6 +1654,8 @@ export function DashboardClient({
             />
           )}
           </WidgetFocusProvider>
+          </PresentingProvider>
+          </DashboardStyleProvider>
         </div>
       </DashboardPendingProvider>
       {/* v3.5: espera do pré-render — dentro do contêiner da tela cheia (o

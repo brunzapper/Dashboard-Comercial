@@ -1,3 +1,7 @@
+// Versão: 1.16 | Data: 02/10/2026
+// v1.16 (02/10/2026): `settings.style` (estilo do board) também é seção
+//   GERIDA no update in-place do preset; `updateDashboardStyle` grava a
+//   escolha do ⋮ → Estilo (otimista, sem revalidate dentro do await).
 // Versão: 1.15 | Data: 01/10/2026
 // v1.15 (01/10/2026): `settings.presentation` passa a ser seção GERIDA no
 //   update in-place do preset (como periodBar/canvas).
@@ -2852,6 +2856,9 @@ async function applyPresetDefinition(
     // v1.15 (01/10/2026): as abas fora dos slides são do preset (a aba de
     // trabalho dele) — reaplicar as reconduz.
     if (managed.presentation !== undefined) next.presentation = managed.presentation;
+    // v1.16 (02/10/2026): o estilo do board é seção gerida — reaplicar o
+    // preset (ou a edição por IA que o traz) o reconduz.
+    if (managed.style !== undefined) next.style = managed.style;
     if (managed.tabs) {
       const presetTabIds = new Set(managed.tabs.map((t) => t.id));
       next.tabs = [

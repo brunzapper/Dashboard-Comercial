@@ -1,4 +1,7 @@
-// Versão: 1.0 | Data: 22/07/2026
+// Versão: 1.1 | Data: 02/10/2026
+// v1.1 (02/10/2026): `styleMul` — multiplicador do ESTILO do dashboard
+//   (lib/dashboards/style.ts, fontScale por papel). Com mul 1 (Clássico) as
+//   funções seguem byte-idênticas: o px só é emitido quando algo muda.
 // Resolução dos tamanhos de fonte dos widgets (AppearanceSettings.fonts +
 // DashboardSettings.fontScale). Regra: px explícito é ABSOLUTO; "Auto"
 // (undefined) usa o default do elemento × escala global do dashboard.
@@ -22,19 +25,22 @@ export const FONT_DEFAULTS = {
 export function resolveFontPx(
   explicit: number | undefined,
   defPx: number,
-  scale: number
+  scale: number,
+  styleMul = 1
 ): number | undefined {
   if (explicit != null) return explicit;
-  return scale !== 1 ? Math.round(defPx * scale) : undefined;
+  const k = scale * styleMul;
+  return k !== 1 ? Math.round(defPx * k) : undefined;
 }
 
 // Style pronto para mesclar num elemento DOM (spread seguro com undefined).
 export function fontStyle(
   explicit: number | undefined,
   defPx: number,
-  scale: number
+  scale: number,
+  styleMul = 1
 ): CSSProperties | undefined {
-  const px = resolveFontPx(explicit, defPx, scale);
+  const px = resolveFontPx(explicit, defPx, scale, styleMul);
   return px != null ? { fontSize: px } : undefined;
 }
 
@@ -42,7 +48,8 @@ export function fontStyle(
 export function resolveFontNum(
   explicit: number | undefined,
   defPx: number,
-  scale: number
+  scale: number,
+  styleMul = 1
 ): number {
-  return explicit ?? Math.round(defPx * scale);
+  return explicit ?? Math.round(defPx * scale * styleMul);
 }

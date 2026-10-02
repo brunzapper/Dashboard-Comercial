@@ -1,4 +1,7 @@
-// Versão: 1.1 | Data: 01/10/2026
+// Versão: 1.2 | Data: 02/10/2026
+// v1.2 (02/10/2026): `formatIndicatorValue(…, { unit: false })` — só o número
+//   (a unidade fica no rótulo da linha, na tabela de slide) e
+//   `indicatorUnitSymbol` (o "R$"/"%" do rótulo).
 // v1.1 (01/10/2026): `cleanMonthKeys` — lista de meses fixos (AAAA-MM) de um
 //   widget, saneada em silêncio. Dona única da régua usada pela Tree (meses
 //   fixos dos nós de indicador) — a Tabela de metas segue avisando pelo
@@ -176,14 +179,16 @@ const PCT = new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 1 });
  */
 export function formatIndicatorValue(
   value: number | null | undefined,
-  unit: IndicatorUnit
+  unit: IndicatorUnit,
+  opts?: { unit?: boolean }
 ): string {
   if (value == null || !Number.isFinite(value)) return "—";
+  const withUnit = opts?.unit !== false;
   switch (unit) {
     case "moeda":
-      return BRL.format(value);
+      return withUnit ? BRL.format(value) : INT.format(Math.round(value));
     case "percentual":
-      return `${PCT.format(value)}%`;
+      return withUnit ? `${PCT.format(value)}%` : PCT.format(value);
     case "quantidade":
       return Math.abs(value - Math.round(value)) < 1e-9
         ? INT.format(value)
@@ -191,6 +196,11 @@ export function formatIndicatorValue(
     default:
       return DEC.format(value);
   }
+}
+
+/** v1.2: símbolo da unidade para o rótulo da linha ("" = sem unidade). */
+export function indicatorUnitSymbol(unit: IndicatorUnit): string {
+  return unit === "moeda" ? "R$" : unit === "percentual" ? "%" : "";
 }
 
 /** Percentual de atingimento exibível ("97%"). */

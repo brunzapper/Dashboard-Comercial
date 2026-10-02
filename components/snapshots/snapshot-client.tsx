@@ -1,4 +1,7 @@
-// Versão: 1.1 | Data: 18/07/2026
+// Versão: 1.2 | Data: 02/10/2026
+// v1.2 (02/10/2026): ESTILO do dashboard (lib/dashboards/style.ts) no link
+//   público: mesmas variáveis no contêiner (data-ds) e o mesmo context dos
+//   widgets — o retrato sai com a cara do board.
 // v1.1 (18/07/2026): fontes por métrica — recordListExtraById repassado ao
 //   grid (extras p/ basis de subtotais; ver runRecordListWithExtras).
 // Shell do VIEWER PÚBLICO de um snapshot (/s/<token>): título + selo de
@@ -11,6 +14,12 @@
 // de abas — o snapshot é UMA aba congelada.
 "use client";
 
+import {
+  dashboardStyleVars,
+  isClassicStyle,
+  resolveDashboardStyle,
+} from "@/lib/dashboards/style";
+import { DashboardStyleProvider } from "@/components/dashboards/dashboard-style-context";
 import { useCallback, useMemo, type CSSProperties } from "react";
 
 import type { FieldDefinition, RecordRow } from "@/lib/records/types";
@@ -75,6 +84,7 @@ export function SnapshotClient({
   respCanon = {},
   available,
   settings,
+  orgStyleKey = null,
   activeTabId,
   dateFormat,
   currencyRates,
@@ -114,6 +124,8 @@ export function SnapshotClient({
   respCanon?: Record<string, string>;
   available: AvailableField[];
   settings: DashboardSettings;
+  /** v1.2: estilo padrão da org do dashboard (null = Clássico). */
+  orgStyleKey?: string | null;
   activeTabId: string;
   dateFormat?: DateFormat;
   currencyRates: CurrencyRates;
@@ -122,13 +134,19 @@ export function SnapshotClient({
   quickFiltersById?: Record<string, WidgetQuickFilters>;
 }) {
   const backgroundCss = dashboardBackgroundCss(settings.background);
+  // v1.2: estilo efetivo (board ?? org ?? Clássico).
+  const boardStyle = useMemo(
+    () => resolveDashboardStyle(settings.style, orgStyleKey),
+    [settings.style, orgStyleKey]
+  );
+  const styled = !isClassicStyle(boardStyle);
+  const styleVars = useMemo(() => dashboardStyleVars(boardStyle), [boardStyle]);
   // Superfície EXTERNA (12/09/2026): aqui não há AppShell, então o wrapper da
   // própria página recebe a cor — e a de texto derivada, senão o título e os
   // selos herdariam --foreground e sumiriam sobre um fundo escuro.
-  const outerCss = outerBackgroundCss(
-    settings.outerBackground,
-    settings.background
-  );
+  const outerCss =
+    outerBackgroundCss(settings.outerBackground, settings.background) ??
+    (styled ? boardStyle.colors?.page : undefined);
   const outerText = readableTextColor(outerCss);
 
   // Layout estático (nada é arrastável): posições base direto dos widgets.
@@ -180,8 +198,15 @@ export function SnapshotClient({
             descendentes — recoloriria rótulo de gráfico, eixo e tabela. */}
         <div
           className="flex w-full flex-col gap-4 p-4 md:p-6"
+          data-ds={styled ? boardStyle.key : undefined}
+          data-ds-outer={styled && !settings.outerBackground ? "" : undefined}
           style={
-            outerCss ? ({ background: outerCss } as CSSProperties) : undefined
+            outerCss || styled
+              ? ({
+                  ...(styled ? styleVars : {}),
+                  ...(outerCss ? { background: outerCss } : {}),
+                } as CSSProperties)
+              : undefined
           }
         >
           <div
@@ -222,6 +247,7 @@ export function SnapshotClient({
               className={backgroundCss ? "rounded-lg p-3" : undefined}
               style={backgroundCss ? { background: backgroundCss } : undefined}
             >
+              <DashboardStyleProvider value={boardStyle}>
               <WidgetFocusProvider focus={focus}>
                 <DashboardGrid
                   widgets={widgets}
@@ -260,6 +286,7 @@ export function SnapshotClient({
                   saveConnectors={saveConnectorsNoop}
                 />
               </WidgetFocusProvider>
+              </DashboardStyleProvider>
             </div>
           </DashboardPendingProvider>
         </div>

@@ -2259,6 +2259,25 @@ This version has breaking changes — APIs, conventions, and file structure may 
   prévia carrega o valor ANTERIOR resolvido no SERVIDOR e `modo`
   substituir/somar é resolvido no apply — a IA nunca faz a conta. Ver
   `docs/arquitetura.md` §4.26 e invariante 41.
+- **Estilo do dashboard é LEITURA de tokens, escopada ao board (02/10/2026,
+  §4.28, invariante 43):** `DashboardSettings.style` (registry em
+  `lib/dashboards/style.ts`: classico/editorial/editorial_escuro/executivo)
+  com cascata ÚNICA `resolveDashboardStyle` — board → padrão da org
+  (`organizations.ui_prefs.dashboardStyle`, só org_admin, sem camada de
+  usuário) → Clássico. Clássico não emite variável e os widgets seguem pelo
+  ramo histórico; o estilo NUNCA reescreve config de widget (voltar ao
+  Clássico desfaz tudo). Tokens `--ds-*` + o tema shadcn redefinido só no
+  CONTÊINER do board (`data-ds`), nunca no `<html>`; cor só por
+  `normalizeHexColor` (entrada e saída), fonte só por chave de
+  `DASHBOARD_FONTS` (@fontsource, servidas pelo app). Decisões estruturais por
+  `useDashboardStyle()`; o padrão da Tabela de metas vive SÓ em
+  `resolveGoalTableDisplay` e o do modo Apresentar (palco 1280×720 escalado ×
+  só altura; entrada suave) SÓ em `effectivePresentation`. "Apresentando" é
+  `usePresenting()` (separado de `hideWidgetMenus`, que também liga na tela
+  cheia); `settings.hideInPresentation` tira o widget só da RENDERIZAÇÃO do
+  slide. Markdown leve da Nota em `lib/widgets/note-blocks.ts` (sem HTML cru;
+  link externo só http/https/mailto; `(( … ))` só no modo edição; índice global
+  das `{=…}` preservado). RPCs intocadas, sem migração.
 - **Lixeira de registros (0121): `deleted_at` só muda por ADMIN e toda leitura
   nova de `records` decide EXPLICITAMENTE sobre a lixeira (07/08/2026):**
   soft delete de 30 dias — enviar/restaurar/purgar SÓ pelas actions de
