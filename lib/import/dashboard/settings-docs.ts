@@ -1,4 +1,6 @@
-// Versão: 1.10 | Data: 02/10/2026
+// Versão: 1.11 | Data: 02/10/2026
+// v1.11 (02/10/2026): `slide.date` e as expressões {= … } em
+//   `tabs[].headline` documentadas para a IA.
 // v1.10 (02/10/2026): esqueleto de slide (slide, tabs[].headline/kicker),
 //   anotações, rótulo direto, área e KPI em escala documentados para a IA.
 // Versão: 1.9 | Data: 02/10/2026
@@ -409,7 +411,7 @@ export const DASHBOARD_SETTINGS_DOC = {
   // v1.8 (01/10/2026): modo Apresentar — abas fora dos slides.
   presentation: `"presentation": { "hiddenTabs": ["<tabId>"], "fit": "palco", "transition": "suave" },   // hiddenTabs = abas de trabalho que o modo Apresentar pula; fit: palco (slide 16:9 escalado à tela, sem rolagem) | altura (só as linhas se ajustam); transition: suave | nenhuma. fit/transition ausentes = padrão do estilo`,
   // v1.10 (02/10/2026): esqueleto de slide.
-  slide: `"slide": { "kicker": "Comercial · 4T26", "footer": "Fonte: CRM", "showDate": true, "showNumber": true },   // ESQUELETO DE SLIDE: o mesmo topo (filete com kicker à esquerda e data à direita) e rodapé (fonte + nº do slide) em todas as abas-slide; o título-conclusão de cada aba vai em "tabs[].headline" e o kicker próprio da aba em "tabs[].kicker"`,
+  slide: `"slide": { "kicker": "Comercial · 4T26", "footer": "Fonte: CRM", "showDate": true, "showNumber": true, "date": "2026-10-15" },   // ESQUELETO DE SLIDE: o mesmo topo (filete com kicker à esquerda e data à direita) e rodapé (fonte + nº do slide) em todas as abas-slide; "date" (opcional, AAAA-MM-DD) fixa a data exibida (ausente = hoje); o título-conclusão de cada aba vai em "tabs[].headline" (aceita {= … } como a Nota, ex.: "{= [Meta: MRR novo] }") e o kicker próprio da aba em "tabs[].kicker"`,
   // v1.9 (02/10/2026): estilo visual do board (lib/dashboards/style.ts).
   style: `"style": { "key": "editorial", "overrides": { "accent": "#b4532a" } },   // estilo do dashboard: ${DASHBOARD_STYLE_KEYS.join(" | ")}. classico = visual de sempre; editorial = papel off-white, títulos em serifa, divisórias finas; editorial_escuro = quase-preto quente (capas/projetor); executivo = sans, superfícies brancas. overrides (opcional): accent/page/surface/ink (#RRGGBB) e fontDisplay/fontBody (${Object.keys(DASHBOARD_FONTS).join(" | ")}). Ausente = padrão da organização`,
 } satisfies Record<keyof DashboardSettings, string | null>;

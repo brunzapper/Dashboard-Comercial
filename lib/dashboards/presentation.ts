@@ -1,4 +1,6 @@
-// Versão: 1.3 | Data: 02/10/2026
+// Versão: 1.4 | Data: 02/10/2026
+// v1.4 (02/10/2026): (a) `slide.date` — data FIXA do topo do slide (a data da
+//   reunião), no lugar de "hoje"; `slideFrameContent` a entrega em `dateIso`.
 // v1.3 (02/10/2026): ESQUELETO DE SLIDE (slideFrameContent, slideFrameHeight,
 //   slideDateLabel e as alturas fixas do topo/headline/rodapé) e AVISO DE
 //   TRANSBORDO (slideOverflows: nem o piso do ajuste cabe).
@@ -209,6 +211,8 @@ export interface SlideSettings {
   footer?: string;
   showDate?: boolean;
   showNumber?: boolean;
+  /** v1.4: data fixa do topo ("AAAA-MM-DD"); ausente = hoje. */
+  date?: string;
 }
 
 export interface SlideFrameContent {
@@ -216,6 +220,8 @@ export interface SlideFrameContent {
   headline: string | null;
   footer: string | null;
   date: boolean;
+  /** v1.4: data fixa (AAAA-MM-DD) ou null = hoje. */
+  dateIso: string | null;
   number: boolean;
 }
 
@@ -236,6 +242,10 @@ export function slideFrameContent(
     headline: clean(tab?.headline),
     footer: clean(slide?.footer),
     date: slide?.showDate === true,
+    dateIso:
+      typeof slide?.date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(slide.date)
+        ? slide.date
+        : null,
     number: slide?.showNumber === true,
   };
   const any =
@@ -252,8 +262,10 @@ export function slideFrameHeight(c: SlideFrameContent | null): number {
   return top + head + foot;
 }
 
-/** "2 de outubro de 2026" — a data do topo do slide. */
-export function slideDateLabel(d: Date): string {
+/** "2 de outubro de 2026" — a data do topo do slide (fixa ou hoje). */
+export function slideDateLabel(d: Date | string): string {
+  // Data fixa AAAA-MM-DD é calendário: meio-dia evita recuar um dia no fuso.
+  if (typeof d === "string") d = new Date(`${d}T12:00:00`);
   return d.toLocaleDateString("pt-BR", {
     day: "numeric",
     month: "long",
@@ -278,3 +290,4 @@ export function slideOverflows(p: {
   const naturalRow = p.innerW / p.baseCols;
   return p.contentRows * naturalRow * FIT_MIN_FACTOR > p.innerH + 0.5;
 }
+

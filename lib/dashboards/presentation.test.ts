@@ -1,4 +1,5 @@
-// Versão: 1.3 | Data: 02/10/2026
+// Versão: 1.4 | Data: 02/10/2026
+// v1.4 (02/10/2026): data fixa do slide.
 // v1.3 (02/10/2026): esqueleto de slide (conteúdo, altura, aba sem esqueleto)
 //   e aviso de transbordo.
 // v1.2 (02/10/2026): palco 16:9 (stageScale), padrão do modo pelo estilo
@@ -16,6 +17,7 @@ import {
   SLIDE_FOOTER_H,
   SLIDE_HEADER_H,
   SLIDE_HEADLINE_H,
+  slideDateLabel,
   slideFrameContent,
   slideFrameHeight,
   slideOverflows,
@@ -113,7 +115,7 @@ describe("esqueleto de slide", () => {
   const slide = { kicker: "Comercial", footer: "Fonte: CRM", showDate: true, showNumber: true };
   it("kicker da aba vence o do dashboard; headline só da aba", () => {
     const c = slideFrameContent(slide, { headline: "MRR cresce", kicker: "Receita" });
-    expect(c).toEqual({ kicker: "Receita", headline: "MRR cresce", footer: "Fonte: CRM", date: true, number: true });
+    expect(c).toEqual({ kicker: "Receita", headline: "MRR cresce", footer: "Fonte: CRM", date: true, dateIso: null, number: true });
     expect(slideFrameContent(slide, {})?.kicker).toBe("Comercial");
   });
   it("aba sem esqueleto (capa) e dashboard sem nada ⇒ null", () => {
@@ -141,5 +143,13 @@ describe("aviso de transbordo", () => {
   it("sem conteúdo ou medida ⇒ sem aviso", () => {
     expect(slideOverflows({ ...base, contentRows: 0 })).toBe(false);
     expect(slideOverflows({ ...base, contentRows: 200, innerH: 0 })).toBe(false);
+  });
+});
+
+describe("v1.4: data fixa do slide", () => {
+  it("slide.date fixa a data; formato inválido cai em hoje", () => {
+    expect(slideFrameContent({ showDate: true, date: "2026-10-15" }, {})?.dateIso).toBe("2026-10-15");
+    expect(slideFrameContent({ showDate: true, date: "15/10/2026" }, {})?.dateIso).toBeNull();
+    expect(slideDateLabel("2026-10-15")).toBe("15 de outubro de 2026");
   });
 });

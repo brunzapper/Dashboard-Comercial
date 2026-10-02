@@ -1,5 +1,7 @@
 "use client";
-// Versão: 1.0 | Data: 02/10/2026
+// Versão: 1.1 | Data: 02/10/2026
+// v1.1 (02/10/2026): data do topo pode ser FIXA (slide.date — a data da
+//   reunião); ausente segue "hoje".
 // v1.0 (02/10/2026): ESQUELETO DE SLIDE — o mesmo topo e rodapé em todas as
 //   abas-slide (DashboardSettings.slide + tabs[].headline/kicker). Topo:
 //   filete fino com o kicker à esquerda e a data à direita; abaixo, a headline
@@ -69,7 +71,7 @@ export function SlideFrame({
           {kicker}
           {content.date ? (
             <span className="text-muted-foreground text-xs tabular-nums">
-              {slideDateLabel(new Date())}
+              {slideDateLabel(content.dateIso ?? new Date())}
             </span>
           ) : null}
         </div>

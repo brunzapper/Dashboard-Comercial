@@ -1,4 +1,5 @@
-// Versão: 1.11 | Data: 02/10/2026
+// Versão: 1.12 | Data: 02/10/2026
+// v1.12 (02/10/2026): `slide.date` (data fixa AAAA-MM-DD do topo do slide).
 // v1.11 (02/10/2026): `dashboard.settings.slide` (esqueleto de slide) saneado —
 //   textos curtos aparados e os dois flags; o resto é descartado.
 // Versão: 1.10 | Data: 02/10/2026
@@ -836,6 +837,10 @@ export function validateDashboardImport(
     if (footer) next.footer = footer;
     if (raw.showDate === true) next.showDate = true;
     if (raw.showNumber === true) next.showNumber = true;
+    // v1.12: data fixa do topo (AAAA-MM-DD); outro formato é descartado.
+    if (typeof raw.date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(raw.date)) {
+      next.date = raw.date;
+    }
     if (Object.keys(next).length > 0) settings.slide = next;
     else delete settings.slide;
   }

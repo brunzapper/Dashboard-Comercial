@@ -1,4 +1,8 @@
-// Versão: 1.6 | Data: 02/10/2026
+// Versão: 1.7 | Data: 02/10/2026
+// v1.7 (02/10/2026): "Exportar PDF" saiu da barra do modo Apresentar e mora
+//   aqui, logo abaixo de Snapshots (e também no menu reduzido de quem só
+//   visualiza). Dispara o mesmo pré-render do Apresentar e imprime um slide por
+//   página — a aparência do PDF é a mesma de antes.
 // v1.6 (02/10/2026): item "Estilo e apresentação" (DashboardStyleSheet) — o
 //   estilo do board (lib/dashboards/style.ts) e o comportamento do modo
 //   Apresentar. Recebe o estilo padrão da org só para o rótulo "Padrão da
@@ -33,6 +37,7 @@
 import { useState, useTransition } from "react";
 import {
   Camera,
+  FileDown,
   Database,
   PencilLine,
   LayoutGrid,
@@ -101,6 +106,7 @@ export function DashboardMenu({
   settings,
   snapshotPeriod,
   onPresent,
+  onExportPdf,
   canEdit = true,
   orgStyleKey = null,
 }: {
@@ -109,6 +115,8 @@ export function DashboardMenu({
   orgStyleKey?: string | null;
   /** v1.5: abre o modo Apresentar (o shell prepara os slides). */
   onPresent?: () => void;
+  /** v1.7: exporta os slides em PDF (pré-render + impressão do navegador). */
+  onExportPdf?: () => void;
   /** v1.5: false = só as entradas de exibição (tela cheia / Apresentar). */
   canEdit?: boolean;
   settings: DashboardSettings;
@@ -339,6 +347,15 @@ export function DashboardMenu({
             <Camera className="size-4" /> Snapshots
           </DropdownMenuItem>
           </>
+          ) : null}
+          {/* v1.7: fora do bloco de edição — quem só visualiza também exporta. */}
+          {onExportPdf ? (
+            <DropdownMenuItem
+              onSelect={() => onExportPdf()}
+              title="Um slide por página 16:9 — prepara todos os slides e abre a impressão (Salvar como PDF)"
+            >
+              <FileDown className="size-4" /> Exportar PDF
+            </DropdownMenuItem>
           ) : null}
         </DropdownMenuContent>
       </DropdownMenu>

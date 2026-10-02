@@ -1,4 +1,8 @@
-// Versão: 3.6 | Data: 02/10/2026
+// Versão: 3.7 | Data: 02/10/2026
+// v3.7 (02/10/2026): expressões {=…} nos textos do esqueleto de slide (headline
+//   e kicker por aba — lib/dashboards/slide-text.ts), avaliadas aqui pelo MESMO
+//   choke point da Nota (`runCalculatedWidget` + catálogo agregado único) com o
+//   período da ABA, e entregues prontas ao cliente (slideTextById).
 // v3.6 (02/10/2026): entrega o estilo PADRÃO dos dashboards da org
 //   (organizations.ui_prefs.dashboardStyle) ao DashboardClient — o board sem
 //   estilo próprio herda dele (resolveDashboardStyle, lib/dashboards/style.ts).
@@ -149,7 +153,22 @@ import {
   type SourceKey,
 } from "@/lib/sources";
 import { loadSources } from "@/lib/config/sources";
-import { loadManualBaseStamp } from "@/lib/manual-base/load";
+import {
+  loadManualAxes,
+  loadManualBaseStamp,
+  loadManualSeries,
+} from "@/lib/manual-base/load";
+import { loadGoalMetrics } from "@/lib/config/goal-metrics";
+import { tokenizeFormulaText } from "@/lib/records/formula-text";
+import {
+  availableAggCatalogInput,
+  buildAggOperandCatalog,
+} from "@/lib/widgets/agg-catalog";
+import {
+  hasSlideExpr,
+  renderSlideText,
+  slideExprSources,
+} from "@/lib/dashboards/slide-text";
 import { loadUserSettings } from "@/lib/config/user-settings";
 import { resolveLaserColor } from "@/lib/theme";
 import {
@@ -1387,8 +1406,75 @@ export default async function DashboardPage({
       collectRecordFkLabels(supabase, Object.values(recordListById).flat())
     )
   );
-  const [fkLabels] = await timing.measure("widgets", () =>
-    Promise.all([fkLabelsPromise, ...widgetTasks])
+  // v3.7 (02/10/2026): textos do esqueleto de slide com {=…} (headline/kicker
+  // da aba). Só consulta quando alguma aba usa expressão; período = o da aba
+  // (bucket), como um widget daquela aba veria.
+  const slideTextPromise = (async (): Promise<
+    Record<string, { headline?: string; kicker?: string }>
+  > => {
+    const exprTabs = (dashSettings.tabs ?? []).filter(
+      (t) => hasSlideExpr(t.headline) || hasSlideExpr(t.kicker)
+    );
+    if (exprTabs.length === 0) return {};
+    const [goalMetrics, manualSeries, manualAxes] = await Promise.all([
+      loadGoalMetrics(supabase),
+      loadManualSeries(supabase),
+      loadManualAxes(supabase),
+    ]);
+    const catalog = buildAggOperandCatalog(
+      availableAggCatalogInput(
+        available,
+        allFields,
+        sources,
+        goalMetrics,
+        manualSeries,
+        manualAxes
+      )
+    );
+    const pseudoId = (tabId: string) => `__slide__${tabId}`;
+    const { periodByWidget: slidePeriods } = resolver.computeWidgetPeriods(
+      exprTabs.map((t) => ({ id: pseudoId(t.id), settings: { tab: t.id } }) as Widget),
+      []
+    );
+    const out: Record<string, { headline?: string; kicker?: string }> = {};
+    await Promise.all(
+      exprTabs.map(async (t) => {
+        const period = slidePeriods[pseudoId(t.id)] ?? null;
+        const evalText = async (text: string): Promise<string> => {
+          const values = await Promise.all(
+            slideExprSources(text).map(async (src): Promise<CalcWidgetResult> => {
+              const tok = tokenizeFormulaText(src, catalog);
+              if (!tok.ok) return { value: null, currency: null, text: "#ERRO" };
+              try {
+                return await runCalculatedWidget(rpcClient, {
+                  formula: tok.formula,
+                  sources: [],
+                  sourceDefs: sources,
+                  filters: [],
+                  period,
+                  correspondences,
+                  currencyMode: "auto",
+                  fields: customFields,
+                  rates: currencyRates,
+                  conversionPeriod: yearQuarterOf(period?.to ?? period?.from ?? null),
+                });
+              } catch {
+                return { value: null, currency: null };
+              }
+            })
+          );
+          return renderSlideText(text, values);
+        };
+        const entry: { headline?: string; kicker?: string } = {};
+        if (t.headline && hasSlideExpr(t.headline)) entry.headline = await evalText(t.headline);
+        if (t.kicker && hasSlideExpr(t.kicker)) entry.kicker = await evalText(t.kicker);
+        out[t.id] = entry;
+      })
+    );
+    return out;
+  })().catch(() => ({}) as Record<string, { headline?: string; kicker?: string }>);
+  const [fkLabels, slideTextById] = await timing.measure("widgets", () =>
+    Promise.all([fkLabelsPromise, slideTextPromise, ...widgetTasks])
   );
   // Agrupamento de responsáveis (0101): mapa apelido→principal p/ o "Agrupar
   // por" client-side das tabelas (que chaveia FK por id cru de propósito —
@@ -1614,6 +1700,7 @@ export default async function DashboardPage({
         focusWidgetId={focusWidget ? focusId : undefined}
         laserColor={laserColor}
         orgStyleKey={orgStyleKey}
+        slideTextById={slideTextById}
       />
       </ManualBaseStampProvider>
     </SourcesProvider>

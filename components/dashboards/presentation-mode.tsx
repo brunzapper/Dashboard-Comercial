@@ -1,4 +1,11 @@
-// Versão: 1.2 | Data: 02/10/2026
+// Versão: 1.3 | Data: 02/10/2026
+// v1.3 (02/10/2026): (a) a barra flutuante SE ESCONDE: some após 2 s sem
+//   interação e só volta com o ponteiro 1 s parado perto da borda de baixo
+//   (useAutoHideBar) — numa apresentação a barra competia com o slide. (b)
+//   "Exportar PDF" saiu da barra e foi para o menu ⋮ do dashboard (abaixo de
+//   Snapshots); `printSlides(onDone)` avisa o fim da impressão para o painel
+//   sair do modo, e `usePresentationMode({ keepOnFullscreenExit })` não
+//   encerra o modo quando o diálogo de impressão tira a tela cheia.
 // v1.2 (02/10/2026): botão "Exportar PDF" na barra (printSlides: um slide por
 //   página 16:9 pela impressão do navegador; regras em globals.css).
 // Versão: 1.1 | Data: 01/10/2026
@@ -15,8 +22,8 @@
 // (lib/dashboards/presentation.ts). Estado efêmero — nada persiste.
 "use client";
 
-import { useEffect } from "react";
-import { ChevronLeft, ChevronRight, FileDown, MousePointer2, X } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { ChevronLeft, ChevronRight, MousePointer2, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -39,9 +46,16 @@ export function usePresentationMode(opts: {
   containerRef: React.RefObject<HTMLElement | null>;
   /** v1.1: false = preparando (só Esc responde). Ausente = pronto. */
   ready?: boolean;
+  /** v1.3: exportando PDF — sair da tela cheia (o diálogo de impressão o faz)
+   * não encerra o modo; quem encerra é o fim da impressão. */
+  keepOnFullscreenExit?: boolean;
 }) {
   const { active, slideIds, currentId, onSelect, onExit, containerRef } = opts;
   const ready = opts.ready ?? true;
+  const keepRef = useRef(opts.keepOnFullscreenExit === true);
+  useEffect(() => {
+    keepRef.current = opts.keepOnFullscreenExit === true;
+  }, [opts.keepOnFullscreenExit]);
 
   useEffect(() => {
     if (!active) return;
@@ -52,7 +66,7 @@ export function usePresentationMode(opts: {
       el.requestFullscreen().catch(() => undefined);
     }
     const onFs = () => {
-      if (!document.fullscreenElement) onExit();
+      if (!document.fullscreenElement && !keepRef.current) onExit();
     };
     document.addEventListener("fullscreenchange", onFs);
     return () => {
@@ -103,8 +117,20 @@ export function PresentationBar({
     const next = stepSlide(slideIds, currentId, action);
     if (next !== currentId) onSelect(next);
   };
+  const bar = useAutoHideBar();
   return (
-    <div className="bg-background/90 fixed bottom-4 left-1/2 z-[60] flex -translate-x-1/2 items-center gap-1 rounded-full border px-2 py-1 shadow-lg backdrop-blur">
+    <div
+      data-visible={bar.visible || undefined}
+      aria-hidden={bar.visible ? undefined : true}
+      onPointerEnter={bar.onEnter}
+      onPointerLeave={bar.onLeave}
+      onFocus={bar.onEnter}
+      onBlur={bar.onLeave}
+      className={cn(
+        "bg-background/90 fixed bottom-4 left-1/2 z-[60] flex -translate-x-1/2 items-center gap-1 rounded-full border px-2 py-1 shadow-lg backdrop-blur transition-opacity duration-300",
+        bar.visible ? "opacity-100" : "pointer-events-none opacity-0"
+      )}
+    >
       <Button
         type="button"
         variant="ghost"
@@ -144,19 +170,6 @@ export function PresentationBar({
       >
         <MousePointer2 className="size-4" />
       </Button>
-      {/* v1.2: um slide por página 16:9 (impressão do navegador → PDF). Os
-          slides já estão todos montados pelo pré-render. */}
-      <Button
-        type="button"
-        variant="ghost"
-        size="icon"
-        className="size-8 rounded-full"
-        aria-label="Exportar PDF"
-        title="Exportar PDF (um slide por página)"
-        onClick={printSlides}
-      >
-        <FileDown className="size-4" />
-      </Button>
       <Button
         type="button"
         variant="ghost"
@@ -178,14 +191,101 @@ export function PresentationBar({
  * página 1280×720, com as cores de fundo). O navegador oferece "Salvar como
  * PDF". A marca sai no `afterprint` (e logo após o print, que bloqueia).
  */
-export function printSlides() {
+export function printSlides(onDone?: () => void) {
   if (typeof window === "undefined") return;
   const body = document.body;
+  let done = false;
   const clear = () => {
+    if (done) return;
+    done = true;
     delete body.dataset.printing;
     window.removeEventListener("afterprint", clear);
+    onDone?.();
   };
   body.dataset.printing = "slides";
   window.addEventListener("afterprint", clear);
   window.print();
+  // `print()` bloqueia até o diálogo fechar na maioria dos navegadores; onde
+  // não bloqueia, o `afterprint` acima chega depois e é ignorado (done).
+  if (!("onafterprint" in window)) clear();
+}
+
+// ------------------------------------------------------------- barra oculta
+
+/** v1.3: tempos da barra (exportados para os testes). */
+export const BAR_HIDE_AFTER_MS = 2000;
+export const BAR_REVEAL_AFTER_MS = 1000;
+/** Faixa inferior da tela (px) em que a proximidade revela a barra. */
+export const BAR_REVEAL_ZONE_PX = 96;
+
+/**
+ * v1.3: a barra começa visível, some após `BAR_HIDE_AFTER_MS` sem interação
+ * e só reaparece com o ponteiro `BAR_REVEAL_AFTER_MS` contínuos na faixa de
+ * baixo (sair da faixa antes cancela). Com o ponteiro ou o foco DENTRO dela,
+ * não some. O teclado de navegação não a mostra — interromperia o slide.
+ */
+export function useAutoHideBar() {
+  const [visible, setVisible] = useState(true);
+  const inside = useRef(false);
+  const hideTimer = useRef<number | null>(null);
+  const revealTimer = useRef<number | null>(null);
+
+  const clearHide = () => {
+    if (hideTimer.current != null) window.clearTimeout(hideTimer.current);
+    hideTimer.current = null;
+  };
+  const clearReveal = () => {
+    if (revealTimer.current != null) window.clearTimeout(revealTimer.current);
+    revealTimer.current = null;
+  };
+  const scheduleHide = useCallback(() => {
+    clearHide();
+    hideTimer.current = window.setTimeout(() => {
+      if (!inside.current) setVisible(false);
+    }, BAR_HIDE_AFTER_MS);
+  }, []);
+
+  // Entrada: visível e contando para sumir.
+  useEffect(() => {
+    scheduleHide();
+    return () => {
+      clearHide();
+      clearReveal();
+    };
+  }, [scheduleHide]);
+
+  useEffect(() => {
+    const onMove = (e: PointerEvent) => {
+      const near = e.clientY >= window.innerHeight - BAR_REVEAL_ZONE_PX;
+      if (!near) {
+        clearReveal();
+        return;
+      }
+      if (visible) {
+        // Perto e já visível: interação — adia o sumiço.
+        if (!inside.current) scheduleHide();
+        return;
+      }
+      if (revealTimer.current == null) {
+        revealTimer.current = window.setTimeout(() => {
+          revealTimer.current = null;
+          setVisible(true);
+          scheduleHide();
+        }, BAR_REVEAL_AFTER_MS);
+      }
+    };
+    window.addEventListener("pointermove", onMove);
+    return () => window.removeEventListener("pointermove", onMove);
+  }, [visible, scheduleHide]);
+
+  const onEnter = useCallback(() => {
+    inside.current = true;
+    clearHide();
+  }, []);
+  const onLeave = useCallback(() => {
+    inside.current = false;
+    scheduleHide();
+  }, [scheduleHide]);
+
+  return { visible, onEnter, onLeave };
 }

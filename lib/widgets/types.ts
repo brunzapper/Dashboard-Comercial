@@ -1,4 +1,7 @@
-// Versão: 1.21 | Data: 02/10/2026
+// Versão: 1.22 | Data: 02/10/2026
+// v1.22 (02/10/2026): o que só o preset Metas 4T26 sabia configurar virou peça
+//   reutilizável — DashboardSettings.slide.date (data fixa do topo do slide);
+//   (demais chaves desta versão comentadas no próprio tipo, com "v1.22").
 // v1.21 (02/10/2026): ESQUELETO DE SLIDE (DashboardSettings.slide,
 //   tabs[].headline/kicker);
 //   AppearanceSettings.annotations/legendMode/area/kpiCompact (anotação, rótulo
@@ -1403,6 +1406,9 @@ export interface DashboardSettings {
     footer?: string;
     showDate?: boolean;
     showNumber?: boolean;
+    // v1.22: data FIXA do topo ("AAAA-MM-DD", a data da reunião); ausente =
+    // o dia em que se apresenta.
+    date?: string;
   };
   // v1.20 (02/10/2026): estilo visual do board (lib/dashboards/style.ts).
   // Ausente = herda o padrão da organização; sem ele, "classico" (visual
