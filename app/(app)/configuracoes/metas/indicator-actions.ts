@@ -1,4 +1,6 @@
-// Versão: 1.0 | Data: 01/10/2026
+// Versão: 1.1 | Data: 02/10/2026
+// v1.1 (02/10/2026): `moveIndicator` — a ORDEM dos indicadores (sort_order)
+//   ganhou controle na tela (antes só o preset a definia).
 // Server Actions do catálogo de INDICADORES (0149) — admin.
 //
 // Gate: sessão + papel admin + área `metas` não negada (mesma régua das
@@ -89,6 +91,47 @@ export async function deleteIndicator(id: string): Promise<IndicatorActionState>
   if (orgId) q = q.eq("organization_id", orgId);
   const { error } = await q;
   if (error) return { ok: false, message: error.message };
+  revalidatePath("/configuracoes/metas");
+  return { ok: true };
+}
+
+/**
+ * v1.1: sobe/desce um indicador na lista (troca o sort_order com o vizinho).
+ * A ordem é a da lista de Indicadores e dos seletores da Tree/Tabela Livre.
+ */
+export async function moveIndicator(
+  id: string,
+  dir: "up" | "down"
+): Promise<IndicatorActionState> {
+  const err = await ensureAdmin();
+  if (err) return { ok: false, message: err };
+  const supabase = await createClient();
+  const orgId = await getActiveOrgId();
+  if (!orgId) return { ok: false, message: "Organização ativa não encontrada." };
+  const { data, error } = await supabase
+    .from("indicators")
+    .select("id, sort_order, label")
+    .eq("organization_id", orgId)
+    .order("sort_order", { ascending: true })
+    .order("label", { ascending: true });
+  if (error || !data) return { ok: false, message: error?.message ?? "Falha ao ler." };
+  const list = data as { id: string; sort_order: number }[];
+  const i = list.findIndex((r) => r.id === id);
+  const j = dir === "up" ? i - 1 : i + 1;
+  if (i < 0 || j < 0 || j >= list.length) return { ok: true };
+  // Ordens repetidas (preset/import) viram uma sequência limpa antes da troca.
+  const order = list.map((r) => r.id);
+  [order[i], order[j]] = [order[j], order[i]];
+  for (const [k, rid] of order.entries()) {
+    const want = (k + 1) * 10;
+    if (list.find((r) => r.id === rid)?.sort_order === want) continue;
+    const { error: e } = await supabase
+      .from("indicators")
+      .update({ sort_order: want })
+      .eq("id", rid)
+      .eq("organization_id", orgId);
+    if (e) return { ok: false, message: e.message };
+  }
   revalidatePath("/configuracoes/metas");
   return { ok: true };
 }

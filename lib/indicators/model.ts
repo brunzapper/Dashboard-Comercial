@@ -1,4 +1,8 @@
-// Versão: 1.2 | Data: 02/10/2026
+// Versão: 1.3 | Data: 02/10/2026
+// v1.3 (02/10/2026): (a) `attentionPct` — a faixa "Atenção" deixou de ser
+//   fixa em 2× a tolerância (0150; null = o padrão de sempre); (b) rótulos dos
+//   operadores dos filhos SEM o exemplo do preset Metas 4T26 ("vendas ×
+//   ticket" etc.) — vocabulário do app, não de um projeto.
 // v1.2 (02/10/2026): `formatIndicatorValue(…, { unit: false })` — só o número
 //   (a unidade fica no rótulo da linha, na tabela de slide) e
 //   `indicatorUnitSymbol` (o "R$"/"%" do rótulo).
@@ -71,6 +75,8 @@ export interface IndicatorDef {
   rollup: IndicatorRollup;
   direction: IndicatorDirection;
   tolerancePct: number;
+  /** v1.3: desvio máximo (%) ainda "Atenção"; null = 2× a tolerância. */
+  attentionPct?: number | null;
   ownerResponsibleId?: string | null;
   realized: IndicatorRealized | null;
   sortOrder: number;
@@ -135,6 +141,12 @@ export function parseIndicatorRealized(raw: unknown): IndicatorRealized | null {
 }
 
 /** Linha do banco → definição. Chave/rótulo inválidos ⇒ null (linha some). */
+function parseAttention(v: unknown): number | null {
+  if (v == null || v === "") return null;
+  const n = Number(v);
+  return Number.isFinite(n) && n >= 0 && n <= 100 ? n : null;
+}
+
 export function parseIndicatorRow(row: Record<string, unknown>): IndicatorDef | null {
   if (!isIndicatorKey(row.key)) return null;
   const label = typeof row.label === "string" ? row.label.trim() : "";
@@ -150,6 +162,7 @@ export function parseIndicatorRow(row: Record<string, unknown>): IndicatorDef | 
     direction: pick(row.direction, INDICATOR_DIRECTION_LABELS, "maior_melhor"),
     tolerancePct:
       Number.isFinite(tol) && tol >= 0 && tol <= 100 ? tol : DEFAULT_TOLERANCE_PCT,
+    attentionPct: parseAttention(row.attention_pct),
     ownerResponsibleId:
       typeof row.owner_responsible_id === "string" ? row.owner_responsible_id : null,
     realized: parseIndicatorRealized(row.realized),
@@ -160,6 +173,10 @@ export function parseIndicatorRow(row: Record<string, unknown>): IndicatorDef | 
 
 /** Colunas lidas pelos loaders (uma lista só). */
 export const INDICATOR_COLUMNS =
+  "id, key, label, description, unit, rollup, direction, tolerance_pct, attention_pct, owner_responsible_id, realized, sort_order, preset_key";
+/** v1.3: as colunas anteriores à 0150 — fallback do loader se a migração
+ * ainda não rodou (sem ele o catálogo inteiro sumiria). */
+export const INDICATOR_COLUMNS_LEGACY =
   "id, key, label, description, unit, rollup, direction, tolerance_pct, owner_responsible_id, realized, sort_order, preset_key";
 
 // ---------------------------------------------------------------- formatação
@@ -281,7 +298,9 @@ export interface StatusContext {
 export function indicatorStatus(
   realized: number | null | undefined,
   target: number | null | undefined,
-  def: Pick<IndicatorDef, "direction" | "tolerancePct" | "unit" | "rollup">,
+  def: Pick<IndicatorDef, "direction" | "tolerancePct" | "unit" | "rollup"> & {
+    attentionPct?: number | null;
+  },
   ctx: StatusContext
 ): IndicatorStatus {
   if (realized == null || target == null) return "sem_dado";
@@ -298,7 +317,9 @@ export function indicatorStatus(
   const shortfall = 100 - att;
   const tol = def.tolerancePct;
   if (shortfall <= tol) return "ok";
-  if (shortfall <= tol * 2) return "atencao";
+  // v1.3: faixa de atenção configurável (nunca abaixo da tolerância).
+  const attention = Math.max(tol, def.attentionPct ?? tol * 2);
+  if (shortfall <= attention) return "atencao";
   return "fora";
 }
 
@@ -307,10 +328,10 @@ export type ChildrenOp = "×" | "+" | "−" | "÷";
 export const CHILDREN_OPS: readonly ChildrenOp[] = ["×", "+", "−", "÷"];
 
 export const CHILDREN_OP_LABELS: Record<ChildrenOp, string> = {
-  "×": "Multiplicação (vendas × ticket)",
-  "+": "Soma (inbound + outbound)",
+  "×": "Multiplicação",
+  "+": "Soma",
   "−": "Subtração",
-  "÷": "Divisão (custo ÷ clientes)",
+  "÷": "Divisão",
 };
 
 /**

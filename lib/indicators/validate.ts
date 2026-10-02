@@ -1,4 +1,9 @@
-// Versão: 1.0 | Data: 01/10/2026
+// Versão: 1.1 | Data: 02/10/2026
+// v1.1 (02/10/2026): `validateRealizedFormula` (extraída do save do
+//   indicador, mesma régua) e `validateRealizedSource` — a fonte do realizado
+//   dos nós da Tree e das linhas de meta da Tabela Livre passa pelo MESMO
+//   catálogo e validador; a quebra só aceita campo agrupável. Também
+//   `attentionPct` (faixa "Atenção" configurável, padrão 2× a tolerância).
 // Validação de SALVAMENTO de um indicador (0149) — a muralha do servidor.
 //
 // O realizado é uma fórmula AGREGADA: valida pelo MESMO catálogo
@@ -26,6 +31,10 @@ import { buildAvailableFields } from "@/lib/widgets/fields";
 import { opHasNoValue } from "@/lib/widgets/filter-ops";
 
 import {
+  parseRealizedSource,
+  type RealizedSource,
+} from "./realized-source";
+import {
   INDICATOR_DIRECTION_LABELS,
   INDICATOR_ROLLUP_LABELS,
   INDICATOR_UNIT_LABELS,
@@ -46,6 +55,8 @@ export interface IndicatorInput {
   rollup: string;
   direction: string;
   tolerancePct: number;
+  /** v1.1: faixa "Atenção" (%); null = 2× a tolerância; ausente = não mexe. */
+  attentionPct?: number | null;
   ownerResponsibleId?: string | null;
   realized: unknown;
   sortOrder?: number;
@@ -59,6 +70,8 @@ export interface IndicatorRowWrite {
   rollup: IndicatorRollup;
   direction: IndicatorDirection;
   tolerance_pct: number;
+  /** v1.1: presente só quando a entrada o informa (preset antigo não manda). */
+  attention_pct?: number | null;
   owner_responsible_id: string | null;
   realized: IndicatorRealized | null;
   sort_order: number;
@@ -89,6 +102,19 @@ export function validateIndicatorShape(input: IndicatorInput): IndicatorValidati
   const tol = Number(input.tolerancePct);
   if (!Number.isFinite(tol) || tol < 0 || tol > 100)
     return { ok: false, message: "Tolerância deve estar entre 0 e 100%." };
+  let attention: number | null | undefined = undefined;
+  if (input.attentionPct !== undefined) {
+    if (input.attentionPct === null) attention = null;
+    else {
+      const a = Number(input.attentionPct);
+      if (!Number.isFinite(a) || a < tol || a > 100)
+        return {
+          ok: false,
+          message: "A faixa de atenção deve ficar entre a tolerância e 100%.",
+        };
+      attention = a;
+    }
+  }
   let realized: IndicatorRealized | null = null;
   if (input.realized != null) {
     realized = parseIndicatorRealized(input.realized);
@@ -123,6 +149,7 @@ export function validateIndicatorShape(input: IndicatorInput): IndicatorValidati
       rollup: input.rollup as IndicatorRollup,
       direction: input.direction as IndicatorDirection,
       tolerance_pct: tol,
+      ...(attention !== undefined ? { attention_pct: attention } : {}),
       owner_responsible_id: input.ownerResponsibleId || null,
       realized,
       sort_order: Number.isFinite(Number(input.sortOrder)) ? Number(input.sortOrder) : 0,
@@ -139,7 +166,14 @@ export async function validateIndicatorSave(
   const shape = validateIndicatorShape(input);
   if (!shape.ok || !shape.row.realized) return shape;
   const realized = shape.row.realized;
+  const r = await validateRealizedFormula(supabase, orgId, realized);
+  return r.ok ? shape : { ok: false, message: `${r.message}` };
+}
 
+type RealizedCheck = { ok: true } | { ok: false; message: string };
+
+/** Catálogo VIVO da org para validar uma fórmula agregada de realizado. */
+async function loadRealizedCatalog(supabase: SupabaseClient, orgId: string | null) {
   const [sources, correspondences, { data: fieldsData }, registry, manualSeries, manualAxes] =
     await Promise.all([
       loadSources(supabase, orgId),
@@ -155,17 +189,6 @@ export async function validateIndicatorSave(
     ]);
   const allFields = (fieldsData ?? []) as FieldDefinition[];
   const available = buildAvailableFields(allFields, correspondences, sources);
-  const sourceKeys = new Set(sources.map((s) => s.key));
-  for (const s of realized.sources) {
-    if (!sourceKeys.has(s))
-      return { ok: false, message: `Base desconhecida no realizado ("${s}").` };
-  }
-  const availableByRef = new Map(available.map((a) => [a.field, a]));
-  for (const f of realized.filters) {
-    const af = availableByRef.get(f.field);
-    if (!af || af.displayOnly || af.aggCalc)
-      return { ok: false, message: `Condição do realizado: campo desconhecido ("${f.field}").` };
-  }
   const catalog = buildAggOperandCatalog(
     availableAggCatalogInput(
       available,
@@ -177,6 +200,43 @@ export async function validateIndicatorSave(
       { withNested: true }
     )
   );
+  return { sources, available, catalog };
+}
+
+/**
+ * v1.1: fórmula + bases + condições de um realizado (do indicador ou próprio)
+ * contra o catálogo vivo — a MESMA régua do save do indicador.
+ */
+export async function validateRealizedFormula(
+  supabase: SupabaseClient,
+  orgId: string | null,
+  realized: Pick<IndicatorRealized, "formula" | "sources" | "filters">,
+  ctx?: Awaited<ReturnType<typeof loadRealizedCatalog>>
+): Promise<RealizedCheck> {
+  const { sources, available, catalog } = ctx ?? (await loadRealizedCatalog(supabase, orgId));
+  const sourceKeys = new Set(sources.map((s) => s.key));
+  for (const s of realized.sources) {
+    if (!sourceKeys.has(s))
+      return { ok: false, message: `Base desconhecida no realizado ("${s}").` };
+  }
+  const availableByRef = new Map(available.map((a) => [a.field, a]));
+  for (const f of realized.filters) {
+    if (f.field === "operation_id")
+      return {
+        ok: false,
+        message:
+          "Operação não é filtrável no realizado — filtre por responsável ou por um campo do registro.",
+      };
+    const af = availableByRef.get(f.field);
+    if (!af || af.displayOnly || af.aggCalc)
+      return { ok: false, message: `Condição do realizado: campo desconhecido ("${f.field}").` };
+    if (!opHasNoValue(f.op)) {
+      const empty = Array.isArray(f.value)
+        ? f.value.length === 0
+        : String(f.value ?? "").trim() === "";
+      if (empty) return { ok: false, message: "Informe o valor de cada condição do realizado." };
+    }
+  }
   const v = validateFormulaForContext(realized.formula, {
     kind: "aggregate",
     catalog,
@@ -186,5 +246,51 @@ export async function validateIndicatorSave(
     return { ok: false, message: `Fórmula do realizado: ${v.error ?? "inválida."}` };
   const fk = await validateFkCondNames(supabase, realized.formula);
   if (!fk.ok) return { ok: false, message: `Fórmula do realizado: ${fk.message}` };
-  return shape;
+  return { ok: true };
+}
+
+/**
+ * v1.1: fonte do realizado de um nó/linha. Devolve a versão SANEADA (o parse
+ * descarta chaves desconhecidas) ou a mensagem amigável. Sem override, valida
+ * só os recortes extras e a quebra (a fórmula é a do catálogo, já validada no
+ * save do indicador).
+ */
+export async function validateRealizedSource(
+  supabase: SupabaseClient,
+  orgId: string | null,
+  raw: unknown
+): Promise<{ ok: true; value: RealizedSource } | { ok: false; message: string }> {
+  const rs = parseRealizedSource(raw);
+  if (!rs) return { ok: false, message: "Fonte do realizado inválida — revise a fórmula e os recortes." };
+  const ctx = await loadRealizedCatalog(supabase, orgId);
+  const filters = (rs.filters ?? []).map((f) => {
+    const { exposed, ...plain } = f;
+    void exposed;
+    return plain;
+  });
+  if (rs.override) {
+    const r = await validateRealizedFormula(
+      supabase,
+      orgId,
+      { formula: rs.override.formula, sources: rs.override.sources, filters },
+      ctx
+    );
+    if (!r.ok) return r;
+  } else if (filters.length > 0) {
+    const byRef = new Map(ctx.available.map((a) => [a.field, a]));
+    for (const f of filters) {
+      const af = byRef.get(f.field);
+      if (f.field === "operation_id" || !af || af.displayOnly || af.aggCalc)
+        return { ok: false, message: `Recorte do realizado: campo inválido ("${f.field}").` };
+    }
+  }
+  if (rs.breakdown) {
+    const af = ctx.available.find((a) => a.field === rs.breakdown!.field);
+    if (!af || af.displayOnly || af.aggCalc)
+      return {
+        ok: false,
+        message: `Quebra do realizado: campo não agrupável ("${rs.breakdown.field}").`,
+      };
+  }
+  return { ok: true, value: rs };
 }
