@@ -1,3 +1,7 @@
+// Versão: 1.1 | Data: 02/10/2026
+// v1.1 (02/10/2026): "Fórmulas" e "Regras" viram CABEÇALHOS — a parte de fórmulas (e a seção
+//   OPERANDOS DISPONÍVEIS) é um tópico escolhível da orquestração
+//   (lib/ai/topics/catalogs.ts); as regras ficam no núcleo.
 // Versão: 1.0 | Data: 30/07/2026
 // SPEC do prompt de criação de campos por IA — DERIVADO do código: tipos de
 // DATA_TYPE_LABELS, moedas de CURRENCY_OPTIONS, percentual de
@@ -82,7 +86,8 @@ ${typeLines}
 - "percentual": true — exibe como % (tipos ${PERCENT_DATA_TYPES.join(", ")});
   nunca junto com "moeda".
 
-Fórmulas ("formula_texto"):
+## Fórmulas ("formula_texto")
+
 - Referencie operandos pelo RÓTULO entre colchetes, ex.: [Valor], [MRR] — use
   EXATAMENTE os rótulos listados em OPERANDOS DISPONÍVEIS (por-registro para
   "calculado"; de agregação para "calculado_agg" — não misture os contextos).
@@ -94,7 +99,8 @@ Fórmulas ("formula_texto"):
 - Em "calculado_agg", condições de SOMASE/CONT.SE sobre Responsável/Operação
   comparam pelo NOME cadastrado.
 
-Regras:
+## Regras
+
 - NUNCA invente operando: se o dado necessário não existe no catálogo, crie
   antes o campo simples correspondente (na MESMA resposta) e referencie-o.
 - Papéis de visibilidade/edição e posição NÃO são seus — o sistema aplica os

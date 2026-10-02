@@ -1,3 +1,7 @@
+// Versão: 1.1 | Data: 02/10/2026
+// v1.1 (02/10/2026): passa o catálogo de tópicos (FIELDS_TOPIC_CATALOG) ao laço de
+//   geração — orquestração por tópicos (lib/ai/topics): roteador antes da
+//   geração e escalonamento ao prompt inteiro se a resposta não validar.
 // Versão: 1.0 | Data: 30/07/2026
 // NÚCLEO da criação de campos por IA (/campos → "Criar com IA"). A IA NUNCA
 // escreve: generateFieldsCore valida a ESTRUTURA (lib/import/fields/validate)
@@ -19,6 +23,7 @@ import { getActiveOrgId } from "@/lib/auth/org";
 import { createClient } from "@/lib/supabase/server";
 import { loadOrgAiConfig } from "@/lib/ai/config";
 import { aiSection, runJsonGenerationLoop } from "@/lib/ai/json-loop";
+import { FIELDS_TOPIC_CATALOG } from "@/lib/ai/topics/catalogs";
 import { loadSources } from "@/lib/config/sources";
 import { loadGoalMetrics } from "@/lib/config/goal-metrics";
 import { loadManualAxes, loadManualSeries } from "@/lib/manual-base/load";
@@ -263,6 +268,8 @@ export async function generateFieldsCore(
   const result = await runJsonGenerationLoop<
     Extract<FieldsCreateValidation, { ok: true }>
   >({
+    // v1.1 (02/10/2026): catálogo de tópicos — orquestração (lib/ai/topics).
+    topics: FIELDS_TOPIC_CATALOG,
     config: aiConfig,
     system,
     priorTurns: input.priorTurns ?? [],

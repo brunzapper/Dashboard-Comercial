@@ -82,6 +82,19 @@ confira manual §16.2 e validador):
    UI/semântica do construtor SEMPRE inclui o manual (regra do AGENTS.md).
 7. **`docs/arquitetura.md` / `AGENTS.md`** — se a mudança criar ou alterar
    invariante, atualize na mesma entrega.
+8. **Orquestração por tópicos** (`lib/ai/topics/`, 02/10/2026) — chave nova
+   de settings ganha tópico em `WIDGET_SETTINGS_TOPIC`/
+   `DASHBOARD_SETTINGS_TOPIC` (o `satisfies` acusa); tipo de widget novo, em
+   `VISUAL_TYPE_TOPICS`; seção NOVA de prompt (cabeçalho nível 1–2) em
+   `lib/ai/topics/catalogs.ts` (tópico escolhível com `headings`/`summary`/
+   `keywords`, ou `CORE_HEADINGS` se tiver de ir sempre); `null` novo de
+   dicionário só com motivo na `NULL_ALLOWLIST` de
+   `lib/ai/topics/catalogs.test.ts`. Assistente novo: catálogo em
+   `AI_TOPIC_CATALOGS` + `topics:` no `runJsonGenerationLoop` + prompt de
+   teste no mesmo arquivo.
+9. **Nós da Tree** (`lib/import/dashboard/tree-maps.ts`) — campo novo de
+   payload de nó (lib/tree/payload.ts) precisa aparecer no `TREE_MAPS_SPEC`
+   (instructions.ts) e passar no `parseNodePayload` que o validador já usa.
 
 ## Método de trabalho
 
@@ -104,7 +117,7 @@ confira manual §16.2 e validador):
 
 ## Formato do relatório final
 
-Checklist por superfície (as 7 acima), cada item marcado **Conforme**,
+Checklist por superfície (as 9 acima), cada item marcado **Conforme**,
 **Corrigido** (com o resumo da correção e arquivos tocados) ou **Pendente**
 (com o motivo — ex.: decisão de produto sobre expor ou não a chave à IA).
 Termine com o resultado de lint/typecheck/test.

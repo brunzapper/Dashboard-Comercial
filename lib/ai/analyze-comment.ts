@@ -1,3 +1,7 @@
+// Versão: 1.4 | Data: 02/10/2026
+// v1.4 (02/10/2026): passa o catálogo de tópicos (COMMENT_ANALYSIS_TOPIC_CATALOG) ao laço de
+//   geração — orquestração por tópicos (lib/ai/topics): roteador antes da
+//   geração e escalonamento ao prompt inteiro se a resposta não validar.
 // Versão: 1.3 | Data: 11/09/2026
 // v1.3 (11/09/2026): `runCommentThreadCore` aceita `onThought`, e o turno deixou
 //   de ser chamado por Server Action — passou para a rota
@@ -66,6 +70,7 @@ import { getActiveOrgId } from "@/lib/auth/org";
 import { createClient } from "@/lib/supabase/server";
 import { loadOrgAiConfig } from "@/lib/ai/config";
 import { runJsonGenerationLoop } from "@/lib/ai/json-loop";
+import { COMMENT_ANALYSIS_TOPIC_CATALOG } from "@/lib/ai/topics/catalogs";
 import { todayBrasiliaIso } from "@/lib/date/today";
 import { DEFAULT_TASK_PHASES, type KanbanSettings } from "@/lib/kanban/types";
 import { deriveColumns } from "@/lib/kanban/columns";
@@ -534,6 +539,8 @@ export async function runCommentThreadCore(input: {
     actions: ParsedTaskAction[];
     warnings: string[];
   }>({
+    // v1.4 (02/10/2026): catálogo de tópicos — orquestração (lib/ai/topics).
+    topics: COMMENT_ANALYSIS_TOPIC_CATALOG,
     config: aiConfig,
     system,
     priorTurns: turns.slice(1, reply ? -1 : undefined),

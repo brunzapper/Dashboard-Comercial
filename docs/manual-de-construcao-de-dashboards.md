@@ -1,4 +1,8 @@
-<!-- Versão: 1.45 | Data: 02/10/2026 -->
+<!-- Versão: 1.46 | Data: 02/10/2026 -->
+<!-- v1.46 (02/10/2026): §3.8.2 — a IA edita os NÓS da Tree (linhas do cartão,
+     indicadores, Multi-fatores, rituais, anotações), mostra "sem mudança" quando
+     nada mudou e escolhe o contexto por tópicos (aviso "Contexto carregado");
+     §5.17 — "Pela IA". -->
 <!-- v1.45 (02/10/2026): §3.6 — Exportar PDF no menu ⋮; §5.16 reescrita —
      metas na Tabela Livre (a Tabela de metas foi absorvida), com o passo a
      passo do painel do preset; §5.17 — cartão de indicador configurável (de
@@ -1053,6 +1057,27 @@ calculada que REUSA um campo `calculado_agg` exporta só campo/rótulo (as
 demais opções da métrica são reconfiguráveis no editor) — única perda conhecida
 do export.
 
+**A Tree pela IA** (02/10/2026): os **nós** dos mapas usados pelos widgets
+Tree (indicadores, Multi-fatores, rituais e anotações) também entram na
+conversa. Pedidos como "desmarque Realizado em todas as linhas do cartão",
+"troque o rótulo Meta por Alvo", "crie um ritual semanal às segundas sob o
+plano 1" ou "pendure este indicador sob MRR novo" passam a funcionar — a IA
+edita e cria nós (nunca exclui). A prévia lista **"atualiza nó: …"** /
+**"novo nó: …"**, e o **Desfazer edição da IA** também volta os nós.
+
+**Prévia honesta** (02/10/2026): widget que a resposta reenviou sem mudar nada
+aparece como **"sem mudança: …"**, com um aviso — se o pedido era mudar aquele
+widget, ele provavelmente pede algo que mora em outro lugar (como as linhas do
+cartão da Tree, que são de cada nó). A mensagem final conta também os "sem
+mudança".
+
+**Contexto por tópicos** (02/10/2026): para não afogar modelos mais leves
+(ex.: Gemini Flash), cada turno da IA interna começa escolhendo **quais
+partes** da especificação e **quais widgets/mapas** do dashboard ela precisa
+ler — o painel mostra "Contexto carregado: …". Se a resposta não passar na
+validação, a correção seguinte recebe a especificação **inteira**. O **Copiar
+prompt** (IA externa) continua levando tudo.
+
 ---
 
 ## 4. Período e filtros no nível do dashboard
@@ -1797,6 +1822,11 @@ data, o cartão não mostra data nenhuma). Qualquer cartão pode ser marcado com
 avisos. **Aparência → Tree** liga cada um de volta para o widget inteiro, e o
 editor de cada cartão pode forçar o rótulo de tipo (mostrar/ocultar). A mesma
 seção define o fundo do canvas da Root.
+
+**Pela IA** (02/10/2026): no painel "Editar com IA", os nós do mapa são
+editáveis por pedido — linhas do cartão (ocultar/mostrar/renomear/reordenar),
+etiqueta, "Filhos se combinam por", fatores, cadência do ritual, anotações — e
+a IA cria nós novos sob qualquer nó (§3.8.2). Excluir nó segue manual.
 
 **Mapa, galho e meses** (configuração do widget Tree, mapa livre): o **mapa**
 sai de uma lista (ou "+ Novo mapa…"); **Mostrar só o galho** escolhe o nó num

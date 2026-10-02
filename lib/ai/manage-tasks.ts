@@ -1,3 +1,7 @@
+// Versão: 1.2 | Data: 02/10/2026
+// v1.2 (02/10/2026): passa o catálogo de tópicos (TASKS_TOPIC_CATALOG) ao laço de
+//   geração — orquestração por tópicos (lib/ai/topics): roteador antes da
+//   geração e escalonamento ao prompt inteiro se a resposta não validar.
 // Versão: 1.1 | Data: 10/09/2026
 // v1.1 (10/09/2026): o executor por ação saiu para `lib/ai/apply-task-action.ts`
 // — o "Salvar e analisar" da Tree passou a aplicar as mesmas ações, e uma
@@ -25,6 +29,7 @@ import { getActiveOrgId } from "@/lib/auth/org";
 import { createClient } from "@/lib/supabase/server";
 import { loadOrgAiConfig } from "@/lib/ai/config";
 import { aiSection, runJsonGenerationLoop } from "@/lib/ai/json-loop";
+import { TASKS_TOPIC_CATALOG } from "@/lib/ai/topics/catalogs";
 import { deriveColumns } from "@/lib/kanban/columns";
 import { DEFAULT_TASK_PHASES, type KanbanSettings } from "@/lib/kanban/types";
 import type { DashboardSettings } from "@/lib/widgets/types";
@@ -248,6 +253,8 @@ export async function generateTasksCore(
     actions: ParsedTaskAction[];
     warnings: string[];
   }>({
+    // v1.2 (02/10/2026): catálogo de tópicos — orquestração (lib/ai/topics).
+    topics: TASKS_TOPIC_CATALOG,
     config: aiConfig,
     system,
     priorTurns: input.priorTurns ?? [],

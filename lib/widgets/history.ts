@@ -1,9 +1,14 @@
+// Versão: 1.1 | Data: 02/10/2026
+// v1.1 (02/10/2026): `treeMaps` OPCIONAL — o Desfazer da edição por IA passa a
+//   cobrir os nós dos mapas da Tree que ela alterou (só o snapshot pré-turno
+//   da IA o preenche; o histórico do cliente segue sem ele, byte-idêntico).
 // Versão: 1.0 | Data: 12/07/2026
 // Snapshot do estado de um dashboard (nome + settings + widgets + células das
 // tabelas editáveis) para o histórico de Desfazer/Refazer. É o que se grava de
 // volta num "restore". A montagem é DETERMINÍSTICA (widgets e células ordenados)
 // para que JSON.stringify sirva de comparação estável entre dois snapshots.
 import type { DashboardSettings, Widget } from "./types";
+import type { TreeMapsSnapshot } from "@/lib/import/dashboard/tree-maps";
 
 // Colunas persistidas de um widget (sem dashboard_id — o restore o injeta a
 // partir do id do dashboard). O `id` é mantido para reconciliar por linha:
@@ -36,6 +41,8 @@ export interface DashboardSnapshot {
   settings: DashboardSettings;
   widgets: WidgetSnapshot[];
   cells: CellSnapshot[];
+  /** v1.1: nós dos mapas da Tree (só no snapshot pré-turno da IA). */
+  treeMaps?: TreeMapsSnapshot;
 }
 
 // Linhas cruas vindas do Supabase (page.tsx / captureDashboardSnapshot).

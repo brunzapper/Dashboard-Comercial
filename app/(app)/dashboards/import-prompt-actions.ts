@@ -1,3 +1,10 @@
+// Versão: 1.5 | Data: 02/10/2026
+// v1.5 (02/10/2026): a Base manual sai do JSON do modelo para uma seção
+//   PRÓPRIA do prompt (`manualModelJson`) — é um tópico da orquestração
+//   (lib/import/dashboard/topics.ts) e pode ficar de fora do turno da IA
+//   interna quando o pedido não a usa; a IA externa recebe as duas seções. O
+//   texto devolvido carrega os MARCADORES de tópico: quem entrega a uma IA
+//   (lib/ai/generate-dashboard.ts) os remove ou recorta.
 // Versão: 1.4 | Data: 17/09/2026
 // v1.4 (17/09/2026): o modelo leva a Base manual INTEIRA — os lançamentos, não
 //   só os nomes dos dados. Sem os números a IA não tinha como propor o
@@ -339,7 +346,8 @@ export async function buildImportPrompt(
     // A Base manual NÃO é uma Base: sem record_type, sem campo de data, fora de
     // `bases`/`sources`; ela casa com o INTERVALO do período, qualquer que seja
     // a coluna de data de cada Base — ver o SPEC.
-    ...manualBaseBlock,
+    // v1.5 (02/10/2026): esses blocos foram para a seção própria
+    // (manualModelJson, abaixo) — tópico "Base manual" da orquestração.
   };
 
   const sampleNote = [
@@ -361,6 +369,10 @@ export async function buildImportPrompt(
   const prompt = buildImportPromptText({
     basesLabel: selected.map((b) => `${b.label} ("${b.key}")`).join(", "),
     baseModelJson: JSON.stringify(model, null, 2),
+    manualModelJson:
+      Object.keys(manualBaseBlock).length > 0
+        ? JSON.stringify(manualBaseBlock, null, 2)
+        : undefined,
     sampleJson: JSON.stringify(sampleBlocks, null, 2),
     sampleNote,
     manual,

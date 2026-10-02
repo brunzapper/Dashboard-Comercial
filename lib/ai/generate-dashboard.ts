@@ -1,3 +1,13 @@
+// Versão: 1.4 | Data: 02/10/2026
+// v1.4 (02/10/2026): (a) ORQUESTRAÇÃO POR TÓPICOS — o turno roda em duas
+//   fases: o roteador (lib/ai/topics/router.ts) lê o índice de tópicos
+//   (lib/import/dashboard/topics.ts) e o índice do ESTADO (widgets e mapas da
+//   Tree) e escolhe o que a geração precisa; a 1ª tentativa recebe só isso, e
+//   as seguintes — se a resposta não validar — o prompt INTEIRO
+//   (escalonamento). O "Copiar prompt" da IA externa segue recebendo tudo, do
+//   MESMO texto (marcadores removidos); (b) o estado do board passa a levar os
+//   NÓS da Tree (`mapas`, lib/tree/ai-maps.ts) — sem eles a IA não alcançava
+//   as linhas do cartão.
 // Versão: 1.3 | Data: 17/09/2026
 // v1.3 (17/09/2026): três blocos EXTRAÍDOS de generateDashboardCore, sem
 //   mudança de comportamento — contexto por modo, montagem do system e a
@@ -55,6 +65,19 @@ import {
 } from "@/lib/import/dashboard/export";
 import { loadExportFkNames } from "@/lib/import/dashboard/export-fk-names";
 import type { ImportWidgetSpec } from "@/lib/import/dashboard/types";
+import type { ImportMapSpec } from "@/lib/import/dashboard/tree-maps";
+import { loadBoardTreeMaps } from "@/lib/tree/ai-maps";
+import {
+  DASHBOARD_TOPIC_CATALOG,
+  VISUAL_TYPE_TOPICS,
+} from "@/lib/import/dashboard/topics";
+import {
+  renderChunks,
+  splitPrompt,
+  stripTopicMarkers,
+} from "@/lib/ai/topics/split";
+import { routeNotice, routeTopics, type RouterItem } from "@/lib/ai/topics/router";
+import { renderRouted } from "@/lib/ai/topics/turn";
 import {
   fuseExtraReferences,
   MAX_EXTRA_REFS,
@@ -150,7 +173,14 @@ Regras deste modo (além da especificação acima):
 - Não mude "name", "visible_to_roles" nem "settings.tabs" sem pedido
   explícito. Inclua "dashboard.settings" só se alterar
   ${documentedKeys(DASHBOARD_SETTINGS_DOC).join("/")}.
-- A "chave" é fixa (o sistema a impõe) — repita a do estado atual.`;
+- A "chave" é fixa (o sistema a impõe) — repita a do estado atual.
+- NÓS DA TREE (indicadores, Multi-fatores, rituais, anotações) ficam em
+  "mapas" — mesma regra de delta por "key"; omitir não exclui. Linhas do
+  cartão, fonte do realizado e fatores são do NÓ, nunca de "settings.tree".
+  Pedido só sobre nós: "widgets": [] + "mapas".
+- Se o estado trouxer "widgets_omitidos"/"mapas_omitidos", esses itens EXISTEM
+  mas o conteúdo deles não foi carregado para este pedido: não os re-emita.
+  Para alterar um deles mesmo assim, mande a "key" + só o delta.`;
 
 const FROM_RULES = `
 O "ESTADO ATUAL DO DASHBOARD (JSON)" abaixo é um dashboard de REFERÊNCIA. O
@@ -275,6 +305,8 @@ interface DashboardModeContext {
   mode: AiDashboardMode;
   bases: string[];
   stateJson: string | null;
+  /** v1.4: o estado como OBJETO — base do recorte por item do roteador. */
+  stateObject?: Record<string, unknown>;
   chave: string;
   modeRules: string;
   currentTabs?: { id: string; name: string; color?: string }[];
@@ -285,6 +317,10 @@ interface DashboardModeContext {
   refWidgets?: ImportWidgetSpec[];
   refSections: { title: string; body: string }[];
   currentCanvas?: Record<string, unknown>;
+  /** v1.x (02/10/2026): mapas da Tree do board (export + base do merge por nó). */
+  baseMaps?: ImportMapSpec[];
+  /** Mapas dos widgets Tree (modo livre) do board. */
+  boardMapKeys?: string[];
 }
 
 /**
@@ -308,6 +344,7 @@ async function resolveDashboardModeContext(
   // ---- Contexto por modo: bases, estado atual (from/edit), chave canônica.
   let bases: string[];
   let stateJson: string | null = null;
+  let stateObject: Record<string, unknown> | undefined;
   let chave: string;
   let modeRules: string;
   let currentTabs: { id: string; name: string; color?: string }[] | undefined;
@@ -324,6 +361,10 @@ async function resolveDashboardModeContext(
   // Modos from/edit: canvas do estado EXPORTADO (carimbo do espaço de grid v2)
   // — injetado no JSON da IA quando ela o omite (rewrite.currentCanvas).
   let currentCanvas: Record<string, unknown> | undefined;
+  // 02/10/2026: nós dos mapas da Tree — sem eles a IA não alcança as linhas
+  // do cartão, a fonte do realizado, planos e rituais (eram invisíveis).
+  let baseMaps: ImportMapSpec[] | undefined;
+  let boardMapKeys: string[] | undefined;
 
   if (mode === "new") {
     bases = (input.bases ?? []).filter(Boolean);
@@ -357,7 +398,14 @@ async function resolveDashboardModeContext(
       fkNames: await loadExportFkNames(supabase, board.widgets),
     });
     bases = exported.json.bases ?? [];
-    stateJson = JSON.stringify(exported.json, null, 2);
+    const treeMaps = await loadBoardTreeMaps(supabase, board.widgets);
+    baseMaps = treeMaps.mapas;
+    boardMapKeys = treeMaps.mapKeys;
+    stateObject =
+      treeMaps.mapas.length > 0
+        ? { ...exported.json, mapas: treeMaps.mapas }
+        : { ...exported.json };
+    stateJson = JSON.stringify(stateObject, null, 2);
     existingKeys = new Set(exported.widgetKeyById.values());
     // Base do merge por widget e do `copy_of` nos DOIS modos com estado: no
     // "from" o apply já mescla sobre a cópia (applyDashboardEditJson) — sem a
@@ -428,6 +476,7 @@ async function resolveDashboardModeContext(
       mode,
       bases,
       stateJson,
+      stateObject,
       chave,
       modeRules,
       currentTabs,
@@ -438,6 +487,8 @@ async function resolveDashboardModeContext(
       refWidgets,
       refSections,
       currentCanvas,
+      baseMaps,
+      boardMapKeys,
     },
   };
 }
@@ -455,7 +506,7 @@ async function resolveDashboardModeContext(
 async function buildDashboardSystemPrompt(
   ctx: DashboardModeContext,
   opts: { variant: ImportPromptVariant; pendingJson?: string }
-): Promise<{ ok: true; system: string } | { ok: false; message: string }> {
+): Promise<{ ok: true; system: string; base: string } | { ok: false; message: string }> {
   const prompt = await buildImportPrompt(ctx.bases, opts.variant);
   if (!prompt.ok || !prompt.prompt) {
     return {
@@ -463,9 +514,34 @@ async function buildDashboardSystemPrompt(
       message: prompt.message ?? "Não foi possível montar o prompt.",
     };
   }
-  let system = prompt.prompt;
-  if (ctx.stateJson) {
-    system += section("ESTADO ATUAL DO DASHBOARD (JSON)", ctx.stateJson);
+  return {
+    ok: true,
+    base: prompt.prompt,
+    system: composeDashboardSystem(prompt.prompt, ctx, {
+      pendingJson: opts.pendingJson,
+    }),
+  };
+}
+
+/**
+ * v1.4 (02/10/2026): o system a partir do prompt-base (SPEC + modelo +
+ * amostras, COM marcadores de tópico) — síncrono, para o turno remontar o
+ * estado recortado sem reconsultar o banco. `items` = itens do estado que o
+ * roteador escolheu (ausente = estado inteiro).
+ */
+function composeDashboardSystem(
+  base: string,
+  ctx: DashboardModeContext,
+  opts: { pendingJson?: string; items?: ReadonlySet<string> }
+): string {
+  let system = base;
+  const state = ctx.stateObject
+    ? opts.items
+      ? JSON.stringify(trimStateToItems(ctx.stateObject, opts.items), null, 2)
+      : ctx.stateJson
+    : ctx.stateJson;
+  if (state) {
+    system += section("ESTADO ATUAL DO DASHBOARD (JSON)", state);
   }
   for (const s of ctx.refSections) system += section(s.title, s.body);
   // Prévia pendente (auto-aplicar OFF): sem isso a IA não enxerga o que ela
@@ -483,7 +559,70 @@ async function buildDashboardSystemPrompt(
     );
   }
   system += section("REGRAS DESTE MODO", ctx.modeRules);
-  return { ok: true, system };
+  return system;
+}
+
+const MAP_ITEM_PREFIX = "mapa:";
+
+/** v1.4: os itens do estado que o roteador pode escolher. */
+function dashboardRouterItems(ctx: DashboardModeContext): RouterItem[] {
+  const st = ctx.stateObject;
+  if (!st) return [];
+  const tabs = new Map(
+    (ctx.currentTabs ?? []).map((t) => [t.id, t.name] as const)
+  );
+  const items: RouterItem[] = [];
+  for (const w of (st.widgets as ImportWidgetSpec[] | undefined) ?? []) {
+    if (!w.key) continue;
+    const tab = w.settings?.tab ? tabs.get(w.settings.tab) ?? w.settings.tab : "";
+    const vt = String(w.visual_type);
+    items.push({
+      id: w.key,
+      label: `${w.title || "(sem título)"} — ${vt}${tab ? ` — aba ${tab}` : ""}`,
+      topics: VISUAL_TYPE_TOPICS[vt as keyof typeof VISUAL_TYPE_TOPICS] ?? [],
+    });
+  }
+  for (const m of (st.mapas as ImportMapSpec[] | undefined) ?? []) {
+    items.push({
+      id: `${MAP_ITEM_PREFIX}${m.mapKey}`,
+      label: `Mapa da Tree "${m.mapKey}" — ${m.nodes.length} nós (indicadores, planos, rituais, anotações)`,
+      topics: ["tree"],
+    });
+  }
+  return items;
+}
+
+/**
+ * v1.4: o estado só com os itens escolhidos; os demais viram uma linha de
+ * índice (`widgets_omitidos`/`mapas_omitidos`). O merge por delta no servidor
+ * continua usando o estado INTEIRO (`baseWidgets`/`baseMaps`) — o recorte é só
+ * do que a IA LÊ.
+ */
+function trimStateToItems(
+  state: Record<string, unknown>,
+  items: ReadonlySet<string>
+): Record<string, unknown> {
+  const widgets = (state.widgets as ImportWidgetSpec[] | undefined) ?? [];
+  const mapas = (state.mapas as ImportMapSpec[] | undefined) ?? [];
+  const keptW = widgets.filter((w) => w.key && items.has(w.key));
+  const omittedW = widgets.filter((w) => !(w.key && items.has(w.key)));
+  const keptM = mapas.filter((m) => items.has(`${MAP_ITEM_PREFIX}${m.mapKey}`));
+  const omittedM = mapas.filter((m) => !items.has(`${MAP_ITEM_PREFIX}${m.mapKey}`));
+  const out: Record<string, unknown> = { ...state, widgets: keptW };
+  if (omittedW.length > 0) {
+    out.widgets_omitidos = omittedW.map((w) => ({
+      key: w.key,
+      title: w.title,
+      visual_type: w.visual_type,
+      ...(w.settings?.tab ? { tab: w.settings.tab } : {}),
+    }));
+  }
+  delete out.mapas;
+  if (keptM.length > 0) out.mapas = keptM;
+  if (omittedM.length > 0) {
+    out.mapas_omitidos = omittedM.map((m) => ({ mapKey: m.mapKey, nos: m.nodes.length }));
+  }
+  return out;
 }
 
 /** Gate comum das entradas de dashboard por IA (viva ou externa). */
@@ -525,7 +664,8 @@ export async function buildDashboardPromptCore(input: {
     variant: input.variant ?? "compacto",
   });
   if (!res.ok) return { ok: false, message: res.message };
-  return { ok: true, prompt: res.system };
+  // v1.4: a IA externa recebe o prompt INTEIRO (só sem os marcadores).
+  return { ok: true, prompt: stripTopicMarkers(res.system) };
 }
 
 /**
@@ -624,10 +764,38 @@ export async function generateDashboardCore(
     pendingJson: input.pendingJson,
   });
   if (!systemRes.ok) return { ok: false, message: systemRes.message };
-  const system = systemRes.system;
 
   const ctx = await loadImportContext(supabase);
   const client = getAiClient(aiConfig);
+
+  // ---- v1.4: 1ª fase — o roteador escolhe tópicos e itens do estado
+  // (fail-open: tudo). `full` é o prompt inteiro (escalonamento = o mesmo
+  // texto da IA externa).
+  const catalog = DASHBOARD_TOPIC_CATALOG;
+  const chunks = splitPrompt(systemRes.system, catalog);
+  const full = renderChunks(chunks, "all");
+  const items = dashboardRouterItems(modeCtxRes.ctx);
+  const route = await routeTopics({
+    client,
+    catalog,
+    chunks,
+    description,
+    priorTurns,
+    items,
+  });
+  let firstSystem = full;
+  if (route.routed) {
+    const sys =
+      route.items === "all"
+        ? systemRes.system
+        : composeDashboardSystem(systemRes.base, modeCtxRes.ctx, {
+            pendingJson: input.pendingJson,
+            items: route.items,
+          });
+    firstSystem = renderRouted(sys, catalog, route);
+    const notice = routeNotice(route, catalog, chunks, items.length);
+    if (notice) onNotice?.(notice);
+  }
 
   // ---- Conversa stateless: turnos de usuário anteriores + o pedido atual.
   const messages: AiMessage[] = [
@@ -645,7 +813,8 @@ export async function generateDashboardCore(
     let raw: string;
     try {
       raw = await client.generateText({
-        system,
+        // v1.4: escalonamento — resposta inválida ⇒ prompt INTEIRO.
+        system: attempt === 0 ? firstSystem : full,
         messages,
         signal: AbortSignal.timeout(CALL_TIMEOUT_MS),
         onThought,

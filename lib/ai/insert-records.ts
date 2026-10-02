@@ -1,3 +1,7 @@
+// Versão: 1.1 | Data: 02/10/2026
+// v1.1 (02/10/2026): passa o catálogo de tópicos (RECORDS_INSERT_TOPIC_CATALOG) ao laço de
+//   geração — orquestração por tópicos (lib/ai/topics): roteador antes da
+//   geração e escalonamento ao prompt inteiro se a resposta não validar.
 // Versão: 1.0 | Data: 30/07/2026
 // NÚCLEO da inserção de registros por IA (/registros → "Inserir com IA").
 // Desenho (espelha o fluxo de dashboards): a IA NUNCA escreve —
@@ -19,6 +23,7 @@ import { getActiveOrgId } from "@/lib/auth/org";
 import { createClient } from "@/lib/supabase/server";
 import { loadOrgAiConfig } from "@/lib/ai/config";
 import { aiSection, runJsonGenerationLoop } from "@/lib/ai/json-loop";
+import { RECORDS_INSERT_TOPIC_CATALOG } from "@/lib/ai/topics/catalogs";
 import { todayBrasiliaIso } from "@/lib/date/today";
 import { DATA_TYPE_LABELS, type DataType } from "@/lib/records/types";
 import { createRecord } from "@/lib/records/actions";
@@ -239,6 +244,8 @@ export async function generateRecordsCore(
   const result = await runJsonGenerationLoop<
     Extract<RecordsInsertValidation, { ok: true }>
   >({
+    // v1.1 (02/10/2026): catálogo de tópicos — orquestração (lib/ai/topics).
+    topics: RECORDS_INSERT_TOPIC_CATALOG,
     config: aiConfig,
     system,
     priorTurns: input.priorTurns ?? [],

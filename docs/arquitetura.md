@@ -1,4 +1,8 @@
-<!-- Versão: 2.3 | Data: 02/10/2026 -->
+<!-- Versão: 2.4 | Data: 02/10/2026 -->
+<!-- v2.4 (02/10/2026): §4.11.4 + invariante 44 — ORQUESTRAÇÃO POR TÓPICOS dos
+     assistentes de IA (roteador → recorte → escalonamento; o prompt externo é
+     o MESMO texto inteiro) e os NÓS da Tree no contrato da IA de dashboards
+     (seção `mapas`, `settings.tree` saneado, prévia "sem mudança"). -->
 <!-- v2.3 (02/10/2026): §4.27 — "Etapa 2: peças editáveis" (a Tabela Livre
      absorve a Tabela de metas; fonte do realizado configurável; Tree com
      exibição ao apresentar, tamanho/prazo/exibição por nó (0150), cartão de
@@ -3021,6 +3025,64 @@ o período do quadro, e é o que o widget-builder grava. Na mesma entrega, o
 RECONSTRÓI `settings.kanban` inteiro e essas duas chaves são editadas fora
 dele (popover de colunas → `saveWidgetSettings`), salvar o widget pelo builder
 desligava o write-back em silêncio.
+
+#### 4.11.4 Orquestração por tópicos e os nós da Tree pela IA (02/10/2026)
+
+**O caso que abriu a entrega.** "Desmarque Realizado em todas as Linhas do
+cartão dos widgets de Tree" voltou com "8 widget(s) atualizado(s)" e nada
+mudou. Três falhas em fila: (1) as linhas do cartão moram em
+`tree_nodes.payload.rows` de CADA nó (lib/tree/payload.ts) e a IA só lia e
+escrevia `widgets.settings`; (2) `settings.tree` estava `null` no dicionário
+(justificativa anterior ao mapa livre) e o validador o tratava como
+passthrough — a chave inventada `settings.tree.rows` foi gravada em silêncio;
+(3) `applyPresetDefinition` contava todo UPDATE como "atualizado".
+
+**Correção (contrato `dashboard-import`).**
+- Seção **`mapas`** (`lib/import/dashboard/tree-maps.ts`, puro): o ESTADO
+  ATUAL leva os nós dos mapas usados pelos widgets Tree em modo livre, no
+  vocabulário do `PresetMapNode` (key/parentKey/kind/label/payload; key =
+  `preset_key` ou `n_<8 hex>`; ids nunca no JSON). A IA manda delta por nó,
+  como nos widgets (`normalizeImportRaw` → `mergeMapDeltas`); `payload.rows`
+  mescla POR `kind`. Validação pelo MESMO `parseNodePayload` do editor; apply
+  SÓ pelos choke points de `tree-actions.ts` (`updateTreeNode`/
+  `updateTreeNote`/`createTreeNode`/`createTreeNote`/`setTreeNodeParent`) em
+  `lib/tree/ai-maps.ts`; edita e CRIA, nunca exclui. O snapshot pré-turno
+  (`captureDashboardSnapshot(id, { treeMapKeys })`) guarda os nós tocados e
+  `restoreDashboardSnapshot` os repõe (nós criados pela IA saem no Desfazer).
+  Resposta só com `mapas` (`"widgets": []`) é válida.
+- `settings.tree` documentado e SANEADO (`tree-settings.ts`): chave
+  desconhecida = aviso + descarte, apontando para `mapas`.
+- Prévia honesta: `checkDashboardJson` rotula "sem mudança" quando o delta não
+  altera o widget (+ aviso) e `applyPresetDefinition` pula UPDATE idêntico
+  (`widgets.unchanged`).
+
+**Orquestração por tópicos (todos os assistentes).** O prompt do assistente
+de dashboards (SPEC + dicionários + modelo + amostras + estado) cresceu além do
+que um modelo leve (Gemini Flash) lê bem. Agora o turno tem DUAS fases:
+1. **Roteador** (`lib/ai/topics/router.ts`): chamada curta com o pedido, o
+   ÍNDICE de tópicos (título + resumo) e, em dashboards, o índice do ESTADO
+   (widgets e mapas). Devolve os tópicos e itens necessários. FAIL-OPEN:
+   erro/timeout/JSON inválido ⇒ prompt inteiro. Palavras-chave do pedido,
+   itens citados pelo nome e os tópicos do tipo de cada widget escolhido
+   (`VISUAL_TYPE_TOPICS`) SOMAM à escolha — nunca subtraem.
+2. **Geração** com o recorte; se a resposta não validar, as tentativas
+   seguintes recebem o prompt INTEIRO (escalonamento).
+
+O texto é UM só: os tópicos são uma PARTIÇÃO dele (`splitPrompt` por cabeçalho
+mapeado ou marcador `@@topic:<chave>@@`), e `renderChunks(.., "all")` devolve o
+prompt da IA externa (marcadores removidos). Nada vira segunda redação. O
+estado do board recortado vira `widgets_omitidos`/`mapas_omitidos`; o merge no
+servidor segue com o estado INTEIRO. Catálogos em `lib/ai/topics/catalogs.ts`
+(dashboards: `lib/import/dashboard/topics.ts`, com `WIDGET_SETTINGS_TOPIC`/
+`DASHBOARD_SETTINGS_TOPIC` exaustivos por `satisfies`). Contratos pequenos e
+indivisíveis têm catálogo sem tópicos escolhíveis — o roteador nem é chamado.
+O aviso "Contexto carregado: …" sai pelo canal `onNotice`.
+
+Fiscalizado por `lib/ai/topics/{split,router,catalogs}.test.ts` (paridade
+recorte-inteiro × prompt externo por assistente; cabeçalho de nível 1–2 sem
+classificação quebra o teste; `null` de dicionário só com justificativa
+allowlistada; guarda estática de `topics:` em todo `runJsonGenerationLoop`) e
+`lib/import/dashboard/tree-maps.test.ts`. Ver invariante 44.
 
 ### 4.12 Espaço de grid v2 (grade fina) e Páginas de widget (25/07/2026)
 
@@ -7486,6 +7548,18 @@ principalmente — para mantenedores humanos.
     número-herói só RE-APRESENTA o texto já formatado (`splitValueText`) e
     tamanho de fonte em `components/dashboards` é da escala nomeada, nunca
     `text-[Npx]`.
+
+44. **Feature voltada à IA tem caminho estruturado, e o prompt é UM texto
+    particionado (§4.11.4).** O que a IA se propõe a facilitar precisa de:
+    dicionário/SPEC derivado do código, TÓPICO no catálogo (cabeçalho de nível
+    1–2 sem classificação quebra `catalogs.test.ts`), validador, export
+    (round-trip) e apply pelo choke point existente. `null` em dicionário de
+    settings só com justificativa na allowlist do teste — foi o `tree: null`
+    desatualizado que deixou a IA cega. A orquestração nunca cria segunda
+    redação: o recorte é `renderChunks` do MESMO texto que a IA externa recebe
+    inteiro; o roteador é fail-open e só soma; o escalonamento devolve o prompt
+    inteiro. Todo `runJsonGenerationLoop` passa `topics:`. Conteúdo DENTRO do
+    cartão da Tree é do NÓ (`mapas`), nunca de `settings.tree`.
 
 ## 6. Convenções do projeto
 

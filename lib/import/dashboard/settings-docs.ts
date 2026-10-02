@@ -1,3 +1,9 @@
+// Versão: 1.13 | Data: 02/10/2026
+// v1.13 (02/10/2026): `tree` deixa de ser `null` — a justificativa ("depende
+//   de série e de registro concreto") envelheceu com o mapa livre, os
+//   indicadores e a Root, e foi esse `null` que deixou a IA cega para a Tree.
+//   Documentado aqui o que é do WIDGET; o que é do NÓ (linhas do cartão, fonte
+//   do realizado, planos, rituais) é a seção `mapas` do SPEC.
 // Versão: 1.12 | Data: 02/10/2026
 // v1.12 (02/10/2026): `goalTable` vira ATALHO — a Tabela de metas foi
 //   absorvida pela Tabela Livre; "metas" + goalTable segue aceito e o
@@ -75,6 +81,11 @@ import {
 } from "@/lib/records/formula-funcs";
 import { PERIOD_ALL, PERIOD_PRESETS } from "@/lib/widgets/period";
 import { MANUAL_SPREAD_LABELS } from "@/lib/manual-base/types";
+import {
+  TREE_DIRECTION_LABELS,
+  TREE_LAYOUT_LABELS,
+  TREE_VIEW_LABELS,
+} from "@/lib/tree/model";
 import { GOAL_TABLE_MODE_LABELS } from "@/lib/widgets/goal-table";
 import {
   DEFAULT_CUSTOM_COLUMNS,
@@ -352,9 +363,21 @@ export const WIDGET_SETTINGS_DOC = {
   // escopo da IA: ela não sabe quais atributos existem na organização, e um
   // clique que abre a tela errada é pior que tabela sem clique.
   rowAction: null,
-  // Widget Tree: a árvore de acompanhamento. Fora do escopo da IA — a árvore
-  // depende de uma série configurada à mão e de um registro concreto.
-  tree: null,
+  // v1.13 (02/10/2026): Widget Tree — só o que é do WIDGET. Linhas do cartão
+  // (Meta/Realizado/…), fonte do realizado, planos e rituais são do NÓ: seção
+  // "mapas" do SPEC (lib/import/dashboard/tree-maps.ts).
+  tree: `"tree": {                                 // SÓ com "visual_type": "tree"
+  "source": "livre",                      // "livre" (mapa: indicadores, Multi-fatores, rituais, anotações) | "registro" (histórico de UM registro)
+  "layout": "livre",                      // ${enumKeys(TREE_LAYOUT_LABELS)}
+  "mapKey": "metas_4t26",                 // modo livre: chave do MAPA — os nós dele estão (e se editam) em "mapas"
+  "rootRef": "preset:plano_1",            // mostra só o GALHO a partir deste nó ("preset:<key>"); ausente = árvore inteira
+  "view": "root",                         // ${enumKeys(TREE_VIEW_LABELS)}
+  "rootDirection": "h",                   // ${enumKeys(TREE_DIRECTION_LABELS)} (só na Root)
+  "months": ["2026-10", "2026-11", "2026-12"],   // meses FIXOS dos nós de indicador; ausente = período do dashboard
+  "canvas": { "bg": "#ffffff", "pattern": "pontos" },   // fundo da Root: pattern pontos | linhas | nenhum
+  "presentation": { "kindBadge": false, "addBranch": false, "ritualSchedule": false, "doneToggle": false, "warnings": false }  // o que os cartões mostram AO APRESENTAR (true = mostra)
+  // NÃO há aqui chave para as linhas do cartão (Meta/Realizado/Projetado…): elas são de CADA nó — "mapas[].nodes[].payload.rows".
+}`,
   // Widget "Base do Dashboard" (0142): a grade editável dos números digitados.
   // A IA de dashboards pode CRIAR o widget e escolher as colunas — as chaves
   // dos dados ela vê no catálogo de operandos (`manual:<chave>`). O que ela

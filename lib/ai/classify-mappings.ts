@@ -1,3 +1,7 @@
+// Versão: 1.1 | Data: 02/10/2026
+// v1.1 (02/10/2026): passa o catálogo de tópicos (MAPPINGS_TOPIC_CATALOG) ao laço de
+//   geração — orquestração por tópicos (lib/ai/topics): roteador antes da
+//   geração e escalonamento ao prompt inteiro se a resposta não validar.
 // Versão: 1.0 | Data: 07/08/2026
 // NÚCLEO do assistente de IA de MAPEAMENTOS (Operação → Mapeamentos →
 // "Classificar com IA"). A IA NUNCA escreve: generateMappingsCore valida o
@@ -18,6 +22,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
 import { loadOrgAiConfig } from "@/lib/ai/config";
 import { aiSection, runJsonGenerationLoop } from "@/lib/ai/json-loop";
+import { MAPPINGS_TOPIC_CATALOG } from "@/lib/ai/topics/catalogs";
 import { loadMappingOverview } from "@/lib/mappings/overview";
 import { normalizeRawValue } from "@/lib/mappings/domains";
 import { loadMappingDomains } from "@/lib/mappings/registry";
@@ -174,6 +179,8 @@ export async function generateMappingsCore(
     items: ParsedMappingItem[];
     warnings: string[];
   }>({
+    // v1.1 (02/10/2026): catálogo de tópicos — orquestração (lib/ai/topics).
+    topics: MAPPINGS_TOPIC_CATALOG,
     config: aiConfig,
     system,
     priorTurns: input.priorTurns ?? [],

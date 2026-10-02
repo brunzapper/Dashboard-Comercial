@@ -1,3 +1,7 @@
+// Versão: 1.1 | Data: 02/10/2026
+// v1.1 (02/10/2026): passa o catálogo de tópicos (OPERATIONS_TOPIC_CATALOG) ao laço de
+//   geração — orquestração por tópicos (lib/ai/topics): roteador antes da
+//   geração e escalonamento ao prompt inteiro se a resposta não validar.
 // Versão: 1.0 | Data: 31/07/2026
 // NÚCLEO do assistente de IA de OPERAÇÕES (Configurações → Operações →
 // "Gerir com IA"). A IA NUNCA escreve: generateOperationsCore valida o lote
@@ -19,6 +23,7 @@ import { getActiveOrgId } from "@/lib/auth/org";
 import { createClient } from "@/lib/supabase/server";
 import { loadOrgAiConfig } from "@/lib/ai/config";
 import { aiSection, runJsonGenerationLoop } from "@/lib/ai/json-loop";
+import { OPERATIONS_TOPIC_CATALOG } from "@/lib/ai/topics/catalogs";
 import { loadSources } from "@/lib/config/sources";
 import { CORE_FIELDS } from "@/lib/widgets/fields";
 import type { WidgetFilter } from "@/lib/widgets/types";
@@ -265,6 +270,8 @@ export async function generateOperationsCore(
     actions: ParsedOperationAction[];
     warnings: string[];
   }>({
+    // v1.1 (02/10/2026): catálogo de tópicos — orquestração (lib/ai/topics).
+    topics: OPERATIONS_TOPIC_CATALOG,
     config: aiConfig,
     system,
     priorTurns: input.priorTurns ?? [],

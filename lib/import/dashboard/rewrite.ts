@@ -1,3 +1,8 @@
+// Versão: 1.6 | Data: 02/10/2026
+// v1.6 (02/10/2026): `baseMaps` — a seção `mapas` (nós da Tree) recebe o MESMO
+//   merge por delta dos widgets: nó de key existente é mesclado sobre o estado
+//   exportado (lib/import/dashboard/tree-maps.ts — `payload.rows` mescla por
+//   `kind`), key nova passa intacta.
 // Versão: 1.5 | Data: 07/09/2026
 // v1.5 (07/09/2026): `deepMergeValue` passa a ser EXPORTADO — o contrato
 //   `kanban-config` mescla o delta do quadro sobre a config atual com a
@@ -42,6 +47,7 @@
 
 import { stripCodeFence } from "./validate";
 import type { ImportWidgetSpec } from "./types";
+import { mergeMapDeltas, type ImportMapSpec } from "./tree-maps";
 
 export interface NormalizeImportRawOpts {
   /** Chave canônica (identidade) — sempre sobrescreve a da IA. */
@@ -79,6 +85,11 @@ export interface NormalizeImportRawOpts {
    * do merge por widget.
    */
   currentCanvas?: Record<string, unknown>;
+  /**
+   * v1.6 (02/10/2026): mapas da Tree EXPORTADOS do board — base do merge por
+   * nó da seção `mapas` (a IA manda só o delta do nó).
+   */
+  baseMaps?: ImportMapSpec[];
 }
 
 function isPlainObject(v: unknown): v is Record<string, unknown> {
@@ -275,6 +286,11 @@ export function normalizeImportRaw(
       }
       return merged;
     });
+  }
+
+  // v1.6: mapas da Tree — delta por nó sobre o estado exportado.
+  if (obj.mapas !== undefined) {
+    obj.mapas = mergeMapDeltas(opts.baseMaps, obj.mapas);
   }
 
   return JSON.stringify(obj);

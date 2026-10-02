@@ -1,3 +1,10 @@
+// Versão: 1.3 | Data: 02/10/2026
+// v1.3 (02/10/2026): ORQUESTRAÇÃO POR TÓPICOS — `topics` (catálogo do
+//   assistente) faz a 1ª tentativa rodar com o prompt RECORTADO pelo roteador
+//   (lib/ai/topics/turn.ts) e as seguintes, se a resposta não validar, com o
+//   prompt INTEIRO (escalonamento). Sem `topics` o comportamento é o de sempre
+//   — mas todo assistente passa o dele (guarda estática em
+//   lib/ai/topics/catalogs.test.ts).
 // Versão: 1.2 | Data: 17/09/2026
 // v1.2 (17/09/2026): repassa `onNotice` — o aviso de que o Gemini rebaixou de
 //   modelo por sobrecarga (lib/ai/model-fallback.ts). É canal PRÓPRIO, não o
@@ -22,6 +29,8 @@ import "server-only";
 
 import { getAiClient, AiTruncatedError, type AiMessage } from "@/lib/ai";
 import type { OrgAiConfig } from "@/lib/ai/config";
+import { planTopicTurn } from "@/lib/ai/topics/turn";
+import type { TopicCatalog } from "@/lib/ai/topics/split";
 
 export const AI_LOOP_MAX_ATTEMPTS = 3;
 export const AI_LOOP_CALL_TIMEOUT_MS = 120_000; // por chamada ao provedor
@@ -62,8 +71,13 @@ export async function runJsonGenerationLoop<T>(opts: {
     | { ok: false; errors: string[] }
     | Promise<{ ok: true; value: T } | { ok: false; errors: string[] }>;
   onThought?: (chunk: string) => void;
-  /** Avisos do sistema sobre a chamada (hoje: rebaixamento de modelo). */
+  /** Avisos do sistema sobre a chamada (rebaixamento de modelo; contexto). */
   onNotice?: (text: string) => void;
+  /**
+   * v1.3 (02/10/2026): catálogo de tópicos do assistente — liga o roteador
+   * (1ª tentativa recortada, escalonamento ao prompt inteiro).
+   */
+  topics?: TopicCatalog;
 }): Promise<JsonLoopResult<T>> {
   const t0 = Date.now();
   const client = getAiClient(opts.config);
@@ -75,6 +89,16 @@ export async function runJsonGenerationLoop<T>(opts: {
   ];
 
   let lastErrors: string[] = [];
+
+  // v1.3: 1ª fase — o roteador escolhe os tópicos (fail-open: tudo).
+  const plan = await planTopicTurn({
+    client,
+    system: opts.system,
+    catalog: opts.topics,
+    description: opts.description,
+    priorTurns: opts.priorTurns.slice(-AI_LOOP_MAX_PRIOR_TURNS),
+    onNotice: opts.onNotice,
+  });
 
   for (let attempt = 0; attempt < AI_LOOP_MAX_ATTEMPTS; attempt++) {
     // Orçamento do turno: não inicia uma tentativa sem tempo hábil.
@@ -88,7 +112,9 @@ export async function runJsonGenerationLoop<T>(opts: {
     let raw: string;
     try {
       raw = await client.generateText({
-        system: opts.system,
+        // v1.3: escalonamento — depois de uma resposta inválida o modelo
+        // recebe o prompt INTEIRO (pode ter faltado um tópico).
+        system: attempt === 0 ? plan.first : plan.full,
         messages,
         signal: AbortSignal.timeout(AI_LOOP_CALL_TIMEOUT_MS),
         onThought: opts.onThought,
