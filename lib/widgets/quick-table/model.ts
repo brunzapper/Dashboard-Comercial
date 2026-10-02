@@ -1,3 +1,11 @@
+// Versão: 1.1 | Data: 02/10/2026
+// v1.1 (02/10/2026): METAS — colunas "rowLabel" (rótulo da linha), "goal"
+//   (expande um mês por coluna, col_key "<colId>@AAAA-MM" — o mesmo esquema do
+//   pivot, então ordem manual/aparência por coluna seguem valendo) e
+//   "goalTotal"; linhas ligadas a indicador ou de total. A célula de meta é
+//   `content: "goal"` com `QTCell.goal` e `value` = o número da faceta (as
+//   fórmulas "=…" leem metas por A1 sem caso especial). Dados do servidor em
+//   `BuildMatrixInput.goals` (lib/widgets/quick-table/goals.ts).
 // Versão: 1.0 | Data: 15/07/2026
 // Widget "Tabela Livre" (visual_type 'tabela_editavel'): modelo PURO da grade
 // renderizada. A ESTRUTURA (colunas livre/dimensão/métrica + linhas livres)
@@ -21,7 +29,25 @@ import {
 import { formatMoney, formatMoneyAggregate } from "@/lib/widgets/currency";
 import { applyManualOrder, fracDigits } from "@/lib/widgets/appearance";
 import { AGG_LABELS } from "@/lib/widgets/types";
+import {
+  formatIndicatorValue,
+  formatAttainment,
+  rollupMonths,
+  type IndicatorStatus,
+  type IndicatorUnit,
+} from "@/lib/indicators/model";
+import {
+  goalFacetValue,
+  goalMonthHeader,
+  goalRowTotal,
+  goalTargetKey,
+  goalTotalSource,
+  type QTGoalRowData,
+  type QuickTableGoalsData,
+} from "./goals";
 import type {
+  QuickTableGoalFacet,
+  QuickTableRow,
   AppearanceSettings,
   CalcWidgetResult,
   QuickTableColumn,
@@ -152,6 +178,41 @@ export interface QTCol {
   column: QuickTableColumn; // coluna configurada por trás
   label: string; // texto do cabeçalho
   numeric: boolean; // default de alinhamento (métrica = true)
+  /** v1.1: mês (AAAA-MM) de uma coluna de meta expandida. */
+  goalMonth?: string;
+}
+
+/** v1.1: o que uma célula de meta mostra. */
+export interface QTGoalView {
+  /** month = um mês; total = total dos meses da linha; sum = linha de total. */
+  kind: "month" | "total" | "sum";
+  month?: string;
+  target: number | null;
+  realized: number | null;
+  attainment: number | null;
+  status: IndicatorStatus;
+  elapsed: number;
+  unit: IndicatorUnit;
+  hasRealized: boolean;
+  error?: string;
+  /** Admin edita a meta desta célula. */
+  editable: boolean;
+  facet: QuickTableGoalFacet;
+}
+
+/** v1.1: dados de exibição de uma linha com metas. */
+export interface QTRowGoalView {
+  label: string;
+  tag: string | null;
+  bold: boolean;
+  unit: IndicatorUnit;
+  unitMode: "auto" | "show" | "hide";
+  responsibleMissing: boolean;
+  hasRealized: boolean;
+  /** Linha de total (soma das ligadas acima). */
+  isTotal: boolean;
+  chips: string[];
+  breakdown?: QTGoalRowData["breakdown"];
 }
 
 export interface QTCell {
@@ -164,7 +225,10 @@ export interface QTCell {
   // métrica, valor da dimensão, texto/número digitado ou o resultado de {=…}.
   // Fórmulas "=…" ficam null aqui (o valor delas é computado no cliente).
   value: number | string | boolean | null;
-  content: QTCellContent | "data"; // "data" = valor vindo do BI (read-only)
+  // "data" = valor vindo do BI (read-only); v1.1: "label" = rótulo da linha,
+  // "goal" = célula de meta (QTCell.goal).
+  content: QTCellContent | "data" | "label" | "goal";
+  goal?: QTGoalView;
   editable: boolean; // digitável por ESTE usuário (papel × editableRoles)
   numeric: boolean;
 }
@@ -173,6 +237,8 @@ export interface QTRow {
   key: string; // row_key
   kind: "data" | "free";
   cells: QTCell[]; // alinhadas com QTMatrix.cols
+  /** v1.1: linha ligada a indicador / de total. */
+  goal?: QTRowGoalView;
 }
 
 export interface QTMatrix {
@@ -181,6 +247,9 @@ export interface QTMatrix {
   headerRow: boolean;
   loading: boolean; // BI configurado e dados ainda não chegaram (deferred)
   error?: string; // erro do runWidget (exibido no rodapé do card)
+  /** v1.1: há colunas de meta e os dados delas ainda não chegaram. */
+  goalsLoading?: boolean;
+  goalsMessage?: string;
 }
 
 export interface QTCellValue {
@@ -271,6 +340,11 @@ export interface BuildMatrixInput {
   // Casas decimais do widget (AppearanceSettings.decimals) — números/moeda/
   // percentual das células BI e resultados de expressão.
   decimals?: number;
+  // v1.1: metas resolvidas no servidor. undefined = carregando; null = sem
+  // metas (ou indisponível, ex.: link público).
+  goals?: QuickTableGoalsData | null;
+  // v1.1: metas digitadas que o servidor ainda não devolveu ("row|mês").
+  goalTargets?: Record<string, number | null>;
 }
 
 // Monta a grade renderizada: cabeçalhos (com expansão de pivot), linhas de
@@ -286,6 +360,8 @@ export function buildQuickTableMatrix(input: BuildMatrixInput): QTMatrix {
     tableAp,
     dateFormat,
     decimals,
+    goals,
+    goalTargets = {},
   } = input;
   const dateFmt = dateFormat ?? DEFAULT_DATE_FORMAT;
   const bi = quickTableBI(qt);
@@ -322,6 +398,7 @@ export function buildQuickTableMatrix(input: BuildMatrixInput): QTMatrix {
     available.find((a) => a.field === c.field)?.isDate ?? false;
 
   const cols: QTCol[] = [];
+  const multiGoal = qt.columns.filter((c) => c.kind === "goal").length > 1;
   for (const c of qt.columns) {
     if (c.kind === "dimension" && c.pivot && c === bi.pivotDim) {
       // A coluna pivot em si não aparece: seus valores viram colunas de métrica.
@@ -368,6 +445,32 @@ export function buildQuickTableMatrix(input: BuildMatrixInput): QTMatrix {
         label: dimLabel(c, available),
         numeric: false,
       });
+      continue;
+    }
+    // v1.1: metas.
+    if (c.kind === "rowLabel") {
+      cols.push({ key: c.id, column: c, label: c.header ?? "", numeric: false });
+      continue;
+    }
+    if (c.kind === "goal") {
+      const months = goals?.monthsByCol[c.id] ?? [];
+      if (months.length === 0) {
+        cols.push({ key: c.id, column: c, label: c.header ?? "Metas", numeric: true });
+      } else {
+        for (const m of months) {
+          cols.push({
+            key: pivotColKey(c.id, m),
+            column: c,
+            label: goalMonthHeader(c, m, multiGoal),
+            numeric: true,
+            goalMonth: m,
+          });
+        }
+      }
+      continue;
+    }
+    if (c.kind === "goalTotal") {
+      cols.push({ key: c.id, column: c, label: c.header ?? "Total", numeric: true });
       continue;
     }
     // Coluna livre (ou dimensão/métrica incompleta — tratada como livre).
@@ -477,25 +580,198 @@ export function buildQuickTableMatrix(input: BuildMatrixInput): QTMatrix {
     }
   }
 
-  // ---- linhas livres ----
-  const freeRows: QTRow[] = qt.rows.map((r) => ({
-    key: r.id,
-    kind: "free" as const,
-    cells: orderedCols.map((col) => freeCell(r.id, col)),
-  }));
+  // ---- linhas livres (v1.1: rótulo e metas) ----
+  const goalCtx = buildGoalContext(qt, goals, goalTargets);
+  const freeRows: QTRow[] = qt.rows.map((r, ri) => {
+    const view = goalCtx.rowView(r, ri);
+    return {
+      key: r.id,
+      kind: "free" as const,
+      cells: orderedCols.map((col) => {
+        const k = col.column.kind;
+        if (k === "rowLabel") {
+          const label = view?.label ?? r.label ?? "";
+          return {
+            rowKey: r.id,
+            colKey: col.key,
+            raw: null,
+            display: label,
+            value: label || null,
+            content: "label" as const,
+            editable: false,
+            numeric: false,
+          };
+        }
+        if (k === "goal" || k === "goalTotal") {
+          const g = goalCtx.cell(r, ri, col);
+          if (!g) {
+            return {
+              rowKey: r.id,
+              colKey: col.key,
+              raw: null,
+              display: "",
+              value: null,
+              content: "blank" as const,
+              editable: false,
+              numeric: true,
+            };
+          }
+          return {
+            rowKey: r.id,
+            colKey: col.key,
+            raw: null,
+            display: goalCellText(g),
+            value: goalFacetValue(g.facet, g),
+            content: "goal" as const,
+            goal: g,
+            editable: false,
+            numeric: true,
+          };
+        }
+        return freeCell(r.id, col);
+      }),
+      ...(view ? { goal: view } : {}),
+    };
+  });
 
   const rows = [
     ...applyManualOrder(dataRows, tableAp?.rowOrder, (r) => r.key),
     ...applyManualOrder(freeRows, tableAp?.rowOrder, (r) => r.key),
   ];
 
+  const hasGoalCols = qt.columns.some((c) => c.kind === "goal");
   return {
     cols: orderedCols,
     rows,
     headerRow: qt.headerRow !== false,
     loading,
     error: data?.error,
+    ...(hasGoalCols && goals === undefined ? { goalsLoading: true } : {}),
+    ...(hasGoalCols && goals?.message ? { goalsMessage: goals.message } : {}),
   };
+}
+
+// ===================== metas (v1.1) =====================
+
+/** Texto simples de uma célula de meta (a grade de planilha e o export). */
+export function goalCellText(g: QTGoalView): string {
+  if (g.facet === "atingimento") return formatAttainment(g.attainment);
+  if (g.facet === "realizado") return formatIndicatorValue(g.realized, g.unit);
+  return formatIndicatorValue(g.target, g.unit);
+}
+
+function buildGoalContext(
+  qt: QuickTable,
+  goals: QuickTableGoalsData | null | undefined,
+  goalTargets: Record<string, number | null>
+) {
+  const targetOf = (rowId: string, month: string): number | null => {
+    const k = goalTargetKey(rowId, month);
+    if (k in goalTargets) return goalTargets[k];
+    return goals?.rows[rowId]?.months[month]?.target ?? null;
+  };
+  // Linhas ligadas ACIMA de cada linha de total (na ordem configurada).
+  const boundAbove = (ri: number) =>
+    qt.rows
+      .slice(0, ri)
+      .filter((x) => x.bind?.kind === "indicator" && goals?.rows[x.id]);
+  const monthsOfCol = (col: QTCol): string[] => {
+    if (col.column.kind === "goal") return col.goalMonth ? [col.goalMonth] : [];
+    const src = goalTotalSource(qt, col.column);
+    return src ? (goals?.monthsByCol[src.id] ?? []) : [];
+  };
+
+  const rowView = (r: QuickTableRow, ri: number): QTRowGoalView | null => {
+    if (!r.bind) return null;
+    if (r.bind.kind === "total") {
+      const first = boundAbove(ri)[0];
+      return {
+        label: r.label ?? "Total",
+        tag: r.tag ?? null,
+        bold: r.bold !== false,
+        unit: first ? goals!.rows[first.id].unit : "quantidade",
+        unitMode: r.unit ?? "auto",
+        responsibleMissing: false,
+        hasRealized: false,
+        isTotal: true,
+        chips: [],
+      };
+    }
+    const gr = goals?.rows[r.id];
+    return {
+      label: r.label?.trim() || gr?.defaultLabel || r.bind.indicator,
+      tag: r.tag ?? null,
+      bold: r.bold === true,
+      unit: gr?.unit ?? "quantidade",
+      unitMode: r.unit ?? "auto",
+      responsibleMissing: gr?.responsibleMissing ?? false,
+      hasRealized: gr?.hasRealized ?? false,
+      isTotal: false,
+      chips: gr?.chips ?? [],
+      ...(gr?.breakdown ? { breakdown: gr.breakdown } : {}),
+    };
+  };
+
+  const cell = (r: QuickTableRow, ri: number, col: QTCol): QTGoalView | null => {
+    if (!goals || !r.bind) return null;
+    const facet: QuickTableGoalFacet = col.column.facet ?? "composto";
+    const months = monthsOfCol(col);
+    if (months.length === 0) return null;
+    if (r.bind.kind === "total") {
+      const rows = boundAbove(ri);
+      if (rows.length === 0) return null;
+      const sums = months.map((m) => {
+        const vals = rows.map((x) => targetOf(x.id, m)).filter((v): v is number => v != null);
+        return vals.length ? vals.reduce((a, b) => a + b, 0) : null;
+      });
+      return {
+        kind: "sum",
+        ...(col.goalMonth ? { month: col.goalMonth } : {}),
+        target: rollupMonths(sums, "soma"),
+        realized: null,
+        attainment: null,
+        status: "sem_dado",
+        elapsed: 0,
+        unit: goals.rows[rows[0].id].unit,
+        hasRealized: false,
+        editable: false,
+        facet,
+      };
+    }
+    const gr = goals.rows[r.id];
+    if (!gr) return null;
+    if (col.column.kind === "goal" && col.goalMonth) {
+      const m = col.goalMonth;
+      const d = gr.months[m];
+      return {
+        kind: "month",
+        month: m,
+        target: targetOf(r.id, m),
+        realized: d?.realized ?? null,
+        attainment: d?.attainment ?? null,
+        status: d?.status ?? "sem_dado",
+        elapsed: d?.elapsed ?? 0,
+        unit: gr.unit,
+        hasRealized: gr.hasRealized,
+        ...(d?.error ? { error: d.error } : {}),
+        editable: goals.canEdit && !gr.responsibleMissing,
+        facet,
+      };
+    }
+    const tot = goalRowTotal(gr, months, (m) => targetOf(r.id, m));
+    return {
+      kind: "total",
+      ...tot,
+      status: "sem_dado",
+      elapsed: months.some((m) => (gr.months[m]?.elapsed ?? 0) > 0) ? 1 : 0,
+      unit: gr.unit,
+      hasRealized: gr.hasRealized,
+      editable: false,
+      facet,
+    };
+  };
+
+  return { rowView, cell };
 }
 
 // Rótulo do pivot reutilizado acima; exportado p/ o painel de coluna exibir a

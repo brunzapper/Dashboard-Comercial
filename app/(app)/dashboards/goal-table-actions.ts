@@ -1,4 +1,8 @@
-// Versão: 1.2 | Data: 02/10/2026
+// Versão: 1.3 | Data: 02/10/2026
+// v1.3 (02/10/2026): `runGoalTable`/`saveGoalCell` SAÍRAM — a Tabela de metas
+//   virou Tabela Livre com colunas de meta (quick-table-actions:
+//   `runQuickTable` + `saveQuickTableGoal`). Ficam os valores dos nós de
+//   indicador da Tree.
 // v1.2 (02/10/2026): Tree — (a) nó de indicador é pedido POR NÓ: o servidor
 //   lê o payload no banco (indicador, responsável e a FONTE DO REALIZADO —
 //   métrica própria, recortes, quebra) e nunca aceita fórmula do navegador;
@@ -44,11 +48,6 @@ import {
   type IndicatorCell,
 } from "@/lib/indicators/values";
 import { deleteGoalTarget, upsertGoalTarget } from "@/lib/metas/upsert";
-import {
-  goalTableRequests,
-  sanitizeGoalTableSettings,
-  sumColumn,
-} from "@/lib/widgets/goal-table";
 import { withRpcMemo } from "@/lib/widgets/rpc-memo";
 import { normalizeMapKey } from "@/lib/tree/model";
 import { parseIndicatorPayload } from "@/lib/tree/payload";
@@ -56,200 +55,6 @@ import type { RealizedSource } from "@/lib/indicators/realized-source";
 import type { IndicatorBreakdownRow } from "@/lib/indicators/values";
 import { withRpcTtlCache } from "@/lib/widgets/rpc-cache";
 import { loadWidgetScope } from "@/lib/widgets/widget-scope";
-
-export interface GoalTableRowResult {
-  id: string;
-  indicator: string;
-  label: string;
-  unit: IndicatorUnit;
-  /** Regra de total entre meses (o card recalcula com a meta otimista). */
-  rollup: IndicatorRollup;
-  bold: boolean;
-  responsibleName: string | null;
-  /** Responsável informado mas não encontrado (a linha mostra o aviso). */
-  responsibleMissing: boolean;
-  cells: IndicatorCell[];
-  total: { target: number | null; realized: number | null; attainment: number | null };
-  hasRealized: boolean;
-  errors?: Record<string, string>;
-}
-
-export interface GoalTableResult {
-  ok: boolean;
-  message?: string;
-  months: string[];
-  rows: GoalTableRowResult[];
-  /** Modo por responsável: soma das metas por mês. */
-  totalRow?: { label: string; targets: (number | null)[]; total: number | null };
-  canEdit: boolean;
-}
-
-const EMPTY: GoalTableResult = { ok: false, months: [], rows: [], canEdit: false };
-
-export async function runGoalTable(
-  dashboardId: string,
-  widgetId: string,
-  search: string
-): Promise<GoalTableResult> {
-  const session = await getSessionInfo();
-  if (!session) return { ...EMPTY, message: "Sessão expirada." };
-  const supabase = await createClient();
-  const scoped = await loadWidgetScope(supabase, session, dashboardId, widgetId, search);
-  if (!scoped.ok) return { ...EMPTY, message: scoped.message };
-  const { widget, period } = scoped.scope;
-  if (widget.visual_type !== "metas") return { ...EMPTY, message: "Widget não encontrado." };
-
-  const orgId = await getActiveOrgId();
-  const [registry, indicators, names] = await Promise.all([
-    loadGoalMetrics(supabase),
-    loadIndicators(supabase, orgId),
-    loadResponsibleNameIndex(supabase),
-  ]);
-  const settings = sanitizeGoalTableSettings(widget.settings?.goalTable ?? {}, {
-    knownKeys: new Set(registry.map((m) => m.key)),
-    where: "",
-    warnings: [],
-  });
-  const today = todayBrasiliaIso();
-  const months =
-    settings?.months && settings.months.length > 0
-      ? settings.months
-      : monthsOfRange(period?.from ?? null, period?.to ?? null, today);
-  const requests = goalTableRequests(settings ?? undefined);
-  const byKey = indicatorsByKey(indicators);
-  const labelOf = (key: string) =>
-    byKey.get(key)?.label ?? registry.find((m) => m.key === key)?.label ?? key;
-  const unitOf = (key: string): IndicatorUnit =>
-    byKey.get(key)?.unit ??
-    (registry.find((m) => m.key === key)?.money ? "moeda" : "quantidade");
-
-  const resolved = requests.map((r) => {
-    const id = r.responsibleName ? responsibleIdForName(names, r.responsibleName) : null;
-    return { ...r, responsibleId: id, missing: Boolean(r.responsibleName) && !id };
-  });
-  const rpcClient = withRpcMemo(withRpcTtlCache(supabase, `u:${session.user.id}`));
-  const series = await resolveIndicatorValues(supabase, rpcClient, {
-    orgId,
-    indicators: byKey,
-    requests: resolved
-      .filter((r) => !r.missing)
-      .map((r) => ({ key: r.indicator, responsibleId: r.responsibleId })),
-    months,
-    todayIso: today,
-    withRealized: settings?.showRealized !== false,
-  });
-  let si = 0;
-  const rows: GoalTableRowResult[] = resolved.map((r) => {
-    const s = r.missing ? null : series[si++];
-    return {
-      id: r.id,
-      indicator: r.indicator,
-      label: r.label ?? labelOf(r.indicator),
-      unit: unitOf(r.indicator),
-      rollup: byKey.get(r.indicator)?.rollup ?? "soma",
-      bold: r.bold,
-      responsibleName: r.responsibleName,
-      responsibleMissing: r.missing,
-      cells:
-        s?.cells ??
-        months.map((m) => ({
-          month: m,
-          target: null,
-          realized: null,
-          attainment: null,
-          status: "sem_dado" as const,
-          elapsed: 0,
-        })),
-      total: s?.total ?? { target: null, realized: null, attainment: null },
-      hasRealized: Boolean(byKey.get(r.indicator)?.realized),
-      ...(s?.errors ? { errors: s.errors } : {}),
-    };
-  });
-  const totalRow =
-    settings?.mode === "por_responsavel" && settings.totalRowLabel
-      ? (() => {
-          const targets = months.map((_, mi) =>
-            sumColumn(rows.map((r) => r.cells[mi]?.target ?? null))
-          );
-          return {
-            label: settings.totalRowLabel,
-            targets,
-            total: sumColumn(targets),
-          };
-        })()
-      : undefined;
-  return {
-    ok: true,
-    months,
-    rows,
-    ...(totalRow ? { totalRow } : {}),
-    canEdit: settings?.editable === true && session.roles.includes("admin"),
-  };
-}
-
-export async function saveGoalCell(input: {
-  dashboardId: string;
-  widgetId: string;
-  indicator: string;
-  responsibleName: string | null;
-  month: string;
-  target: number | null;
-}): Promise<{ ok: boolean; message?: string }> {
-  const session = await getSessionInfo();
-  if (!session) return { ok: false, message: "Sessão expirada." };
-  if (!session.roles.includes("admin"))
-    return { ok: false, message: "Apenas administradores editam metas." };
-  const p = parseMonthKey(input.month);
-  if (!p) return { ok: false, message: "Mês inválido." };
-  if (input.target != null && !Number.isFinite(input.target))
-    return { ok: false, message: "Valor inválido." };
-  const supabase = await createClient();
-  // O widget tem de existir no board, ser uma Tabela de metas EDITÁVEL e citar
-  // este indicador — a célula não é uma porta genérica para `goals`.
-  const { data: w } = await supabase
-    .from("widgets")
-    .select("id, visual_type, settings")
-    .eq("id", input.widgetId)
-    .eq("dashboard_id", input.dashboardId)
-    .maybeSingle();
-  const gt = (w?.settings as { goalTable?: unknown } | null)?.goalTable;
-  const settings = sanitizeGoalTableSettings(gt ?? {}, {
-    knownKeys: new Set([input.indicator]),
-    where: "",
-    warnings: [],
-  });
-  if (!w || w.visual_type !== "metas" || settings?.editable !== true)
-    return { ok: false, message: "Esta tabela não permite editar metas." };
-  const cited = goalTableRequests(settings).some(
-    (r) =>
-      r.indicator === input.indicator &&
-      (r.responsibleName ?? null) === (input.responsibleName ?? null)
-  );
-  if (!cited) return { ok: false, message: "Indicador fora desta tabela." };
-
-  let responsibleId: string | null = null;
-  if (input.responsibleName) {
-    responsibleId = responsibleIdForName(
-      await loadResponsibleNameIndex(supabase),
-      input.responsibleName
-    );
-    if (!responsibleId)
-      return { ok: false, message: `Responsável "${input.responsibleName}" não encontrado.` };
-  }
-  const key = {
-    year: p.year,
-    month: p.month,
-    scope: responsibleId ? "responsible" : "global",
-    responsibleId,
-    metric: input.indicator,
-  };
-  const orgId = await getActiveOrgId();
-  const error =
-    input.target == null
-      ? await deleteGoalTarget(supabase, key)
-      : await upsertGoalTarget(supabase, orgId, key, input.target);
-  return error ? { ok: false, message: error } : { ok: true };
-}
 
 // ============================================================================
 // Valores dos nós de INDICADOR da Tree (0149). Mesmo escopo (widget-scope) e

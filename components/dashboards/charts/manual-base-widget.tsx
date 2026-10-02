@@ -1,4 +1,6 @@
-// Versão: 1.0 | Data: 17/09/2026
+// Versão: 1.1 | Data: 02/10/2026
+// v1.1 (02/10/2026): mês e distribuição iniciais da linha nova vêm da
+//   configuração do widget (antes `defaultMonth` era gravado e nunca lido).
 // Widget "Base do Dashboard" (0142): a grade dos números DIGITADOS, editável
 // dentro do painel. Ele não consulta registro nenhum — é o MESMO gestor da
 // página Registros → Base manual e do menu ⋮, em modo `compact`.
@@ -61,6 +63,8 @@ export function ManualBaseWidget({ settings }: { settings?: BaseManualSettings }
         canEdit={state.canEdit}
         compact
         onlySeries={settings?.series}
+        initialMonth={settings?.defaultMonth}
+        initialSpread={settings?.defaultSpread}
       />
     </div>
   );

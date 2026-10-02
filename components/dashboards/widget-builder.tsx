@@ -1,4 +1,8 @@
 // Versão: 1.32 | Data: 02/10/2026
+// v1.32 (02/10/2026) — também: (f) widget "Base do Dashboard" ganha seção
+//   própria (quais dados aparecem, mês e distribuição da linha nova) — antes
+//   `baseManual.series` só era gravado pelo preset e `defaultMonth` nunca era
+//   lido; (g) a Tabela de metas sai da lista de tipos (HIDDEN_VISUAL_TYPES).
 // v1.32 (02/10/2026): Tree compreensível pela UI. (a) MAPA escolhido numa
 //   lista dos mapas da org (+ "Novo mapa"), em vez de digitar a chave; (b)
 //   "Mostrar só o galho" por um seletor dos nós do mapa (antes: digitar
@@ -146,6 +150,11 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { MonthRangePicker } from "@/components/ui/month-range-picker";
 import {
+  MANUAL_SPREADS,
+  MANUAL_SPREAD_LABELS,
+  type ManualSpread,
+} from "@/lib/manual-base/types";
+import {
   listTreeMaps,
   loadTreeMapOutline,
   type TreeMapOption,
@@ -266,6 +275,7 @@ import {
   SHAPE_KIND_LABELS,
   TRANSFORM_LABELS,
   VISUAL_TYPE_LABELS,
+  HIDDEN_VISUAL_TYPES,
   type Aggregation,
   type CalculatorVariable,
   type DateAgg,
@@ -335,10 +345,8 @@ import type { FilterValueSource } from "@/components/filters/filter-value-picker
 import { ComparisonSection } from "@/components/dashboards/widget-builder-comparison";
 import { GoalsSection } from "@/components/dashboards/widget-builder-goals";
 import { CardModeSection } from "@/components/dashboards/card-mode-section";
-import { GoalTableSection } from "@/components/dashboards/goal-table-section";
 import { cleanMonthKeys } from "@/lib/indicators/model";
-import { sanitizeGoalTableSettings } from "@/lib/widgets/goal-table";
-import type { GoalTableSettings, TreeSettings } from "@/lib/widgets/types";
+import type { TreeSettings } from "@/lib/widgets/types";
 import { TargetTabChecklist } from "@/components/dashboards/target-tab-checklist";
 import { groupByLevels } from "@/lib/widgets/appearance";
 import { DATE_FORMAT_LABELS, DATE_FORMATS } from "@/lib/widgets/format";
@@ -621,6 +629,17 @@ export function WidgetBuilder({
   const [treeMonths, setTreeMonths] = useState<string[]>(
     widget?.settings?.tree?.months ?? []
   );
+  // v1.32: Base do Dashboard (base_manual).
+  const isManualBaseWidget = visualType === "base_manual";
+  const [bmSeries, setBmSeries] = useState<string[]>(
+    widget?.settings?.baseManual?.series ?? []
+  );
+  const [bmMonth, setBmMonth] = useState<string[]>(
+    widget?.settings?.baseManual?.defaultMonth ? [widget.settings.baseManual.defaultMonth] : []
+  );
+  const [bmSpread, setBmSpread] = useState<ManualSpread | "">(
+    widget?.settings?.baseManual?.defaultSpread ?? ""
+  );
   // v1.32: mapas existentes e os nós do mapa escolhido (seletor de galho).
   const [treeMaps, setTreeMaps] = useState<TreeMapOption[] | null>(null);
   const [treeNewMap, setTreeNewMap] = useState(false);
@@ -656,10 +675,6 @@ export function WidgetBuilder({
   const treeOutlineNodes =
     treeOutline && treeOutline.key === treeOutlineKey ? treeOutline.nodes : null;
   // v1.30 (01/10/2026): Tabela de metas (0149).
-  const isGoalTableWidget = visualType === "metas";
-  const [goalTable, setGoalTable] = useState<GoalTableSettings>(
-    () => widget?.settings?.goalTable ?? { mode: "indicadores", rows: [] }
-  );
 
   const [rowActionKind, setRowActionKind] = useState<string>(
     widget?.settings?.rowAction?.kind ?? "none"
@@ -1350,9 +1365,12 @@ export function WidgetBuilder({
     { value: "*", label: "Contagem de registros" },
     ...toFieldOptions(numericFields, sourceLabels),
   ];
+  // v1.32: tipos legados (Tabela de metas → Tabela Livre) fora da lista.
   const visualOptions: ComboboxOption[] = (
     Object.keys(VISUAL_TYPE_LABELS) as VisualType[]
-  ).map((v) => ({ value: v, label: VISUAL_TYPE_LABELS[v] }));
+  )
+    .filter((v) => !HIDDEN_VISUAL_TYPES.has(v))
+    .map((v) => ({ value: v, label: VISUAL_TYPE_LABELS[v] }));
   // Só os formatos de data curados aparecem (day/week/month legados ficam fora).
   const transformOptions: ComboboxOption[] = DATE_TRANSFORMS.map((t) => ({
     value: t,
@@ -2237,18 +2255,19 @@ export function WidgetBuilder({
       delete settings.tree;
     }
 
-    // v1.30 (01/10/2026): Tabela de metas — régua única (a mesma do servidor e
-    // do import da IA); chave inválida some com aviso no console do builder.
-    if (isGoalTableWidget) {
-      const gt = sanitizeGoalTableSettings(goalTable, {
-        knownKeys: new Set(goalMetrics.map((m) => m.key)),
-        where: "builder",
-        warnings: [],
-      });
-      if (gt) settings.goalTable = gt;
-      else delete settings.goalTable;
+    // v1.32: a Tabela de metas virou Tabela Livre — `goalTable` nunca mais
+    // é gravado (o widget legado chega aqui já convertido).
+    delete settings.goalTable;
+
+    // v1.32: Base do Dashboard.
+    if (isManualBaseWidget) {
+      settings.baseManual = {
+        ...(bmSeries.length > 0 ? { series: bmSeries } : {}),
+        ...(bmMonth[0] ? { defaultMonth: bmMonth[0] } : {}),
+        ...(bmSpread ? { defaultSpread: bmSpread } : {}),
+      };
     } else {
-      delete settings.goalTable;
+      delete settings.baseManual;
     }
 
     // Filtros rápidos: grava a config limpa (ids preservados — são a chave dos
@@ -2919,11 +2938,6 @@ export function WidgetBuilder({
                 </div>
               ) : null}
             </>
-          ) : null}
-
-          {/* v1.30 (01/10/2026): Tabela de metas (0149). */}
-          {isGoalTableWidget ? (
-            <GoalTableSection value={goalTable} onChange={setGoalTable} />
           ) : null}
 
           {/* Config do KANBAN: modo, fonte, colunas (campo ou bucket de data),
@@ -3640,9 +3654,7 @@ export function WidgetBuilder({
           visualType !== "imagem" &&
           visualType !== "tabela_editavel" &&
           visualType !== "kanban" &&
-          visualType !== "agenda" &&
-          // v1.30: a Tabela de metas lê o catálogo de Indicadores, não Bases.
-          visualType !== "metas" ? (
+          visualType !== "agenda" ? (
           <Accordion type="multiple" className="-mt-2">
           {/* Fontes + modo de combinação */}
           <BuilderSection
@@ -4275,6 +4287,61 @@ export function WidgetBuilder({
                   d.transform === "month_year"
               )}
             />
+          ) : null}
+
+          {/* v1.32: Base do Dashboard — o que a grade mostra e como a linha
+              nova nasce. */}
+          {isManualBaseWidget ? (
+            <BuilderSection
+              value="base_manual"
+              title="Base do Dashboard"
+              badge={bmSeries.length > 0 ? `${bmSeries.length} dado(s)` : "Todos os dados"}
+            >
+              <p className="text-muted-foreground text-xs">
+                A grade dos números digitados (Registros → Base manual), editável
+                no próprio painel. Escolha os dados que aparecem como coluna —
+                nenhum marcado mostra todos.
+              </p>
+              <div className="flex flex-wrap gap-x-4 gap-y-2">
+                {manualSeries.map((ms) => (
+                  <label key={ms.key} className="flex items-center gap-2 text-sm">
+                    <Checkbox
+                      checked={bmSeries.includes(ms.key)}
+                      onCheckedChange={(v) =>
+                        setBmSeries((prev) =>
+                          v === true ? [...prev, ms.key] : prev.filter((x) => x !== ms.key)
+                        )
+                      }
+                    />
+                    {ms.label}
+                  </label>
+                ))}
+                {manualSeries.length === 0 ? (
+                  <span className="text-muted-foreground text-xs">
+                    Nenhum dado cadastrado ainda — crie em Registros → Base manual.
+                  </span>
+                ) : null}
+              </div>
+              <Label>Mês da linha nova</Label>
+              <MonthRangePicker
+                value={bmMonth}
+                onChange={(m) => setBmMonth(m.slice(-1))}
+                single
+                periodLabel="Mês corrente"
+                ariaLabel="Mês inicial da linha nova"
+              />
+              <Label>Como a linha nova conta no período</Label>
+              <Combobox
+                options={[
+                  { value: "", label: "Padrão" },
+                  ...MANUAL_SPREADS.map((sp) => ({ value: sp, label: MANUAL_SPREAD_LABELS[sp] })),
+                ]}
+                value={bmSpread}
+                onValueChange={(v) => setBmSpread(v as ManualSpread | "")}
+                searchable={false}
+                aria-label="Distribuição da linha nova"
+              />
+            </BuilderSection>
           ) : null}
 
           {/* Tree: de onde saem os nós e como a árvore se organiza. */}

@@ -1,3 +1,19 @@
+// Versão: 1.5 | Data: 02/10/2026
+// v1.5 (02/10/2026): o preset passa a ser só CONSUMIDOR de peças editáveis na
+//   UI — nada do que ele usa fica fixo no código. (a) As tabelas são TABELAS
+//   LIVRES com colunas de meta (o tipo "metas" foi absorvido), montadas pelo
+//   MESMO conversor dos widgets antigos (`goalTableToQuickTable`) — visual
+//   idêntico; (b) o nível dos nós de indicador é ETIQUETA livre (`tag`), não
+//   mais o enum N0–N3 repetido no rótulo; (c) as linhas do cartão de indicador
+//   vêm EXPLÍCITAS no payload (editáveis no cartão); (d) os planos de ação são
+//   Multi-fatores (fatores com título), não o molde 5W2H. Os títulos-conclusão
+//   seguem texto: o operando `meta:` não resolve trimestre e a barra de
+//   período deste deck é "todo o período" (limitação registrada no plano).
+//   Versão do preset → 5.
+// Versão: 1.4 | Data: 02/10/2026
+// v1.4 (02/10/2026): vendedores com os nomes CADASTRADOS e período padrão
+//   "todo o período" (a barra oculta aplicava "este trimestre" em AND com os
+//   filtros de 2026 do Destaque).
 // Versão: 1.3 | Data: 02/10/2026
 // v1.3 (02/10/2026): ESQUELETO DE SLIDE no deck (settings.slide + headline e
 //   kicker por aba; capa com frame false) e o slide DESTAQUE — KPI em escala +
@@ -43,6 +59,8 @@
 // Metas → Indicadores.
 import type { Formula, FormulaToken } from "@/lib/records/formulas";
 import type { WidgetSettings } from "@/lib/widgets/types";
+import { goalTableToQuickTable } from "@/lib/widgets/quick-table/goal-convert";
+import { DEFAULT_INDICATOR_ROWS, PLAN_FIELDS, type PlanFactor } from "@/lib/tree/payload";
 import type {
   PresetDashboard,
   PresetGoal,
@@ -221,7 +239,21 @@ const ind = (
   label: string,
   payload: Record<string, unknown>,
   direction?: "h" | "v"
-): PresetMapNode => ({ key, parentKey, kind: "indicator", label, payload, ...(direction ? { direction } : {}) });
+): PresetMapNode => ({
+  key,
+  parentKey,
+  kind: "indicator",
+  label,
+  // v1.5: as linhas do cartão EXPLÍCITAS — é o que o editor do cartão mostra
+  // para editar (rótulo, ordem, ocultar).
+  payload: { ...payload, rows: DEFAULT_INDICATOR_ROWS.map((r) => ({ ...r })) },
+  ...(direction ? { direction } : {}),
+});
+
+// v1.5: plano de ação = Multi-fatores. Os textos de sempre viram fatores com
+// o título de cada pergunta (a ordem do molde), editáveis um a um.
+const factors = (byField: Partial<Record<(typeof PLAN_FIELDS)[number][0], string>>): PlanFactor[] =>
+  PLAN_FIELDS.flatMap(([k, title]) => (byField[k] ? [{ id: k, title, text: byField[k]! }] : []));
 const note = (key: string, parentKey: string, label: string, extra: Partial<PresetMapNode> = {}): PresetMapNode => ({
   key,
   parentKey,
@@ -236,35 +268,35 @@ const RITUAL_WINDOW = { anchor: "2026-10-01", until: "2026-12-31" };
 const NODES: PresetMapNode[] = [
   // N0
   note("resultado", "", "Resultado do 4T26 — MRR e CAC", { goal: true, parentKey: undefined, body: "Diretoria valida a ligação N3 → N2 → N1 → N0 e os planos." }),
-  ind("mrr_final", "resultado", "N0 · MRR final", { indicator: "mrr_final", level: "N0", hint: "abertura + novos + expansão − perda" }),
-  ind("mrr_abertura", "mrr_final", "MRR de abertura", { indicator: "mrr_abertura", level: "N1" }),
-  ind("mrr_novo", "mrr_final", "N1 · MRR novo (oficial)", { indicator: "mrr_novo", level: "N1", childrenOp: "+", hint: "inbound + outbound" }),
-  ind("mrr_inbound", "mrr_novo", "N1 · MRR novo inbound", { indicator: "mrr_novo_inbound", level: "N1", childrenOp: "×", hint: "Vendas × ticket" }),
-  ind("vendas_inbound", "mrr_inbound", "N2 · Vendas inbound", { indicator: "vendas_inbound", level: "N2", childrenOp: "×", hint: "SQL realizados × conversão" }),
-  ind("sql_inbound", "vendas_inbound", "N3 · SQL", { indicator: "sql_inbound", level: "N3" }),
-  ind("conv_sql_venda", "vendas_inbound", "N3 · Conversão SQL → venda", { indicator: "conv_sql_venda", level: "N3" }),
+  ind("mrr_final", "resultado", "MRR final", { indicator: "mrr_final", tag: "N0", hint: "abertura + novos + expansão − perda" }),
+  ind("mrr_abertura", "mrr_final", "MRR de abertura", { indicator: "mrr_abertura", tag: "N1" }),
+  ind("mrr_novo", "mrr_final", "MRR novo (oficial)", { indicator: "mrr_novo", tag: "N1", childrenOp: "+", hint: "inbound + outbound" }),
+  ind("mrr_inbound", "mrr_novo", "MRR novo inbound", { indicator: "mrr_novo_inbound", tag: "N1", childrenOp: "×", hint: "Vendas × ticket" }),
+  ind("vendas_inbound", "mrr_inbound", "Vendas inbound", { indicator: "vendas_inbound", tag: "N2", childrenOp: "×", hint: "SQL realizados × conversão" }),
+  ind("sql_inbound", "vendas_inbound", "SQL", { indicator: "sql_inbound", tag: "N3" }),
+  ind("conv_sql_venda", "vendas_inbound", "Conversão SQL → venda", { indicator: "conv_sql_venda", tag: "N3" }),
   note("n3_revisar_sql", "vendas_inbound", "Revisar SQLs e cadências semanalmente"),
-  ind("ticket_inbound", "mrr_inbound", "N2 · Ticket inbound", { indicator: "ticket_inbound", level: "N2", hint: "MRR novo inbound ÷ vendas" }),
+  ind("ticket_inbound", "mrr_inbound", "Ticket inbound", { indicator: "ticket_inbound", tag: "N2", hint: "MRR novo inbound ÷ vendas" }),
   note("n3_ticket_inbound", "ticket_inbound", "Acompanhar ticket médio de entrada e propostas comerciais"),
-  ind("mrr_outbound", "mrr_novo", "N1 · MRR novo outbound", { indicator: "mrr_novo_outbound", level: "N1", childrenOp: "×", hint: "Vendas × ticket" }),
-  ind("vendas_outbound", "mrr_outbound", "N2 · Vendas outbound", { indicator: "vendas_outbound", level: "N2", childrenOp: "×", hint: "Reuniões × conversão (8 a 12%)" }),
-  ind("reunioes_ob", "vendas_outbound", "N3 · Reuniões realizadas", { indicator: "reunioes_realizadas", level: "N3" }),
-  ind("conv_reuniao", "vendas_outbound", "N3 · Conversão reunião → venda", { indicator: "conv_reuniao_venda", level: "N3" }),
-  ind("ticket_outbound", "mrr_outbound", "N2 · Ticket outbound", { indicator: "ticket_outbound", level: "N2" }),
+  ind("mrr_outbound", "mrr_novo", "MRR novo outbound", { indicator: "mrr_novo_outbound", tag: "N1", childrenOp: "×", hint: "Vendas × ticket" }),
+  ind("vendas_outbound", "mrr_outbound", "Vendas outbound", { indicator: "vendas_outbound", tag: "N2", childrenOp: "×", hint: "Reuniões × conversão (8 a 12%)" }),
+  ind("reunioes_ob", "vendas_outbound", "Reuniões realizadas", { indicator: "reunioes_realizadas", tag: "N3" }),
+  ind("conv_reuniao", "vendas_outbound", "Conversão reunião → venda", { indicator: "conv_reuniao_venda", tag: "N3" }),
+  ind("ticket_outbound", "mrr_outbound", "Ticket outbound", { indicator: "ticket_outbound", tag: "N2" }),
   note("n3_ticket_outbound", "ticket_outbound", "Prospectar empresas no porte adequado. Critérios definidos na criação das listas"),
-  ind("mrr_expansao", "mrr_final", "MRR de expansão", { indicator: "mrr_expansao", level: "N1" }),
-  ind("mrr_perda", "mrr_final", "MRR perdido", { indicator: "mrr_perda", level: "N1" }),
-  ind("cac", "resultado", "N0 · CAC", { indicator: "cac", level: "N0", hint: "(Marketing + Comercial) ÷ clientes" }),
-  ind("investimento", "cac", "N1 · Investimento comercial", { indicator: "investimento_comercial", level: "N1", childrenOp: "+", hint: "equipe + comissões + softwares + consultorias" }),
-  ind("inv_equipe", "investimento", "Equipe", { indicator: "invest_equipe", level: "N2", hint: "pessoas × custo médio" }),
-  ind("inv_comissoes", "investimento", "Comissões", { indicator: "invest_comissoes", level: "N2", hint: "soma por contrato" }),
-  ind("inv_softwares", "investimento", "Softwares", { indicator: "invest_softwares", level: "N2", hint: "licenças × preços" }),
-  ind("inv_consultorias", "investimento", "Consultorias", { indicator: "invest_consultorias", level: "N2", hint: "soma dos contratos" }),
-  ind("marketing", "cac", "Marketing", { indicator: "marketing", level: "N1" }),
-  ind("clientes_novos", "cac", "N1 · Clientes novos", { indicator: "clientes_novos", level: "N1", childrenOp: "+", hint: "inbound + outbound" }),
-  ind("clientes_inbound", "clientes_novos", "N2 · Clientes inbound", { indicator: "clientes_inbound", level: "N2" }),
+  ind("mrr_expansao", "mrr_final", "MRR de expansão", { indicator: "mrr_expansao", tag: "N1" }),
+  ind("mrr_perda", "mrr_final", "MRR perdido", { indicator: "mrr_perda", tag: "N1" }),
+  ind("cac", "resultado", "CAC", { indicator: "cac", tag: "N0", hint: "(Marketing + Comercial) ÷ clientes" }),
+  ind("investimento", "cac", "Investimento comercial", { indicator: "investimento_comercial", tag: "N1", childrenOp: "+", hint: "equipe + comissões + softwares + consultorias" }),
+  ind("inv_equipe", "investimento", "Equipe", { indicator: "invest_equipe", tag: "N2", hint: "pessoas × custo médio" }),
+  ind("inv_comissoes", "investimento", "Comissões", { indicator: "invest_comissoes", tag: "N2", hint: "soma por contrato" }),
+  ind("inv_softwares", "investimento", "Softwares", { indicator: "invest_softwares", tag: "N2", hint: "licenças × preços" }),
+  ind("inv_consultorias", "investimento", "Consultorias", { indicator: "invest_consultorias", tag: "N2", hint: "soma dos contratos" }),
+  ind("marketing", "cac", "Marketing", { indicator: "marketing", tag: "N1" }),
+  ind("clientes_novos", "cac", "Clientes novos", { indicator: "clientes_novos", tag: "N1", childrenOp: "+", hint: "inbound + outbound" }),
+  ind("clientes_inbound", "clientes_novos", "Clientes inbound", { indicator: "clientes_inbound", tag: "N2" }),
   note("n3_clientes_inbound", "clientes_inbound", "N3: 134,78 / 137,50 / 140 SQL × 23% / 24% / 25%"),
-  ind("clientes_outbound", "clientes_novos", "N2 · Clientes outbound", { indicator: "clientes_outbound", level: "N2" }),
+  ind("clientes_outbound", "clientes_novos", "Clientes outbound", { indicator: "clientes_outbound", tag: "N2" }),
   note("n3_clientes_outbound", "clientes_outbound", "N3: 25 / 25 / 30 reuniões com conversão entre 8 e 10%"),
 
   // Planos de ação (slides 10–12)
@@ -275,12 +307,14 @@ const NODES: PresetMapNode[] = [
     kind: "plan" as const,
     label: "1. Implantar ciclo completo com foco no lead",
     payload: {
-      oQue: "Atribuir cada lead a um vendedor responsável por todo o ciclo, com carteira e agenda definidas.",
-      porQue: "Atenção contínua reduz perdas entre etapas e sustenta as conversões projetadas.",
-      resultado: "Cinco vendedores em ciclo completo; 33/35/38 clientes e MRR oficial R$ 33.820/38.650/42.750.",
-      comoMedir: "Bitrix: MRR, clientes, conversão e tempo até contato por vendedor e canal.",
-      prazo: "Início em 01/10. Gestão diária, revisão semanal e fechamento em 31/10, 30/11 e 31/12.",
-      comoAcontecer: "Bruno distribui leads, orienta a equipe e revisa funil e agenda. Alinha recursos previstos com Alice.",
+      factors: factors({
+        oQue: "Atribuir cada lead a um vendedor responsável por todo o ciclo, com carteira e agenda definidas.",
+        porQue: "Atenção contínua reduz perdas entre etapas e sustenta as conversões projetadas.",
+        resultado: "Cinco vendedores em ciclo completo; 33/35/38 clientes e MRR oficial R$ 33.820/38.650/42.750.",
+        comoMedir: "Bitrix: MRR, clientes, conversão e tempo até contato por vendedor e canal.",
+        prazo: "Início em 01/10. Gestão diária, revisão semanal e fechamento em 31/10, 30/11 e 31/12.",
+        comoAcontecer: "Bruno distribui leads, orienta a equipe e revisa funil e agenda. Alinha recursos previstos com Alice.",
+      }),
       responsible: "Bruno",
       indicators: ["mrr_novo", "clientes_novos"],
     },
@@ -294,12 +328,14 @@ const NODES: PresetMapNode[] = [
     kind: "plan" as const,
     label: "2. Converter inbound com ticket e qualificação",
     payload: {
-      oQue: "Aplicar roteamento, qualificação, cadência e revisão de propostas desde o primeiro dia.",
-      porQue: "O mesmo vendedor acompanha o lead até o fechamento, base para a conversão projetada de 23%/24%/25%.",
-      resultado: "31/33/35 vendas; conversão SQL-venda 23%/24%/25%; ticket R$ 1.000/1.050/1.100.",
-      comoMedir: "Bitrix: leads, SQL, vendas, tempo de resposta e ticket médio de entrada por cliente.",
-      prazo: "Início em 01/10. Contato diário, revisão semanal e fechamento em 31/10, 30/11 e 31/12.",
-      comoAcontecer: "Contato em 15 min e cadência até o 5º dia. Bruno qualifica e revisa propostas; Felipe acompanha a geração.",
+      factors: factors({
+        oQue: "Aplicar roteamento, qualificação, cadência e revisão de propostas desde o primeiro dia.",
+        porQue: "O mesmo vendedor acompanha o lead até o fechamento, base para a conversão projetada de 23%/24%/25%.",
+        resultado: "31/33/35 vendas; conversão SQL-venda 23%/24%/25%; ticket R$ 1.000/1.050/1.100.",
+        comoMedir: "Bitrix: leads, SQL, vendas, tempo de resposta e ticket médio de entrada por cliente.",
+        prazo: "Início em 01/10. Contato diário, revisão semanal e fechamento em 31/10, 30/11 e 31/12.",
+        comoAcontecer: "Contato em 15 min e cadência até o 5º dia. Bruno qualifica e revisa propostas; Felipe acompanha a geração.",
+      }),
       responsible: "Bruno",
       indicators: ["mrr_novo_inbound", "vendas_inbound", "conv_sql_venda", "ticket_inbound"],
     },
@@ -314,12 +350,14 @@ const NODES: PresetMapNode[] = [
     kind: "plan" as const,
     label: "3. Gerar outbound com listas qualificadas",
     payload: {
-      oQue: "Executar prospecção com empresas únicas, critérios de perfil e agenda por vendedor.",
-      porQue: "O acompanhamento individual preserva o contexto do prospect. A taxa de 14% segue como premissa a medir.",
-      resultado: "2/2/3 vendas; MRR R$ 3.600/4.320/5.184; ticket R$ 1.800/2.160/1.728; 15/15/22 reuniões.",
-      comoMedir: "Bitrix: empresas únicas, reuniões, conversão e ticket. Medir duplicidade e rendimento da lista.",
-      prazo: "Início em 01/10. Prospecção diária, revisão semanal e fechamento em 31/10, 30/11 e 31/12.",
-      comoAcontecer: "Bruno prioriza ICP, indicações e Apollo; distribui listas, acompanha abordagens e revisa propostas e perdas.",
+      factors: factors({
+        oQue: "Executar prospecção com empresas únicas, critérios de perfil e agenda por vendedor.",
+        porQue: "O acompanhamento individual preserva o contexto do prospect. A taxa de 14% segue como premissa a medir.",
+        resultado: "2/2/3 vendas; MRR R$ 3.600/4.320/5.184; ticket R$ 1.800/2.160/1.728; 15/15/22 reuniões.",
+        comoMedir: "Bitrix: empresas únicas, reuniões, conversão e ticket. Medir duplicidade e rendimento da lista.",
+        prazo: "Início em 01/10. Prospecção diária, revisão semanal e fechamento em 31/10, 30/11 e 31/12.",
+        comoAcontecer: "Bruno prioriza ICP, indicações e Apollo; distribui listas, acompanha abordagens e revisa propostas e perdas.",
+      }),
       responsible: "Bruno",
       indicators: ["mrr_novo_outbound", "vendas_outbound", "reunioes_realizadas", "ticket_outbound"],
     },
@@ -549,7 +587,11 @@ const table = (
   goalTable: NonNullable<WidgetSettings["goalTable"]>,
   pos: PresetWidget["grid_position"] = { x: 0, y: 0, w: MAIN_W, h: SLIDE_H }
 ): PresetWidget =>
-  base("tabela", tab, title, "metas", { goalTable: { ...goalTable, months: METAS_4T26_MONTH_KEYS } }, pos);
+  // v1.5: Tabela Livre com colunas de meta — o MESMO conversor dos widgets
+  // "metas" antigos (ids fixos, visual idêntico).
+  base("tabela", tab, title, "tabela_editavel", {
+    quickTable: goalTableToQuickTable({ ...goalTable, months: METAS_4T26_MONTH_KEYS }),
+  }, pos);
 
 const rows = (list: [string, string, boolean?][]) =>
   list.map(([indicator, label, bold]) => ({ indicator, label, ...(bold ? { bold: true } : {}) }));
@@ -757,7 +799,7 @@ export const METAS_4T26_PRESET: PresetDashboard = {
   presetKey: METAS_4T26_KEY,
   // v1.2: 3 — estilo Editorial, palco 16:9 e a composição de slide nova.
   // v1.3: 4 — esqueleto de slide, headlines por aba e o slide Destaque.
-  version: 4,
+  version: 5,
   name: "Comercial — Metas e desdobramentos 4T26",
   visible_to_roles: ["admin", "gestor"],
   settings: {

@@ -1,3 +1,7 @@
+// Versão: 3.8 | Data: 02/10/2026
+// v3.8 (02/10/2026): a Tabela de metas ('metas') é LEGADO convertido na
+//   leitura para a Tabela Livre (normalizeLegacyWidget) — o resto da page só
+//   conhece 'tabela_editavel'.
 // Versão: 3.7 | Data: 02/10/2026
 // v3.7 (02/10/2026): expressões {=…} nos textos do esqueleto de slide (headline
 //   e kicker por aba — lib/dashboards/slide-text.ts), avaliadas aqui pelo MESMO
@@ -198,6 +202,7 @@ import {
 import { buildDashboardSnapshot } from "@/lib/widgets/history";
 import { widgetConfigFingerprint } from "@/lib/widgets/deferred-fingerprint";
 import { normalizeGridSpace } from "@/lib/widgets/grid-space";
+import { normalizeLegacyWidget } from "@/lib/widgets/quick-table/goal-convert";
 import { withRpcTtlCache } from "@/lib/widgets/rpc-cache";
 import { withRpcMemo } from "@/lib/widgets/rpc-memo";
 import { startDashboardLoadTiming } from "@/lib/widgets/load-timing";
@@ -382,7 +387,10 @@ export default async function DashboardPage({
   // Espaço de grid v2: board legado (sem canvas.gridVersion) é convertido AQUI
   // para unidades finas — o cliente inteiro (grid/builder/menu) opera SEMPRE no
   // espaço fino e as actions de escrita convertem o banco (ensureFineGrid).
-  const rawWidgets = (widgetsData ?? []) as Widget[];
+  // v3.8 (02/10/2026): Tabela de metas legada ('metas') vira Tabela Livre
+  // NA LEITURA (lib/widgets/quick-table/goal-convert.ts) — o cliente inteiro
+  // só conhece 'tabela_editavel'.
+  const rawWidgets = ((widgetsData ?? []) as Widget[]).map(normalizeLegacyWidget);
   const gridNorm = normalizeGridSpace(
     (dash.settings ?? {}) as DashboardSettings,
     rawWidgets
@@ -996,9 +1004,8 @@ export default async function DashboardPage({
   // Kanban e Agenda: também DEFERIDOS (fetch no cliente, padrão Tabela Livre).
   const isKanbanWidget = (w: Widget) => w.visual_type === "kanban";
   const isAgendaWidget = (w: Widget) => w.visual_type === "agenda";
-  // v3.5 (01/10/2026): Tabela de metas (runGoalTable) e Tree (tree-actions)
-  // buscam pelos próprios caminhos — fora do lote de engine.
-  const isGoalTableWidget = (w: Widget) => w.visual_type === "metas";
+  // v3.5 (01/10/2026): Tree (tree-actions) busca pelo próprio caminho — fora
+  // do lote de engine. v3.8: a Tabela de metas virou Tabela Livre.
   const isTreeWidget = (w: Widget) => w.visual_type === "tree";
   // Deferimento automático dos widgets de ENGINE (26/07/2026): gráfico/KPI/
   // card/pizza/funil/tabela agregada/calculado/calculadora/nota saem do
@@ -1013,7 +1020,6 @@ export default async function DashboardPage({
     !isQuickTableWidget(w) &&
     !isKanbanWidget(w) &&
     !isAgendaWidget(w) &&
-    !isGoalTableWidget(w) &&
     !isTreeWidget(w);
 
   // Fingerprint de ESCOPO dos widgets deferidos (Tabela Livre/kanban/engine):
@@ -1029,7 +1035,6 @@ export default async function DashboardPage({
     if (
       !isQuickTableWidget(w) &&
       !isKanbanWidget(w) &&
-      !isGoalTableWidget(w) &&
       !isTreeWidget(w) &&
       !isEngineDeferredWidget(w)
     ) {

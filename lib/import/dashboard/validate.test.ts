@@ -1,3 +1,6 @@
+// Versão: 1.4 | Data: 02/10/2026
+// v1.4 (02/10/2026): "metas" + goalTable vira Tabela Livre com colunas de
+//   meta (a Tabela de metas foi absorvida) — aviso, nunca erro.
 // Versão: 1.3 | Data: 18/09/2026
 // v1.3 (18/09/2026): bloco do CRUZAMENTO dado × família. Os dois ramos já
 //   testados aqui — a família existe, o dado existe — passavam sozinhos num
@@ -854,5 +857,41 @@ describe("cruzamento dado × família (v1.8)", () => {
     );
     expect(res.ok).toBe(true);
     expect(res.warnings.join(" ")).not.toContain("não se reparte");
+  });
+});
+
+describe("Tabela de metas → Tabela Livre (v1.4)", () => {
+  it("visual_type metas é convertido com aviso, linhas ligadas ao indicador", () => {
+    const doc = JSON.stringify({
+      formato: "dashboard-import",
+      versao: 1,
+      chave: "teste_metas",
+      bases: ["deals"],
+      dashboard: { name: "Teste", visible_to_roles: [], settings: {} },
+      widgets: [
+        {
+          key: "tab",
+          title: "Metas",
+          visual_type: "metas",
+          dimensions: [],
+          metrics: [],
+          filters: [],
+          settings: { goalTable: { rows: [{ indicator: "mrr", label: "N1 MRR" }], editable: true } },
+          grid_position: { x: 0, y: 0, w: 6, h: 4 },
+        },
+      ],
+    });
+    const res = validateDashboardImport(doc, ctx);
+    expect(res.errors).toEqual([]);
+    const w = res.preset!.widgets[0];
+    expect(w.visual_type).toBe("tabela_editavel");
+    expect(w.settings?.goalTable).toBeUndefined();
+    expect(w.settings?.quickTable?.rows[0]).toMatchObject({
+      tag: "N1",
+      label: "MRR",
+      bind: { kind: "indicator", indicator: "mrr" },
+    });
+    expect(w.settings?.quickTable?.goals).toEqual({ editable: true });
+    expect(res.warnings.join("\n")).toContain("virou Tabela Livre");
   });
 });

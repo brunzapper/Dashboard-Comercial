@@ -1,3 +1,7 @@
+// Versão: 1.8 | Data: 02/10/2026
+// v1.8 (02/10/2026): Tabela de metas legada ('metas') vira Tabela Livre na
+//   leitura (normalizeLegacyWidget) — as actions enxergam o mesmo widget que
+//   a page.
 // Versão: 1.7 | Data: 10/08/2026
 // v1.7 (10/08/2026): filtro rápido de período no MESMO campo do período
 //   efetivo ASSUME o período (period = pMap) em vez de anulá-lo e virar
@@ -34,6 +38,7 @@
 // (?ff_<id>). Extraído de app/(app)/dashboards/export-actions.ts para ser
 // compartilhado com a action de paginação do modo lista
 // (fetchWidgetRecordsPage) — os dois DEVEM enxergar o mesmo recorte.
+import { normalizeLegacyWidget } from "@/lib/widgets/quick-table/goal-convert";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type { SessionInfo } from "@/lib/auth/session";
@@ -493,7 +498,7 @@ export async function loadDashboardScopeBundle(
   ]);
   if (!dash) return { ok: false, message: "Dashboard não encontrado." };
 
-  const widgets = (widgetsData ?? []) as Widget[];
+  const widgets = ((widgetsData ?? []) as Widget[]).map(normalizeLegacyWidget);
   const allFields = (fieldsData ?? []) as FieldDefinition[];
   const dashSettings = (dash.settings ?? {}) as DashboardSettings;
   // Escopo de BASES do board (⋮ → "Bases") — MESMO catálogo efetivo da page

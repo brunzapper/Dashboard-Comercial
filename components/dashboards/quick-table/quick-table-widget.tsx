@@ -1,4 +1,13 @@
-// Versão: 1.6 | Data: 02/10/2026
+// Versão: 1.7 | Data: 02/10/2026
+// v1.7 (02/10/2026): METAS — a Tabela Livre absorveu a Tabela de metas.
+//   (a) colunas de meta (um mês por coluna) e linhas ligadas a indicador
+//       vêm do `runQuickTable` (goals); a meta é editada na célula (admin +
+//       `goals.editable`) com otimista + `saveQuickTableGoal` em background;
+//   (b) com `quickTable.display` e fora do "Editar layout", a tabela usa a
+//       marcação da antiga Tabela de metas (presentation-table.tsx —
+//       paridade visual); no Editar layout fica a grade de planilha;
+//   (c) avisa prontidão ao pré-render do modo Apresentar (useWarmupReady);
+//   (d) o painel de linha liga a linha a um indicador (RowPanel).
 // v1.6 (02/10/2026): tamanhos de fonte fixos (10px/11px em classe) trocados
 //   pela escala nomeada text-2xs/text-micro (globals.css); guarda em
 //   tests/no-arbitrary-font-size.test.ts.
@@ -57,6 +66,7 @@ import type {
   AppearanceSettings,
   ColorPair,
   QuickTableColumn,
+  QuickTableRow,
   TableAlign,
   Widget,
 } from "@/lib/widgets/types";
@@ -102,6 +112,18 @@ import { FONT_DEFAULTS, fontStyle } from "@/lib/widgets/fonts";
 import { ColumnPanel, RowPanel, useQuickTableConfig } from "./column-panel";
 import { QuickTableFormulaBar } from "./formula-bar";
 import { useSnapshotMode } from "@/components/snapshots/snapshot-mode";
+import { useBackgroundSave } from "@/lib/feedback/use-background-save";
+import { useWarmupReady } from "../presentation-warmup";
+import { usePresenting } from "../presenting-context";
+import {
+  goalTargetKey,
+  parseTypedGoal,
+  quickTableHasGoals,
+} from "@/lib/widgets/quick-table/goals";
+import { saveQuickTableGoal } from "@/app/(app)/dashboards/quick-table-actions";
+import { GoalCellBody, useGoalDisplay } from "./goal-cells";
+import { GoalPresentationTable } from "./presentation-table";
+import type { RealizedCatalog } from "@/components/indicators/realized-source-editor";
 
 // Posição de uma célula na GRADE RENDERIZADA (índices de exibição; as chaves
 // estáveis ficam nas próprias células da matriz).
@@ -131,6 +153,7 @@ export function QuickTableWidget({
   appearance,
   onAppearanceChange,
   scopeKey,
+  realizedCatalog = null,
 }: {
   widget: Widget;
   dashboardId: string;
@@ -146,6 +169,8 @@ export function QuickTableWidget({
   // Fingerprint do escopo efetivo (page → deferredScopeById): re-dispara o
   // fetch quando período/filtros mudam — inclusive __qf__ (banco, sem URL).
   scopeKey?: string;
+  /** v1.7: catálogo do editor da fonte do realizado (painel de linha). */
+  realizedCatalog?: RealizedCatalog | null;
 }) {
   const router = useRouter();
   // Modo snapshot (viewer público): dados BI chegam precomputados do servidor
@@ -208,9 +233,11 @@ export function QuickTableWidget({
   // expressões digitadas ou os parâmetros de URL (período/filtros) mudam;
   // enquanto refaz, mantém os dados anteriores (stale-while-refetch).
   const bi = useMemo(() => quickTableBI(qt), [qt]);
+  // v1.7: metas — colunas de mês e linhas ligadas entram na chave de busca.
+  const hasGoals = quickTableHasGoals(qt);
   const biKey = useMemo(
     () =>
-      JSON.stringify(
+      JSON.stringify([
         qt.columns.map((c) => [
           c.kind,
           c.field,
@@ -219,9 +246,12 @@ export function QuickTableWidget({
           c.metric?.field,
           c.metric?.agg,
           c.pivot === true,
-        ])
-      ),
-    [qt.columns]
+          c.months,
+        ]),
+        hasGoals ? qt.rows.map((r) => [r.id, r.bind ?? null]) : null,
+        hasGoals ? (qt.goals ?? null) : null,
+      ]),
+    [qt.columns, qt.rows, qt.goals, hasGoals]
   );
   const exprKey = useMemo(
     () =>
@@ -235,7 +265,10 @@ export function QuickTableWidget({
       ),
     [effectiveCells]
   );
-  const needsServer = bi.hasBI || exprKey !== "[]";
+  const needsServer = bi.hasBI || hasGoals || exprKey !== "[]";
+  // v1.7: re-busca silenciosa depois de gravar uma meta (o valor já está na
+  // tela pelo otimista).
+  const [goalTick, setGoalTick] = useState(0);
   const [fetched, setFetched] = useState<QuickTableResult | null>(null);
   // Re-busca com dados antigos em tela (stale-while-refetch): dim + spinner
   // até o resultado novo aterrissar — sem isso o usuário confunde o dado
@@ -291,12 +324,68 @@ export function QuickTableWidget({
     };
     // biKey/exprKey resumem a config/expressões — são as deps reais (e já
     // entram no originOf, junto com o scopeKey).
-  }, [needsServer, readOnly, biKey, exprKey, scopeKey, dataTick, dashboardId, widget.id, originOf]);
+  }, [needsServer, readOnly, biKey, exprKey, scopeKey, dataTick, goalTick, dashboardId, widget.id, originOf]);
   const deferred = readOnly
     ? (snapshotMode.quickTableResults?.[widget.id] ?? null)
     : fetched;
   // "Atualizando…" só quando há dado antigo em tela (o 1º load tem skeleton).
   const staleRefreshing = refreshing && deferred != null && !readOnly;
+  // v1.7: pronto para o pré-render do Apresentar quando o 1º resultado chegou.
+  useWarmupReady(widget.id, !needsServer || readOnly || deferred != null);
+
+  // ---- metas (v1.7): meta digitada que o servidor ainda não devolveu ----
+  const [goalOptimistic, setGoalOptimistic] = useState<Record<string, number | null>>({});
+  const [goalEditing, setGoalEditing] = useState<string | null>(null);
+  const { save: saveGoalBg, pendingKeys: goalPending } = useBackgroundSave();
+  const goalsData = hasGoals
+    ? readOnly
+      ? null
+      : deferred
+        ? (deferred.goals ?? null)
+        : undefined
+    : null;
+  // Resposta nova do servidor: descarta o otimista que ela já alcançou.
+  const [goalsSeed, setGoalsSeed] = useState(goalsData);
+  if (goalsSeed !== goalsData) {
+    setGoalsSeed(goalsData);
+    if (Object.keys(goalOptimistic).length > 0 && goalPending.size === 0) setGoalOptimistic({});
+  }
+  const commitGoal = (rowKey: string, month: string, raw: string) => {
+    setGoalEditing(null);
+    const parsed = parseTypedGoal(raw);
+    if (parsed === "invalid") return;
+    const k = goalTargetKey(rowKey, month);
+    const before =
+      k in goalOptimistic
+        ? goalOptimistic[k]
+        : (goalsData?.rows[rowKey]?.months[month]?.target ?? null);
+    if (parsed === before) return;
+    setGoalOptimistic((o) => ({ ...o, [k]: parsed }));
+    saveGoalBg({
+      key: k,
+      context: "Não foi possível salvar a meta",
+      reconcile: false,
+      action: async () => {
+        const res = await saveQuickTableGoal({
+          dashboardId,
+          widgetId: widget.id,
+          rowId: rowKey,
+          month,
+          target: parsed,
+        });
+        if (res.ok) setGoalTick((t) => t + 1);
+        return res;
+      },
+      revert: () =>
+        setGoalOptimistic((o) => {
+          const next = { ...o };
+          delete next[k];
+          return next;
+        }),
+    });
+  };
+  const goalKit = useGoalDisplay(qt.display, qt.goals);
+  const presenting = usePresenting();
 
   // ---- matriz renderizada ----
   const matrix: QTMatrix = useMemo(() => {
@@ -311,6 +400,8 @@ export function QuickTableWidget({
       tableAp: appearance?.table,
       dateFormat,
       decimals: appearance?.decimals,
+      goals: goalsData,
+      goalTargets: goalOptimistic,
     });
     // Snapshot: nenhuma célula é digitável, independentemente de editableRoles
     // (ausente = "todos os visualizadores" — não vale para um link público).
@@ -333,6 +424,8 @@ export function QuickTableWidget({
     appearance?.decimals,
     dateFormat,
     readOnly,
+    goalsData,
+    goalOptimistic,
   ]);
 
   // ---- fórmulas de célula ("=…", avaliadas no cliente) ----
@@ -440,6 +533,19 @@ export function QuickTableWidget({
     // Chaves de aparência/células da coluna ficam órfãs de propósito (ids
     // nunca são reusados); limpar exigiria acoplar dois gravadores debounced.
     saveConfig({ ...qt, columns: qt.columns.filter((c) => c.id !== colId) });
+    setMenu(null);
+  };
+  // v1.7: linha (rótulo/etiqueta/vínculo a indicador).
+  const patchRow = (rowId: string, patch: Partial<QuickTableRow>) =>
+    saveConfig({
+      ...qt,
+      rows: qt.rows.map((r) => (r.id === rowId ? { ...r, ...patch } : r)),
+    });
+  const addRowsAfter = (rowId: string, rows: QuickTableRow[]) => {
+    const i = qt.rows.findIndex((r) => r.id === rowId);
+    const next = [...qt.rows];
+    next.splice(i < 0 ? next.length : i + 1, 0, ...rows);
+    saveConfig({ ...qt, rows: next });
     setMenu(null);
   };
   const deleteRow = (rowId: string) => {
@@ -989,6 +1095,52 @@ export function QuickTableWidget({
     );
   }
 
+  // v1.7: tabela de SLIDE (o visual da antiga Tabela de metas) — com
+  // `display` e fora do Editar layout.
+  if (qt.display && !structureEdit) {
+    if (hasGoals && readOnly) {
+      return (
+        <div className="text-muted-foreground flex h-full items-center justify-center p-3 text-center text-sm">
+          As metas não são exibidas no link público.
+        </div>
+      );
+    }
+    if (matrix.goalsLoading || matrix.loading) {
+      return <div className="bg-muted h-full min-h-24 w-full animate-pulse rounded-md" />;
+    }
+    if (matrix.goalsMessage) {
+      return (
+        <div className="text-muted-foreground flex h-full items-center justify-center p-3 text-sm">
+          {matrix.goalsMessage}
+        </div>
+      );
+    }
+    if (matrix.rows.length === 0) {
+      return (
+        <div className="text-muted-foreground flex h-full items-center justify-center p-3 text-center text-sm">
+          Adicione linhas e ligue-as a indicadores (Editar layout → ⚙ da linha).
+        </div>
+      );
+    }
+    return (
+      <GoalPresentationTable
+        matrix={matrix}
+        kit={goalKit}
+        fontScale={fontScale}
+        presenting={presenting}
+        refreshing={staleRefreshing}
+        note={qt.display.note}
+        goalMonths={goalsData?.months ?? []}
+        displayOf={displayOf}
+        editingKey={goalEditing}
+        pendingKeys={goalPending}
+        onStartEdit={setGoalEditing}
+        onCommit={commitGoal}
+        onCancel={() => setGoalEditing(null)}
+      />
+    );
+  }
+
   // Total de colunas do DOM (gutter + dados + coluna do "+").
   const domCols =
     matrix.cols.length + (showRuler ? 1 : 0) + (structureEdit ? 1 : 0);
@@ -1356,11 +1508,29 @@ export function QuickTableWidget({
                             )}
                             aria-label="Editar célula"
                           />
+                        ) : cell.content === "goal" && cell.goal ? (
+                          // v1.7: célula de meta — as MESMAS peças da tabela
+                          // de slide (meta editável + realizado · atingimento).
+                          <div className="text-xs leading-tight">
+                            <GoalCellBody
+                              kit={goalKit}
+                              view={cell.goal}
+                              rowHasRealized={row.goal?.hasRealized ?? false}
+                              editing={goalEditing === `${row.key}|${cell.goal.month ?? ""}`}
+                              pending={goalPending.has(`${row.key}|${cell.goal.month ?? ""}`)}
+                              onStartEdit={() => setGoalEditing(`${row.key}|${cell.goal!.month ?? ""}`)}
+                              onCommit={(raw) =>
+                                cell.goal?.month && commitGoal(row.key, cell.goal.month, raw)
+                              }
+                              onCancel={() => setGoalEditing(null)}
+                            />
+                          </div>
                         ) : (
                           <span
                             className={cn(
                               spanClass,
-                              formulaError && "text-destructive"
+                              formulaError && "text-destructive",
+                              cell.content === "label" && row.goal?.bold && "font-semibold"
                             )}
                           >
                             {(isEditing ? editing.draft : display) || " "}
@@ -1483,6 +1653,7 @@ export function QuickTableWidget({
                 y={menu.y}
                 column={col}
                 available={available}
+                goalColumns={qt.columns.filter((c) => c.kind === "goal")}
                 onChange={(patch) => patchColumn(col.id, patch)}
                 onDelete={() => deleteColumn(col.id)}
                 onClose={() => setMenu(null)}
@@ -1494,6 +1665,11 @@ export function QuickTableWidget({
         <RowPanel
           x={menu.x}
           y={menu.y}
+          row={qt.rows.find((r) => r.id === menu.rowId)}
+          goalData={goalsData?.rows[menu.rowId]}
+          realizedCatalog={realizedCatalog}
+          onChange={(patch) => patchRow(menu.rowId, patch)}
+          onAddRows={(rows) => addRowsAfter(menu.rowId, rows)}
           onDelete={() => deleteRow(menu.rowId)}
           onClose={() => setMenu(null)}
         />

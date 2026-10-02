@@ -1,3 +1,7 @@
+// Versão: 1.5 | Data: 02/10/2026
+// v1.5 (02/10/2026): preset v5 — tabelas são Tabelas Livres com colunas de
+//   meta (linhas ligadas a indicadores do catálogo), nós de indicador com
+//   etiqueta livre (sem "N1 ·" no rótulo) e planos como Multi-fatores.
 // Versão: 1.3 | Data: 02/10/2026
 // v1.3 (02/10/2026): esqueleto de slide (headline em toda aba-slide, capa sem
 //   esqueleto) e o slide Destaque (recorte, destaque e anotação coerentes).
@@ -14,7 +18,6 @@ import { describe, expect, it } from "vitest";
 import { combineChildren } from "@/lib/indicators/model";
 import { validateIndicatorShape } from "@/lib/indicators/validate";
 import { parseNodePayload } from "@/lib/tree/payload";
-import { sanitizeGoalTableSettings } from "@/lib/widgets/goal-table";
 import {
   METAS_4T26_GOALS,
   METAS_4T26_INDICATORS,
@@ -132,10 +135,12 @@ describe("integridade das referências", () => {
       expect(tabIds.has(w.settings?.tab ?? ""), w.presetKey).toBe(true);
       const rootRef = w.settings?.tree?.rootRef;
       if (rootRef) expect(nodeKeys.has(rootRef.replace(/^preset:/, "")), rootRef).toBe(true);
-      if (w.settings?.goalTable) {
-        const warnings: string[] = [];
-        sanitizeGoalTableSettings(w.settings.goalTable, { knownKeys: keys, where: w.presetKey, warnings });
-        expect(warnings, w.presetKey).toEqual([]);
+      // v1.5: nenhuma Tabela de metas antiga; as linhas ligadas citam
+      // indicadores do catálogo.
+      expect(w.visual_type, w.presetKey).not.toBe("metas");
+      expect(w.settings?.goalTable, w.presetKey).toBeUndefined();
+      for (const r of w.settings?.quickTable?.rows ?? []) {
+        if (r.bind?.kind === "indicator") expect(keys.has(r.bind.indicator), `${w.presetKey}:${r.id}`).toBe(true);
       }
     }
     // As abas de trabalho ficam fora dos slides.
@@ -236,8 +241,40 @@ describe("slides ocupam a tela e já vêm no período certo (v1.1)", () => {
   it("tabelas e árvores com os meses fixos de out–dez/2026", () => {
     expect(METAS_4T26_MONTH_KEYS).toEqual(["2026-10", "2026-11", "2026-12"]);
     for (const w of METAS_4T26_PRESET.widgets) {
-      if (w.visual_type === "metas") expect(w.settings?.goalTable?.months, w.presetKey).toEqual(METAS_4T26_MONTH_KEYS);
+      for (const c of w.settings?.quickTable?.columns ?? []) {
+        if (c.kind === "goal") expect(c.months, w.presetKey).toEqual(METAS_4T26_MONTH_KEYS);
+      }
       if (w.visual_type === "tree") expect(w.settings?.tree?.months, w.presetKey).toEqual(METAS_4T26_MONTH_KEYS);
     }
+  });
+
+  it("v1.5: peças editáveis — Tabela Livre, etiqueta livre e Multi-fatores", () => {
+    const tables = METAS_4T26_PRESET.widgets.filter((w) => w.settings?.quickTable);
+    expect(tables.length).toBeGreaterThanOrEqual(5);
+    for (const w of tables) {
+      expect(w.visual_type).toBe("tabela_editavel");
+      // `display` presente = o visual de tabela de slide (paridade).
+      expect(w.settings?.quickTable?.display, w.presetKey).toBeDefined();
+    }
+    const vend = tables.find((w) => w.presetKey.endsWith(".vendedores.tabela"))!;
+    const names = (vend.settings?.quickTable?.rows ?? [])
+      .filter((r) => r.bind?.kind === "indicator")
+      .map((r) => (r.bind as { responsible?: string }).responsible);
+    expect(names).toEqual(Object.keys(METAS_4T26_SELLERS));
+    expect(vend.settings?.quickTable?.rows.at(-1)?.bind).toEqual({ kind: "total" });
+    for (const n of METAS_4T26_NODES) {
+      if (n.kind === "indicator") {
+        expect(n.label, n.key).not.toMatch(/^N\d\s*·/);
+        const p = parseNodePayload("indicator", n.payload) as { rows?: unknown[] } | null;
+        expect(p?.rows?.length, n.key).toBeGreaterThan(0);
+      }
+      if (n.kind === "plan") {
+        const p = parseNodePayload("plan", n.payload) as { factors: { title?: string }[] };
+        expect(p.factors.length, n.key).toBeGreaterThan(0);
+        expect(p.factors[0].title, n.key).toBe("O quê");
+        expect((n.payload as Record<string, unknown>).oQue, n.key).toBeUndefined();
+      }
+    }
+    expect(METAS_4T26_PRESET.version).toBe(5);
   });
 });

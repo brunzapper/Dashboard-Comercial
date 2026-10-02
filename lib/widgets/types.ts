@@ -1,3 +1,8 @@
+// Versão: 1.23 | Data: 02/10/2026
+// v1.23 (02/10/2026): a Tabela Livre absorve a Tabela de metas — colunas
+//   rowLabel/goal/goalTotal, linhas ligadas a indicador (QuickTableRowBind),
+//   `quickTable.goals` e `quickTable.display`. O tipo "metas" vira legado,
+//   convertido na leitura (lib/widgets/quick-table/goal-convert.ts).
 // Versão: 1.22 | Data: 02/10/2026
 // v1.22 (02/10/2026): o que só o preset Metas 4T26 sabia configurar virou peça
 //   reutilizável — DashboardSettings.slide.date (data fixa do topo do slide);
@@ -124,6 +129,14 @@ export type VisualType =
   | "base_manual"
   // v1.18 (01/10/2026): Tabela de metas (0149).
   | "metas";
+
+/**
+ * v1.23 (02/10/2026): tipos que existem (CHECK do banco, widgets antigos,
+ * snapshots congelados) mas NÃO são oferecidos ao criar widget. A Tabela de
+ * metas foi absorvida pela Tabela Livre (colunas de meta) — os widgets
+ * existentes são convertidos na leitura.
+ */
+export const HIDDEN_VISUAL_TYPES: ReadonlySet<VisualType> = new Set<VisualType>(["metas"]);
 
 export const VISUAL_TYPE_LABELS: Record<VisualType, string> = {
   kpi: "Card",
@@ -857,7 +870,19 @@ export interface NoteSettings {
 // vivem em dashboard_table_cells (row_key/col_key = ids abaixo), graváveis por
 // qualquer visualizador do dashboard — exceto colunas restritas por papel,
 // validadas na server action (saveQuickTableCells).
-export type QuickTableColKind = "free" | "dimension" | "metric";
+// v1.23 (02/10/2026): a Tabela Livre ABSORVE a Tabela de metas — colunas
+// "rowLabel" (rótulo da linha), "goal" (um mês por coluna: meta, realizado,
+// atingimento) e "goalTotal" (total dos meses pela regra do indicador).
+export type QuickTableColKind =
+  | "free"
+  | "dimension"
+  | "metric"
+  | "rowLabel"
+  | "goal"
+  | "goalTotal";
+/** O que a célula de meta mostra: o par meta + realizado · atingimento
+ * (padrão, o visual da antiga Tabela de metas) ou um número só. */
+export type QuickTableGoalFacet = "composto" | "meta" | "realizado" | "atingimento";
 export interface QuickTableColumn {
   id: string; // estável ("qc_…") — é o col_key das células e da aparência
   kind: QuickTableColKind;
@@ -876,17 +901,70 @@ export interface QuickTableColumn {
   // visualizadores; [] = ninguém (admin sempre pode). Validado na UI E na
   // server action (a RLS da tabela de células não distingue coluna).
   editableRoles?: RoleKey[];
+  /** v1.23 — kind "goal": meses fixos (AAAA-MM). Ausente = os meses do
+   * período do painel. */
+  months?: string[];
+  /** v1.23 — kind "goal"/"goalTotal": o que a célula mostra (padrão "composto"). */
+  facet?: QuickTableGoalFacet;
+  /** v1.23 — kind "goalTotal": id da coluna "goal" somada (padrão: a 1ª). */
+  of?: string;
 }
+/** v1.23: a linha LIGADA a um indicador (ou a soma das ligadas acima). */
+export type QuickTableRowBind =
+  | {
+      kind: "indicator";
+      /** Chave do indicador/meta (registry de metas). */
+      indicator: string;
+      /** Responsável pelo NOME (regra "filtros por nome"); ausente = global. */
+      responsible?: string;
+      /** Fonte do realizado própria da linha (lib/indicators/realized-source). */
+      realized?: unknown;
+    }
+  | { kind: "total" };
 // Linha LIVRE (estática) da tabela. No modo BI as linhas de DADOS são
 // derivadas dos valores da dimensão (row_key "d:…") e não ficam aqui.
 export interface QuickTableRow {
   id: string; // estável ("qr_…") — é o row_key das células e da aparência
+  /** v1.23: texto da coluna "Rótulo da linha". */
+  label?: string;
+  /** v1.23: linha em negrito (num board com estilo vira a CONCLUSÃO). */
+  bold?: boolean;
+  /** v1.23: etiqueta discreta antes do rótulo (ex.: "N1", "Estratégico"). */
+  tag?: string;
+  /** v1.23: unidade "(R$)" no rótulo — automática (pela regra de exibição),
+   * sempre ou nunca. */
+  unit?: "auto" | "show" | "hide";
+  /** v1.23: ligada a indicador (metas por mês) ou linha de total. */
+  bind?: QuickTableRowBind;
+}
+/** v1.23: exibição das células de META (ausentes = padrão do estilo). A
+ * presença do objeto liga o visual de TABELA DE SLIDE (o da antiga Tabela de
+ * metas) fora do "Editar layout". */
+export interface QuickTableGoalDisplay {
+  density?: "preencher" | "confortavel" | "compacta";
+  attainmentStyle?: "pilula" | "texto" | "barra";
+  emptyRealized?: "zero" | "traco";
+  unitPlacement?: "celula" | "rotulo";
+  /** Mostrar a etiqueta (`tag`) das linhas. */
+  levelTags?: boolean;
+  /** Rodapé (regra de cálculo, donos). */
+  note?: string;
 }
 export interface QuickTableSettings {
   quickTable?: {
     columns: QuickTableColumn[];
     rows: QuickTableRow[];
     headerRow?: boolean; // exibe a linha de cabeçalho (default true)
+    /** v1.23: comportamento das células de meta. */
+    goals?: {
+      /** Admin edita a META na célula (padrão false). */
+      editable?: boolean;
+      /** Realizado sob a meta (padrão true). */
+      showRealized?: boolean;
+      /** Atingimento (padrão true). */
+      showAttainment?: boolean;
+    };
+    display?: QuickTableGoalDisplay;
   };
 }
 

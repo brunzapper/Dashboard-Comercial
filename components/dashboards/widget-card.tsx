@@ -1,7 +1,8 @@
 // Versão: 2.22 | Data: 02/10/2026
-// v2.22 (02/10/2026): a Tree recebe o catálogo do editor de REALIZADO
-//   (o mesmo do gerenciador de indicadores — RealizedCatalog) e o papel
-//   admin (edição das metas no próprio nó). Só monta para widget Tree.
+// v2.22 (02/10/2026): a Tree e a Tabela Livre recebem o catálogo do editor
+//   de REALIZADO (o mesmo do gerenciador de indicadores — RealizedCatalog);
+//   a Tree também o papel admin (metas no próprio nó). A Tabela de metas
+//   ('metas') saiu: a page a entrega convertida em Tabela Livre.
 // v2.21 (02/10/2026): o cromo do card segue o ESTILO do dashboard
 //   (lib/dashboards/style.ts). "nenhum" = sem moldura nem fundo (o bloco
 //   senta na página); "superficie" = um nível de fundo, sem borda nem sombra;
@@ -239,10 +240,6 @@ const AgendaWidget = dynamic(
 );
 const TreeWidget = dynamic(
   () => import("./charts/tree-widget").then((m) => m.TreeWidget),
-  { ssr: false, loading: () => chunkFallback }
-);
-const GoalTableWidget = dynamic(
-  () => import("./charts/goal-table-widget").then((m) => m.GoalTableWidget),
   { ssr: false, loading: () => chunkFallback }
 );
 const ManualBaseWidget = dynamic(
@@ -498,7 +495,6 @@ export const WidgetCard = memo(function WidgetCard({
   // "Base do Dashboard" (0142): grade dos números digitados, editada no card.
   const isManualBase = widget.visual_type === "base_manual";
   // v2.19 (01/10/2026): Tabela de metas (0149).
-  const isGoalTable = widget.visual_type === "metas";
   const snapshotReadOnly = useSnapshotMode().snapshot;
   const isCalc = widget.visual_type === "calculado";
   const isKpi = widget.visual_type === "kpi";
@@ -782,10 +778,11 @@ export const WidgetCard = memo(function WidgetCard({
     manualSeries,
   ]);
 
-  // v2.22: catálogo do editor de realizado do nó de indicador da Tree.
+  // v2.22: catálogo do editor de realizado — nó de indicador da Tree e
+  // linha de meta da Tabela Livre.
   const treeCatalog: RealizedCatalog | null = useMemo(
     () =>
-      isTree
+      isTree || isQuickTable
         ? {
             available: availableForBuilder,
             allFields: fields,
@@ -795,7 +792,7 @@ export const WidgetCard = memo(function WidgetCard({
             manualAxes,
           }
         : null,
-    [isTree, availableForBuilder, fields, sourcesCatalog, goalMetrics, manualSeries, manualAxes]
+    [isTree, isQuickTable, availableForBuilder, fields, sourcesCatalog, goalMetrics, manualSeries, manualAxes]
   );
 
   // Dimensões dinâmicas: mede o tamanho natural do conteúdo e reporta ao grid,
@@ -912,7 +909,6 @@ export const WidgetCard = memo(function WidgetCard({
     // A Base do Dashboard é uma GRADE DE EDIÇÃO, não um recorte de registros:
     // "Exportar CSV" ali sairia vazio.
     !isManualBase &&
-    !isGoalTable &&
     !isCalc &&
     !isCalculator &&
     !isNote &&
@@ -1529,6 +1525,7 @@ export const WidgetCard = memo(function WidgetCard({
               appearance={appearance}
               onAppearanceChange={saveAppearance}
               scopeKey={deferredScopeKey}
+              realizedCatalog={treeCatalog}
             />
           ) : isTree ? (
             <TreeWidget
@@ -1543,19 +1540,6 @@ export const WidgetCard = memo(function WidgetCard({
               catalog={treeCatalog}
               isAdmin={userRoles.includes("admin")}
             />
-          ) : isGoalTable ? (
-            snapshotReadOnly ? (
-              <div className="text-muted-foreground flex h-full items-center justify-center p-3 text-center text-sm">
-                A tabela de metas não é exibida no link público.
-              </div>
-            ) : (
-              <GoalTableWidget
-                dashboardId={dashboardId}
-                widgetId={widget.id}
-                settings={widget.settings?.goalTable}
-                scopeKey={deferredScopeKey}
-              />
-            )
           ) : isManualBase ? (
             <ManualBaseWidget settings={widget.settings?.baseManual} />
           ) : isKanban ? (

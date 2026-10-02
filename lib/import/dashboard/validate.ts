@@ -1,4 +1,9 @@
-// Versão: 1.12 | Data: 02/10/2026
+// Versão: 1.13 | Data: 02/10/2026
+// v1.13 (02/10/2026): a Tabela de metas foi absorvida pela Tabela Livre —
+//   `"visual_type": "metas"` + `goalTable` segue ACEITO como atalho e é
+//   convertido aqui (aviso) pelo MESMO conversor da leitura
+//   (`goalTableSettingsToQuickTable`): o widget sai 'tabela_editavel' com
+//   colunas de meta e linhas ligadas aos indicadores.
 // v1.12 (02/10/2026): `slide.date` (data fixa AAAA-MM-DD do topo do slide).
 // v1.11 (02/10/2026): `dashboard.settings.slide` (esqueleto de slide) saneado —
 //   textos curtos aparados e os dois flags; o resto é descartado.
@@ -71,6 +76,7 @@
 // (perRecordCalcOperands / buildAggOperandCatalog) — para que uma fórmula
 // aceita aqui seja exatamente a que os editores aceitariam. Nenhum I/O aqui:
 // client-safe e testável (npx tsx) sem banco.
+import { goalTableSettingsToQuickTable } from "@/lib/widgets/quick-table/goal-convert";
 import {
   DASHBOARD_STYLE_KEYS,
   normalizeDashboardStyleSetting,
@@ -975,7 +981,7 @@ export function validateDashboardImport(
       );
       return;
     }
-    const visualType = visual as VisualType;
+    let visualType = visual as VisualType;
     const wKeySlug = slugify(asString(w.key)) || `w${i + 1}`;
     if (usedWidgetKeys.has(wKeySlug)) {
       errors.push(`${where}: "key" duplicada ("${wKeySlug}").`);
@@ -1491,6 +1497,18 @@ export function validateDashboardImport(
       });
       if (gt) wSettings.goalTable = gt;
       else delete (wSettings as Record<string, unknown>).goalTable;
+    }
+    // v1.13: "metas" → Tabela Livre com colunas de meta (conversor único).
+    if (visualType === "metas") {
+      const converted = goalTableSettingsToQuickTable(wSettings);
+      for (const k of Object.keys(wSettings)) delete (wSettings as Record<string, unknown>)[k];
+      Object.assign(wSettings, converted);
+      visualType = "tabela_editavel";
+      warnings.push(
+        `${where}: "metas" virou Tabela Livre com colunas de meta (a Tabela de metas foi absorvida por ela).`
+      );
+    } else {
+      delete (wSettings as Record<string, unknown>).goalTable;
     }
 
     // Coerência kanban/agenda × `sources`: é de `widgets.sources` que a page
