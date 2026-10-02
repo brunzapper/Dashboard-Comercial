@@ -1,4 +1,10 @@
-<!-- Versão: 2.2 | Data: 02/10/2026 -->
+<!-- Versão: 2.3 | Data: 02/10/2026 -->
+<!-- v2.3 (02/10/2026): §4.27 — "Etapa 2: peças editáveis" (a Tabela Livre
+     absorve a Tabela de metas; fonte do realizado configurável; Tree com
+     exibição ao apresentar, tamanho/prazo/exibição por nó (0150), cartão de
+     indicador configurável, Multi-fatores, ritual multi-dia); §4.28 — barra
+     da apresentação auto-oculta, PDF pelo menu ⋮ e fundo de aba fora da
+     apresentação; invariante 42 ampliada. -->
 <!-- v2.2 (02/10/2026): §4.28 — etapa 2 do deck: esqueleto de slide, anotação,
      rótulo direto, área, número-herói, aviso de transbordo, PDF dos slides e
      a escala tipográfica nomeada (guarda estática); invariante 43 ampliada. -->
@@ -6561,6 +6567,74 @@ dela, nó de mapa por `tree_nodes.preset_key`. Reaplicar nunca desfaz um ajuste.
 Isto AMENDA a regra antiga "metas não são deps de preset": um preset de METAS é
 exatamente o caso.
 
+**Etapa 2 — peças editáveis (02/10/2026).** O preset Metas 4T26 tinha
+deixado escolhas DELE no código e no JSON (nível N0–N3 em enum, rótulos
+"Real"/"Proj." fixos no cartão, molde 5W2H, realizado só do catálogo, a data
+do apply como "prazo" da anotação, meses digitados como `2026-10, 2026-11`,
+uma Tabela de metas com UX própria). A regra passou a ser: o preset é só
+CONSUMIDOR de peças que a UI monta.
+
+- **A Tabela Livre absorve a Tabela de metas.** Três tipos de coluna novos em
+  `QuickTableColumn` — `rowLabel`, `goal` (um mês por coluna, col_key
+  `<colId>@AAAA-MM`, o mesmo esquema do pivot, então ordem manual e aparência
+  por coluna seguem valendo; `months` fixos ou os do período; `facet` =
+  composto/meta/realizado/atingimento) e `goalTotal` (`of` = qual coluna de
+  meses) — e linhas LIGADAS (`QuickTableRow.bind`: indicador + responsável
+  pelo NOME + `realized`, ou `total` = soma das metas das ligadas acima),
+  com `tag`/`bold`/`unit` por linha. A matriz é a MESMA (`buildQuickTableMatrix`
+  com `goals` + `goalTargets` otimistas; `QTCell.value` = o número da faceta,
+  então fórmulas A1 leem metas sem caso especial). O servidor é o
+  `runQuickTable` (widget-scope) chamando `resolveIndicatorValues`
+  (`computeQuickTableGoals`); a meta é gravada por `saveQuickTableGoal`, que lê
+  a LINHA do widget gravado (indicador/responsável nunca vêm do navegador) e
+  usa `upsertGoalTarget`/`deleteGoalTarget`. Com `quickTable.display`, fora do
+  "Editar layout", a tabela usa a marcação da antiga Tabela de metas
+  (`presentation-table.tsx` + peças MOVIDAS para `goal-cells.tsx`) — paridade
+  visual. O tipo `'metas'` saiu dos seletores (`HIDDEN_VISUAL_TYPES`; a CHECK
+  do banco não muda) e é LEGADO convertido NA LEITURA por
+  `normalizeLegacyWidget` (`lib/widgets/quick-table/goal-convert.ts`, ids
+  FIXOS porque roda a cada carga) na page, no widget-scope, no
+  `saveQuickTableCells`, no viewer e no refresh de snapshot; o
+  `saveWidgetSettings` troca o `visual_type` da linha legada no primeiro save
+  da estrutura (senão ela ficaria `metas` com `quickTable` e sem `goalTable`).
+  O import da IA aceita `"metas"` + `goalTable` como ATALHO e o converte pelo
+  mesmo conversor. `runGoalTable`/`saveGoalCell`/`GoalTableWidget` saíram.
+- **Fonte do realizado (`lib/indicators/realized-source.ts`).** `RealizedSource
+  {v:1, override?, filters?, breakdown?}` — fórmula própria do MESMO catálogo
+  agregado, recortes (cada um exposto como etiqueta ou oculto) e quebra por
+  dimensão (aberta ou recolhida, top N + "Outros"). `effectiveRealized` decide
+  o que roda; a quebra vai ao `runWidget` com a métrica ad-hoc
+  `calc:formula` (RPCs intocadas). A régua semântica é `validateRealizedSource`
+  (no save do nó da Tree e da estrutura da Tabela Livre); em runtime o shape é
+  re-checado. A Tree pede valores POR NÓ: `loadTreeIndicatorValues` lê o
+  payload no banco — a fórmula nunca vem do navegador. O editor é UM
+  (`RealizedSourceEditor`), usado pelo gerenciador de indicadores, pelo nó e
+  pelo painel de linha da Tabela Livre. `indicators.attention_pct` (0150) é a
+  faixa de "Atenção" (ausente = 2× a tolerância, o comportamento de antes).
+- **Tree.** `treeChrome` (`lib/tree/display.ts`) decide o que o cartão mostra
+  AO APRESENTAR — tipo, "+", "Agendar próxima", concluir e avisos ocultos por
+  padrão; o widget liga cada um (`settings.tree.presentation`, Aparência ▸
+  Tree) e o cartão força o próprio rótulo de tipo (`tree_nodes.display`).
+  `tree_nodes` ganhou `width/height` (redimensionar; duplo-clique na alça volta
+  ao automático), `display` (tipo ao apresentar, cor) e `due_date` (prazo
+  PRÓPRIO da anotação — a data de criação vai para o tooltip; sem prazo, nada
+  é exibido). Duplo-clique abre o cartão em destaque (também apresentando);
+  o 1º clique no título seleciona e o 2º edita. O nó de indicador ganhou
+  etiqueta LIVRE (`tag`; `level` legado lido como etiqueta), linhas do cartão
+  configuráveis (`rows`), `projectFrom`, meta editável no próprio cartão
+  (`saveTreeIndicatorGoal`) e realizado próprio. O plano virou **Multi-fatores**
+  (`factors[]` com título opcional; 5W2H legado convertido na leitura e
+  oferecido só como atalho); o `kind` segue `plan`. Ritual com vários dias da
+  semana, dia 1–31 e "manter N abertas". Anotação converte em
+  indicador/Multi-fatores/ritual (`convertNoteToOperational`) e qualquer nó
+  próprio pode ser o Resultado (`setTreeNodeGoal`). O builder escolhe mapa e
+  galho em lista (`listTreeMaps`/`loadTreeMapOutline`) e preserva
+  `canvas`/`presentation` no save. Loaders com fallback de colunas enquanto a
+  0150 não foi aplicada.
+- **Preset v5.** Tabelas = Tabelas Livres pelo conversor, nós com `tag` e
+  `rows` explícitas, planos com `factors`. Os títulos-conclusão seguem texto:
+  o `meta:` não resolve trimestre e a barra deste deck é "todo o período".
+
 ### 4.28 Estilo do dashboard e apresentação como palco (02/10/2026)
 
 **Por quê.** A interface era de EDIÇÃO, não de apresentação: cada widget trazia
@@ -6654,6 +6728,23 @@ RPCs de widget INTOCADAS; nenhuma migração (`settings` jsonb e a coluna
 - **Escala tipográfica nomeada:** `text-2xs`/`text-micro` (globals.css
   `@theme`) substituíram os px soltos; `tests/no-arbitrary-font-size.test.ts`
   barra `text-[Npx]` em `components/dashboards/**`.
+
+**Etapa 3 (02/10/2026).**
+- **Fundo de aba fora da apresentação:** `tabs[].background` passou a pintar
+  a superfície da aba também no painel (antes só no palco — a capa escura
+  ficava com texto claro sobre o papel). Controle na UI em "Estilo e
+  apresentação" (por aba: fundo e "Incluir na apresentação"); o save preserva
+  as cores `style.overrides` que não estão no formulário.
+- **Exportar PDF sai da barra e vai para o ⋮ do dashboard** (abaixo de
+  Snapshots, também para leitores). Mesmo caminho do Apresentar (tela cheia no
+  clique, pré-render, palco) e o MESMO CSS de impressão — a aparência do PDF
+  não mudou; durante a exportação a saída da tela cheia pelo diálogo de
+  impressão não encerra o modo.
+- **Barra da apresentação auto-oculta** (`useAutoHideBar`): some após 2 s sem
+  interação com ela e só reaparece com o ponteiro 1 s seguido perto da borda
+  inferior; foco/hover dentro dela a mantém; teclado não a mostra.
+- `slide.date` fixa a data do topo do slide (reunião); `headline`/`kicker`
+  aceitam as expressões `{=…}` da Nota (`lib/dashboards/slide-text.ts`).
 
 ## 5. Invariantes críticas (NÃO QUEBRAR)
 
@@ -7371,7 +7462,13 @@ principalmente — para mantenedores humanos.
     ocorrência DERIVADA e trava por ocorrência (`uq_tasks_ritual_occurrence`,
     sem `completed_at is null`). Nó operacional da Tree é linha própria
     (`note:<uuid>`) com payload re-parseado no servidor. Seções de dados de
-    preset são ensure-if-absent e SÓ do caminho de fábrica.
+    preset são ensure-if-absent e SÓ do caminho de fábrica. Desde 02/10/2026:
+    a fonte do realizado própria (`RealizedSource`) também se resolve no
+    ENGINE e é validada pela régua do catálogo no save; a Tree pede valores
+    POR NÓ (o servidor lê o payload — fórmula nunca vem do navegador); a
+    Tabela de metas é LEGADO convertido na leitura por `normalizeLegacyWidget`
+    (ids fixos) — metas vivem em colunas `goal` da Tabela Livre e a célula grava
+    por `saveQuickTableGoal`, que lê a linha do widget gravado.
 
 43. **Estilo do dashboard é LEITURA de tokens, escopada ao board (§4.28).** O
     estilo nunca reescreve a config dos widgets — trocar de volta para o

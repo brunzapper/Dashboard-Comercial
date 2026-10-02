@@ -1,4 +1,8 @@
-// Versão: 1.0 | Data: 01/10/2026
+// Versão: 1.1 | Data: 02/10/2026
+// v1.1 (02/10/2026): (a) ordem dos indicadores (↑/↓ — moveIndicator); (b)
+//   faixa "Atenção" configurável (attentionPct; vazio = 2× a tolerância); (c)
+//   o editor do realizado é o `RealizedFormulaFields` compartilhado com a Tree
+//   e a Tabela Livre (components/indicators/realized-source-editor.tsx).
 // Catálogo de INDICADORES (0149) — Configurações → Metas.
 //
 // Um indicador explica uma chave de meta: unidade, regra de total entre meses,
@@ -13,7 +17,7 @@
 "use client";
 
 import { useMemo, useState, useTransition } from "react";
-import { Pencil, Plus, Trash2 } from "lucide-react";
+import { ArrowDown, ArrowUp, Pencil, Plus, Trash2 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -38,60 +42,34 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
-import { FilterRow } from "@/components/dashboards/widget-builder-rows";
-import { FormulaEditor } from "@/components/formula/formula-editor";
-import { SourcePicker } from "@/components/configuracoes/remuneracao/plan-editor";
-import { useSourceLabels } from "@/components/source-labels-context";
+import {
+  RealizedFormulaFields,
+  type RealizedCatalog,
+} from "@/components/indicators/realized-source-editor";
 import { notifyActionError } from "@/lib/feedback/notify";
 import {
   INDICATOR_DIRECTION_LABELS,
   INDICATOR_ROLLUP_LABELS,
   INDICATOR_UNIT_LABELS,
-  MAX_INDICATOR_FILTERS,
   type IndicatorDef,
 } from "@/lib/indicators/model";
-import { goalMetricKeyFromLabel, type GoalMetricDef } from "@/lib/metas/metrics";
-import type { ManualAxisCatalog } from "@/lib/manual-base/families";
-import type { ManualSeries } from "@/lib/manual-base/types";
-import type { RefOption } from "@/lib/records/date-operands";
+import { goalMetricKeyFromLabel } from "@/lib/metas/metrics";
 import type { Formula } from "@/lib/records/formulas";
-import type { FieldDefinition } from "@/lib/records/types";
-import type { SourceDef } from "@/lib/sources";
-import {
-  availableAggCatalogInput,
-  buildAggOperandCatalog,
-} from "@/lib/widgets/agg-catalog";
-import type { AvailableField } from "@/lib/widgets/fields";
-import {
-  cleanFilters,
-  decorateRefOptions,
-  FILTER_OPS,
-  sourceChips,
-  toFieldOptions,
-} from "@/lib/widgets/filter-ops";
+import { cleanFilters } from "@/lib/widgets/filter-ops";
 import type { WidgetFilter } from "@/lib/widgets/types";
 import {
   deleteIndicator,
+  moveIndicator,
   saveIndicator,
 } from "@/app/(app)/configuracoes/metas/indicator-actions";
 
-const FILTER_OP_OPTIONS: ComboboxOption[] = FILTER_OPS.map((o) => ({
-  value: o.op,
-  label: o.label,
-}));
 const UNIT_OPTIONS = Object.entries(INDICATOR_UNIT_LABELS).map(([value, label]) => ({ value, label }));
 const ROLLUP_OPTIONS = Object.entries(INDICATOR_ROLLUP_LABELS).map(([value, label]) => ({ value, label }));
 const DIRECTION_OPTIONS = Object.entries(INDICATOR_DIRECTION_LABELS).map(([value, label]) => ({ value, label }));
 const NO_OWNER = "__none__";
 
-export interface IndicatorsCatalogProps {
-  available: AvailableField[];
-  allFields: FieldDefinition[];
-  sources: SourceDef[];
-  metrics: GoalMetricDef[];
-  manualSeries: ManualSeries[];
-  manualAxes: ManualAxisCatalog;
-}
+/** v1.1: o mesmo shape do editor compartilhado do realizado. */
+export type IndicatorsCatalogProps = RealizedCatalog;
 
 interface Draft {
   id: string | null;
@@ -103,6 +81,7 @@ interface Draft {
   rollup: string;
   direction: string;
   tolerancePct: string;
+  attentionPct: string;
   ownerResponsibleId: string;
   withRealized: boolean;
   formula: Formula | null;
@@ -122,6 +101,7 @@ function draftOf(def: IndicatorDef | null, nextOrder: number): Draft {
     rollup: def?.rollup ?? "soma",
     direction: def?.direction ?? "maior_melhor",
     tolerancePct: String(def?.tolerancePct ?? 5),
+    attentionPct: def?.attentionPct != null ? String(def.attentionPct) : "",
     ownerResponsibleId: def?.ownerResponsibleId ?? "",
     withRealized: Boolean(def?.realized),
     formula: def?.realized?.formula ?? null,
@@ -186,7 +166,7 @@ export function IndicatorsManager({
                 </TableCell>
               </TableRow>
             ) : (
-              indicators.map((d) => (
+              indicators.map((d, i) => (
                 <TableRow key={d.key}>
                   <TableCell className="font-medium">{d.label}</TableCell>
                   <TableCell>
@@ -206,6 +186,34 @@ export function IndicatorsManager({
                   </TableCell>
                   <TableCell>
                     <div className="flex justify-end gap-1">
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        aria-label={`Subir ${d.label}`}
+                        disabled={pending || i === 0}
+                        onClick={() =>
+                          startTransition(async () => {
+                            const res = await moveIndicator(d.id!, "up");
+                            if (!res.ok) notifyActionError("Não foi possível mover.", res.message);
+                          })
+                        }
+                      >
+                        <ArrowUp className="size-4" />
+                      </Button>
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        aria-label={`Descer ${d.label}`}
+                        disabled={pending || i === indicators.length - 1}
+                        onClick={() =>
+                          startTransition(async () => {
+                            const res = await moveIndicator(d.id!, "down");
+                            if (!res.ok) notifyActionError("Não foi possível mover.", res.message);
+                          })
+                        }
+                      >
+                        <ArrowDown className="size-4" />
+                      </Button>
                       <Button
                         size="icon"
                         variant="ghost"
@@ -274,40 +282,10 @@ function IndicatorSheet({
   responsibles: { id: string; label: string }[];
   catalog: IndicatorsCatalogProps;
 }) {
-  const sourceLabels = useSourceLabels();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const patch = (p: Partial<Draft>) => setDraft({ ...draft, ...p });
 
-  const aggCatalog: RefOption[] = useMemo(
-    () =>
-      decorateRefOptions(
-        buildAggOperandCatalog(
-          availableAggCatalogInput(
-            catalog.available,
-            catalog.allFields,
-            catalog.sources,
-            catalog.metrics,
-            catalog.manualSeries,
-            catalog.manualAxes,
-            { withNested: true }
-          )
-        ),
-        catalog.available,
-        sourceLabels
-      ),
-    [catalog, sourceLabels]
-  );
-  const filterFieldOptions = useMemo(
-    () =>
-      toFieldOptions(
-        catalog.available.filter(
-          (a) => !a.displayOnly && !a.aggCalc && a.field !== "operation_id"
-        ),
-        sourceLabels
-      ),
-    [catalog.available, sourceLabels]
-  );
   const ownerOptions: ComboboxOption[] = useMemo(
     () => [
       { value: NO_OWNER, label: "Sem dono" },
@@ -332,6 +310,9 @@ function IndicatorSheet({
         rollup: draft.rollup,
         direction: draft.direction,
         tolerancePct: Number(draft.tolerancePct.replace(",", ".")),
+        attentionPct: draft.attentionPct.trim()
+          ? Number(draft.attentionPct.replace(",", "."))
+          : null,
         ownerResponsibleId: draft.ownerResponsibleId || null,
         sortOrder: draft.sortOrder,
         realized: draft.withRealized
@@ -420,6 +401,19 @@ function IndicatorSheet({
                 onChange={(e) => patch({ tolerancePct: e.target.value })}
               />
             </div>
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="ind-att">Atenção até (%)</Label>
+              <Input
+                id="ind-att"
+                inputMode="decimal"
+                placeholder={`Padrão: ${(Number(draft.tolerancePct.replace(",", ".")) || 0) * 2}`}
+                value={draft.attentionPct}
+                onChange={(e) => patch({ attentionPct: e.target.value })}
+              />
+              <span className="text-muted-foreground text-xs">
+                Desvio até a tolerância = no plano; até este valor = atenção; acima = fora.
+              </span>
+            </div>
             <div className="flex flex-col gap-1.5 sm:col-span-2">
               <Label>Dono</Label>
               <Combobox
@@ -448,67 +442,16 @@ function IndicatorSheet({
           </label>
 
           {draft.withRealized ? (
-            <div className="flex flex-col gap-3 rounded-md border p-3">
-              <div className="flex flex-col gap-1.5">
-                <Label>Bases</Label>
-                <SourcePicker
-                  sources={catalog.sources}
-                  value={draft.sources}
-                  onChange={(v) => patch({ sources: v })}
-                />
-              </div>
-              <div className="flex flex-col gap-1.5">
-                <Label>Fórmula do realizado</Label>
-                <FormulaEditor
-                  context="aggregate"
-                  catalog={aggCatalog}
-                  chips={sourceChips(sourceLabels)}
-                  sources={catalog.sources}
-                  initial={draft.formula}
-                  onChange={(f) => patch({ formula: f })}
-                />
-              </div>
-              <div className="flex flex-col gap-1.5">
-                <Label>Condições do recorte</Label>
-                {draft.filters.length > 0 ? (
-                  <div className="grid gap-2 sm:grid-cols-2">
-                    {draft.filters.map((flt, fi) => (
-                      <FilterRow
-                        key={fi}
-                        filter={flt}
-                        fieldOptions={filterFieldOptions}
-                        fieldChips={sourceChips(sourceLabels)}
-                        opOptions={FILTER_OP_OPTIONS}
-                        valueSource={null}
-                        onChange={(p) =>
-                          patch({
-                            filters: draft.filters.map((x, xi) =>
-                              xi === fi ? { ...x, ...p } : x
-                            ),
-                          })
-                        }
-                        onRemove={() =>
-                          patch({ filters: draft.filters.filter((_, xi) => xi !== fi) })
-                        }
-                      />
-                    ))}
-                  </div>
-                ) : null}
-                <div>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    disabled={draft.filters.length >= MAX_INDICATOR_FILTERS}
-                    onClick={() =>
-                      patch({ filters: [...draft.filters, { field: "", op: "eq", value: "" }] })
-                    }
-                  >
-                    <Plus className="size-4" /> Adicionar condição
-                  </Button>
-                </div>
-              </div>
-            </div>
+            // v1.1: bloco compartilhado com a Tree e a Tabela Livre.
+            <RealizedFormulaFields
+              catalog={catalog}
+              sources={draft.sources}
+              onSources={(v) => patch({ sources: v })}
+              formula={draft.formula}
+              onFormula={(f) => patch({ formula: f })}
+              filters={draft.filters}
+              onFilters={(f) => patch({ filters: f })}
+            />
           ) : null}
 
           {error ? <p className="text-destructive text-sm">{error}</p> : null}

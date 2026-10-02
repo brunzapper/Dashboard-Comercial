@@ -1,4 +1,15 @@
-// Versão: 1.13 | Data: 02/10/2026
+// Versão: 1.14 | Data: 02/10/2026
+// v1.14 (02/10/2026): o widget deixa de depender de escolhas fixas do preset.
+//   (a) MODO APRESENTAR: rótulo de tipo, "+", concluir etapa, "Agendar
+//       próxima", avisos e o cabeçalho "Mapa · …" somem por padrão
+//       (`settings.presentation` liga de volta; o cartão força o rótulo);
+//   (b) cartões REDIMENSIONÁVEIS (0150) e em DESTAQUE no duplo-clique;
+//   (c) anotação com descrição e data próprias (editor completo) e
+//       conversão em indicador/Multi-fatores/ritual; Resultado em qualquer
+//       nó desenhado;
+//   (d) nó de indicador pedido POR NÓ (o servidor lê a fonte do realizado no
+//       banco); o editor recebe o catálogo de fórmulas do painel e grava a
+//       meta do mês no próprio nó.
 // v1.13 (02/10/2026): repassa `settings.canvas` (fundo do canvas da Root) ao
 //   TreeRootView.
 // Versão: 1.12 | Data: 01/10/2026
@@ -147,12 +158,26 @@ import {
   loadRecordTree,
   scheduleRitualOccurrence,
   setTreeNodeGeometry,
+  setTreeNodeGoal,
   setTreeNodeParent,
+  convertNoteToOperational,
   updateTreeNode,
   updateTreeNote,
   type TreeData,
   type TreeNoteStatus,
 } from "@/app/(app)/dashboards/tree-actions";
+import { usePresenting } from "../presenting-context";
+import { useDashboardStyle } from "../dashboard-style-context";
+import { isClassicStyle } from "@/lib/dashboards/style";
+import {
+  parsePresentationSettings,
+  treeChrome,
+  type TreeNodeDisplay,
+} from "@/lib/tree/display";
+import { parseIndicatorPayload } from "@/lib/tree/payload";
+import { fieldLabel } from "@/lib/widgets/fields";
+import type { RealizedCatalog } from "@/components/indicators/realized-source-editor";
+import { TreeNodeFocusDialog, TreeNoteEditSheet, type NoteEditInput } from "./tree-node-focus";
 import { TreeSeriesSheet } from "./tree-series-sheet";
 import { useRecordFocus } from "../record-focus-context";
 import { setRecordAttributeStatus } from "@/lib/attributes/actions";
@@ -200,14 +225,17 @@ import {
   OperationalNodeSheet,
   operationalSize,
   TreeOpsProvider,
+  useTreeOps,
   type OperationalDraft,
+  type OperationalSaveInput,
   type TreeOpsValue,
 } from "./tree-op-nodes";
 import {
   loadTreeIndicatorValues,
+  saveTreeIndicatorGoal,
   type TreeIndicatorValues,
 } from "@/app/(app)/dashboards/goal-table-actions";
-import { indicatorRequestsOf, seriesKey } from "@/lib/tree/payload";
+import { indicatorRequestsOf, nodeSeriesKey, seriesKey } from "@/lib/tree/payload";
 import { useGoalMetrics } from "@/components/goal-metrics-context";
 import { ROOT_NODE_HEIGHT, ROOT_NODE_WIDTH } from "@/lib/tree/root-layout";
 import { updateComment } from "@/lib/comments/actions";
@@ -221,6 +249,8 @@ interface NodeSelection {
   onToggle: (node: TreeNode) => void;
   /** v1.9: puxar um galho novo deste nó. */
   onAddBranch?: (kind: TreeBranchKind, parent: TreeNode | null) => void;
+  /** v1.14: duplo-clique — o cartão em destaque. */
+  onOpenFocus?: (node: TreeNode) => void;
 }
 
 function NodeCard({
@@ -241,6 +271,9 @@ function NodeCard({
   // parcial. Nó sem nada selecionável abaixo não mostra caixa nenhuma.
   const checkState = nodeCheckState(selection.selected, node);
   const selectable = selectableRefs(node).length > 0;
+  // v1.14: o que o cartão mostra ao apresentar (lib/tree/display.ts).
+  const ops = useTreeOps();
+  const chrome = treeChrome(ops?.presentation, ops?.displayOf?.(node) ?? null, ops?.presenting ?? false);
 
   return (
     <div className="flex flex-col">
@@ -248,6 +281,10 @@ function NodeCard({
         className={`flex flex-wrap items-center gap-2 rounded-md border px-2 py-1.5 ${
           KIND_TONE[node.kind] ?? "border-muted"
         }`}
+        onDoubleClick={(e) => {
+          if ((e.target as HTMLElement).closest("button, input, textarea, [role='checkbox']")) return;
+          selection.onOpenFocus?.(node);
+        }}
       >
         {hasChildren ? (
           <button
@@ -266,7 +303,7 @@ function NodeCard({
           <span className="w-4 shrink-0" />
         )}
 
-        {selectable ? (
+        {selectable && !ops?.presenting ? (
           <Checkbox
             checked={checkState}
             onCheckedChange={() => selection.onToggle(node)}
@@ -274,9 +311,11 @@ function NodeCard({
           />
         ) : null}
 
-        <Badge variant="outline" className="shrink-0 text-xs">
-          {TREE_NODE_KIND_LABELS[node.kind]}
-        </Badge>
+        {chrome.kindBadge ? (
+          <Badge variant="outline" className="shrink-0 text-xs">
+            {TREE_NODE_KIND_LABELS[node.kind]}
+          </Badge>
+        ) : null}
         {node.goal ? (
           <Badge className="shrink-0 bg-amber-500 text-xs text-white">
             Resultado
@@ -292,8 +331,8 @@ function NodeCard({
 
         {/* v1.9: o miolo de ações saiu para `NodeActions` (tree-node-parts),
             compartilhado com a Root — e o "+" puxa um galho de QUALQUER nó. */}
-        <NodeActions node={node} actx={actx} />
-        {selection.onAddBranch ? (
+        {ops?.presenting ? null : <NodeActions node={node} actx={actx} />}
+        {selection.onAddBranch && chrome.addBranch ? (
           <AddBranchMenu
             parent={node}
             scopeKind={actx.scope.kind}
@@ -355,6 +394,8 @@ export function TreeWidget({
   dashboardId,
   widgetId,
   scopeKey: boardScopeKey,
+  catalog = null,
+  isAdmin = false,
 }: {
   settings: TreeSettings | undefined;
   /** Registro em foco: o do settings, ou o que a tabela clicou. */
@@ -366,6 +407,10 @@ export function TreeWidget({
   widgetId?: string;
   /** v1.11: fingerprint de escopo da page (período/filtros/config). */
   scopeKey?: string;
+  /** v1.14: catálogo do editor de fórmula (fonte do realizado). */
+  catalog?: RealizedCatalog | null;
+  /** v1.14: admin — edita metas no próprio nó. */
+  isAdmin?: boolean;
 }) {
   // v1.9: a fonte LIVRE é um mapa por chave, sem registro nenhum.
   const isMap = settings?.source === "livre";
@@ -502,7 +547,9 @@ export function TreeWidget({
     [data, isMap]
   );
   const requestsKey = JSON.stringify(requests);
-  const valuesKey = `${requestsKey}|${boardScopeKey ?? ""}`;
+  // v1.14: `valuesTick` re-busca os números depois de editar uma meta no nó.
+  const [valuesTick, setValuesTick] = useState(0);
+  const valuesKey = `${requestsKey}|${boardScopeKey ?? ""}|${valuesTick}`;
   const [values, setValues] = useState<{ key: string; data: TreeIndicatorValues } | null>(
     null
   );
@@ -551,15 +598,49 @@ export function TreeWidget({
     [goalMetrics]
   );
 
+  // v1.14: apresentação, estilo e exibição por cartão.
+  const presenting = usePresenting();
+  const dstyle = useDashboardStyle();
+  const styled = !isClassicStyle(dstyle);
+  const presentation = useMemo(
+    () => parsePresentationSettings(settings?.presentation),
+    [settings?.presentation]
+  );
+  const geoByRef = useMemo(
+    () => new Map((data?.geometry ?? []).map((g) => [g.nodeRef, g])),
+    [data?.geometry]
+  );
+  const fieldLabelOf = useMemo(() => {
+    const available = catalog?.available ?? [];
+    return (ref: string) => (available.length > 0 ? fieldLabel(ref, available) : ref);
+  }, [catalog?.available]);
+
+  // v1.14: valores correntes separados do objeto de contexto (que carrega
+  // callbacks) — o editor do nó os lê durante o render.
+  const currentValues = values?.key === valuesKey ? values.data : null;
+  const opMonths = useMemo(() => currentValues?.months ?? [], [currentValues]);
+  const opSeries = useMemo(
+    () =>
+      new Map(
+        (currentValues?.series ?? []).map((x) => [
+          // v1.14: série de nó de indicador chaveada pelo NÓ.
+          x.nodeId ? nodeSeriesKey(x.nodeId) : seriesKey(x.key, x.responsible),
+          x,
+        ])
+      ),
+    [currentValues]
+  );
   const opsValue: TreeOpsValue | null = useMemo(() => {
     if (!data) return null;
-    const current = values?.key === valuesKey ? values.data : null;
     return {
-      months: current?.months ?? [],
-      series: new Map(
-        (current?.series ?? []).map((x) => [seriesKey(x.key, x.responsible), x])
-      ),
-      loading: requests.length > 0 && current == null,
+      months: opMonths,
+      series: opSeries,
+      presenting,
+      presentation,
+      styled,
+      fieldLabelOf,
+      displayOf: (node) => geoByRef.get(node.id)?.display ?? null,
+      loading: requests.length > 0 && currentValues == null,
       ritualOccurrences: data.ritualOccurrences ?? {},
       scheduling,
       onScheduleRitual: (node) => {
@@ -587,7 +668,12 @@ export function TreeWidget({
     };
     // `scope`/`refresh` mudam junto do `data` (mesmo escopo).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data, values, valuesKey, scheduling, requests.length]);
+  }, [data, opMonths, opSeries, currentValues, scheduling, requests.length, presenting, presentation, styled, fieldLabelOf, geoByRef]);
+
+  // v1.14: cartão em destaque e editor da anotação.
+  const [focusNode, setFocusNode] = useState<TreeNode | null>(null);
+  const [noteEdit, setNoteEdit] = useState<TreeNode | null>(null);
+  const [noteSaving, setNoteSaving] = useState(false);
 
   if (!scope) {
     return (
@@ -869,7 +955,15 @@ export function TreeWidget({
 
   const patchGeometry = (
     nodeId: string,
-    patch: { offsetX?: number; offsetY?: number; direction?: TreeDirection }
+    patch: {
+      offsetX?: number;
+      offsetY?: number;
+      direction?: TreeDirection;
+      // v1.14 (0150): tamanho e exibição do cartão.
+      width?: number | null;
+      height?: number | null;
+      display?: TreeNodeDisplay | null;
+    }
   ) => {
     const before = data;
     const exists = data.geometry.some((g) => g.nodeRef === nodeId);
@@ -958,42 +1052,167 @@ export function TreeWidget({
     },
   };
 
-  /** v1.11: salva o nó operacional (criar ou editar). */
-  const saveOperational = (input: { label: string; payload: unknown }) => {
+  /** v1.11: salva o nó operacional (criar, editar ou converter anotação). */
+  const saveOperational = (input: OperationalSaveInput) => {
     const d = opDraft;
     if (!d) return;
     setOpSaving(true);
-    const run = d.node?.refId
-      ? updateTreeNode(
-          d.node.refId,
+    const run: Promise<{ ok?: boolean; message?: string; nodeId?: string }> = d.fromNoteId
+      ? convertNoteToOperational(
+          scope,
+          d.fromNoteId,
           { kind: d.kind, label: input.label, payload: input.payload },
           { revalidate: false }
-        )
-      : createTreeNode(
-          scope,
-          { kind: d.kind, parentRef: d.parentRef, label: input.label, payload: input.payload },
-          { revalidate: false }
-        );
-    void run.then((res) => {
+        ).then((r) => ({ ...r, nodeId: `note:${d.fromNoteId}` }))
+      : d.node?.refId
+        ? updateTreeNode(
+            d.node.refId,
+            { kind: d.kind, label: input.label, payload: input.payload },
+            { revalidate: false }
+          ).then((r) => ({ ...r, nodeId: d.node!.id }))
+        : createTreeNode(
+            scope,
+            { kind: d.kind, parentRef: d.parentRef, label: input.label, payload: input.payload },
+            { revalidate: false }
+          );
+    void run.then(async (res) => {
+      if (res.ok && res.nodeId && input.display !== undefined) {
+        // v1.14: a exibição do cartão vai pela geometria (0150).
+        const prev = geoByRef.get(res.nodeId)?.display ?? null;
+        if (JSON.stringify(prev) !== JSON.stringify(input.display)) {
+          await setTreeNodeGeometry(scope, res.nodeId, { display: input.display }, { revalidate: false });
+        }
+      }
       setOpSaving(false);
       if (!res.ok) {
         notifyActionError("Não foi possível salvar o nó", res.message);
         return;
       }
       setOpDraft(null);
+      setValuesTick((n) => n + 1);
       void refresh();
     });
   };
 
+  /** v1.14: editor completo da anotação (título, descrição, data, exibição). */
+  const saveNoteDetails = (input: NoteEditInput) => {
+    const node = noteEdit;
+    if (!node?.refId) return;
+    setNoteSaving(true);
+    void updateTreeNote(
+      node.refId,
+      {
+        label: input.label,
+        body: input.body,
+        dueDate: input.dueDate,
+        status: input.status,
+        goal: input.goal,
+      },
+      { revalidate: false }
+    ).then(async (res) => {
+      if (res.ok) {
+        const prev = geoByRef.get(node.id)?.display ?? null;
+        if (JSON.stringify(prev) !== JSON.stringify(input.display)) {
+          await setTreeNodeGeometry(scope, node.id, { display: input.display }, { revalidate: false });
+        }
+      }
+      setNoteSaving(false);
+      if (!res.ok) return notifyActionError("Não foi possível salvar a anotação", res.message);
+      setNoteEdit(null);
+      void refresh();
+    });
+  };
+
+  /** v1.14: Resultado em nó operacional (otimista). */
+  const setGoal = (node: TreeNode, goal: boolean) => {
+    const before = data;
+    const apply = (list: TreeNode[]): TreeNode[] =>
+      list.map((n) =>
+        n.id === node.id ? { ...n, goal, children: apply(n.children) } : { ...n, children: apply(n.children) }
+      );
+    patchData({ ...data, nodes: apply(data.nodes) });
+    save({
+      key: `tree-goal:${node.id}`,
+      context: "Não foi possível marcar o resultado",
+      reconcile: false,
+      action: () => setTreeNodeGoal(scope, node.id, goal, { revalidate: false }),
+      revert: () => patchData(before),
+    });
+  };
+
+  /** v1.14: etiquetas já usadas no mapa (sugestões do editor). */
+  const tagSuggestions = (() => {
+    const out = new Set<string>();
+    const walk = (list: TreeNode[]) => {
+      for (const n of list) {
+        if (n.kind === "indicator") {
+          const t = parseIndicatorPayload(n.payload)?.tag;
+          if (t) out.add(t);
+        }
+        walk(n.children);
+      }
+    };
+    walk(data.nodes);
+    return [...out].sort();
+  })();
+
+  const opNodeId = opDraft?.node?.id ?? (opDraft?.fromNoteId ? `note:${opDraft.fromNoteId}` : null);
   const opSheet = (
-    <OperationalNodeSheet
-      draft={opDraft}
-      onClose={() => setOpDraft(null)}
-      onSave={saveOperational}
-      indicatorOptions={indicatorOptions}
-      responsibleOptions={data.responsibles.map((r) => ({ value: r.label, label: r.label }))}
-      saving={opSaving}
-    />
+    <>
+      <OperationalNodeSheet
+        draft={opDraft}
+        onClose={() => setOpDraft(null)}
+        onSave={saveOperational}
+        indicatorOptions={indicatorOptions}
+        responsibleOptions={data.responsibles.map((r) => ({ value: r.label, label: r.label }))}
+        saving={opSaving}
+        catalog={catalog}
+        display={opNodeId ? (geoByRef.get(opNodeId)?.display ?? null) : null}
+        tagSuggestions={tagSuggestions}
+        months={opMonths}
+        series={opNodeId ? opSeries.get(nodeSeriesKey(opNodeId)) : undefined}
+        canEditGoals={isAdmin}
+        onSaveGoal={
+          opDraft?.node && dashboardId && widgetId
+            ? async (month, value) => {
+                const res = await saveTreeIndicatorGoal(
+                  dashboardId,
+                  widgetId,
+                  opDraft.node!.id,
+                  month,
+                  value
+                );
+                if (!res.ok) {
+                  notifyActionError("Não foi possível salvar a meta", res.message);
+                  return false;
+                }
+                setValuesTick((n) => n + 1);
+                return true;
+              }
+            : undefined
+        }
+      />
+      <TreeNoteEditSheet
+        node={noteEdit}
+        display={noteEdit ? (geoByRef.get(noteEdit.id)?.display ?? null) : null}
+        onClose={() => setNoteEdit(null)}
+        onSave={saveNoteDetails}
+        saving={noteSaving}
+      />
+      <TreeNodeFocusDialog
+        node={focusNode}
+        onClose={() => setFocusNode(null)}
+        onEdit={
+          presenting
+            ? undefined
+            : (n) => {
+                setFocusNode(null);
+                if (n.kind === "note" && n.refId) setNoteEdit(n);
+                else if (isOperationalNode(n)) actx.onEditOperational?.(n);
+              }
+        }
+      />
+    </>
   );
   const rootMissingNote = data.rootMissing ? (
     <p className="text-muted-foreground text-xs">
@@ -1115,7 +1334,10 @@ export function TreeWidget({
     />
   );
 
-  const header = (
+  // v1.14: ao apresentar, o cabeçalho de trabalho ("Mapa · chave") some
+  // (a menos que o widget mostre avisos).
+  const chromeAll = treeChrome(presentation, null, presenting);
+  const header = !chromeAll.warnings ? null : (
     <div className="flex flex-wrap items-center gap-2">
       <span className="truncate text-sm font-medium">
         {isMap ? `Mapa · ${scope.kind === "livre" ? scope.mapKey : ""}` : data.recordTitle}
@@ -1246,11 +1468,28 @@ export function TreeWidget({
               {loadMoreButton}
             </>
           }
-          sizeOf={(n) => operationalSize(n) ?? { w: ROOT_NODE_WIDTH, h: ROOT_NODE_HEIGHT }}
+          sizeOf={(n) =>
+            operationalSize(n, opsValue?.months.length || 3) ?? {
+              w: ROOT_NODE_WIDTH,
+              h: ROOT_NODE_HEIGHT,
+            }
+          }
           renderBody={(n) => (isOperationalNode(n) ? <OperationalBody node={n} /> : null)}
           onCreateOperational={({ kind, parentRef, title }) =>
             setOpDraft({ kind, node: null, parentRef, title })
           }
+          presentation={presentation}
+          onResize={(id, size) =>
+            patchGeometry(id, { width: size?.w ?? null, height: size?.h ?? null })
+          }
+          onOpenFocus={setFocusNode}
+          onEditNoteDetails={setNoteEdit}
+          onConvertOperational={(node, kind) =>
+            node.refId
+              ? setOpDraft({ kind, node: null, parentRef: null, title: node.label, fromNoteId: node.refId })
+              : undefined
+          }
+          onSetGoal={setGoal}
         />
         {taskComposer}
         {opSheet}
@@ -1284,6 +1523,7 @@ export function TreeWidget({
                 selected: bulk.selected,
                 onToggle: toggleNode,
                 onAddBranch: addBranch,
+                onOpenFocus: setFocusNode,
               }}
             />
           ))}

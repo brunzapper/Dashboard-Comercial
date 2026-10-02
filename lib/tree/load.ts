@@ -1,4 +1,6 @@
-// Versão: 1.7 | Data: 01/10/2026
+// Versão: 1.8 | Data: 02/10/2026
+// v1.8 (02/10/2026): leitura de `tree_nodes` com as colunas da 0150 (tamanho,
+//   exibição e data própria) e FALLBACK para as anteriores (selectTreeNodes).
 // v1.7 (01/10/2026): o mapa devolve `presetRefs` (resolve o `rootRef` do
 //   widget) e, por RITUAL (0149), as ocorrências que já viraram tarefa
 //   (`tasks.ritual_node_id`) — é com elas que o nó sabe qual é a "próxima".
@@ -64,7 +66,12 @@ import type { RecordRow } from "@/lib/records/types";
 
 import { TREE_WINDOW_STEP } from "./model";
 import type { TreeFact, TreeNodeGeometry, TreeParentOverride } from "./model";
-import { parseTreeNodeRows, TREE_NODE_COLUMNS, type TreeNodeRow } from "./rows";
+import {
+  parseTreeNodeRows,
+  TREE_NODE_COLUMNS,
+  TREE_NODE_COLUMNS_LEGACY,
+  type TreeNodeRow,
+} from "./rows";
 
 export { TREE_WINDOW_STEP };
 
@@ -311,11 +318,10 @@ export async function loadRecordTreeFacts(
         .order("changed_at", { ascending: asc })
         .limit(cap),
       // Nós livres e exceções de parentesco: independentes dos fatos acima.
-      db
-        .from("tree_nodes")
-        .select(TREE_NODE_COLUMNS)
-        .eq("scope_kind", "record")
-        .eq("scope_id", recordId),
+      // v1.8 (02/10/2026): colunas da 0150 com fallback (migração pendente).
+      selectTreeNodes((cols) =>
+        db.from("tree_nodes").select(cols).eq("scope_kind", "record").eq("scope_id", recordId)
+      ),
     ]);
 
   /**
@@ -442,16 +448,18 @@ export async function loadMapTreeFacts(
   db: SupabaseClient,
   input: { mapKey: string; orgId: string | null }
 ): Promise<TreeMapFacts> {
-  let q = db
-    .from("tree_nodes")
-    .select(TREE_NODE_COLUMNS)
-    .eq("scope_kind", "livre")
-    .eq("scope_id", input.mapKey)
-    .limit(FACT_FETCH_CAP);
   // Escopo EXPLÍCITO por org: a chave do mapa é do usuário, e duas orgs podem
   // escolher a mesma. A RLS já recorta; o filtro evita depender só dela.
-  if (input.orgId) q = q.eq("organization_id", input.orgId);
-  const { data: rows } = await q;
+  const { data: rows } = await selectTreeNodes((cols) => {
+    let q = db
+      .from("tree_nodes")
+      .select(cols)
+      .eq("scope_kind", "livre")
+      .eq("scope_id", input.mapKey)
+      .limit(FACT_FETCH_CAP);
+    if (input.orgId) q = q.eq("organization_id", input.orgId);
+    return q;
+  });
   const parsed = parseTreeNodeRows((rows ?? []) as unknown as TreeNodeRow[], {
     allowMapTasks: true,
   });
@@ -518,4 +526,17 @@ export async function loadMapTreeFacts(
     presetRefs: parsed.presetRefs,
     ritualOccurrences,
   };
+}
+
+/**
+ * v1.8 (02/10/2026): lê `tree_nodes` com as colunas da 0150 e, se o banco
+ * ainda não as tem (migração pendente), refaz com as anteriores — a árvore
+ * nunca some por causa de uma coluna nova.
+ */
+async function selectTreeNodes(
+  build: (cols: string) => PromiseLike<{ data: unknown; error: unknown }>
+): Promise<{ data: unknown; error: unknown }> {
+  const first = await build(TREE_NODE_COLUMNS);
+  if (!first.error) return first;
+  return build(TREE_NODE_COLUMNS_LEGACY);
 }

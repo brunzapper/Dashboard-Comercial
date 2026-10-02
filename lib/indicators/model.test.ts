@@ -1,4 +1,5 @@
-// Versão: 1.1 | Data: 01/10/2026
+// Versão: 1.2 | Data: 02/10/2026
+// v1.2 (02/10/2026): faixa de atenção configurável (attentionPct).
 // v1.1 (01/10/2026): cleanMonthKeys.
 import { describe, expect, it } from "vitest";
 
@@ -135,6 +136,11 @@ describe("indicatorStatus", () => {
     expect(indicatorStatus(20, 23, pct, { elapsed: 0.5 })).toBe("fora");
     const cac = { ...def, direction: "menor_melhor", unit: "moeda" } as const;
     expect(indicatorStatus(3000, 2837, cac, { elapsed: 0.5 })).toBe("atencao");
+  });
+  it("v1.2: faixa de atenção configurável, nunca abaixo da tolerância", () => {
+    expect(indicatorStatus(85, 100, { ...def, attentionPct: 20 }, { elapsed: 1 })).toBe("atencao");
+    expect(indicatorStatus(85, 100, { ...def, attentionPct: null }, { elapsed: 1 })).toBe("fora");
+    expect(indicatorStatus(96, 100, { ...def, attentionPct: 2 }, { elapsed: 1 })).toBe("ok");
   });
 });
 

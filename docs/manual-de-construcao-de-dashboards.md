@@ -1,4 +1,11 @@
-<!-- Versão: 1.44 | Data: 02/10/2026 -->
+<!-- Versão: 1.45 | Data: 02/10/2026 -->
+<!-- v1.45 (02/10/2026): §3.6 — Exportar PDF no menu ⋮; §5.16 reescrita —
+     metas na Tabela Livre (a Tabela de metas foi absorvida), com o passo a
+     passo do painel do preset; §5.17 — cartão de indicador configurável (de
+     onde vem cada número, linhas, etiqueta livre, realizado próprio com
+     recorte e quebra), Multi-fatores, ritual multi-dia, tamanho/destaque/prazo
+     e exibição ao apresentar, receita do cartão "MRR novo outbound"; §5.15 —
+     configuração da Base do Dashboard; §5.18 — barra auto-oculta. -->
 <!-- v1.44 (02/10/2026): §5.18 — esqueleto de slide, aviso de transbordo e
      Exportar PDF; §5.19 — anotações, rótulo direto, área e número em escala. -->
 <!-- v1.43 (02/10/2026): §5.19 — Estilo do dashboard (⋮ → Estilo e
@@ -877,6 +884,10 @@ colunas do grid. Colar preserva o desenho, transladado para a célula clicada.
   (§3.4).
 - **Compartilhamento**: papéis que veem o dashboard.
 - **Snapshots**: painel de links públicos congelados (capítulo 11).
+- **Exportar PDF** (dashboards com abas-slide; também para quem só
+  visualiza): prepara todos os slides como o Apresentar e abre a impressão do
+  navegador com um slide por página 16:9 — escolha "Salvar como PDF". Pode
+  levar alguns segundos carregando antes do diálogo abrir.
 
 ### 3.7 Modo foco e atalhos
 
@@ -1668,7 +1679,8 @@ sem recarregar a página.
 - **Dados exibidos** — quais colunas aparecem. Nada escolhido = todas. É o que
   permite um widget só com as métricas de mensageria enquanto outro mostra as
   de mídia.
-- **Mês padrão** e **como contar** — a semente do formulário de "Nova linha"
+- **Mês da linha nova** (seletor de mês; vazio = o mês corrente) e **como a
+  linha nova conta no período** — a semente do formulário de "Nova linha"
   deste widget, para não reescolher a cada lançamento.
 
 **Quem edita:** quem já pode editar valores de registros. Para os demais a
@@ -1679,45 +1691,119 @@ widget é para lançar e corrigir números, que é o gesto do dia a dia.
 
 ---
 
-### 5.16 Tabela de metas (`metas`)
+### 5.16 Metas na Tabela Livre
 
-Grade **indicador × mês** com a meta, o realizado e o atingimento (verde = no
-plano, âmbar = atenção, vermelho = fora; o mês corrente compara com a meta
-proporcional aos dias úteis decorridos). As colunas são os meses do período do
-painel — ou meses fixos.
+A antiga **Tabela de metas** foi absorvida pela **Tabela Livre** (§5.13): ela
+não aparece mais na lista de tipos, e as tabelas existentes viram Tabelas
+Livres sozinhas, com o MESMO visual. Agora uma tabela pode misturar metas,
+colunas digitadas e fórmulas entre células.
 
-- **Formato**: "Uma linha por indicador" (escolha os indicadores, a ordem, o
-  rótulo e quais ficam em negrito) ou "Um indicador repartido por responsável"
-  (um nome por linha, com linha de total opcional).
-- O que cada linha significa vem do catálogo de **Indicadores** (Configurações →
-  Metas): unidade, como os meses viram total, direção, dono e a fórmula do
-  realizado. Indicador sem fórmula mostra só a meta.
-- **Admin edita a meta na célula**: clique no número; apagar exclui a meta.
-- **Rodapé**: texto livre sob a tabela (regra de cálculo, donos).
+**Montar a tabela (Editar layout ligado):**
 
-### 5.17 Tree operacional: indicador, plano de ação e ritual
+1. Insira uma **Tabela Livre** e clique no ⚙ do cabeçalho de cada coluna:
+   - **Rótulo da linha** — a primeira coluna (o nome de cada linha);
+   - **Metas por mês** — vira UMA coluna por mês. Escolha os meses no seletor
+     (fixos — ex.: out a dez/2026 — ou "Meses do período do painel") e o que a
+     célula mostra: *meta + realizado · atingimento* (padrão), só a meta, só o
+     realizado ou só o atingimento;
+   - **Total dos meses** — total pela regra do indicador (soma, último mês ou
+     média);
+   - colunas **Livres** continuam digitáveis ao lado.
+2. Em cada linha, o ⚙ da régua de números abre a configuração da linha:
+   rótulo, **etiqueta** (ex.: "N1", "Estratégico"), negrito, unidade no rótulo
+   e **Esta linha**: *Ligada a um indicador* (escolha o indicador e, se quiser,
+   o **responsável** — da lista dos cadastrados) ou *Total das linhas ligadas
+   acima* (soma das metas, mês a mês). **Repetir para responsáveis…** cria uma
+   linha por vendedor de uma vez.
+3. **Realizado — de onde vem** (mesma configuração da linha): a fórmula do
+   indicador (padrão, cadastrada em Configurações → Metas → Indicadores) ou
+   uma **métrica própria** (qualquer métrica calculada), com **recortes**
+   (cada um pode aparecer como etiqueta na linha ou ficar oculto) e **quebra
+   por dimensão** (sub-linhas abertas ou recolhidas em "▸ por …").
+4. **Aparência → Metas**: *Visual de tabela de slide* (o visual da antiga
+   Tabela de metas fora do Editar layout), densidade, estilo do atingimento,
+   mês sem realizado (zero ou "—"), unidade na célula ou no rótulo, etiqueta
+   discreta ou como texto, nota de rodapé, mostrar realizado/atingimento e
+   **Administrador edita a meta na célula** (clique no número; apagar exclui a
+   meta).
+
+**De onde vêm os números.** Meta: as metas mensais do indicador (globais ou
+do responsável da linha) — as mesmas de Configurações → Metas; editar na
+célula edita lá. Realizado: a fórmula do indicador ou a métrica própria da
+linha, sobre os registros, no período do mês. Atingimento: realizado ÷ meta
+(verde = no plano, âmbar = atenção, vermelho = fora; o mês corrente compara
+com a meta proporcional aos dias úteis; "Atenção até (%)" do indicador define
+a faixa âmbar).
+
+**Recriar o "Painel estratégico" do preset:** colunas *Rótulo da linha*
+("Indicador"), *Metas por mês* (out–dez/2026) e *Total dos meses*; linhas
+ligadas a "MRR novo inbound", "MRR novo outbound", "Investimento comercial",
+"Clientes novos" (etiqueta N1) e "MRR final", "CAC" (etiqueta N0, negrito);
+Aparência → Metas → visual de tabela de slide e "Administrador edita a meta".
+Os vendedores: indicador "MRR novo" com *Repetir para responsáveis* e uma
+linha de total "Compromissos individuais (R$)".
+
+Fórmulas "=…" de outras células leem a célula de meta pelo endereço (A1) — o
+valor é o número que ela mostra. Com meses do período, o número de colunas
+muda com o período e os endereços se deslocam: use meses fixos quando a
+tabela tiver fórmulas. No link público (snapshot) as metas não aparecem.
+
+### 5.17 Tree operacional: indicador, Multi-fatores e ritual
 
 No **mapa livre**, o "+" de qualquer branch (ou o clique direito no rascunho)
-cria também:
+cria também — e o clique direito numa **anotação** a **converte** em —:
 
-- **Indicador** — meta × realizado por mês do indicador escolhido. Com "Filhos
-  se combinam por" (×, +, −, ÷) e filhos indicadores, mostra o **projetado**
-  (ex.: vendas × ticket) contra a meta oficial do nó. Nível N0–N3 é rótulo.
-- **Plano de ação** — o quê, por quê, resultado esperado, como medir, prazo,
-  como acontecer, responsável e os indicadores que ele move (status vivo). As
-  etapas são branches filhas (anotação-etapa ou tarefa).
-- **Ritual** — rotina com cadência (dia útil, semanal, mensal, a cada N dias),
+- **Indicador** — meta × realizado por mês. O editor do cartão responde *de
+  onde vem cada número*:
+  - **Meta**: as metas mensais do indicador (globais ou do responsável),
+    editáveis no próprio cartão por administradores;
+  - **Realizado**: a fórmula do indicador ou uma **métrica própria** com
+    recortes (expostos como etiqueta no cartão ou ocultos) e quebra por
+    dimensão (aberta ou "▸ por …");
+  - **Projetado**: "Filhos se combinam por" (×, +, −, ÷) sobre as metas ou os
+    realizados dos cartões-filho indicadores;
+  - **Linhas do cartão**: rótulo, ordem e mostrar/ocultar de Composição, Meta,
+    Realizado, Projetado e Atingimento ("Real" virou "Realizado" — troque o
+    texto se quiser);
+  - **Etiqueta** livre (ex.: "N1", "Estratégico" — sugestões das já usadas no
+    mapa), dica e responsável.
+- **Multi-fatores** (antigo "Plano de ação") — uma lista de fatores, cada um
+  com título opcional e descrição; adicione, remova e reordene. "Adicionar
+  molde 5W2H" só insere fatores editáveis (O quê, Por quê…) — nada é imposto.
+  Responsável e indicadores movidos são opcionais; as etapas seguem como
+  branches filhas.
+- **Ritual** — cadência (dia útil, semanal em **um ou mais dias**, mensal no
+  dia 1–31 — se o mês não tiver o dia, o último —, a cada N dias),
   responsável e "leitura e decisão". "Agendar próxima" cria a tarefa da
-  próxima ocorrência; "Gerar sozinho" deixa o sistema criar.
+  próxima ocorrência; "Gerar sozinho" deixa o sistema criar, mantendo N
+  abertas.
 
-**Mostrar só o galho** (configuração do widget Tree, mapa livre): o id de um nó
-(menu do nó → "Copiar id do nó", ou `preset:<chave>`) faz o widget começar
-nele. Vários widgets podem mostrar galhos diferentes do MESMO mapa.
+**Receita — o cartão "MRR novo outbound" do preset:** "+" no cartão "MRR novo"
+→ Indicador → indicador "MRR novo outbound", etiqueta "N1", dica "Vendas ×
+ticket", "Filhos se combinam por" ×; depois "+" nele para os filhos "Vendas
+outbound" (N2) e "Ticket outbound" (N2). As metas aparecem pelo indicador; o
+realizado, pela fórmula dele.
 
-**Meses fixos dos indicadores** (mesma configuração): `AAAA-MM` separados por
-vírgula. Os nós de indicador passam a mostrar sempre esses meses, sem depender
-da barra de período — é o que deixa um slide de apresentação "já no período
-certo". Vazio = os meses do período do painel.
+**Cartões.** Arraste a alça do canto inferior direito para **redimensionar**
+(o texto ganha espaço; duplo-clique na alça volta ao tamanho automático).
+**Duplo-clique** no cartão o abre **em destaque**, grande, para ler textos
+longos — também durante a apresentação. O 1º clique no título seleciona; o 2º
+edita. A **anotação** tem título, descrição e **data/prazo próprios** (sem
+data, o cartão não mostra data nenhuma). Qualquer cartão pode ser marcado como
+**Resultado** e ter uma **cor** própria.
+
+**Ao apresentar**, por padrão, os cartões mostram só o conteúdo: somem o tipo
+("Indicador", "Anotação"…), o "+", o "Agendar próxima", o concluir e os
+avisos. **Aparência → Tree** liga cada um de volta para o widget inteiro, e o
+editor de cada cartão pode forçar o rótulo de tipo (mostrar/ocultar). A mesma
+seção define o fundo do canvas da Root.
+
+**Mapa, galho e meses** (configuração do widget Tree, mapa livre): o **mapa**
+sai de uma lista (ou "+ Novo mapa…"); **Mostrar só o galho** escolhe o nó num
+seletor — vários widgets podem mostrar galhos diferentes do MESMO mapa; os
+**meses dos indicadores** saem do seletor de meses (fixos — o slide já abre
+no período certo — ou os do período do painel). O próprio editor explica de
+onde vêm meta, realizado e projetado, com o atalho para Configurações → Metas.
 
 ### 5.18 Modo Apresentar
 
@@ -1733,7 +1819,7 @@ plateia. **Começar agora** pula a espera; **Cancelar** (ou Esc) desiste.
 
 Na apresentação cada slide se ajusta à altura da tela (o texto cresce junto),
 e a barra de período e o **⋮** dos widgets somem — prepare o período de cada
-quadro antes (meses fixos na Tabela de metas e nos indicadores da Tree). O ⋮
+quadro antes (meses fixos nas colunas de metas e nos indicadores da Tree). O ⋮
 dos widgets também some no **Modo tela cheia**. ←/→ (ou PageUp/PageDown, espaço) navegam,
 Home/End vão às pontas e Esc sai. Os widgets continuam vivos — filtros,
 árvores e tabelas respondem durante a apresentação — e o ponteiro laser está na
@@ -1753,6 +1839,11 @@ ao apresentar**, sem deixar de existir no dashboard. Ao apresentar também somem
 a barra de busca e o "+" das tabelas, os filtros rápidos, a barra de
 ferramentas da Tree, o aviso "Responsável não encontrado" e o sino de tarefas.
 
+**Barra da apresentação.** A barra flutuante (slides, laser, sair) some 2 s
+depois que você para de mexer nela e só volta quando o ponteiro fica 1 s
+perto da borda de baixo — assim ela não cobre o slide. As setas do teclado
+navegam sem fazê-la aparecer.
+
 **Esqueleto de slide (02/10/2026).** Em **⋮ → Estilo e apresentação →
 Esqueleto de slide** defina o **rótulo da seção**, o **rodapé** (a fonte dos
 dados), se aparece a **data no topo** e o **número do slide**; para cada aba,
@@ -1766,9 +1857,9 @@ título aparecem acima dos blocos da aba.
 faixa âmbar avisa quando a aba não cabe num slide (o fim seria cortado):
 divida o conteúdo em outra aba ou reduza a altura dos blocos.
 
-**Exportar PDF.** Na barra da apresentação, o botão de PDF abre a impressão do
-navegador com um slide por página 16:9 — escolha "Salvar como PDF". Bom também
-para conferir como o slide fica fora do monitor.
+**Exportar PDF.** Fica no **⋮ do dashboard**, abaixo de Snapshots (§3.6): abre
+a impressão do navegador com um slide por página 16:9 — escolha "Salvar como
+PDF". Bom também para conferir como o slide fica fora do monitor.
 
 ### 5.19 Estilo do dashboard
 
@@ -1786,7 +1877,7 @@ dashboard inteiro — tipografia, cores, blocos, tabelas e gráficos:
 Nos estilos novos: o título do bloco vira um **título-conclusão** (sem faixa,
 na fonte de exibição; o ⋮ aparece ao passar o mouse) com **kicker** opcional
 (Aparência → Título e borda → Kicker); tabelas ganham cabeçalho em rótulo
-pequeno com filete; a **Tabela de metas** usa linhas de altura fixa, unidade
+pequeno com filete; as **células de meta** da Tabela Livre (§5.16) usam linhas de altura fixa, unidade
 só no rótulo ("(R$)"), nível "N0/N1" como etiqueta, linha em negrito como
 conclusão (filete em cima), atingimento como barrinha e mês sem realizado como
 "—" neutro (cada escolha pode ser fixada no widget); gráficos usam grade suave,
@@ -3256,7 +3347,9 @@ referência.
 - **Tipos de widget (21)**: Card, Métrica calculada, Calculadora, Nota
   (post-it), Forma, Linha divisória, Imagem, Tabela, Tabela Livre, Barra
   vertical, Barra horizontal, Linha, Pizza, Funil, Filtro de período, Filtro
-  por campo, Kanban, Agenda, Tree, Base do Dashboard, Tabela de metas.
+  por campo, Kanban, Agenda, Tree, Base do Dashboard, Tabela de metas (legado:
+  fora da lista de criação, convertida em Tabela Livre com colunas de meta —
+  §5.16).
 - **Agregações de métrica (5)**: Soma, Contagem, Média, Mínimo, Máximo.
 - **Agregações de "Agrupar período" (6)**: Individual (por registro), Soma,
   Contagem, Média, Mediana, Moda.

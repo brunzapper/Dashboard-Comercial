@@ -1,3 +1,7 @@
+// Versão: 1.2 | Data: 02/10/2026
+// v1.2 (02/10/2026): `resolveGoalTableDisplay` aceita só as chaves de
+//   exibição — é o mesmo resolvedor das células de meta da Tabela Livre
+//   (`quickTable.display`), que absorveu a Tabela de metas.
 // Versão: 1.1 | Data: 02/10/2026
 // v1.1 (02/10/2026): chaves de EXIBIÇÃO (density, attainmentStyle,
 //   emptyRealized, unitPlacement, levelTags) saneadas aqui e resolvidas contra o
@@ -180,7 +184,12 @@ export interface GoalTableDisplay {
  * decide. `styled` = estilo não-Clássico (lib/dashboards/style.ts).
  */
 export function resolveGoalTableDisplay(
-  s: GoalTableSettings | undefined,
+  s:
+    | Pick<
+        GoalTableSettings,
+        "density" | "attainmentStyle" | "emptyRealized" | "unitPlacement" | "levelTags"
+      >
+    | undefined,
   style: { styled: boolean; header: "faixa" | "linha"; zebra: boolean }
 ): GoalTableDisplay {
   const st = style.styled;

@@ -1,4 +1,7 @@
-// Versão: 1.0 | Data: 01/10/2026
+// Versão: 1.1 | Data: 02/10/2026
+// v1.1 (02/10/2026): semanal em VÁRIOS dias (`weekdays`). Com um dia só, a
+//   sequência é byte-idêntica à de antes (o `weekday` legado segue lido) — a
+//   numeração das ocorrências já agendadas não muda.
 // Cadência de RITUAIS (0149) — módulo PURO e client-safe.
 //
 // Um ritual é uma rotina de acompanhamento SEM registro ("revisar conversão
@@ -37,6 +40,8 @@ export interface RitualSchedule {
   cadence: RitualCadence;
   /** Semanal: 0 = domingo … 6 = sábado (padrão: segunda). */
   weekday?: number;
+  /** v1.1: semanal em vários dias (ordenados, sem repetição). Vence `weekday`. */
+  weekdays?: number[];
   /** Mensal: dia do mês (1–31, cortado no fim do mês) ou o último dia útil. */
   monthDay?: number | "ultimo_util";
   /** "A cada N dias": N (1–365). */
@@ -111,11 +116,23 @@ export function* ritualOccurrences(
       return;
     }
     case "semanal": {
-      const wd = Number.isInteger(s.weekday) ? ((s.weekday! % 7) + 7) % 7 : 1;
-      let d = addDays(s.anchor, (wd - weekdayOf(s.anchor) + 7) % 7);
-      for (; n < MAX_STEPS; d = addDays(d, 7)) {
+      const days = weekdaysOf(s);
+      if (days.length === 1) {
+        const wd = days[0];
+        let d = addDays(s.anchor, (wd - weekdayOf(s.anchor) + 7) % 7);
+        for (; n < MAX_STEPS; d = addDays(d, 7)) {
+          if (past(d)) return;
+          yield { n: n++, date: d };
+        }
+        return;
+      }
+      // v1.1: vários dias — anda dia a dia a partir da âncora.
+      const set = new Set(days);
+      let d = s.anchor;
+      for (let i = 0; i < MAX_STEPS * 7 && n < MAX_STEPS; i += 1) {
         if (past(d)) return;
-        yield { n: n++, date: d };
+        if (set.has(weekdayOf(d))) yield { n: n++, date: d };
+        d = addDays(d, 1);
       }
       return;
     }
@@ -195,8 +212,10 @@ export function describeSchedule(s: RitualSchedule): string {
     case "diario_util":
       return "Todo dia útil";
     case "semanal": {
-      const wd = Number.isInteger(s.weekday) ? ((s.weekday! % 7) + 7) % 7 : 1;
-      return `Toda ${WEEKDAY_LABELS[wd]}`;
+      const days = weekdaysOf(s);
+      if (days.length === 1) return `Toda ${WEEKDAY_LABELS[days[0]]}`;
+      const names = days.map((d) => WEEKDAY_LABELS[d]);
+      return `Toda ${names.slice(0, -1).join(", ")} e ${names[names.length - 1]}`;
     }
     case "mensal":
       return s.monthDay === "ultimo_util"
@@ -219,9 +238,17 @@ export function parseRitualSchedule(raw: unknown): RitualSchedule | null {
     out.until = r.until;
   }
   if (out.cadence === "semanal") {
-    const wd = Number(r.weekday ?? 1);
-    if (!Number.isInteger(wd) || wd < 0 || wd > 6) return null;
-    out.weekday = wd;
+    if (Array.isArray(r.weekdays) && r.weekdays.length > 0) {
+      const list = r.weekdays.map(Number);
+      if (!list.every((d) => Number.isInteger(d) && d >= 0 && d <= 6)) return null;
+      const sorted = [...new Set(list)].sort((a, b) => a - b);
+      if (sorted.length === 1) out.weekday = sorted[0];
+      else out.weekdays = sorted;
+    } else {
+      const wd = Number(r.weekday ?? 1);
+      if (!Number.isInteger(wd) || wd < 0 || wd > 6) return null;
+      out.weekday = wd;
+    }
   }
   if (out.cadence === "mensal") {
     if (r.monthDay === "ultimo_util") out.monthDay = "ultimo_util";
@@ -237,4 +264,10 @@ export function parseRitualSchedule(raw: unknown): RitualSchedule | null {
     out.everyDays = e;
   }
   return out;
+}
+
+/** v1.1: os dias da semana de um semanal (legado `weekday` incluso). */
+export function weekdaysOf(s: Pick<RitualSchedule, "weekday" | "weekdays">): number[] {
+  if (s.weekdays && s.weekdays.length > 0) return s.weekdays;
+  return [Number.isInteger(s.weekday) ? ((s.weekday! % 7) + 7) % 7 : 1];
 }

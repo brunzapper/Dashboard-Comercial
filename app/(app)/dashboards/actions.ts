@@ -1,4 +1,8 @@
-// Versão: 1.17 | Data: 02/10/2026
+// Versão: 1.18 | Data: 02/10/2026
+// v1.18 (02/10/2026): Tabela de metas legada lida já convertida em Tabela
+//   Livre (normalizeLegacyWidget) em `saveQuickTableCells`; `saveWidgetSettings`
+//   valida a fonte do realizado das linhas de meta e converte o tipo da linha
+//   legada no primeiro save da estrutura.
 // v1.17 (02/10/2026): `settings.slide` (esqueleto de slide) é seção GERIDA no
 //   update in-place do preset.
 // Versão: 1.16 | Data: 02/10/2026
@@ -78,6 +82,8 @@
 // dashboards/widgets exigem create_dashboards p/ criar; owner/admin p/ editar).
 "use server";
 
+import { normalizeLegacyWidget } from "@/lib/widgets/quick-table/goal-convert";
+import { validateRealizedSource } from "@/lib/indicators/validate";
 import { revalidatePath } from "next/cache";
 
 import { getSessionInfo } from "@/lib/auth/session";
@@ -1321,13 +1327,15 @@ export async function saveQuickTableCells(
   }
   const supabase = await createClient();
 
-  const { data: w } = await supabase
+  const { data: wRaw } = await supabase
     .from("widgets")
-    .select("settings")
+    .select("visual_type, settings")
     .eq("id", widgetId)
     .eq("dashboard_id", dashboardId)
     .maybeSingle();
-  if (!w) return { ok: false, message: "Widget não encontrado." };
+  if (!wRaw) return { ok: false, message: "Widget não encontrado." };
+  // v1.18: Tabela de metas legada = Tabela Livre (mesma conversão da page).
+  const w = normalizeLegacyWidget(wRaw as Pick<Widget, "visual_type" | "settings">);
   const qt = ((w.settings ?? {}) as WidgetSettings).quickTable;
   if (!qt) return { ok: false, message: "Este widget não é uma Tabela Livre." };
 
@@ -1883,9 +1891,33 @@ export async function saveWidgetSettings(
     next = { ...settings, kanban: norm.kanban };
     maintenance = norm.maintenance;
   }
+  // v1.18 (02/10/2026): Tabela Livre com metas — (a) a fonte do realizado
+  // própria de cada linha passa pela MESMA régua do catálogo dos nós da Tree
+  // (lib/indicators/validate.ts); (b) a Tabela de metas legada ('metas', lida
+  // já convertida) vira 'tabela_editavel' de verdade no primeiro save da
+  // estrutura — sem isso a linha ficaria 'metas' com `quickTable` e sem
+  // `goalTable`, e a conversão na leitura apagaria a tabela.
+  let flipLegacy = false;
+  if (settings.quickTable) {
+    const orgId = await getActiveOrgId();
+    for (const r of settings.quickTable.rows ?? []) {
+      if (r.bind?.kind !== "indicator" || r.bind.realized == null) continue;
+      const v = await validateRealizedSource(supabase, orgId, r.bind.realized);
+      if (!v.ok) return { ok: false, message: `${r.label ?? "Linha"}: ${v.message}` };
+    }
+    const { data: vt } = await supabase
+      .from("widgets")
+      .select("visual_type")
+      .eq("id", widgetId)
+      .maybeSingle();
+    flipLegacy = vt?.visual_type === "metas";
+  }
   const { error } = await supabase
     .from("widgets")
-    .update({ settings: sanitizeImageSettings(next) })
+    .update({
+      settings: sanitizeImageSettings(next),
+      ...(flipLegacy ? { visual_type: "tabela_editavel" } : {}),
+    })
     .eq("id", widgetId)
     .eq("dashboard_id", dashboardId);
   if (error) return { ok: false, message: error.message };

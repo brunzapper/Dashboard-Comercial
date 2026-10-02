@@ -1,4 +1,7 @@
-// Versão: 1.3 | Data: 01/10/2026
+// Versão: 1.4 | Data: 02/10/2026
+// v1.4 (02/10/2026): a Tabela de metas legada é congelada JÁ convertida em
+//   Tabela Livre (normalizeLegacyWidget) — as metas seguem fora do link
+//   público (a própria tabela avisa).
 // v1.3 (01/10/2026): Tabela de metas (visual_type 'metas', 0149) fora dos
 //   widgets de engine do snapshot (o card exibe aviso no link público).
 // Versão: 1.2 | Data: 26/07/2026
@@ -48,6 +51,7 @@ import {
   collapseResponsibleOptions,
 } from "@/lib/config/responsible-canon";
 import { normalizeGridSpace } from "@/lib/widgets/grid-space";
+import { normalizeLegacyWidget } from "@/lib/widgets/quick-table/goal-convert";
 
 import { snapshotClient } from "./db-adapter";
 import { computeNextRefreshAt } from "./schedule";
@@ -173,7 +177,7 @@ async function doRefresh(
   // ANTES desta versão são convertidos na leitura pelo viewer (app/s/[token]).
   const gridNorm = normalizeGridSpace(
     (dashData.settings ?? {}) as DashboardSettings,
-    (widgetsData ?? []) as Widget[]
+    ((widgetsData ?? []) as Widget[]).map(normalizeLegacyWidget)
   );
   const widgets = gridNorm.widgets;
   const fields = (fieldsData ?? []) as FieldDefinition[];
@@ -216,10 +220,7 @@ async function doRefresh(
       w.visual_type !== "imagem" &&
       // "Base do Dashboard" (0142) é uma GRADE DE EDIÇÃO da Base manual, não
       // um recorte de registros: sem métrica, o RPC recusaria o SELECT vazio.
-      w.visual_type !== "base_manual" &&
-      // v1.3 (01/10/2026): Tabela de metas (0149) — lê metas/indicadores por
-      // action com sessão; no link público não há o que computar.
-      w.visual_type !== "metas"
+      w.visual_type !== "base_manual"
   );
   const fieldFilterWidgets = tabWidgets.filter(
     (w) => w.visual_type === "filtro_campo"

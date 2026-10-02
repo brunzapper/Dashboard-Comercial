@@ -1,3 +1,12 @@
+// Versão: 1.1 | Data: 02/10/2026
+// v1.1 (02/10/2026): METAS (a Tabela Livre absorveu a Tabela de metas).
+//  - ColumnPanel: tipos "Rótulo da linha", "Metas por mês" (meses pelo
+//    seletor — fixos ou os do período, nunca "2026-10, 2026-11" digitado — e
+//    o que a célula mostra) e "Total dos meses";
+//  - RowPanel: rótulo, etiqueta, negrito, unidade no rótulo e o VÍNCULO da
+//    linha — indicador + responsável (lista dos cadastrados, grava o NOME) +
+//    fonte do realizado (o MESMO editor da Tree e dos indicadores) — ou linha
+//    de total; atalho "Repetir para responsáveis".
 // Versão: 1.0 | Data: 15/07/2026
 // Tabela Livre — painéis flutuantes de estrutura (modo Editar layout):
 //  - useQuickTableConfig: estado otimista de settings.quickTable + gravação
@@ -7,7 +16,7 @@
 //  - RowPanel: excluir linha.
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Trash2 } from "lucide-react";
 
@@ -32,6 +41,16 @@ import { sourceChips, toFieldOptions } from "@/lib/widgets/filter-ops";
 import { useSourceLabels } from "@/components/source-labels-context";
 import { saveWidgetSettings } from "@/app/(app)/dashboards/actions";
 import { FloatingPanel } from "../appearance-editing";
+import { MonthRangePicker } from "@/components/ui/month-range-picker";
+import { useGoalMetrics } from "@/components/goal-metrics-context";
+import {
+  RealizedSourceEditor,
+  type RealizedCatalog,
+} from "@/components/indicators/realized-source-editor";
+import { parseRealizedSource } from "@/lib/indicators/realized-source";
+import { QT_GOAL_FACET_LABELS, type QTGoalRowData } from "@/lib/widgets/quick-table/goals";
+import { listActiveResponsibleNames } from "@/app/(app)/dashboards/quick-table-actions";
+import type { QuickTableGoalFacet, QuickTableRow } from "@/lib/widgets/types";
 
 const ROLE_KEYS = Object.keys(ROLE_LABELS) as RoleKey[];
 
@@ -87,13 +106,40 @@ const KIND_OPTIONS: ComboboxOption[] = [
   { value: "free", label: "Livre (digitação)" },
   { value: "dimension", label: "Dimensão (dados do sistema)" },
   { value: "metric", label: "Métrica (agregação)" },
+  // v1.1: metas.
+  { value: "rowLabel", label: "Rótulo da linha" },
+  { value: "goal", label: "Metas por mês (um mês por coluna)" },
+  { value: "goalTotal", label: "Total dos meses" },
 ];
+
+const FACET_OPTIONS: ComboboxOption[] = (
+  Object.keys(QT_GOAL_FACET_LABELS) as QuickTableGoalFacet[]
+).map((f) => ({ value: f, label: QT_GOAL_FACET_LABELS[f] }));
+
+/** Patch que limpa a config que não se aplica ao tipo novo. */
+function clearForKind(kind: QuickTableColumn["kind"]): Partial<QuickTableColumn> {
+  const none = {
+    field: undefined,
+    metric: undefined,
+    pivot: undefined,
+    transform: undefined,
+    weekMode: undefined,
+    months: undefined,
+    facet: undefined,
+    of: undefined,
+    editableRoles: undefined,
+  };
+  if (kind === "free") return { ...none, editableRoles: undefined };
+  if (kind === "dimension") return { ...none, field: undefined };
+  return none;
+}
 
 export function ColumnPanel({
   x,
   y,
   column,
   available,
+  goalColumns = [],
   onChange,
   onDelete,
   onClose,
@@ -102,6 +148,8 @@ export function ColumnPanel({
   y: number;
   column: QuickTableColumn;
   available: AvailableField[];
+  /** v1.1: colunas "Metas por mês" da tabela (o total escolhe qual soma). */
+  goalColumns?: QuickTableColumn[];
   // Patch mesclado na coluna (a troca de pivot é resolvida pelo chamador).
   onChange: (patch: Partial<QuickTableColumn>) => void;
   onDelete: () => void;
@@ -157,17 +205,15 @@ export function ColumnPanel({
             searchable={false}
             options={KIND_OPTIONS}
             value={column.kind}
-            onValueChange={(v) =>
-              onChange({
-                kind: v as QuickTableColumn["kind"],
-                // Troca de tipo limpa a config que não se aplica.
-                ...(v === "free"
-                  ? { field: undefined, metric: undefined, pivot: undefined, transform: undefined, weekMode: undefined }
-                  : v === "dimension"
-                    ? { metric: undefined }
-                    : { field: undefined, pivot: undefined, transform: undefined, weekMode: undefined }),
-              })
-            }
+            onValueChange={(v) => {
+              const kind = v as QuickTableColumn["kind"];
+              // Troca de tipo limpa a config que não se aplica (a dimensão
+              // conserva o campo — o comportamento de sempre).
+              const patch = clearForKind(kind);
+              if (kind === "dimension") delete patch.field;
+              if (kind === "free") delete patch.editableRoles;
+              onChange({ kind, ...patch });
+            }}
             aria-label="Tipo da coluna"
           />
         </div>
@@ -259,6 +305,77 @@ export function ColumnPanel({
           </div>
         ) : null}
 
+        {/* v1.1: metas. */}
+        {column.kind === "rowLabel" ? (
+          <p className="text-muted-foreground text-xs">
+            Mostra o rótulo de cada linha (configurado no ⚙ da linha). Linha
+            ligada a indicador sem rótulo usa o nome do indicador.
+          </p>
+        ) : null}
+        {column.kind === "goal" ? (
+          <>
+            <div className="flex flex-col gap-1.5">
+              <Label className="text-xs">Meses</Label>
+              <MonthRangePicker
+                value={column.months ?? []}
+                onChange={(months) => onChange({ months: months.length > 0 ? months : undefined })}
+                ariaLabel="Meses da coluna de metas"
+              />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label className="text-xs">A célula mostra</Label>
+              <Combobox
+                searchable={false}
+                options={FACET_OPTIONS}
+                value={column.facet ?? "composto"}
+                onValueChange={(f) =>
+                  onChange({ facet: f === "composto" ? undefined : (f as QuickTableGoalFacet) })
+                }
+                aria-label="O que a célula de meta mostra"
+              />
+            </div>
+            <p className="text-muted-foreground text-xs">
+              Meta: as metas mensais do indicador da linha (Configurações →
+              Metas). Realizado: a fórmula do indicador ou a métrica própria da
+              linha. Uma coluna por mês.
+            </p>
+          </>
+        ) : null}
+        {column.kind === "goalTotal" ? (
+          <>
+            {goalColumns.length > 1 ? (
+              <div className="flex flex-col gap-1.5">
+                <Label className="text-xs">Soma os meses de</Label>
+                <Combobox
+                  searchable={false}
+                  options={goalColumns.map((g, i) => ({
+                    value: g.id,
+                    label: g.header?.trim() || `Metas por mês ${i + 1}`,
+                  }))}
+                  value={column.of ?? goalColumns[0]?.id ?? ""}
+                  onValueChange={(of) => onChange({ of })}
+                  aria-label="Coluna de metas somada"
+                />
+              </div>
+            ) : null}
+            <div className="flex flex-col gap-1.5">
+              <Label className="text-xs">A célula mostra</Label>
+              <Combobox
+                searchable={false}
+                options={FACET_OPTIONS}
+                value={column.facet ?? "composto"}
+                onValueChange={(f) =>
+                  onChange({ facet: f === "composto" ? undefined : (f as QuickTableGoalFacet) })
+                }
+                aria-label="O que a célula de total mostra"
+              />
+            </div>
+            <p className="text-muted-foreground text-xs">
+              Total pela regra do indicador (soma, último mês ou média).
+            </p>
+          </>
+        ) : null}
+
         {column.kind === "free" ? (
           <div className="flex flex-col gap-1.5 border-t pt-2">
             <label className="flex items-center gap-2 text-sm">
@@ -318,19 +435,269 @@ export function ColumnPanel({
 
 // -------- painel de linha --------
 
+const NONE = "__nenhum__";
+
+/** v1.1: responsáveis cadastrados (carregados ao abrir o painel). */
+function useResponsibleNames(): string[] | null {
+  const [names, setNames] = useState<string[] | null>(null);
+  useEffect(() => {
+    let alive = true;
+    listActiveResponsibleNames()
+      .then((n) => {
+        if (alive) setNames(n);
+      })
+      .catch(() => {
+        if (alive) setNames([]);
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
+  return names;
+}
+
 export function RowPanel({
   x,
   y,
+  row,
+  goalData,
+  realizedCatalog,
+  onChange,
+  onAddRows,
   onDelete,
   onClose,
 }: {
   x: number;
   y: number;
+  /** v1.1: a linha (ausente = linha de dados BI — só excluir não se aplica). */
+  row?: QuickTableRow;
+  /** v1.1: o que o servidor resolveu para a linha (rótulo/fórmula do indicador). */
+  goalData?: QTGoalRowData;
+  realizedCatalog?: RealizedCatalog | null;
+  onChange?: (patch: Partial<QuickTableRow>) => void;
+  /** v1.1: "Repetir para responsáveis" — linhas novas logo abaixo. */
+  onAddRows?: (rows: QuickTableRow[]) => void;
   onDelete: () => void;
   onClose: () => void;
 }) {
+  const metrics = useGoalMetrics();
+  const names = useResponsibleNames();
+  const [repeatOpen, setRepeatOpen] = useState(false);
+  const [repeatPick, setRepeatPick] = useState<Set<string>>(() => new Set());
+  const indicatorOptions: ComboboxOption[] = useMemo(
+    () => metrics.map((m) => ({ value: m.key, label: m.label })),
+    [metrics]
+  );
+  const respOptions: ComboboxOption[] = useMemo(
+    () => [
+      { value: NONE, label: "Global (sem responsável)" },
+      ...(names ?? []).map((n) => ({ value: n, label: n })),
+      // Nome gravado que não está mais na lista segue visível.
+      ...(row?.bind?.kind === "indicator" &&
+      row.bind.responsible &&
+      names &&
+      !names.includes(row.bind.responsible)
+        ? [{ value: row.bind.responsible, label: `${row.bind.responsible} (não cadastrado)` }]
+        : []),
+    ],
+    [names, row]
+  );
+  if (!row || !onChange) {
+    return (
+      <FloatingPanel x={x} y={y} onClose={onClose} className="w-44">
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="text-destructive hover:text-destructive w-full justify-start"
+          onClick={onDelete}
+        >
+          <Trash2 className="size-4" /> Excluir linha
+        </Button>
+      </FloatingPanel>
+    );
+  }
+  const bindKind = row.bind?.kind ?? "none";
+  const ind = row.bind?.kind === "indicator" ? row.bind : null;
+  const indicatorLabel =
+    (ind && metrics.find((m) => m.key === ind.indicator)?.label) ?? goalData?.defaultLabel ?? null;
   return (
-    <FloatingPanel x={x} y={y} onClose={onClose} className="w-44">
+    <FloatingPanel x={x} y={y} onClose={onClose} className="max-h-[75vh] w-80 overflow-y-auto">
+      <div className="flex flex-col gap-3 p-1">
+        <div className="flex flex-col gap-1.5">
+          <Label className="text-xs">Rótulo</Label>
+          <Input
+            className="h-8 text-sm"
+            value={row.label ?? ""}
+            onChange={(e) => onChange({ label: e.target.value || undefined })}
+            placeholder={indicatorLabel ?? "Texto da coluna “Rótulo da linha”"}
+          />
+        </div>
+        <div className="grid grid-cols-2 gap-2">
+          <div className="flex flex-col gap-1.5">
+            <Label className="text-xs">Etiqueta</Label>
+            <Input
+              className="h-8 text-sm"
+              value={row.tag ?? ""}
+              maxLength={24}
+              onChange={(e) => onChange({ tag: e.target.value.trim() ? e.target.value : undefined })}
+              placeholder="ex.: N1"
+            />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <Label className="text-xs">Unidade no rótulo</Label>
+            <Combobox
+              searchable={false}
+              options={[
+                { value: "auto", label: "Automática" },
+                { value: "show", label: "Mostrar" },
+                { value: "hide", label: "Ocultar" },
+              ]}
+              value={row.unit ?? "auto"}
+              onValueChange={(v) => onChange({ unit: v === "auto" ? undefined : (v as "show" | "hide") })}
+              aria-label="Unidade no rótulo"
+            />
+          </div>
+        </div>
+        <label className="flex items-center gap-2 text-sm">
+          <Checkbox
+            checked={row.bold === true}
+            onCheckedChange={(v) => onChange({ bold: v === true ? true : undefined })}
+          />
+          Negrito (num board com estilo, vira a linha de conclusão)
+        </label>
+
+        <div className="flex flex-col gap-1.5 border-t pt-2">
+          <Label className="text-xs">Esta linha</Label>
+          <Combobox
+            searchable={false}
+            options={[
+              { value: "none", label: "Livre (sem metas)" },
+              { value: "indicator", label: "Ligada a um indicador (metas por mês)" },
+              { value: "total", label: "Total das linhas ligadas acima" },
+            ]}
+            value={bindKind}
+            onValueChange={(v) =>
+              onChange({
+                bind:
+                  v === "indicator"
+                    ? { kind: "indicator", indicator: ind?.indicator ?? metrics[0]?.key ?? "" }
+                    : v === "total"
+                      ? { kind: "total" }
+                      : undefined,
+              })
+            }
+            aria-label="Vínculo da linha"
+          />
+        </div>
+        {ind ? (
+          <>
+            <div className="flex flex-col gap-1.5">
+              <Label className="text-xs">Indicador</Label>
+              <Combobox
+                options={indicatorOptions}
+                value={ind.indicator}
+                onValueChange={(k) => onChange({ bind: { ...ind, indicator: k } })}
+                placeholder="— indicador —"
+                aria-label="Indicador da linha"
+              />
+              <a
+                href="/configuracoes/metas"
+                target="_blank"
+                rel="noreferrer"
+                className="text-primary self-start text-xs underline-offset-2 hover:underline"
+              >
+                Criar/editar indicadores e metas
+              </a>
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label className="text-xs">Responsável</Label>
+              <Combobox
+                options={respOptions}
+                value={ind.responsible ?? NONE}
+                onValueChange={(v) =>
+                  onChange({ bind: { ...ind, responsible: v === NONE ? undefined : v } })
+                }
+                placeholder={names ? "Global" : "Carregando…"}
+                aria-label="Responsável da linha"
+              />
+              <p className="text-muted-foreground text-xs">
+                Com responsável, a meta é a dele e o realizado é recortado por
+                ele. Sem responsável, as metas globais.
+              </p>
+            </div>
+            {realizedCatalog ? (
+              <div className="flex flex-col gap-1.5 border-t pt-2">
+                <Label className="text-xs">Realizado — de onde vem</Label>
+                <RealizedSourceEditor
+                  catalog={realizedCatalog}
+                  value={parseRealizedSource(ind.realized)}
+                  onChange={(rs) => onChange({ bind: { ...ind, realized: rs ?? undefined } })}
+                  indicatorLabel={indicatorLabel}
+                  indicatorFormula={goalData?.formulaText ?? null}
+                />
+              </div>
+            ) : null}
+            {onAddRows ? (
+              <div className="flex flex-col gap-1.5 border-t pt-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setRepeatOpen((o) => !o)}
+                >
+                  Repetir para responsáveis…
+                </Button>
+                {repeatOpen ? (
+                  <>
+                    <div className="flex max-h-48 flex-col gap-1 overflow-y-auto">
+                      {(names ?? []).map((n) => (
+                        <label key={n} className="flex items-center gap-2 text-sm">
+                          <Checkbox
+                            checked={repeatPick.has(n)}
+                            onCheckedChange={(v) =>
+                              setRepeatPick((prev) => {
+                                const next = new Set(prev);
+                                if (v === true) next.add(n);
+                                else next.delete(n);
+                                return next;
+                              })
+                            }
+                          />
+                          {n}
+                        </label>
+                      ))}
+                    </div>
+                    <Button
+                      type="button"
+                      size="sm"
+                      disabled={repeatPick.size === 0}
+                      onClick={() => {
+                        onAddRows(
+                          [...repeatPick].map((n) => ({
+                            id: `qr_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`,
+                            label: n,
+                            bind: { kind: "indicator", indicator: ind.indicator, responsible: n },
+                          }))
+                        );
+                        setRepeatPick(new Set());
+                        setRepeatOpen(false);
+                      }}
+                    >
+                      Adicionar {repeatPick.size} linha(s) abaixo
+                    </Button>
+                  </>
+                ) : null}
+              </div>
+            ) : null}
+          </>
+        ) : null}
+        {bindKind === "total" ? (
+          <p className="text-muted-foreground text-xs">
+            Soma as METAS das linhas ligadas acima desta, mês a mês.
+          </p>
+        ) : null}
+
       <Button
         type="button"
         variant="ghost"
@@ -340,6 +707,7 @@ export function RowPanel({
       >
         <Trash2 className="size-4" /> Excluir linha
       </Button>
+      </div>
     </FloatingPanel>
   );
 }

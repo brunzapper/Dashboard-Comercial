@@ -1,4 +1,7 @@
-// Versão: 1.11 | Data: 02/10/2026
+// Versão: 1.12 | Data: 02/10/2026
+// v1.12 (02/10/2026): `goalTable` vira ATALHO — a Tabela de metas foi
+//   absorvida pela Tabela Livre; "metas" + goalTable segue aceito e o
+//   validador converte para 'tabela_editavel' com colunas de meta.
 // v1.11 (02/10/2026): `slide.date` e as expressões {= … } em
 //   `tabs[].headline` documentadas para a IA.
 // v1.10 (02/10/2026): esqueleto de slide (slide, tabs[].headline/kicker),
@@ -365,7 +368,9 @@ export const WIDGET_SETTINGS_DOC = {
   // v1.8 (01/10/2026): Tabela de metas (visual_type "metas", 0149). A IA
   // escolhe QUAIS indicadores e como exibir; as METAS e a fórmula do realizado
   // vivem no catálogo de Indicadores (Configurações → Metas) — nunca aqui.
-  goalTable: `"goalTable": {                          // SÓ com "visual_type": "metas"; "sources"/"dimensions"/"metrics" ficam vazios
+  // v1.12: ATALHO — o validador converte "metas" + goalTable numa Tabela Livre
+  // com colunas de meta (o tipo "metas" saiu do seletor do construtor).
+  goalTable: `"goalTable": {                          // ATALHO: SÓ com "visual_type": "metas" — o import converte numa Tabela Livre com colunas de meta (o widget fica "tabela_editavel"); "sources"/"dimensions"/"metrics" ficam vazios
   "mode": "indicadores",                  // ${Object.keys(GOAL_TABLE_MODE_LABELS).join(" | ")}
   "rows": [ { "indicator": "mrr", "label": "MRR novo", "bold": false, "responsible": "<nome, opcional>" } ],  // modo indicadores; "indicator" = chave de meta/indicador existente (operandos meta:<chave>)
   "indicator": "mrr", "responsibles": ["<nome>", "<nome>"], "totalRowLabel": "Total",  // modo por_responsavel

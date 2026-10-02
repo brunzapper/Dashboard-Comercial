@@ -1,3 +1,8 @@
+// Versão: 1.1 | Data: 02/10/2026
+// v1.1 (02/10/2026): `initialMonth`/`initialSpread` — o widget "Base do
+//   Dashboard" semeia a linha nova com o mês e a distribuição configurados no
+//   construtor (`baseManual.defaultMonth`/`defaultSpread`, antes gravados e
+//   nunca lidos).
 // Versão: 1.0 | Data: 17/09/2026
 // O gestor da BASE MANUAL (0142) — UM componente para TRÊS superfícies:
 // Registros → Base manual, o ⋮ do dashboard e o widget "Base do Dashboard".
@@ -103,6 +108,10 @@ export interface ManualBaseManagerProps {
   compact?: boolean;
   /** Recorta as colunas (chaves de dado). Vazio = todas. */
   onlySeries?: string[];
+  /** v1.1: mês (AAAA-MM) semeado na linha nova; ausente = o mês corrente. */
+  initialMonth?: string;
+  /** v1.1: distribuição semeada na linha nova. */
+  initialSpread?: ManualSpread;
   /** Assistente de IA, injetado pela superfície que o hospeda (o widget não o
    *  hospeda). Fica aqui para o gestor não importar o painel e, com ele, todo
    *  o caminho de IA em telas que não o usam. */
@@ -143,6 +152,8 @@ export function ManualBaseManager({
   compact,
   onlySeries,
   assistant,
+  initialMonth,
+  initialSpread,
 }: ManualBaseManagerProps) {
   const { save, pendingKeys } = useBackgroundSave();
 
@@ -183,10 +194,12 @@ export function ManualBaseManager({
   }, [columns, declarations]);
   const grid = useMemo(() => buildManualGrid(rows), [rows]);
 
-  const [newMonth, setNewMonth] = useState(todayMonth);
+  const [newMonth, setNewMonth] = useState(() =>
+    initialMonth && /^\d{4}-(0[1-9]|1[0-2])$/.test(initialMonth) ? initialMonth : todayMonth()
+  );
   const [newOperation, setNewOperation] = useState<string>(NONE);
   const [newResponsible, setNewResponsible] = useState<string>(NONE);
-  const [newSpread, setNewSpread] = useState<ManualSpread>(DEFAULT_MANUAL_SPREAD);
+  const [newSpread, setNewSpread] = useState<ManualSpread>(initialSpread ?? DEFAULT_MANUAL_SPREAD);
   const [newSeriesLabel, setNewSeriesLabel] = useState("");
   // 0143: o NÍVEL da linha nova. `{}` é o nível ∅ (o total) — é o padrão, e é
   // o que toda linha era antes das famílias existirem.

@@ -1,4 +1,19 @@
-// Versão: 1.12 | Data: 01/10/2026
+// Versão: 1.14 | Data: 02/10/2026
+// v1.14 (02/10/2026): `listTreeMaps` e `loadTreeMapOutline` — o builder da
+//   Tree escolhe o MAPA e o GALHO numa lista (antes: digitar a chave e o
+//   `preset:<chave>` do nó, sintaxe que só o preset conhecia).
+// Versão: 1.13 | Data: 02/10/2026
+// v1.13 (02/10/2026): o que o preset Metas 4T26 deixou fixo vira dado do nó.
+//   (a) `setTreeNodeGeometry` grava também o TAMANHO do cartão (redimensionar)
+//       e a EXIBIÇÃO (`display`: rótulo de tipo ao apresentar, cor) — 0150;
+//   (b) `updateTreeNote` grava a data PRÓPRIA (`dueDate`, prazo) da anotação —
+//       antes ela só exibia a data de criação, sem edição;
+//   (c) `setTreeNodeGoal` marca o Resultado em QUALQUER nó próprio do mapa
+//       (indicador incluso), não só na anotação;
+//   (d) `convertNoteToOperational` — uma anotação vira indicador,
+//       Multi-fatores ou ritual (o `updateTreeNode` filtra pelo tipo atual);
+//   (e) nó de indicador com FONTE DO REALIZADO própria é validado no servidor
+//       pela régua do catálogo (lib/indicators/validate.ts).
 // v1.12 (01/10/2026): nós OPERACIONAIS (0149) e o galho por widget.
 //   (a) `loadMapTree(mapKey, { rootRef })` devolve só o GALHO a partir de um
 //       nó (`preset:<chave>` ou o id lógico) — cada slide mostra o galho dele
@@ -126,6 +141,8 @@ import {
 import { deriveTree } from "@/lib/tree/derive";
 import { subtreeAt } from "@/lib/tree/path";
 import { parseNodePayload, parseRitualPayload } from "@/lib/tree/payload";
+import { parseNodeDisplay, type TreeNodeDisplay } from "@/lib/tree/display";
+import { validateRealizedSource } from "@/lib/indicators/validate";
 import { nextOpenOccurrence } from "@/lib/rituals/cadence";
 import { loadNonWorkingDays } from "@/lib/config/non-working-days";
 import {
@@ -386,6 +403,69 @@ export async function loadMapTree(
   };
 }
 
+export interface TreeMapOption {
+  key: string;
+  nodes: number;
+}
+
+/** v1.14: os mapas livres que existem na org (chave + nº de nós). */
+export async function listTreeMaps(): Promise<TreeMapOption[]> {
+  const session = await getSessionInfo();
+  if (!session) return [];
+  const orgId = await getActiveOrgId();
+  const supabase = await createClient();
+  let q = supabase
+    .from("tree_nodes")
+    .select("scope_id")
+    .eq("scope_kind", "livre")
+    .limit(5000);
+  if (orgId) q = q.eq("organization_id", orgId);
+  const { data } = await q;
+  const counts = new Map<string, number>();
+  for (const r of data ?? []) {
+    const k = (r as { scope_id: string | null }).scope_id;
+    if (k) counts.set(k, (counts.get(k) ?? 0) + 1);
+  }
+  return [...counts.entries()]
+    .map(([key, nodes]) => ({ key, nodes }))
+    .sort((a, b) => a.key.localeCompare(b.key, "pt-BR"));
+}
+
+export interface TreeOutlineNode {
+  /** O que o widget grava em `rootRef` (o `preset:<chave>` quando houver). */
+  ref: string;
+  /** Id lógico (`note:<uuid>`) — casa um `rootRef` antigo gravado pelo id. */
+  id: string;
+  label: string;
+  kind: string;
+  depth: number;
+}
+
+/** v1.14: os nós do mapa em ordem de árvore, para o seletor de galho. */
+export async function loadTreeMapOutline(mapKey: string): Promise<TreeOutlineNode[]> {
+  const session = await getSessionInfo();
+  if (!session) return [];
+  const key = normalizeMapKey(mapKey);
+  if (!key || key !== mapKey) return [];
+  const orgId = await getActiveOrgId();
+  const supabase = await createClient();
+  const facts = await loadMapTreeFacts(supabase, { mapKey: key, orgId });
+  const nodes = deriveTree({ facts: facts.facts, layout: "livre", overrides: facts.overrides });
+  const presetById = new Map<string, string>();
+  for (const [pk, id] of Object.entries(facts.presetRefs)) presetById.set(id, pk);
+  const out: TreeOutlineNode[] = [];
+  const walk = (list: TreeNode[], depth: number) => {
+    for (const n of list) {
+      if (out.length >= 500) return;
+      const pk = presetById.get(n.id);
+      out.push({ ref: pk ? `preset:${pk}` : n.id, id: n.id, label: n.label, kind: n.kind, depth });
+      walk(n.children, depth + 1);
+    }
+  };
+  walk(nodes, 0);
+  return out;
+}
+
 /**
  * Anota na árvore — pelo `createComment` de 0066, que é o dono da escrita.
  *
@@ -560,6 +640,10 @@ const NOTE_LABEL_MAX = 200;
 const NOTE_BODY_MAX = 4000;
 /** Teto do offset gravado — muito além de qualquer canvas real. */
 const OFFSET_MAX = 100_000;
+// v1.13 (0150): limites do tamanho do cartão (os mesmos do CHECK).
+const SIZE_MIN_W = 120;
+const SIZE_MIN_H = 60;
+const SIZE_MAX = 1600;
 
 /**
  * O contexto comum das escritas em `tree_nodes`: sessão, org e o escopo
@@ -734,11 +818,28 @@ export async function setTreeNodeGeometry(
     offsetX?: number | null;
     offsetY?: number | null;
     direction?: TreeDirection | null;
+    /** v1.13 (0150): tamanho do cartão (null = automático). */
+    width?: number | null;
+    height?: number | null;
+    /** v1.13 (0150): exibição do cartão (null = limpar). */
+    display?: TreeNodeDisplay | null;
   },
   opts: { revalidate?: boolean } = {}
 ): Promise<TreeActionState> {
   if (!isTreeNodeRef(nodeRef)) return { ok: false, message: "Nó inválido." };
   const cols: Record<string, unknown> = {};
+  // v1.13: tamanho com teto (o CHECK da 0150 também barra).
+  for (const [key, min] of [
+    ["width", SIZE_MIN_W],
+    ["height", SIZE_MIN_H],
+  ] as const) {
+    if (!(key in patch)) continue;
+    const v = patch[key];
+    if (v == null) cols[key] = null;
+    else if (!Number.isFinite(v)) return { ok: false, message: "Tamanho inválido." };
+    else cols[key] = Math.round(Math.max(min, Math.min(SIZE_MAX, v)));
+  }
+  if ("display" in patch) cols.display = parseNodeDisplay(patch.display) ?? null;
   const offset = (v: number | null | undefined) => {
     if (v == null) return null;
     if (!Number.isFinite(v)) return undefined;
@@ -834,6 +935,8 @@ export async function updateTreeNote(
     body?: string | null;
     status?: TreeNoteStatus;
     goal?: boolean;
+    /** v1.13 (0150): data própria (prazo) — "AAAA-MM-DD" ou null. */
+    dueDate?: string | null;
   },
   opts: { revalidate?: boolean } = {}
 ): Promise<TreeActionState> {
@@ -843,6 +946,11 @@ export async function updateTreeNote(
     return { ok: false, message: "Anotação inválida." };
   }
   const cols: Record<string, unknown> = {};
+  if (patch.dueDate !== undefined) {
+    if (patch.dueDate != null && !/^\d{4}-\d{2}-\d{2}$/.test(patch.dueDate))
+      return { ok: false, message: "Data inválida." };
+    cols.due_date = patch.dueDate ?? null;
+  }
   if (patch.label !== undefined) {
     const label = String(patch.label).trim().slice(0, NOTE_LABEL_MAX);
     if (!label) return { ok: false, message: "A anotação não pode ficar vazia." };
@@ -1109,10 +1217,13 @@ export async function createTreeNode(
   if (input.parentRef != null && !isTreeNodeRef(input.parentRef)) {
     return { ok: false, message: "Nó inválido." };
   }
-  const payload = parseNodePayload(input.kind, input.payload);
-  if (!payload) return { ok: false, message: "Configuração do nó incompleta." };
+  const parsed = parseNodePayload(input.kind, input.payload);
+  if (!parsed) return { ok: false, message: "Configuração do nó incompleta." };
   const ctx = await treeWriteContext(scopeRaw);
   if (!ctx.ok) return { ok: false, message: ctx.message };
+  const checked = await checkRealized(ctx.supabase, ctx.orgId, input.kind, parsed);
+  if (!checked.ok) return checked;
+  const payload = checked.payload;
   const body = input.body ? String(input.body).slice(0, NOTE_BODY_MAX) : null;
   const { data, error } = await ctx.supabase
     .from("tree_nodes")
@@ -1154,13 +1265,15 @@ export async function updateTreeNode(
   if (patch.body !== undefined) {
     cols.body = patch.body ? String(patch.body).slice(0, NOTE_BODY_MAX) : null;
   }
+  const supabase = await createClient();
   if (patch.payload !== undefined) {
-    const payload = parseNodePayload(patch.kind, patch.payload);
-    if (!payload) return { ok: false, message: "Configuração do nó incompleta." };
-    cols.payload = payload;
+    const parsed = parseNodePayload(patch.kind, patch.payload);
+    if (!parsed) return { ok: false, message: "Configuração do nó incompleta." };
+    const checked = await checkRealized(supabase, await getActiveOrgId(), patch.kind, parsed);
+    if (!checked.ok) return checked;
+    cols.payload = checked.payload;
   }
   if (Object.keys(cols).length === 0) return { ok: true };
-  const supabase = await createClient();
   const { data, error } = await supabase
     .from("tree_nodes")
     .update(cols)
@@ -1239,4 +1352,83 @@ export async function scheduleRitualOccurrence(
   }
   if (opts.revalidate !== false) revalidatePath("/dashboards");
   return { ok: true, taskId: created.id, dueDate: next.date };
+}
+
+/**
+ * v1.13: a FONTE DO REALIZADO de um nó de indicador passa pela régua do
+ * catálogo (fórmula, bases, recortes, quebra) — o editor monta o MESMO
+ * catálogo, então o save nunca recusa o que o editor aceitou.
+ */
+async function checkRealized(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  orgId: string | null,
+  kind: OperationalNodeKind,
+  payload: NonNullable<ReturnType<typeof parseNodePayload>>
+): Promise<{ ok: true; payload: typeof payload } | { ok: false; message: string }> {
+  if (kind !== "indicator") return { ok: true, payload };
+  const p = payload as { realized?: unknown };
+  if (!p.realized) return { ok: true, payload };
+  const v = await validateRealizedSource(supabase, orgId, p.realized);
+  if (!v.ok) return v;
+  return { ok: true, payload: { ...payload, realized: v.value } };
+}
+
+/**
+ * v1.13: marca/desmarca o RESULTADO esperado em qualquer nó PRÓPRIO do mapa
+ * (anotação, indicador, Multi-fatores, ritual). A Root destaca o caminho de
+ * cada nó até ele.
+ */
+export async function setTreeNodeGoal(
+  scopeRaw: TreeScope,
+  nodeRef: string,
+  goal: boolean,
+  opts: { revalidate?: boolean } = {}
+): Promise<TreeActionState> {
+  if (!nodeRef.startsWith("note:") || !refUuid(nodeRef, "note")) {
+    return { ok: false, message: "Só nós desenhados na árvore podem ser o resultado." };
+  }
+  const ctx = await treeWriteContext(scopeRaw);
+  if (!ctx.ok) return { ok: false, message: ctx.message };
+  const res = await writeNodeRow(ctx, nodeRef, { is_goal: goal === true });
+  if (res.ok && opts.revalidate !== false) revalidatePath("/dashboards");
+  return res;
+}
+
+/**
+ * v1.13: a ANOTAÇÃO vira um nó operacional (indicador, Multi-fatores ou
+ * ritual) — mesma linha, mesmo id lógico: pai, geometria e branches filhas
+ * ficam. O payload passa pelo mesmo parse/validação do `createTreeNode`.
+ */
+export async function convertNoteToOperational(
+  scopeRaw: TreeScope,
+  noteId: string,
+  input: { kind: OperationalNodeKind; label: string; payload: unknown },
+  opts: { revalidate?: boolean } = {}
+): Promise<TreeActionState> {
+  if (!isOperationalKind(input.kind)) return { ok: false, message: "Tipo de nó inválido." };
+  const reason = branchKindDisabledReason(input.kind, (scopeRaw as TreeScope)?.kind ?? "record");
+  if (reason) return { ok: false, message: reason };
+  if (!refUuid(`note:${noteId}`, "note")) return { ok: false, message: "Anotação inválida." };
+  const label = String(input.label ?? "").trim().slice(0, NOTE_LABEL_MAX);
+  if (!label) return { ok: false, message: "Dê um nome ao nó." };
+  const parsed = parseNodePayload(input.kind, input.payload);
+  if (!parsed) return { ok: false, message: "Configuração do nó incompleta." };
+  const ctx = await treeWriteContext(scopeRaw);
+  if (!ctx.ok) return { ok: false, message: ctx.message };
+  const checked = await checkRealized(ctx.supabase, ctx.orgId, input.kind, parsed);
+  if (!checked.ok) return checked;
+  const where = scopeColumns(ctx.scope);
+  const { data, error } = await ctx.supabase
+    .from("tree_nodes")
+    .update({ kind: input.kind, label, payload: checked.payload, status: null })
+    .eq("id", noteId)
+    .eq("kind", "note")
+    .eq("scope_kind", where.scope_kind)
+    .eq("scope_id", where.scope_id)
+    .is("node_ref", null)
+    .select("id");
+  if (error) return { ok: false, message: `Falha ao converter: ${error.message}` };
+  if (!data || data.length === 0) return { ok: false, message: "Sem permissão para alterar esta anotação." };
+  if (opts.revalidate !== false) revalidatePath("/dashboards");
+  return { ok: true };
 }

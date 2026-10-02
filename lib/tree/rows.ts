@@ -1,4 +1,9 @@
-// Versão: 1.1 | Data: 01/10/2026
+// Versão: 1.2 | Data: 02/10/2026
+// v1.2 (02/10/2026): colunas da 0150 — `width`/`height`/`display` entram na
+//   geometria (tamanho escolhido ao redimensionar, rótulo de tipo e cor do
+//   cartão) e `due_date` vira a data PRÓPRIA do nó desenhado (`dueDate`). Há
+//   a lista de colunas ANTERIOR (`TREE_NODE_COLUMNS_LEGACY`) para o loader
+//   cair nela se a migração ainda não rodou.
 // v1.1 (01/10/2026): nós OPERACIONAIS (0149). Linha própria de `kind`
 //   indicator/plan/ritual vira fato do MESMO jeito que a anotação (id
 //   `note:<uuid>`, pai e geometria na própria linha), carregando o `payload`
@@ -24,6 +29,7 @@
 //
 // Módulo PURO e client-safe.
 import { TREE_NODE_KIND_LABELS, TREE_OWN_ROW_KINDS } from "./model";
+import { parseNodeDisplay } from "./display";
 import type {
   TreeDirection,
   TreeFact,
@@ -50,10 +56,18 @@ export interface TreeNodeRow {
   /** v1.1 (0149): payload do nó operacional e identidade do seed. */
   payload?: unknown;
   preset_key?: string | null;
+  /** v1.2 (0150). */
+  width?: number | null;
+  height?: number | null;
+  display?: unknown;
+  due_date?: string | null;
 }
 
 /** As colunas que os loaders pedem — um lugar só, para as duas leituras. */
 export const TREE_NODE_COLUMNS =
+  "id, kind, ref_id, node_ref, parent_ref, label, body, position, created_at, offset_x, offset_y, direction, status, is_goal, payload, preset_key, width, height, display, due_date";
+/** v1.2: as colunas anteriores à 0150 (fallback do loader). */
+export const TREE_NODE_COLUMNS_LEGACY =
   "id, kind, ref_id, node_ref, parent_ref, label, body, position, created_at, offset_x, offset_y, direction, status, is_goal, payload, preset_key";
 
 /** Uma tarefa que a linha pendura num mapa (hidratada pelo loader). */
@@ -93,12 +107,27 @@ function parentOf(v: unknown): string | null | undefined {
   return v;
 }
 
+const size = (v: unknown): number | null =>
+  typeof v === "number" && Number.isFinite(v) && v > 0 ? v : null;
+
 function geometryOf(nodeRef: string, row: TreeNodeRow): TreeNodeGeometry | null {
   const dir = direction(row.direction);
   const x = num(row.offset_x);
   const y = num(row.offset_y);
-  if (dir == null && x === 0 && y === 0) return null;
-  return { nodeRef, offsetX: x, offsetY: y, direction: dir };
+  const width = size(row.width);
+  const height = size(row.height);
+  const display = parseNodeDisplay(row.display);
+  if (dir == null && x === 0 && y === 0 && width == null && height == null && !display)
+    return null;
+  return {
+    nodeRef,
+    offsetX: x,
+    offsetY: y,
+    direction: dir,
+    ...(width != null ? { width } : {}),
+    ...(height != null ? { height } : {}),
+    ...(display ? { display } : {}),
+  };
 }
 
 /**
@@ -165,6 +194,10 @@ export function parseTreeNodeRows(
           : "aberta"
         : null,
       goal: row.is_goal === true,
+      // v1.2: data própria (prazo) — nunca a de criação.
+      ...(typeof row.due_date === "string" && row.due_date
+        ? { dueDate: row.due_date.slice(0, 10) }
+        : {}),
       // v1.1: o payload cru — o card parseia (fail-closed) pelo tipo.
       ...(kind !== "note" && row.payload != null ? { payload: row.payload } : {}),
     });

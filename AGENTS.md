@@ -2311,14 +2311,14 @@ This version has breaking changes — APIs, conventions, and file structure may 
   `lib/records/trash.test.ts` + `records-table.selection.test.tsx` + blocos
   de seleção em `update-validate.test.ts`/`update-instructions.test.ts`.
   Ver `docs/arquitetura.md` §4.21 e invariante 30.
-- **Indicadores, Tabela de metas, Tree operacional e rituais (0149,
-  01/10/2026):** `indicators` é o catálogo que EXPLICA uma chave de meta
+- **Indicadores, metas na Tabela Livre, Tree operacional e rituais (0149,
+  01/10/2026; 0150, 02/10/2026):** `indicators` é o catálogo que EXPLICA uma chave de meta
   (`key` = `goals.metric`; unidade, rollup, direção, tolerância, dono, fórmula
   do realizado). O realizado sai SÓ de `runCalculatedWidget` por mês e a meta
   de `resolveGoal` (explicit-first — a meta global oficial vence o roll-up dos
   compromissos individuais), pelo dono único `resolveIndicatorValues`
-  (`lib/indicators/values.ts`) — Tabela de metas (`visual_type 'metas'`,
-  `runGoalTable`) e nós de indicador da Tree (`loadTreeIndicatorValues`) leem
+  (`lib/indicators/values.ts`) — colunas de meta da Tabela Livre
+  (`runQuickTable`) e nós de indicador da Tree (`loadTreeIndicatorValues`) leem
   por ele e pelo widget-scope. NÃO recrie as RPCs para isso. A validação do
   realizado usa o MESMO catálogo agregado do construtor
   (`lib/indicators/validate.ts`); saneamento do `settings.goalTable` é ÚNICO
@@ -2338,5 +2338,23 @@ This version has breaking changes — APIs, conventions, and file structure may 
   novo que busca os próprios dados deve avisar `useWarmupReady`
   (`components/dashboards/presentation-warmup.tsx`), senão o slide dele
   aparece carregando; sem barra de período nem ⋮ dos widgets (o slide vem no
-  período certo de origem: `months` da Tabela de metas e `tree.months`). Ver
-  `docs/arquitetura.md` §4.27 e invariante 42.
+  período certo de origem: `months` das colunas de meta e `tree.months`).
+  **Peças editáveis (02/10/2026):** a Tabela de metas foi ABSORVIDA pela
+  Tabela Livre — colunas `rowLabel`/`goal`/`goalTotal` e linhas com `bind`
+  (indicador + responsável por NOME + `realized`, ou `total`); servidor =
+  `runQuickTable` (`computeQuickTableGoals` → `resolveIndicatorValues`), meta
+  gravada por `saveQuickTableGoal` (lê a LINHA do widget gravado, nunca do
+  navegador). O tipo `'metas'` é LEGADO convertido NA LEITURA por
+  `normalizeLegacyWidget` (`lib/widgets/quick-table/goal-convert.ts`, ids
+  FIXOS) em page/widget-scope/saveQuickTableCells/snapshot; o import da IA o
+  aceita como atalho e converte; `HIDDEN_VISUAL_TYPES` o tira dos seletores —
+  NÃO reintroduza `runGoalTable`/um widget próprio. A fonte do realizado
+  própria (`RealizedSource`, `lib/indicators/realized-source.ts`) resolve no
+  ENGINE (`runCalculatedWidget`; quebra via `runWidget` com `calc:formula`),
+  é validada no save por `validateRealizedSource` e tem UM editor
+  (`RealizedSourceEditor`); a Tree pede valores POR NÓ (payload lido no banco).
+  O que o cartão da Tree mostra ao apresentar sai SÓ de `treeChrome`
+  (`lib/tree/display.ts`); tamanho/exibição/prazo por nó são colunas de
+  `tree_nodes` (0150). Plano = "Multi-fatores" (`factors[]`, `kind` segue
+  `plan`; 5W2H legado convertido na leitura); nível do indicador é etiqueta
+  LIVRE (`tag`). Ver `docs/arquitetura.md` §4.27 e invariante 42.

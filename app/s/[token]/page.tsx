@@ -1,4 +1,7 @@
-// Versão: 1.9 | Data: 02/10/2026
+// Versão: 1.10 | Data: 02/10/2026
+// v1.10 (02/10/2026): Tabela de metas legada ('metas', congelada em
+//   snapshots antigos) vira Tabela Livre NA LEITURA (normalizeLegacyWidget);
+//   as metas não aparecem no link público (aviso na própria tabela).
 // v1.9 (02/10/2026): estilo do dashboard no link público — o padrão da org
 //   (organizations.ui_prefs.dashboardStyle) sai de leitura service ESCOPADA
 //   pela org do dashboard e vai ao SnapshotClient junto do settings congelado.
@@ -114,6 +117,7 @@ import {
   loadResponsibleCanon,
 } from "@/lib/config/responsible-canon";
 import { normalizeGridSpace } from "@/lib/widgets/grid-space";
+import { normalizeLegacyWidget } from "@/lib/widgets/quick-table/goal-convert";
 import {
   applySourceScope,
   collectBoardSourceKeys,
@@ -291,7 +295,7 @@ async function SnapshotContent({
   // congelado — por isso a conversão runtime aqui é permanente). Read-only.
   const gridNorm = normalizeGridSpace(
     (cfg.dashboard.settings ?? {}) as DashboardSettings,
-    cfg.widgets
+    (cfg.widgets as Widget[]).map(normalizeLegacyWidget)
   );
   const widgets = gridNorm.widgets;
   const fields = (cfg.fields ?? []) as FieldDefinition[];
@@ -411,10 +415,7 @@ async function SnapshotContent({
       w.visual_type !== "imagem" &&
       // "Base do Dashboard" (0142) é uma GRADE DE EDIÇÃO da Base manual, não
       // um recorte de registros: sem métrica, o RPC recusaria o SELECT vazio.
-      w.visual_type !== "base_manual" &&
-      // v1.8 (01/10/2026): Tabela de metas (0149) — lê metas/indicadores por
-      // action com sessão; no link público não há o que computar.
-      w.visual_type !== "metas"
+      w.visual_type !== "base_manual"
   );
   const filterWidgets = widgets.filter((w) => w.visual_type === "filtro");
   const fieldFilterWidgets = widgets.filter(

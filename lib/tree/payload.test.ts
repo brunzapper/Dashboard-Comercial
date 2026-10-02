@@ -1,4 +1,7 @@
-// Versão: 1.0 | Data: 01/10/2026
+// Versão: 1.1 | Data: 02/10/2026
+// v1.1 (02/10/2026): o nível vira ETIQUETA livre (o `level` legado é lido
+//   como etiqueta), o plano vira Multi-fatores (5W2H legado convertido na
+//   leitura) e os pedidos de valor saem POR NÓ.
 import { describe, expect, it } from "vitest";
 
 import {
@@ -14,16 +17,35 @@ import { layoutRoot, ROOT_NODE_HEIGHT, ROOT_NODE_WIDTH } from "./root-layout";
 import type { TreeNode } from "./model";
 
 describe("payload fail-closed", () => {
-  it("indicador exige chave válida e descarta enum desconhecido", () => {
+  it("indicador exige chave válida; o nível legado vira etiqueta livre", () => {
     expect(parseIndicatorPayload({ indicator: "MRR!" })).toBeNull();
     expect(
       parseIndicatorPayload({ indicator: "mrr_novo_inbound", level: "N9", childrenOp: "×" })
-    ).toEqual({ indicator: "mrr_novo_inbound", childrenOp: "×" });
+    ).toEqual({ indicator: "mrr_novo_inbound", tag: "N9", childrenOp: "×" });
+    expect(parseIndicatorPayload({ indicator: "mrr", tag: "Estratégico" })?.tag).toBe(
+      "Estratégico"
+    );
   });
-  it("plano guarda só o 5W2H conhecido e indicadores válidos", () => {
+  it("plano LEGADO (5W2H) vira fatores com título, na ordem; lixo some", () => {
     expect(
       parsePlanPayload({ oQue: " x ", lixo: 1, indicators: ["mrr", "Ruim", "mrr"] })
-    ).toEqual({ oQue: "x", indicators: ["mrr"] });
+    ).toEqual({ factors: [{ id: "oQue", title: "O quê", text: "x" }], indicators: ["mrr"] });
+  });
+  it("Multi-fatores: título opcional, fator vazio some", () => {
+    expect(
+      parsePlanPayload({
+        factors: [
+          { id: "a", text: "Ligar para a base" },
+          { title: "Prazo", text: "até 15/10" },
+          { text: "  " },
+        ],
+      })
+    ).toEqual({
+      factors: [
+        { id: "a", text: "Ligar para a base" },
+        { id: "f2", title: "Prazo", text: "até 15/10" },
+      ],
+    });
   });
   it("ritual exige cadência válida", () => {
     expect(parseRitualPayload({ schedule: { cadence: "semanal", anchor: "x" } })).toBeNull();
@@ -100,16 +122,19 @@ describe("galho e layout", () => {
     // o filho começa depois do cartão LARGO do pai
     expect(b.x).toBeGreaterThanOrEqual(a.x + 300);
   });
-  it("indicatorRequestsOf recolhe indicadores e os dos planos sem repetir", () => {
+  it("indicatorRequestsOf: um pedido por nó de indicador + os dos planos", () => {
     const t: TreeNode[] = [
       { ...node("a", "indicator"), payload: { indicator: "mrr" } },
       { ...node("p", "plan"), payload: { indicators: ["mrr", "clientes"] } },
       { ...node("r", "indicator"), payload: { indicator: "mrr", responsible: "Ana" } },
     ];
+    // v1.1: indicador pede POR NÓ (o servidor lê o payload pelo id);
+    // indicadores citados pelo plano seguem por chave, sem repetir.
     expect(indicatorRequestsOf(t)).toEqual([
+      { key: "mrr", responsible: null, nodeId: "a" },
       { key: "mrr", responsible: null },
       { key: "clientes", responsible: null },
-      { key: "mrr", responsible: "Ana" },
+      { key: "mrr", responsible: "Ana", nodeId: "r" },
     ]);
   });
 });

@@ -1,4 +1,18 @@
-// Versão: 1.5 | Data: 02/10/2026
+// Versão: 1.6 | Data: 02/10/2026
+// v1.6 (02/10/2026): o cartão deixa de ser fixo.
+//   (a) REDIMENSIONAR: alça no canto inferior direito; o tamanho vira
+//       geometria (0150) e o layout o respeita — card de texto longo não
+//       corta mais; duplo-clique na alça volta ao automático;
+//   (b) DUPLO-CLIQUE abre o cartão em DESTAQUE (onOpenFocus) — também ao
+//       apresentar. Para não brigar com o duplo-clique, o clique no título só
+//       EDITA se o cartão já estava selecionado (1º clique seleciona);
+//   (c) MODO APRESENTAR: rótulo de tipo, "+" e concluir etapa somem por
+//       padrão (lib/tree/display.ts — o widget liga de volta; o cartão força
+//       o rótulo de tipo); a cor do cartão é escolha dele (`display.tone`);
+//   (d) anotação mostra a DESCRIÇÃO no cartão e a data PRÓPRIA (prazo), não
+//       mais a de criação; menu ganhou "Editar anotação…", "Abrir em
+//       destaque", "Converter em indicador/Multi-fatores/ritual" e "Marcar
+//       como resultado" em qualquer nó desenhado.
 // v1.5 (02/10/2026): tamanhos de fonte fixos (10px/11px em classe) trocados
 //   pela escala nomeada text-2xs/text-micro (globals.css); guarda em
 //   tests/no-arbitrary-font-size.test.ts.
@@ -141,6 +155,12 @@ import {
   NoteDoneButton,
   type NodeActionsContext,
 } from "./tree-node-parts";
+import {
+  TREE_TONE_CLASSES,
+  treeChrome,
+  type TreeChrome,
+  type TreePresentationSettings,
+} from "@/lib/tree/display";
 
 /** Arrasto abaixo disto é clique. */
 const DRAG_THRESHOLD_PX = 4;
@@ -215,7 +235,23 @@ type Gesture =
       sx: number;
       sy: number;
       moved: boolean;
+    }
+  | {
+      // v1.6: a alça de redimensionar do cartão.
+      kind: "resize";
+      pointerId: number;
+      id: string;
+      sx: number;
+      sy: number;
+      w: number;
+      h: number;
+      moved: boolean;
     };
+
+/** v1.6: limites do redimensionar (os mesmos do servidor/CHECK da 0150). */
+const RESIZE_MIN_W = 120;
+const RESIZE_MIN_H = 60;
+const RESIZE_MAX = 1600;
 
 interface DragState {
   id: string;
@@ -297,6 +333,18 @@ export interface TreeRootViewProps {
     parentRef: string | null;
     title: string;
   }) => void;
+  /** v1.6: o que o widget deixa aparecer ao apresentar. */
+  presentation?: TreePresentationSettings;
+  /** v1.6: redimensionar (null = voltar ao automático). */
+  onResize?: (nodeId: string, size: { w: number; h: number } | null) => void;
+  /** v1.6: duplo-clique — o cartão em destaque. */
+  onOpenFocus?: (node: TreeNode) => void;
+  /** v1.6: editor completo da anotação (título, descrição, data, exibição). */
+  onEditNoteDetails?: (node: TreeNode) => void;
+  /** v1.6: anotação vira indicador / Multi-fatores / ritual. */
+  onConvertOperational?: (node: TreeNode, kind: "indicator" | "plan" | "ritual") => void;
+  /** v1.6: Resultado em nó operacional (a anotação segue pelo onEditNote). */
+  onSetGoal?: (node: TreeNode, goal: boolean) => void;
 }
 
 /** Anotação e comentário com dono no banco são digitáveis no próprio card. */
@@ -326,6 +374,12 @@ export function TreeRootView({
   renderBody,
   onCreateOperational,
   canvas,
+  presentation,
+  onResize,
+  onOpenFocus,
+  onEditNoteDetails,
+  onConvertOperational,
+  onSetGoal,
 }: TreeRootViewProps) {
   // v1.4: estilo do board e modo Apresentar.
   const dstyle = useDashboardStyle();
@@ -345,6 +399,8 @@ export function TreeRootView({
   const [draft, setDraft] = useState<Draft | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
   const [menu, setMenu] = useState<ContextMenuState | null>(null);
+  // v1.6: tamanho ao vivo enquanto a alça é arrastada.
+  const [resizing, setResizing] = useState<{ id: string; w: number; h: number } | null>(null);
   const gesture = useRef<Gesture | null>(null);
   // Branch recém-salva que precisa ficar ONDE a prévia apareceu (ver v1.1).
   const pendingPlace = useRef<{ id: string; abs: { x: number; y: number } } | null>(
@@ -392,14 +448,17 @@ export function TreeRootView({
       directionOf: (id: string) => geoById.get(id)?.direction ?? null,
       collapsed,
       // v1.2: o rascunho mantém o cartão padrão (ele é um texto).
-      ...(sizeOf
-        ? {
-            sizeOf: (n: TreeNode) =>
-              n.id === ROOT_DRAFT_ID ? { w: ROOT_NODE_WIDTH, h: ROOT_NODE_HEIGHT } : sizeOf(n),
-          }
-        : {}),
+      // v1.6: o tamanho ESCOLHIDO (redimensionar, 0150) vence o automático; e
+      // durante o arrasto da alça, o tamanho ao vivo.
+      sizeOf: (n: TreeNode) => {
+        if (n.id === ROOT_DRAFT_ID) return { w: ROOT_NODE_WIDTH, h: ROOT_NODE_HEIGHT };
+        if (resizing && resizing.id === n.id) return { w: resizing.w, h: resizing.h };
+        const auto = sizeOf ? sizeOf(n) : { w: ROOT_NODE_WIDTH, h: ROOT_NODE_HEIGHT };
+        const g = geoById.get(n.id);
+        return { w: g?.width ?? auto.w, h: g?.height ?? auto.h };
+      },
     }),
-    [defaultDirection, geoById, collapsed, sizeOf]
+    [defaultDirection, geoById, collapsed, sizeOf, resizing]
   );
 
   const layout = useMemo(
@@ -617,6 +676,28 @@ export function TreeRootView({
   const onPointerDown = (e: ReactPointerEvent<HTMLDivElement>) => {
     if (e.button !== 0) return;
     const target = e.target as HTMLElement;
+    // v1.6: a alça de redimensionar (vem antes da regra de "controle não
+    // arrasta" — ela É o controle do gesto).
+    const handle = target.closest<HTMLElement>("[data-resize-handle]");
+    if (handle && onResize) {
+      const id = handle.dataset.resizeHandle ?? "";
+      const box = boxesRef.current.find((b) => b.id === id);
+      if (box) {
+        containerRef.current?.setPointerCapture(e.pointerId);
+        gesture.current = {
+          kind: "resize",
+          pointerId: e.pointerId,
+          id,
+          sx: e.clientX,
+          sy: e.clientY,
+          w: box.w,
+          h: box.h,
+          moved: false,
+        };
+        e.stopPropagation();
+        return;
+      }
+    }
     // Controle dentro do cartão (botão, campo, menu) não inicia arrasto.
     if (
       target.closest(
@@ -660,6 +741,15 @@ export function TreeRootView({
       setView({ ...g.view, x: g.view.x + dxs, y: g.view.y + dys });
       return;
     }
+    if (g.kind === "resize") {
+      const k = effectiveRef.current.k;
+      setResizing({
+        id: g.id,
+        w: Math.round(Math.max(RESIZE_MIN_W, Math.min(RESIZE_MAX, g.w + dxs / k))),
+        h: Math.round(Math.max(RESIZE_MIN_H, Math.min(RESIZE_MAX, g.h + dys / k))),
+      });
+      return;
+    }
     if (isSynthetic(g.id)) return;
     const node = nodeById.get(g.id);
     if (!node) return;
@@ -687,6 +777,12 @@ export function TreeRootView({
     if (g.kind === "pan") {
       // Clique no vazio: tira a seleção.
       if (!g.moved) setSelected(null);
+      return;
+    }
+    if (g.kind === "resize") {
+      const r = resizing;
+      setResizing(null);
+      if (g.moved && r && r.id === g.id) onResize?.(g.id, { w: r.w, h: r.h });
       return;
     }
     const current = drag;
@@ -820,8 +916,19 @@ export function TreeRootView({
         onSelect: () => startDraft(node.id),
       },
     ];
+    if (onOpenFocus && !synthetic) {
+      items.push({ label: "Abrir em destaque", hint: "Duplo-clique", onSelect: () => onOpenFocus(node) });
+    }
     if (isTextEditable(node)) {
       items.push({ label: "Editar texto", onSelect: () => setEditing(node.id) });
+    }
+    // v1.6: o editor completo da anotação (descrição, data, exibição).
+    if (node.kind === "note" && node.refId && onEditNoteDetails) {
+      items.push({
+        label: "Editar anotação…",
+        hint: "Descrição, data e exibição",
+        onSelect: () => onEditNoteDetails(node),
+      });
     }
     // v1.2: nó operacional abre o editor dele.
     if (
@@ -856,6 +963,14 @@ export function TreeRootView({
           label: `Converter em ${TREE_BRANCH_LABELS.task.toLowerCase()}`,
           onSelect: () => onConvert(node, "task"),
         },
+        // v1.6: anotação vira nó operacional (abre o editor com o texto).
+        ...(onConvertOperational
+          ? (["indicator", "plan", "ritual"] as const).map((k) => ({
+              label: `Converter em ${TREE_BRANCH_LABELS[k].toLowerCase()}`,
+              disabled: branchKindDisabledReason(k, scope.kind),
+              onSelect: () => onConvertOperational(node, k),
+            }))
+          : []),
         { separator: true },
         {
           label: node.goal ? "Desmarcar resultado" : "Marcar como resultado",
@@ -867,6 +982,16 @@ export function TreeRootView({
             onEditNote(node, { status: checkable ? "texto" : "pendente" }),
         }
       );
+    }
+    // v1.6: Resultado também em indicador/Multi-fatores/ritual.
+    if (
+      (node.kind === "indicator" || node.kind === "plan" || node.kind === "ritual") &&
+      onSetGoal
+    ) {
+      items.push({
+        label: node.goal ? "Desmarcar resultado" : "Marcar como resultado",
+        onSelect: () => onSetGoal(node, !node.goal),
+      });
     }
     if (!synthetic && parent && !isSynthetic(parent.id)) {
       items.push({
@@ -997,6 +1122,8 @@ export function TreeRootView({
           onDirection={onDirection}
           onEditNote={onEditNote}
           onClose={() => setSelected(null)}
+          onSetGoal={onSetGoal}
+          onEditNoteDetails={onEditNoteDetails}
         />
       ) : null}
 
@@ -1017,6 +1144,7 @@ export function TreeRootView({
         onPointerCancel={() => {
           gesture.current = null;
           setDrag(null);
+          setResizing(null);
         }}
         onContextMenu={onContextMenu}
         role="tree"
@@ -1138,6 +1266,15 @@ export function TreeRootView({
                 onCancelEdit={() => setEditing(null)}
                 onNewBranch={() => startDraft(node.id)}
                 body={renderBody?.(node) ?? null}
+                chrome={treeChrome(presentation, geoById.get(node.id)?.display ?? null, presenting)}
+                tone={(() => {
+                  const t = geoById.get(node.id)?.display?.tone;
+                  return t && t !== "padrao" ? t : null;
+                })()}
+                resizable={Boolean(onResize) && !presenting && !isSynthetic(node.id)}
+                resized={geoById.get(node.id)?.width != null || geoById.get(node.id)?.height != null}
+                onResetSize={() => onResize?.(node.id, null)}
+                onOpenFocus={onOpenFocus ? () => onOpenFocus(node) : undefined}
               />
             );
           })}
@@ -1454,6 +1591,12 @@ function RootNodeTile({
   onCancelEdit,
   onNewBranch,
   body,
+  chrome,
+  tone,
+  resizable,
+  resized,
+  onResetSize,
+  onOpenFocus,
 }: {
   node: TreeNode;
   box: RootBox;
@@ -1474,6 +1617,14 @@ function RootNodeTile({
   onNewBranch: () => void;
   /** v1.2: corpo do nó operacional (null = data + progresso de sempre). */
   body?: ReactNode | null;
+  /** v1.6: o que aparece (modo Apresentar — lib/tree/display.ts). */
+  chrome: TreeChrome;
+  /** v1.6: cor escolhida do cartão (null = a do tipo). */
+  tone: keyof typeof TREE_TONE_CLASSES | null;
+  resizable: boolean;
+  resized: boolean;
+  onResetSize: () => void;
+  onOpenFocus?: () => void;
 }) {
   const task = node.refId ? (actx.taskById.get(node.refId) ?? null) : null;
   const done = isCheckable(node) && isDone(node);
@@ -1494,9 +1645,17 @@ function RootNodeTile({
           onSelect();
         }
       }}
+      // v1.6: duplo-clique abre o cartão em destaque (texto inteiro).
+      onDoubleClick={(e) => {
+        if (editing || !onOpenFocus) return;
+        if ((e.target as HTMLElement).closest("[data-resize-handle], input, textarea")) return;
+        e.preventDefault();
+        onCancelEdit();
+        onOpenFocus();
+      }}
       className={cn(
         "group bg-card absolute flex flex-col gap-1 rounded-lg border-2 px-2 py-1.5 shadow-sm transition-[opacity,box-shadow]",
-        KIND_TONE[node.kind] ?? "border-muted",
+        tone ? TREE_TONE_CLASSES[tone] : (KIND_TONE[node.kind] ?? "border-muted"),
         node.goal && "border-amber-500 bg-amber-50 dark:bg-amber-950/40",
         synthetic ? "cursor-default" : "cursor-move",
         selected && "ring-primary ring-2 ring-offset-1",
@@ -1515,19 +1674,22 @@ function RootNodeTile({
       }}
     >
       <div className="flex items-center gap-1">
-        <Badge variant="outline" className="h-4 shrink-0 px-1 text-2xs">
-          {TREE_NODE_KIND_LABELS[node.kind]}
-        </Badge>
+        {/* v1.6: some ao apresentar (o widget/cartão pode ligar de volta). */}
+        {chrome.kindBadge ? (
+          <Badge variant="outline" className="h-4 shrink-0 px-1 text-2xs">
+            {TREE_NODE_KIND_LABELS[node.kind]}
+          </Badge>
+        ) : null}
         {node.goal ? (
           <Badge className="h-4 shrink-0 gap-0.5 bg-amber-500 px-1 text-2xs text-white">
             <Star className="size-2.5" /> Resultado
           </Badge>
         ) : null}
         <span className="flex-1" />
-        {node.kind === "note" ? (
+        {node.kind === "note" && chrome.doneToggle ? (
           <NoteDoneButton node={node} onChanged={actx.onChanged} compact />
         ) : null}
-        {!synthetic ? (
+        {!synthetic && chrome.addBranch ? (
           <button
             type="button"
             data-no-drag
@@ -1568,15 +1730,19 @@ function RootNodeTile({
       ) : (
         <button
           type="button"
-          onClick={editable ? onStartEdit : onSelect}
+          // v1.6: o 1º clique SELECIONA; editar é o 2º clique (no cartão já
+          // selecionado) — o duplo-clique fica livre para abrir o destaque.
+          onClick={editable && selected ? onStartEdit : onSelect}
           className={cn(
-            "line-clamp-2 shrink-0 text-left text-xs leading-snug font-medium",
-            editable && "hover:bg-accent/60 cursor-text rounded",
+            "line-clamp-3 shrink-0 text-left text-xs leading-snug font-medium",
+            editable && selected && "hover:bg-accent/60 cursor-text rounded",
             done && "text-muted-foreground line-through"
           )}
           title={
             editable
-              ? "Clique para editar o texto"
+              ? selected
+                ? "Clique para editar o texto · duplo-clique abre em destaque"
+                : "Clique para selecionar · duplo-clique abre em destaque"
               : node.body
                 ? `${node.label}\n\n${node.body}`
                 : node.label
@@ -1593,11 +1759,40 @@ function RootNodeTile({
           {body}
         </div>
       ) : (
-        <div className="mt-auto flex items-center gap-1.5">
-          {node.at || task ? <NodeDate node={node} task={task} /> : null}
-          <ProgressBar progress={progress} />
-        </div>
+        <>
+          {/* v1.6: a DESCRIÇÃO da anotação aparece no cartão (recortada pelo
+              tamanho; inteira no destaque). */}
+          {node.kind === "note" && node.body ? (
+            <p className="text-muted-foreground min-h-0 flex-1 overflow-hidden text-micro leading-snug whitespace-pre-line">
+              {node.body}
+            </p>
+          ) : null}
+          <div className="mt-auto flex items-center gap-1.5">
+            {node.at || node.dueDate || task ? <NodeDate node={node} task={task} /> : null}
+            <ProgressBar progress={progress} />
+          </div>
+        </>
       )}
+      {/* v1.6: alça de redimensionar (duplo-clique volta ao automático). */}
+      {resizable && !editing ? (
+        <div
+          data-resize-handle={node.id}
+          data-no-drag
+          role="separator"
+          aria-label="Redimensionar o cartão"
+          title={resized ? "Arraste para redimensionar · duplo-clique volta ao tamanho automático" : "Arraste para redimensionar"}
+          onDoubleClick={(e) => {
+            e.stopPropagation();
+            if (resized) onResetSize();
+          }}
+          className="absolute right-0 bottom-0 size-3 cursor-nwse-resize opacity-0 transition-opacity group-hover:opacity-100 data-[on=true]:opacity-100"
+          data-on={selected || resized}
+          style={{
+            background:
+              "linear-gradient(135deg, transparent 50%, var(--muted-foreground) 50%, var(--muted-foreground) 60%, transparent 60%, transparent 75%, var(--muted-foreground) 75%, var(--muted-foreground) 85%, transparent 85%)",
+          }}
+        />
+      ) : null}
     </div>
   );
 }
@@ -1621,6 +1816,8 @@ function SelectedBar({
   onDirection,
   onEditNote,
   onClose,
+  onSetGoal,
+  onEditNoteDetails,
 }: {
   node: TreeNode;
   parent: TreeNode | null;
@@ -1635,7 +1832,10 @@ function SelectedBar({
   onDirection: (nodeId: string, direction: TreeDirection) => void;
   onEditNote: TreeRootViewProps["onEditNote"];
   onClose: () => void;
+  onSetGoal?: TreeRootViewProps["onSetGoal"];
+  onEditNoteDetails?: TreeRootViewProps["onEditNoteDetails"];
 }) {
+  const isOp = node.kind === "indicator" || node.kind === "plan" || node.kind === "ritual";
   const path = pathToGoal(nodes, node.id)
     .slice(1)
     .map((id) => nodeById.get(id)?.label ?? "")
@@ -1712,7 +1912,32 @@ function SelectedBar({
               <Star className="size-3.5" />
               {node.goal ? "É o resultado" : "Marcar como resultado"}
             </Button>
+            {onEditNoteDetails ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-7 text-xs"
+                title="Título, descrição, data e exibição do cartão"
+                onClick={() => onEditNoteDetails(node)}
+              >
+                Editar anotação…
+              </Button>
+            ) : null}
           </>
+        ) : null}
+        {/* v1.6: Resultado também em nó operacional. */}
+        {isOp && onSetGoal ? (
+          <Button
+            type="button"
+            variant={node.goal ? "default" : "outline"}
+            size="sm"
+            className="h-7 gap-1 text-xs"
+            onClick={() => onSetGoal(node, !node.goal)}
+          >
+            <Star className="size-3.5" />
+            {node.goal ? "É o resultado" : "Marcar como resultado"}
+          </Button>
         ) : null}
 
         {!synthetic ? (

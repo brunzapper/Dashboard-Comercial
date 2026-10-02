@@ -1,3 +1,6 @@
+// Versão: 1.3 | Data: 02/10/2026
+// v1.3 (02/10/2026): a Tabela de metas sai da lista (HIDDEN_VISUAL_TYPES) —
+//   a Tabela Livre a absorveu (colunas de meta).
 // Versão: 1.2 | Data: 01/10/2026
 // v1.2 (01/10/2026): ícone do tipo 'metas' (Tabela de metas, Target).
 // Versão: 1.1 | Data: 25/07/2026
@@ -36,7 +39,7 @@ import {
 
 import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
-import { VISUAL_TYPE_LABELS, type VisualType } from "@/lib/widgets/types";
+import { HIDDEN_VISUAL_TYPES, VISUAL_TYPE_LABELS, type VisualType } from "@/lib/widgets/types";
 
 const TYPE_ICONS: Record<VisualType, LucideIcon> = {
   kpi: Gauge,
@@ -87,7 +90,12 @@ export function InsertTypeMenu({
   const q = norm(query.trim());
   const items = (
     Object.entries(VISUAL_TYPE_LABELS) as [VisualType, string][]
-  ).filter(([kind, label]) => !q || norm(label).includes(q) || norm(kind).includes(q));
+  ).filter(
+    ([kind, label]) =>
+      // v1.3: tipos legados (Tabela de metas → Tabela Livre) não são oferecidos.
+      !HIDDEN_VISUAL_TYPES.has(kind) &&
+      (!q || norm(label).includes(q) || norm(kind).includes(q))
+  );
   const active = Math.min(hi, Math.max(0, items.length - 1));
 
   const move = (delta: number) => {

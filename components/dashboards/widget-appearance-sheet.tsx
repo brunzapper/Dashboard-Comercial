@@ -1,3 +1,14 @@
+// Versão: 2.13 | Data: 02/10/2026
+// v2.13 (02/10/2026): Tabela Livre — seção "Metas": visual de tabela de slide
+//   (o da antiga Tabela de metas), densidade, atingimento, realizado vazio,
+//   unidade, etiqueta, nota e o comportamento das células de meta (mostrar
+//   realizado/atingimento, admin edita a meta). Antes essas chaves só
+//   existiam no JSON do preset. Vivem em settings.quickTable.display/goals.
+// Versão: 2.12 | Data: 02/10/2026
+// v2.12 (02/10/2026): seção "Tree" — o que os cartões mostram AO APRESENTAR
+//   (tipo, +, "Agendar próxima", concluir, avisos; padrão = oculto) e o fundo
+//   do canvas da Root (cor + trama), que antes só existiam no JSON do preset.
+//   Ambos vivem DENTRO de settings.tree (merge no save, config preservada).
 // Versão: 2.11 | Data: 02/10/2026
 // v2.11 (02/10/2026): seção "Destaque e anotações" (destacar categorias,
 //   anotações com filete, rótulo direto e área nas linhas) e, no Card, "Número
@@ -76,6 +87,10 @@ import { ColorField } from "./appearance-controls";
 import { KanbanAppearanceSection } from "@/components/kanban/kanban-appearance-section";
 import { AgendaAppearanceSection } from "@/components/agenda/agenda-appearance-section";
 import type { AgendaAppearance } from "@/lib/agenda/types";
+import {
+  TREE_PRESENTATION_LABELS,
+  type TreePresentationSettings,
+} from "@/lib/tree/display";
 import { fieldLabel, type AvailableField } from "@/lib/widgets/fields";
 import type { ComboboxOption } from "@/components/ui/combobox";
 import { ConditionalFormatSection } from "@/components/dashboards/conditional-format-section";
@@ -93,8 +108,11 @@ import type {
   AxisSide,
   GridLines,
   TableAlign,
+  QuickTableGoalDisplay,
+  TreeSettings,
   Widget,
   WidgetData,
+  WidgetSettings,
 } from "@/lib/widgets/types";
 import type { WidgetInput } from "@/app/(app)/dashboards/actions";
 import { updateWidget } from "@/app/(app)/dashboards/actions";
@@ -142,7 +160,26 @@ export function WidgetAppearanceSheet({
     widget.settings?.agenda?.appearance ?? {}
   );
 
+  // v2.12: exibição da Tree ao apresentar + canvas — dentro de settings.tree.
+  const [tpres, setTpres] = useState<TreePresentationSettings>(
+    widget.settings?.tree?.presentation ?? {}
+  );
+  const [tcanvas, setTcanvas] = useState<NonNullable<TreeSettings["canvas"]>>(
+    widget.settings?.tree?.canvas ?? {}
+  );
+
+  // v2.13: metas da Tabela Livre (display/goals dentro de settings.quickTable).
+  const [qtDisplayOn, setQtDisplayOn] = useState(widget.settings?.quickTable?.display != null);
+  const [qtDisplay, setQtDisplay] = useState<QuickTableGoalDisplay>(
+    widget.settings?.quickTable?.display ?? {}
+  );
+  const [qtGoals, setQtGoals] = useState<NonNullable<NonNullable<WidgetSettings["quickTable"]>["goals"]>>(
+    widget.settings?.quickTable?.goals ?? {}
+  );
+  const qtHasGoals = (widget.settings?.quickTable?.columns ?? []).some((c) => c.kind === "goal");
+
   const vt = widget.visual_type;
+  const isTree = vt === "tree";
   const isBar = vt === "barra" || vt === "barra_horizontal";
   const isChart = isBar || vt === "linha";
   const isPie = vt === "pizza" || vt === "funil";
@@ -333,6 +370,26 @@ export function WidgetAppearanceSheet({
         // o objeto — a aparência não pode se perder nem apagar a config).
         ...(isAgenda
           ? { agenda: { ...widget.settings?.agenda, appearance: aap } }
+          : {}),
+        // v2.13: Tabela Livre — exibição/comportamento das metas.
+        ...(vt === "tabela_editavel" && widget.settings?.quickTable
+          ? {
+              quickTable: {
+                ...widget.settings.quickTable,
+                display: qtDisplayOn ? qtDisplay : undefined,
+                goals: Object.keys(qtGoals).length > 0 ? qtGoals : undefined,
+              },
+            }
+          : {}),
+        // v2.12: Tree — exibição e canvas dentro de settings.tree.
+        ...(isTree && widget.settings?.tree
+          ? {
+              tree: {
+                ...widget.settings.tree,
+                presentation: Object.keys(tpres).length > 0 ? tpres : undefined,
+                canvas: Object.keys(tcanvas).length > 0 ? tcanvas : undefined,
+              },
+            }
           : {}),
       },
     };
@@ -628,6 +685,62 @@ export function WidgetAppearanceSheet({
                 onClear={() =>
                   patch({ calculator: { ...ap.calculator, opKeyText: undefined } })
                 }
+              />
+            </BuilderSection>
+          ) : null}
+
+          {/* ---------- Tree (v2.12) ---------- */}
+          {isTree ? (
+            <BuilderSection value="tree" title="Tree">
+              <p className="text-muted-foreground text-xs">
+                Ao apresentar, os cartões mostram só o conteúdo. Marque o que
+                deve continuar aparecendo no modo Apresentar (cada cartão
+                ainda pode forçar o próprio rótulo de tipo no editor dele).
+              </p>
+              {(Object.keys(TREE_PRESENTATION_LABELS) as (keyof TreePresentationSettings)[]).map(
+                (k) => (
+                  <CheckRow
+                    key={k}
+                    label={TREE_PRESENTATION_LABELS[k]}
+                    checked={tpres[k] === true}
+                    onChange={(c) =>
+                      setTpres((prev) => {
+                        const next = { ...prev };
+                        if (c) next[k] = true;
+                        else delete next[k];
+                        return next;
+                      })
+                    }
+                  />
+                )
+              )}
+              <div className="flex flex-col gap-1 pt-2">
+                <Label className="text-xs">Trama do fundo (visualização Root)</Label>
+                <Select
+                  value={tcanvas.pattern ?? "padrao"}
+                  onValueChange={(v) =>
+                    setTcanvas((prev) => ({
+                      ...prev,
+                      pattern: v === "padrao" ? undefined : (v as "pontos" | "linhas" | "nenhum"),
+                    }))
+                  }
+                >
+                  <SelectTrigger className="h-8 text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="padrao">Padrão do estilo</SelectItem>
+                    <SelectItem value="pontos">Pontos</SelectItem>
+                    <SelectItem value="linhas">Quadriculado</SelectItem>
+                    <SelectItem value="nenhum">Liso</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <ColorField
+                label="Cor do fundo (visualização Root)"
+                value={tcanvas.bg}
+                onChange={(v) => setTcanvas((prev) => ({ ...prev, bg: v }))}
+                onClear={() => setTcanvas((prev) => ({ ...prev, bg: undefined }))}
               />
             </BuilderSection>
           ) : null}
@@ -1457,6 +1570,133 @@ export function WidgetAppearanceSheet({
                   arraste a alça ou dê duplo-clique direto na tabela.
                 </p>
               </BuilderSection>
+              {/* v2.13: metas da Tabela Livre. */}
+              {isQuickTable ? (
+                <BuilderSection value="metas" title="Metas">
+                  {!qtHasGoals ? (
+                    <p className="text-muted-foreground text-xs">
+                      Para mostrar metas, em Editar layout configure uma coluna
+                      como “Metas por mês” e ligue as linhas a indicadores (⚙
+                      da linha).
+                    </p>
+                  ) : null}
+                  <CheckRow
+                    label="Visual de tabela de slide (fora do Editar layout)"
+                    checked={qtDisplayOn}
+                    onChange={setQtDisplayOn}
+                  />
+                  {qtDisplayOn ? (
+                    <>
+                      <SelectRow
+                        label="Densidade"
+                        value={qtDisplay.density ?? "padrao"}
+                        onChange={(v) =>
+                          setQtDisplay((d) => ({
+                            ...d,
+                            density: v === "padrao" ? undefined : (v as QuickTableGoalDisplay["density"]),
+                          }))
+                        }
+                        options={[
+                          { value: "padrao", label: "Padrão do estilo" },
+                          { value: "preencher", label: "Preencher o card" },
+                          { value: "confortavel", label: "Confortável" },
+                          { value: "compacta", label: "Compacta" },
+                        ]}
+                      />
+                      <SelectRow
+                        label="Atingimento"
+                        value={qtDisplay.attainmentStyle ?? "padrao"}
+                        onChange={(v) =>
+                          setQtDisplay((d) => ({
+                            ...d,
+                            attainmentStyle:
+                              v === "padrao" ? undefined : (v as QuickTableGoalDisplay["attainmentStyle"]),
+                          }))
+                        }
+                        options={[
+                          { value: "padrao", label: "Padrão do estilo" },
+                          { value: "pilula", label: "Pílula colorida" },
+                          { value: "texto", label: "Texto" },
+                          { value: "barra", label: "Barrinha" },
+                        ]}
+                      />
+                      <SelectRow
+                        label="Mês sem realizado"
+                        value={qtDisplay.emptyRealized ?? "padrao"}
+                        onChange={(v) =>
+                          setQtDisplay((d) => ({
+                            ...d,
+                            emptyRealized:
+                              v === "padrao" ? undefined : (v as QuickTableGoalDisplay["emptyRealized"]),
+                          }))
+                        }
+                        options={[
+                          { value: "padrao", label: "Padrão do estilo" },
+                          { value: "zero", label: "Zero (R$ 0 · 0%)" },
+                          { value: "traco", label: "Traço (—)" },
+                        ]}
+                      />
+                      <SelectRow
+                        label="Unidade"
+                        value={qtDisplay.unitPlacement ?? "padrao"}
+                        onChange={(v) =>
+                          setQtDisplay((d) => ({
+                            ...d,
+                            unitPlacement:
+                              v === "padrao" ? undefined : (v as QuickTableGoalDisplay["unitPlacement"]),
+                          }))
+                        }
+                        options={[
+                          { value: "padrao", label: "Padrão do estilo" },
+                          { value: "celula", label: "Em cada célula" },
+                          { value: "rotulo", label: "Só no rótulo" },
+                        ]}
+                      />
+                      <SelectRow
+                        label="Etiqueta da linha"
+                        value={qtDisplay.levelTags == null ? "padrao" : qtDisplay.levelTags ? "discreta" : "texto"}
+                        onChange={(v) =>
+                          setQtDisplay((d) => ({
+                            ...d,
+                            levelTags: v === "padrao" ? undefined : v === "discreta",
+                          }))
+                        }
+                        options={[
+                          { value: "padrao", label: "Padrão do estilo" },
+                          { value: "discreta", label: "Discreta (à parte)" },
+                          { value: "texto", label: "Como texto do rótulo" },
+                        ]}
+                      />
+                      <div className="flex flex-col gap-1">
+                        <Label className="text-xs">Nota de rodapé</Label>
+                        <Input
+                          className="h-8 text-sm"
+                          value={qtDisplay.note ?? ""}
+                          onChange={(e) =>
+                            setQtDisplay((d) => ({ ...d, note: e.target.value || undefined }))
+                          }
+                          placeholder="Regra de cálculo, donos…"
+                        />
+                      </div>
+                    </>
+                  ) : null}
+                  <CheckRow
+                    label="Mostrar o realizado sob a meta"
+                    checked={qtGoals.showRealized !== false}
+                    onChange={(c) => setQtGoals((g) => ({ ...g, showRealized: c ? undefined : false }))}
+                  />
+                  <CheckRow
+                    label="Mostrar o atingimento"
+                    checked={qtGoals.showAttainment !== false}
+                    onChange={(c) => setQtGoals((g) => ({ ...g, showAttainment: c ? undefined : false }))}
+                  />
+                  <CheckRow
+                    label="Administrador edita a meta na célula"
+                    checked={qtGoals.editable === true}
+                    onChange={(c) => setQtGoals((g) => ({ ...g, editable: c ? true : undefined }))}
+                  />
+                </BuilderSection>
+              ) : null}
             </>
           ) : null}
 

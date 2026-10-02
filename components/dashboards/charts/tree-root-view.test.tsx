@@ -1,5 +1,8 @@
 // @vitest-environment jsdom
-// Versão: 1.2 | Data: 01/10/2026
+// Versão: 1.3 | Data: 02/10/2026
+// v1.3 (02/10/2026): o 1º clique no título SELECIONA e o 2º edita (o
+//   duplo-clique abre o cartão em destaque); o duplo-clique chama
+//   `onOpenFocus`.
 // v1.2 (01/10/2026): clique direito na prévia VAZIA (fora da caixa de texto)
 //   abre o menu de tipo sem salvar nem descartar.
 // v1.1 (01/10/2026): criação e edição DENTRO do canvas — clique direito no
@@ -285,8 +288,11 @@ describe("TreeRootView", () => {
     expect(item).toHaveTextContent(/feed de um registro/);
   });
 
-  it("clicar no TEXTO de uma anotação edita no próprio card", () => {
+  it("clicar no TEXTO de uma anotação selecionada edita no próprio card", () => {
     const props = setup();
+    fireEvent.click(within(tile("note:demo")).getByText("note:demo"));
+    // 1º clique só seleciona.
+    expect(within(tile("note:demo")).queryByRole("textbox")).toBeNull();
     fireEvent.click(within(tile("note:demo")).getByText("note:demo"));
     const box = within(tile("note:demo")).getByRole("textbox");
     fireEvent.change(box, { target: { value: "Demo marcada" } });
@@ -309,6 +315,7 @@ describe("TreeRootView", () => {
       ],
     });
     fireEvent.click(within(tile("comment:c1")).getByText("Liguei"));
+    fireEvent.click(within(tile("comment:c1")).getByText("Liguei"));
     const box = within(tile("comment:c1")).getByRole("textbox");
     expect(box).toHaveValue("Liguei, sem resposta");
     fireEvent.change(box, { target: { value: "Liguei, retornar amanhã" } });
@@ -317,5 +324,12 @@ describe("TreeRootView", () => {
       expect.objectContaining({ id: "comment:c1" }),
       "Liguei, retornar amanhã"
     );
+  });
+
+  it("duplo-clique abre o cartão em destaque", () => {
+    const onOpenFocus = vi.fn();
+    setup({ onOpenFocus });
+    fireEvent.doubleClick(tile("note:demo"));
+    expect(onOpenFocus).toHaveBeenCalledWith(expect.objectContaining({ id: "note:demo" }));
   });
 });
