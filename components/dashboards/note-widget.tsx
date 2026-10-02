@@ -1,4 +1,8 @@
-// Versão: 1.4 | Data: 02/10/2026
+// Versão: 1.5 | Data: 02/10/2026
+// v1.5 (02/10/2026): menu "Formatação" no editor (título, subtítulo, kicker,
+//   lista, negrito, itálico, filete, comentário de autor) — a sintaxe do
+//   markdown leve só era conhecida por quem lia o preset; o botão aplica o
+//   formato na linha/seleção (lib/widgets/note-format.ts) e mostra o atalho.
 // v1.4 (02/10/2026): tamanhos de fonte fixos (10px/11px em classe) trocados
 //   pela escala nomeada text-2xs/text-micro (globals.css); guarda em
 //   tests/no-arbitrary-font-size.test.ts.
@@ -29,7 +33,7 @@
 "use client";
 
 import { useMemo, useRef, useState } from "react";
-import { Check, CircleAlert, Link2, Loader2, SquareSigma, X } from "lucide-react";
+import { Check, CircleAlert, Heading, Link2, Loader2, SquareSigma, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -69,6 +73,7 @@ import {
   type NoteRun,
 } from "@/lib/widgets/note-blocks";
 import { WidgetLinkPicker } from "./widget-link-picker";
+import { applyNoteFormat, NOTE_FORMATS, type NoteFormatKind } from "@/lib/widgets/note-format";
 
 const DEFAULT_NOTE_BG = "#fef9c3"; // amarelo post-it
 
@@ -192,6 +197,27 @@ export function NoteWidget({
     const next = draft.slice(0, pos) + snippet + draft.slice(pos);
     setDraft(next);
     focusDraftAt(pos + (cursorOffset ?? snippet.length));
+  };
+
+  // v1.5: aplica um formato do markdown leve na linha/seleção.
+  const [formatOpen, setFormatOpen] = useState(false);
+  const applyFormat = (kind: NoteFormatKind) => {
+    const ta = taRef.current;
+    const r = applyNoteFormat(
+      draft,
+      ta?.selectionStart ?? draft.length,
+      ta?.selectionEnd ?? draft.length,
+      kind
+    );
+    setDraft(r.text);
+    setFormatOpen(false);
+    requestAnimationFrame(() => {
+      const el = taRef.current;
+      if (!el) return;
+      el.focus();
+      el.setSelectionRange(r.selStart, r.selEnd);
+      setCursor(r.selEnd);
+    });
   };
 
   // Insere o link: usa o texto selecionado como rótulo; senão um placeholder.
@@ -369,6 +395,33 @@ export function NoteWidget({
           >
             <SquareSigma className="size-3.5" /> Cálculo
           </Button>
+          <Popover open={formatOpen} onOpenChange={setFormatOpen}>
+            <PopoverTrigger asChild>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-7 px-2 text-xs"
+                title="Títulos, listas, negrito, filete e comentário de autor"
+              >
+                <Heading className="size-3.5" /> Formatação
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-72 p-1" align="start">
+              {NOTE_FORMATS.map((f) => (
+                <button
+                  key={f.kind}
+                  type="button"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => applyFormat(f.kind)}
+                  className="hover:bg-accent flex w-full items-center justify-between gap-2 rounded-sm px-2 py-1 text-left text-sm"
+                >
+                  <span>{f.label}</span>
+                  <code className="text-muted-foreground text-xs">{f.hint}</code>
+                </button>
+              ))}
+            </PopoverContent>
+          </Popover>
           <Popover open={linkOpen} onOpenChange={setLinkOpen}>
             <PopoverTrigger asChild>
               <Button

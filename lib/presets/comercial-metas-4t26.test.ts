@@ -194,6 +194,21 @@ describe("slides ocupam a tela e já vêm no período certo (v1.1)", () => {
   it("grade fina, linha quadrada e barra de período desligada", () => {
     expect(METAS_4T26_PRESET.settings?.canvas).toEqual({ gridVersion: 2 });
     expect(METAS_4T26_PRESET.settings?.periodBar?.enabled).toBe(false);
+    // v1.4: barra oculta APLICA o padrão — tem de ser "todo o período", senão
+    // vira AND com os recortes fixos dos widgets (o Destaque ficava vazio).
+    expect(METAS_4T26_PRESET.settings?.periodBar?.defaultPreset).toBe("all");
+  });
+
+  it("v1.4: vendedores com a grafia exata dos responsáveis cadastrados", () => {
+    // Mesma grafia do preset Remuneração Variável (base viva).
+    const live = new Set([
+      "Gabriella Salles",
+      "Daniela Drielsma",
+      "Paulo Vitor Santos",
+      "Marcus Barcelos",
+      "Marcos Hernandes",
+    ]);
+    for (const name of Object.keys(METAS_4T26_SELLERS)) expect(live.has(name)).toBe(true);
   });
 
   it("cada slide cobre a largura toda, sem sobreposição", () => {

@@ -1,5 +1,11 @@
 "use client";
-// Versão: 1.1 | Data: 02/10/2026
+// Versão: 1.2 | Data: 02/10/2026
+// v1.2 (02/10/2026): o que só o preset sabia configurar ganhou controle aqui —
+//   (a) TODAS as abas listadas, com "Incluir na apresentação"
+//   (presentation.hiddenTabs) e "Fundo da aba" (tabs[].background, a capa
+//   escura); (b) cores de papel/superfície/tinta do estilo (style.overrides —
+//   antes o save as APAGAVA quando vinham do JSON); (c) data fixa do topo do
+//   slide (slide.date); (d) a headline aceita {= … } para números vivos.
 // v1.1 (02/10/2026): seção "Esqueleto de slide" — rótulo da seção, rodapé,
 //   data, nº do slide e o título-conclusão/kicker por aba-slide (tabs preservam
 //   id/nome/cor/fundo).
@@ -49,6 +55,8 @@ import { updateDashboardSettings } from "@/app/(app)/dashboards/actions";
 const INHERIT = "__org__";
 const AUTO = "__auto__";
 
+const HEX = /^#[0-9a-f]{6}$/i;
+
 export function DashboardStyleSheet({
   open,
   onOpenChange,
@@ -85,8 +93,26 @@ export function DashboardStyleSheet({
   const [slideFooter, setSlideFooter] = useState(settings.slide?.footer ?? "");
   const [slideDate, setSlideDate] = useState(settings.slide?.showDate === true);
   const [slideNumber, setSlideNumber] = useState(settings.slide?.showNumber === true);
-  const hidden = new Set(settings.presentation?.hiddenTabs ?? []);
-  const slideTabs = (settings.tabs ?? []).filter((t) => !hidden.has(t.id));
+  // v1.2: data fixa do topo (vazio = hoje).
+  const [slideDateFixed, setSlideDateFixed] = useState(settings.slide?.date ?? "");
+  // v1.2: cores do estilo (vazio = a do estilo).
+  const [page, setPage] = useState(current?.overrides?.page ?? "");
+  const [surface, setSurface] = useState(current?.overrides?.surface ?? "");
+  const [ink, setInk] = useState(current?.overrides?.ink ?? "");
+  // v1.2: abas fora da apresentação e fundo próprio por aba.
+  const [hiddenTabs, setHiddenTabs] = useState<Set<string>>(
+    () => new Set(settings.presentation?.hiddenTabs ?? [])
+  );
+  const [tabBg, setTabBg] = useState<Record<string, string>>(() =>
+    Object.fromEntries(
+      (settings.tabs ?? []).flatMap((t) =>
+        t.background?.mode === "solid" && t.background.color
+          ? [[t.id, t.background.color]]
+          : []
+      )
+    )
+  );
+  const allTabs = settings.tabs ?? [];
   const [tabText, setTabText] = useState<
     Record<string, { headline: string; kicker: string; noFrame: boolean }>
   >(() =>
@@ -111,6 +137,10 @@ export function DashboardStyleSheet({
       if (effective.colors && /^#[0-9a-f]{6}$/i.test(accent)) {
         overrides.accent = accent.toLowerCase();
       }
+      // v1.2: papel/superfície/tinta — antes o save as descartava.
+      if (effective.colors && HEX.test(page)) overrides.page = page.toLowerCase();
+      if (effective.colors && HEX.test(surface)) overrides.surface = surface.toLowerCase();
+      if (effective.colors && HEX.test(ink)) overrides.ink = ink.toLowerCase();
       if (isDashboardFontKey(fontDisplay)) overrides.fontDisplay = fontDisplay;
       if (isDashboardFontKey(fontBody)) overrides.fontBody = fontBody;
       style = {
@@ -118,8 +148,10 @@ export function DashboardStyleSheet({
         ...(Object.keys(overrides).length > 0 ? { overrides } : {}),
       };
     }
+    const hiddenList = allTabs.map((t) => t.id).filter((id) => hiddenTabs.has(id));
     const presentation: DashboardSettings["presentation"] = {
       ...settings.presentation,
+      hiddenTabs: hiddenList.length > 0 ? hiddenList : undefined,
       fit: fit === "palco" || fit === "altura" ? fit : undefined,
       transition:
         transition === "suave" || transition === "nenhuma"
@@ -131,16 +163,27 @@ export function DashboardStyleSheet({
       ...(slideFooter.trim() ? { footer: slideFooter.trim() } : {}),
       ...(slideDate ? { showDate: true } : {}),
       ...(slideNumber ? { showNumber: true } : {}),
+      ...(/^\d{4}-\d{2}-\d{2}$/.test(slideDateFixed) ? { date: slideDateFixed } : {}),
     };
-    // Abas: só headline/kicker mudam — id, nome, cor e fundo são preservados.
+    // Abas: headline/kicker/esqueleto e (v1.2) fundo mudam — id, nome e cor
+    // são preservados. Fundo em gradiente vindo do JSON segue intocado
+    // enquanto a cor sólida não é editada aqui.
     const tabsNext = settings.tabs?.map((t) => {
       const txt = tabText[t.id];
-      const { headline: _h, kicker: _k, frame: _f, ...rest } = t;
+      const { headline: _h, kicker: _k, frame: _f, background: bg, ...rest } = t;
       void _h;
       void _k;
       void _f;
+      const solid = tabBg[t.id];
+      const background =
+        solid && HEX.test(solid)
+          ? { mode: "solid" as const, color: solid.toLowerCase() }
+          : bg?.mode === "gradient"
+            ? bg
+            : undefined;
       return {
         ...rest,
+        ...(background ? { background } : {}),
         ...(txt?.headline.trim() ? { headline: txt.headline.trim() } : {}),
         ...(txt?.kicker.trim() ? { kicker: txt.kicker.trim() } : {}),
         ...(txt?.noFrame ? { frame: false } : {}),
@@ -213,6 +256,25 @@ export function DashboardStyleSheet({
                 value={fontBody}
                 onChange={setFontBody}
                 fallback={effective.fonts.body}
+              />
+              {/* v1.2: papel, superfície e tinta (vazio = do estilo). */}
+              <ColorField
+                label="Papel (fundo da página)"
+                value={page || effective.colors.page}
+                onChange={setPage}
+                onClear={page ? () => setPage("") : undefined}
+              />
+              <ColorField
+                label="Superfície (blocos)"
+                value={surface || effective.colors.surface}
+                onChange={setSurface}
+                onClear={surface ? () => setSurface("") : undefined}
+              />
+              <ColorField
+                label="Tinta (texto)"
+                value={ink || effective.colors.ink}
+                onChange={setInk}
+                onClear={ink ? () => setInk("") : undefined}
               />
               {accent ? (
                 <button
@@ -298,14 +360,60 @@ export function DashboardStyleSheet({
               />
               Número do slide no rodapé
             </label>
-            {slideTabs.length > 0 ? (
+            {slideDate ? (
+              <label className="flex flex-col gap-1 text-xs">
+                <span className="text-muted-foreground">
+                  Data exibida (vazio = o dia em que se apresenta)
+                </span>
+                <input
+                  type="date"
+                  value={slideDateFixed}
+                  onChange={(e) => setSlideDateFixed(e.target.value)}
+                  className="border-input h-8 w-44 rounded-md border bg-transparent px-2 text-xs outline-none"
+                  aria-label="Data exibida no topo do slide"
+                />
+              </label>
+            ) : null}
+            {allTabs.length > 0 ? (
               <div className="flex flex-col gap-2">
                 <span className="text-muted-foreground text-xs">
-                  Título-conclusão por aba (a frase que o slide defende)
+                  Por aba: se entra na apresentação, o título-conclusão (a frase
+                  que o slide defende) e o fundo. No título, {"{= … }"} traz um
+                  número vivo — as mesmas expressões da Nota (ex.:{" "}
+                  {"{= [Meta: MRR novo] }"}).
                 </span>
-                {slideTabs.map((t) => (
+                {allTabs.map((t) => (
                   <div key={t.id} className="flex flex-col gap-1 rounded-md border p-2">
                     <span className="text-xs font-medium">{t.name}</span>
+                    <label className="flex items-center gap-2 text-xs">
+                      <Checkbox
+                        checked={!hiddenTabs.has(t.id)}
+                        onCheckedChange={(v) =>
+                          setHiddenTabs((prev) => {
+                            const next = new Set(prev);
+                            if (v === true) next.delete(t.id);
+                            else next.add(t.id);
+                            return next;
+                          })
+                        }
+                      />
+                      Incluir na apresentação (desmarcada = aba de trabalho)
+                    </label>
+                    <ColorField
+                      label="Fundo da aba"
+                      value={tabBg[t.id] ?? ""}
+                      onChange={(v) => setTabBg((prev) => ({ ...prev, [t.id]: v }))}
+                      onClear={
+                        tabBg[t.id]
+                          ? () =>
+                              setTabBg((prev) => {
+                                const next = { ...prev };
+                                delete next[t.id];
+                                return next;
+                              })
+                          : undefined
+                      }
+                    />
                     <input
                       type="text"
                       maxLength={140}

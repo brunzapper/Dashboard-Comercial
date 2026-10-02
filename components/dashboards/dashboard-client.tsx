@@ -1,4 +1,10 @@
-// Versão: 3.7 | Data: 02/10/2026
+// Versão: 3.8 | Data: 02/10/2026
+// v3.8 (02/10/2026): (a) o fundo PRÓPRIO da aba vale também fora da
+//   apresentação (innerSurfaceCss) — a capa escura ficava com o texto claro
+//   sobre o papel do board; (b) "Exportar PDF" pelo menu ⋮: o MESMO caminho do
+//   Apresentar (tela cheia, fit, pré-render) com a intenção "export" — imprime
+//   ao ficar pronto e sai no fim da impressão, sem barra; (c) textos do
+//   esqueleto de slide com {=…} chegam resolvidos da page (slideTextById).
 // v3.7 (02/10/2026): ESQUELETO DE SLIDE (SlideFrame: kicker/data no topo,
 //   headline, rodapé com fonte e nº — o grid recebe a altura que sobra; fora da
 //   apresentação, kicker + headline acima do grid), AVISO DE TRANSBORDO no modo
@@ -202,7 +208,7 @@ import { AiEditPanel, type AiEditPanelHandle } from "./ai-edit-panel";
 import type { SnapshotPeriodCapture } from "./snapshots-panel";
 import { DashboardTabs } from "./dashboard-tabs";
 import { cn } from "@/lib/utils";
-import { PresentationBar, usePresentationMode } from "./presentation-mode";
+import { PresentationBar, printSlides, usePresentationMode } from "./presentation-mode";
 import {
   STAGE_H,
   STAGE_PAD_X,
@@ -313,6 +319,7 @@ export function DashboardClient({
   focusWidgetId,
   laserColor,
   orgStyleKey = null,
+  slideTextById,
 }: {
   previewCapture?: { scope: string };
   dashboardId: string;
@@ -398,6 +405,8 @@ export function DashboardClient({
   laserColor?: string;
   // v3.6: estilo padrão dos dashboards da org (null = Clássico).
   orgStyleKey?: string | null;
+  /** v3.8: headline/kicker com {=…} já resolvidos, por aba (page). */
+  slideTextById?: Record<string, { headline?: string; kicker?: string }>;
 }) {
   const [editMode, setEditMode] = useState(false);
   // Modo "Conectar" (criar linhas entre widgets); só faz sentido em editMode.
@@ -1128,6 +1137,9 @@ export function DashboardClient({
   // v3.5: em duas fases — "warming" (slides montando atrás da espera) e "on".
   const [presentPhase, setPresentPhase] = useState<"off" | "warming" | "on">("off");
   const presenting = presentPhase !== "off";
+  // v3.8: o modo foi aberto para EXPORTAR o PDF (menu ⋮) — mesmo caminho,
+  // sem barra, imprime ao ficar pronto e sai no fim da impressão.
+  const [exportIntent, setExportIntent] = useState(false);
   const presentRef = useRef<HTMLDivElement | null>(null);
   const slideIds = useMemo(
     () => slideTabIds(tabs, settings.presentation?.hiddenTabs),
@@ -1188,10 +1200,29 @@ export function DashboardClient({
   const stopPresenting = useCallback(() => {
     warmingRef.current = false;
     setPresentPhase("off");
+    setExportIntent(false);
     setLaserMode(false);
   }, []);
+  const exportPdf = () => {
+    setExportIntent(true);
+    startPresenting();
+  };
+  // v3.8: pronto com a intenção de exportar ⇒ imprime (depois de dois quadros,
+  // para o layout do último slide assentar) e sai quando a impressão termina.
+  useEffect(() => {
+    if (presentPhase !== "on" || !exportIntent) return;
+    let raf2 = 0;
+    const raf1 = window.requestAnimationFrame(() => {
+      raf2 = window.requestAnimationFrame(() => printSlides(stopPresenting));
+    });
+    return () => {
+      window.cancelAnimationFrame(raf1);
+      window.cancelAnimationFrame(raf2);
+    };
+  }, [presentPhase, exportIntent, stopPresenting]);
   usePresentationMode({
     active: presenting,
+    keepOnFullscreenExit: exportIntent,
     ready: presentPhase === "on",
     slideIds,
     currentId: activeTabId,
@@ -1312,6 +1343,13 @@ export function DashboardClient({
   const tabBgCss = (id: string) =>
     dashboardBackgroundCss(tabs.find((t) => t.id === id)?.background);
   const currentTabBg = presenting ? tabBgCss(activeTabId) : undefined;
+  // v3.8: fora da apresentação, o fundo da aba vence o do board no contêiner
+  // interno (o que se edita é o que se apresenta). Apresentando, o fundo da
+  // aba já vai no contêiner da tela (ou no quadro do palco).
+  const activeTabBg = dashboardBackgroundCss(
+    tabs.find((t) => t.id === activeTabId)?.background
+  );
+  const innerBg = !presenting && activeTabBg ? activeTabBg : backgroundCss;
   const presentFitHeight = stage
     ? STAGE_H - 2 * STAGE_PAD_Y
     : presenting && viewportH > 0
@@ -1319,12 +1357,15 @@ export function DashboardClient({
       : null;
   // Fundo interno em caixa (rounded p-3): no palco o fundo vai no próprio
   // quadro do slide — a caixa ficaria fora do transform.
-  const innerBox = !!backgroundCss && !stage;
+  const innerBox = !!innerBg && !stage;
   // v3.7: esqueleto de slide por aba (só nas abas que são slides).
-  const frameOf = (tabId: string) =>
-    slideIds.includes(tabId)
-      ? slideFrameContent(settings.slide, tabs.find((t) => t.id === tabId))
-      : null;
+  const frameOf = (tabId: string) => {
+    if (!slideIds.includes(tabId)) return null;
+    const tab = tabs.find((t) => t.id === tabId);
+    // v3.8: {=…} da headline/kicker resolvidos pela page.
+    const resolved = slideTextById?.[tabId];
+    return slideFrameContent(settings.slide, tab && resolved ? { ...tab, ...resolved } : tab);
+  };
   const activeFrame = frameOf(activeTabId);
   // v3.7: aviso de TRANSBORDO (só editando um board que apresenta em palco):
   // a aba não cabe nem com o piso do ajuste — no slide, o fim seria cortado.
@@ -1525,6 +1566,7 @@ export function DashboardClient({
               settings={settings}
               snapshotPeriod={snapshotPeriod}
               onPresent={startPresenting}
+              onExportPdf={exportPdf}
               orgStyleKey={orgStyleKey}
             />
           </div>
@@ -1535,6 +1577,7 @@ export function DashboardClient({
             settings={settings}
             snapshotPeriod={snapshotPeriod}
             onPresent={startPresenting}
+            onExportPdf={exportPdf}
             canEdit={false}
           />
         )}
@@ -1616,7 +1659,7 @@ export function DashboardClient({
 
         <div
           className={innerBox ? "rounded-lg p-3" : undefined}
-          style={innerBox ? { background: backgroundCss } : undefined}
+          style={innerBox ? { background: innerBg } : undefined}
         >
           <DashboardStyleProvider value={boardStyle}>
           <PresentingProvider value={presenting}>
@@ -1654,7 +1697,7 @@ export function DashboardClient({
                       // ser o atual (o seletor volta a casar e a animação
                       // reinicia; ver [data-slide-enter] em globals.css).
                       data-slide-enter={
-                        current && presentPhase === "on" && pres.transition === "suave"
+                        current && presentPhase === "on" && !exportIntent && pres.transition === "suave"
                           ? ""
                           : undefined
                       }
@@ -1735,7 +1778,7 @@ export function DashboardClient({
           onCancel={stopPresenting}
         />
       ) : null}
-      {presentPhase === "on" ? (
+      {presentPhase === "on" && !exportIntent ? (
         <PresentationBar
           slideIds={slideIds}
           currentId={activeTabId}

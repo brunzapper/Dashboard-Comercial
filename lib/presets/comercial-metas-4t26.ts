@@ -186,12 +186,16 @@ const TARGETS: Record<string, readonly [number, number, number]> = {
   conv_reuniao_venda: [8, 8, 12],
 };
 
-/** Compromissos individuais (MRR novo por vendedor). */
+/** Compromissos individuais (MRR novo por vendedor).
+ * v1.4: nomes COMPLETOS, a grafia exata dos responsáveis cadastrados (a mesma
+ * do preset Remuneração Variável) — "Gabriella", "Paulo Vitor" e "Marcus
+ * Vinicius" não casavam com ninguém: as metas eram puladas no apply e as
+ * linhas da tabela ficavam "Responsável não encontrado". */
 export const METAS_4T26_SELLERS: Record<string, readonly [number, number, number]> = {
-  Gabriella: [15000, 15500, 16000],
-  "Paulo Vitor": [10000, 12500, 15000],
-  Daniela: [6000, 7000, 8000],
-  "Marcus Vinicius": [2000, 2500, 3000],
+  "Gabriella Salles": [15000, 15500, 16000],
+  "Paulo Vitor Santos": [10000, 12500, 15000],
+  "Daniela Drielsma": [6000, 7000, 8000],
+  "Marcus Barcelos": [2000, 2500, 3000],
   "Marcos Hernandes": [2000, 2500, 3000],
 };
 
@@ -759,8 +763,11 @@ export const METAS_4T26_PRESET: PresetDashboard = {
   settings: {
     tabs: TABS,
     // v1.1: barra DESLIGADA — os quadros têm meses fixos (out–dez/2026), então
-    // toda aba já abre no período certo; o padrão fica para widget novo.
-    periodBar: { enabled: false, defaultPreset: "este_trimestre", scope: "global" },
+    // toda aba já abre no período certo.
+    // v1.4: o padrão é "todo o período". Com a barra oculta o resolver APLICA
+    // o padrão (lib/widgets/period-resolve.ts) — "este_trimestre" virava AND
+    // com os filtros de 2026 do slide Destaque e o deixava vazio (01–02/10).
+    periodBar: { enabled: false, defaultPreset: "all", scope: "global" },
     // v1.1: grade fina com linha quadrada (proporção de slide).
     canvas: { gridVersion: 2 },
     // v1.2: palco 16:9 com entrada suave; a aba de lançamentos é trabalho.
