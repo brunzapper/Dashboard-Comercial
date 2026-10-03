@@ -1,4 +1,7 @@
-// Versão: 2.1 | Data: 03/10/2026
+// Versão: 2.2 | Data: 03/10/2026
+//
+// v2.2 (03/10/2026): o nome do board ganha tooltip com o nome inteiro quando
+// está cortado (OverflowTooltip — o modo prévia limita o título a 2 linhas).
 // Cards do hub Workspace e do painel de Operação — servem às duas telas sem
 // uma segunda régua.
 //
@@ -54,6 +57,7 @@ import {
   type BoardStatus,
 } from "@/components/dashboards/board-card-menu";
 import { CardGrid } from "@/components/ui/card-grid";
+import { OverflowTooltip } from "@/components/ui/overflow-tooltip";
 import { PinButton } from "./pin-button";
 import { useHubDisplay } from "./hub-display-context";
 import { DashboardPreview, type PreviewImage } from "./dashboard-preview";
@@ -137,11 +141,17 @@ export function BoardCard({
           ) : null}
           {trashed ? (
             // Na Lixeira o board NÃO abre: título sem link (rotas dão 404).
-            <span className="text-muted-foreground">{row.name}</span>
+            <OverflowTooltip text={row.name}>
+              <span className="text-muted-foreground">{row.name}</span>
+            </OverflowTooltip>
           ) : (
-            <Link href={href} className="hover:underline">
-              {row.name}
-            </Link>
+            // v2.2: nome cortado (line-clamp do modo prévia) mostra o nome
+            // inteiro ao passar o mouse — só quando de fato não cabe.
+            <OverflowTooltip text={row.name}>
+              <Link href={href} className="hover:underline">
+                {row.name}
+              </Link>
+            </OverflowTooltip>
           )}
         </CardTitle>
         {description ? <CardDescription>{description}</CardDescription> : null}
