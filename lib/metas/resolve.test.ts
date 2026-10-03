@@ -1,4 +1,6 @@
-// Versão: 1.0 | Data: 31/07/2026
+// Versão: 1.1 | Data: 03/10/2026
+// v1.1 (03/10/2026): memo de leitura por cliente (resolve.ts v1.2) — uma
+//   consulta por (ano, métrica) e invalidação após gravar.
 // Testes da resolução de metas (antes sem cobertura): goalPeriodScope
 // (byte-idêntico à regra histórica do KPI modo meta), resolveGoal
 // (explicit-first + roll-up operação/global; ausência ⇒ null; Number() do
@@ -10,6 +12,7 @@ import { fakeSupabase, type RecordedQuery } from "@/tests/helpers/fake-supabase"
 
 import {
   goalPeriodScope,
+  invalidateGoalCache,
   resolveGoal,
   resolveGoalOperandValues,
 } from "./resolve";
@@ -174,5 +177,33 @@ describe("resolveGoalOperandValues", () => {
     expect(values.mrr).toBe(50000);
     expect(values.boom).toBeNull();
     expect(values.sumida).toBeNull();
+  });
+});
+
+describe("memo de leitura por cliente (v1.2, 03/10/2026)", () => {
+  const ROWS: GoalRow[] = [
+    { period_year: 2026, period_month: 7, scope: "global", metric: "mrr", operation_id: null, responsible_id: null, target: "100" },
+    { period_year: 2026, period_month: 8, scope: "global", metric: "mrr", operation_id: null, responsible_id: null, target: "200" },
+  ];
+
+  it("vários meses da mesma métrica = UMA consulta por cliente", async () => {
+    const fake = fakeSupabase({ tables: { goals: goalsHandler(ROWS) } });
+    const jul = await resolveGoal(fake.db, { scope: "global", year: 2026, month: 7, metric: "mrr" });
+    const ago = await resolveGoal(fake.db, { scope: "global", year: 2026, month: 8, metric: "mrr" });
+    const set = await resolveGoal(fake.db, { scope: "global", year: 2026, month: 9, metric: "mrr" });
+    expect(jul.target).toBe(100);
+    expect(ago.target).toBe(200);
+    expect(set).toEqual({ target: null, source: "none" });
+    expect(fake.queries.filter((q) => q.table === "goals")).toHaveLength(1);
+  });
+
+  it("invalidateGoalCache força a releitura (gravou ⇒ não lê velho)", async () => {
+    const rows = [...ROWS];
+    const fake = fakeSupabase({ tables: { goals: goalsHandler(rows) } });
+    await resolveGoal(fake.db, { scope: "global", year: 2026, month: 7, metric: "mrr" });
+    rows[0] = { ...rows[0], target: "150" };
+    invalidateGoalCache(fake.db);
+    const again = await resolveGoal(fake.db, { scope: "global", year: 2026, month: 7, metric: "mrr" });
+    expect(again.target).toBe(150);
   });
 });

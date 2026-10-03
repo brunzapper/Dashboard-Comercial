@@ -1,4 +1,12 @@
-// Versão: 1.2 | Data: 10/09/2026
+// Versão: 1.3 | Data: 03/10/2026
+// v1.3 (03/10/2026): redução de LOG INGESTION do Supabase sem mudar o que o
+//   tick faz. (a) O estado ocioso (takeover de job preso, job em andamento,
+//   último reconcile automático, filas pendentes) sai de UMA RPC
+//   (`loadSyncTickState`, 0151) e os drenos só consultam a fila que tem
+//   pendência. (b) A varredura da antecedência do espelho fica atrás do
+//   PORTÃO DE MUDANÇA (lib/ticks/gate.ts): a decisão é por dia e pelos dados,
+//   então minuto sem mudança e sem virada de dia não tem o que enfileirar.
+//   A leitura de volta das atividades segue a CADA minuto (o portal é externo).
 // v1.2 (10/09/2026): a varredura da ANTECEDÊNCIA do espelho e a conciliação
 //   das TAREFAS espelhadas com o Bitrix a cada minuto
 //   (0137, sem a timeline). Antes isso só existia como gancho pós-job — e o
@@ -26,14 +34,17 @@ import { createServiceClient } from "@/lib/supabase/service";
 import {
   createJob,
   driveJob,
-  getRunningJob,
-  lastAutoReconcileAt,
-  takeoverStale,
+  loadSyncTickState,
 } from "@/lib/sync/bitrix/runner";
+import {
+  beginTickGate,
+  commitTickGate,
+  TICK_GATE_KEYS,
+} from "@/lib/ticks/gate";
 import { drainWritebackQueue } from "@/lib/sync/bitrix/writeback";
 import {
   drainTaskMirrorQueue,
-  enqueueDueTaskMirrors,
+  sweepDueTaskMirrors,
 } from "@/lib/sync/bitrix/task-mirror";
 import { syncBitrixActivitiesInbound } from "@/lib/sync/bitrix/activity-inbound";
 
@@ -65,21 +76,36 @@ export async function POST(request: Request) {
     const deadline = Date.now() + BUDGET_MS;
     const db = createServiceClient();
 
-    // Libera jobs "presos" (chamador morreu) para a guarda de concorrência.
-    const staled = await takeoverStale(db);
+    // Libera jobs "presos" (chamador morreu) para a guarda de concorrência e
+    // lê o resto do estado ocioso — v1.3: uma ida ao banco.
+    const state = await loadSyncTickState(db);
+    const staled = state.staled;
 
     // 1) Write-back pendente.
-    const writeback = await drainWritebackQueue(db, deadline);
+    const writeback = state.writebackPending
+      ? await drainWritebackQueue(db, deadline)
+      : { done: 0, errors: 0 };
 
     // 1a2) Ocorrências de série cujo vencimento entrou na janela de
     // antecedência da regra viram ordem de criação AGORA. Antes do dreno de
-    // propósito: enfileira e envia no mesmo minuto.
-    const mirrorsQueued = await enqueueDueTaskMirrors(db);
+    // propósito: enfileira e envia no mesmo minuto. v1.3: atrás do portão de
+    // mudança (só roda se algum dado mudou ou o dia virou).
+    let mirrorsQueued = 0;
+    const mirrorGate = await beginTickGate(db, TICK_GATE_KEYS.mirrorSweep);
+    if (mirrorGate.run) {
+      const sweep = await sweepDueTaskMirrors(db);
+      mirrorsQueued = sweep.queued;
+      if (sweep.complete) await commitTickGate(db, mirrorGate);
+    }
 
     // 1b) Espelho de tarefas no Bitrix (0136). DEPOIS do write-back de
     // propósito: aquele carrega edição de dado do usuário e tem prioridade
     // sobre um efeito colateral. Os dois dividem o mesmo orçamento de tempo.
-    const taskMirror = await drainTaskMirrorQueue(db, deadline);
+    // v1.3: a varredura acima pode ter acabado de enfileirar.
+    const taskMirror =
+      state.taskMirrorPending || mirrorsQueued > 0
+        ? await drainTaskMirrorQueue(db, deadline)
+        : { done: 0, errors: 0 };
 
     // 1c) Leitura de volta das TAREFAS (0137), sem a timeline. Concluir uma
     // atividade não mexe no DATE_MODIFY do negócio, então o job nunca traz esse
@@ -98,13 +124,15 @@ export async function POST(request: Request) {
     // 2) Job ativo (manual OU automático) — avança de onde parou.
     let drove: string | null = null;
     let createdAuto = false;
-    const running = await getRunningJob(db);
+    const running = state.running;
     if (running) {
       const p = await driveJob(db, running.jobId, deadline);
       drove = p.status;
     } else if (Date.now() < deadline) {
       // 3) Sem job rodando: cria um reconcile automático se passou ≥ 1h.
-      const last = await lastAutoReconcileAt(db);
+      // (createJob mantém a guarda de concorrência: um job manual criado
+      // durante este tick é devolvido em vez de duplicado.)
+      const last = state.lastAutoReconcileAt;
       if (last == null || Date.now() - last >= AUTO_INTERVAL_MS) {
         const { jobId } = await createJob(db, "reconcile", autoWindowDays(), "auto", null);
         createdAuto = true;

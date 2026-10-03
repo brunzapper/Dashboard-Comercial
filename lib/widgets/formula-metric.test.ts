@@ -1,3 +1,5 @@
+// Versão: 1.3 | Data: 03/10/2026 (v1.3: dublês de `goals` no formato da
+// leitura memoizada de lib/metas/resolve.ts v1.2 — lista por ano×métrica)
 // Versão: 1.2 | Data: 28/09/2026 (v1.2: filterAlternatives — basis dobrada
 // por alternativa disjunta; divisão sai Σ/Σ; perna nula anula a chave)
 // Versão: 1.1 | Data: 01/08/2026 (v1.1: perna escopada VAZIA no modo moeda
@@ -172,23 +174,22 @@ describe("operando de META (meta:<chave>)", () => {
       tables: {
         goals: (q) => {
           // Escopo GLOBAL mensal: period_year 2026 / period_month 3 (o período
-          // 01–31/03 cabe num mês — regra extraída do card).
+          // 01–31/03 cabe num mês — regra extraída do card). Uma linha de
+          // OUTRO mês prova que a resolução recorta pelo mês certo.
           const eqs = Object.fromEntries(
             q.steps
               .filter((s) => s.method === "eq")
               .map((s) => [s.args[0], s.args[1]])
           );
-          const single = q.steps.some((s) => s.method === "maybeSingle");
-          if (
-            single &&
-            eqs.period_year === 2026 &&
-            eqs.period_month === 3 &&
-            eqs.scope === "global" &&
-            eqs.metric === "mrr"
-          ) {
-            return { data: { target: "50000" }, error: null };
-          }
-          return { data: single ? null : [], error: null };
+          if (eqs.period_year !== 2026 || eqs.metric !== "mrr")
+            return { data: [], error: null };
+          return {
+            data: [
+              { period_month: 3, scope: "global", operation_id: null, responsible_id: null, target: "50000" },
+              { period_month: 4, scope: "global", operation_id: null, responsible_id: null, target: "1" },
+            ],
+            error: null,
+          };
         },
       },
     });
@@ -214,10 +215,7 @@ describe("operando de META (meta:<chave>)", () => {
         run_widget_query: () => ({ data: [{ metric_1: 40000 }], error: null }),
       },
       tables: {
-        goals: (q) => ({
-          data: q.steps.some((s) => s.method === "maybeSingle") ? null : [],
-          error: null,
-        }),
+        goals: () => ({ data: [], error: null }),
       },
     });
     const out = await runCalculatedWidget(semMeta.db, {
@@ -254,10 +252,12 @@ describe("operando de META (meta:<chave>)", () => {
   it("fórmula SÓ de meta vira const puro — zero RPCs de widget", async () => {
     const { db, rpcCalls } = fakeSupabase({
       tables: {
-        goals: (q) => {
-          const single = q.steps.some((s) => s.method === "maybeSingle");
-          return { data: single ? { target: "1234" } : [], error: null };
-        },
+        goals: () => ({
+          data: [
+            { period_month: 3, scope: "global", operation_id: null, responsible_id: null, target: "1234" },
+          ],
+          error: null,
+        }),
       },
     });
     const out = await runCalculatedWidget(db, {

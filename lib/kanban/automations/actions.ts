@@ -1,4 +1,7 @@
-// Versão: 1.5 | Data: 12/09/2026
+// Versão: 1.6 | Data: 03/10/2026
+// v1.6 (03/10/2026): "Última execução" considera a VERIFICAÇÃO do tick
+//   (`tick_gates.checked_at`, 0151) — com o portão de mudança o `last_run_at`
+//   só anda quando houve rodada de fato; a tela segue mostrando "há 1 min".
 // v1.5 (12/09/2026): `dateFields` no catálogo — o editor precisa saber quais
 //   refs são data para oferecer um seletor de data e falar "antes de"/"depois
 //   de". Molde dos `booleanFields`/`numericFields` que já estavam aqui.
@@ -35,6 +38,11 @@ import { isSettingsAreaDenied } from "@/lib/auth/access";
 import { getActiveOrgId } from "@/lib/auth/org";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
+import {
+  loadTickCheckedAt,
+  TICK_GATE_KEYS,
+  withTickCheck,
+} from "@/lib/ticks/gate";
 import type { FieldDefinition } from "@/lib/records/types";
 import { isCoreDef } from "@/lib/records/core-defs";
 import { EDITABLE_CORE_COLUMNS } from "@/lib/config/core-writeback";
@@ -105,20 +113,30 @@ export async function listAutomations(
     .order("position", { ascending: true })
     .order("created_at", { ascending: true });
   if (error) return { ok: false, message: error.message };
+  // v1.6: tick_gates é service-role-only (sem policies) — só o instante.
+  const checkedAt = await loadTickCheckedAt(
+    createServiceClient(),
+    TICK_GATE_KEYS.kanbanAutomations
+  );
   const rows: AutomationRow[] = [];
   for (const r of data ?? []) {
     const rule = parseAutomationRule(r.rule);
     if (!rule) continue; // linha corrompida fora da lista (não deve ocorrer)
-    rows.push({
-      id: r.id as string,
-      name: (r.name as string) ?? "",
-      enabled: Boolean(r.enabled),
-      position: (r.position as number) ?? 0,
-      rule,
-      last_run_at: (r.last_run_at as string) ?? null,
-      last_error: (r.last_error as string) ?? null,
-      last_moved_count: (r.last_moved_count as number) ?? 0,
-    });
+    rows.push(
+      withTickCheck(
+        {
+          id: r.id as string,
+          name: (r.name as string) ?? "",
+          enabled: Boolean(r.enabled),
+          position: (r.position as number) ?? 0,
+          rule,
+          last_run_at: (r.last_run_at as string) ?? null,
+          last_error: (r.last_error as string) ?? null,
+          last_moved_count: (r.last_moved_count as number) ?? 0,
+        },
+        checkedAt
+      )
+    );
   }
   return { ok: true, rows };
 }

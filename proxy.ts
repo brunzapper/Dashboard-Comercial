@@ -1,4 +1,12 @@
-// Versão: 1.1 | Data: 17/07/2026
+// Versão: 1.2 | Data: 03/10/2026
+// v1.2 (03/10/2026): getClaims() no lugar de getUser(). O projeto assina o JWT
+//   com chave ASSIMÉTRICA (ES256), então getClaims verifica a assinatura
+//   LOCALMENTE (JWKS em cache de 10 min no processo) — getUser era uma ida de
+//   rede ao servidor de auth em TODA navegação/action/refresh (~8,4 mil por
+//   dia no log ingestion do Supabase). O refresh do cookie segue igual:
+//   getClaims chama getSession, que renova o token vencido e dispara o setAll
+//   abaixo. Garantia de segurança idêntica à do PostgREST/RLS (que também só
+//   confere assinatura + exp).
 // Proxy (Next.js 16 — antigo "middleware"). Atualiza a sessão do Supabase a
 // cada request e redireciona usuários não autenticados para /login.
 // Runtime: nodejs (padrão do proxy no Next 16).
@@ -64,11 +72,11 @@ export async function proxy(request: NextRequest) {
     }
   );
 
-  // IMPORTANTE: getUser() revalida a sessão e dispara o setAll acima quando o
-  // token é renovado. Não coloque lógica entre createServerClient e getUser.
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  // IMPORTANTE: getClaims() revalida a sessão (renova o token vencido e
+  // dispara o setAll acima) e verifica a assinatura do JWT. Não coloque
+  // lógica entre createServerClient e getClaims.
+  const { data } = await supabase.auth.getClaims();
+  const user = data?.claims?.sub ? { id: data.claims.sub } : null;
 
   if (!user && !isPublic(pathname)) {
     const loginUrl = request.nextUrl.clone();

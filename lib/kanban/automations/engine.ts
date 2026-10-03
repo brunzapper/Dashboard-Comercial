@@ -1,4 +1,10 @@
-// Versão: 1.6 | Data: 10/09/2026
+// Versão: 1.7 | Data: 03/10/2026
+// v1.7 (03/10/2026): sinais de COMPLETUDE para o portão de mudança do tick
+//   (0151, lib/ticks/gate.ts) — `runAllKanbanAutomations` devolve `complete`
+//   (todos os donos avaliados, sem corte de orçamento/teto e sem erro) e o
+//   resumo por dono ganha `capped` (sobrou ação além do teto). Só rodada
+//   completa deixa o tick pular os minutos seguintes sem mudança; nenhum
+//   comportamento da avaliação mudou.
 // v1.6 (10/09/2026): só vocabulário — o substantivo da ocorrência
 //   da série saiu do código e virou dado (SeriesConfig.noun, e
 //   tasks.occurrence_noun por tarefa).
@@ -108,6 +114,12 @@ export interface AutomationRunSummary {
   seriesRevoked: number;
   // Rodada não avaliou (config fora do escopo, dono sumido, deadline…).
   fatal?: string;
+  /**
+   * v1.7 (03/10/2026): alguma família de ação foi CORTADA pelo teto
+   * `MAX_ACTIONS_PER_RUN` — sobrou trabalho para a próxima rodada. O portão
+   * do tick (lib/ticks/gate.ts) não faz commit e o minuto seguinte roda.
+   */
+  capped?: boolean;
 }
 
 /** Teto de AÇÕES (moves + sets de campo) por quadro por rodada — o resto fica
@@ -144,6 +156,13 @@ export async function runAllKanbanAutomations(
   seriesSkipped: number;
   /** Ocorrências devolvidas por o registro ter saído do recorte da regra. */
   seriesRevoked: number;
+  /**
+   * v1.7 (03/10/2026): a rodada avaliou TODOS os donos até o fim, sem corte de
+   * orçamento/teto e sem erro. Só rodada completa autoriza o portão do tick a
+   * gravar "nada mudou desde aqui" — incompleta repete no minuto seguinte,
+   * exatamente como antes do portão.
+   */
+  complete: boolean;
 }> {
   const { data } = await db
     .from("automation_rules")
@@ -172,8 +191,12 @@ export async function runAllKanbanAutomations(
   let errors = 0;
   let seriesSkipped = 0;
   let seriesRevoked = 0;
+  let complete = true;
   for (const { owner } of owners) {
-    if (Date.now() >= deadline) break;
+    if (Date.now() >= deadline) {
+      complete = false;
+      break;
+    }
     try {
       const summary = await runBoardAutomations(db, owner, { deadline });
       boards += 1;
@@ -182,6 +205,7 @@ export async function runAllKanbanAutomations(
       seriesSkipped += summary.seriesSkipped;
       seriesRevoked += summary.seriesRevoked;
       if (summary.fatal || summary.ruleErrors.length > 0) errors += 1;
+      if (summary.capped) complete = false;
     } catch (e) {
       errors += 1;
       console.error(
@@ -190,7 +214,16 @@ export async function runAllKanbanAutomations(
       );
     }
   }
-  return { boards, moved, evaluated, errors, seriesSkipped, seriesRevoked };
+  if (errors > 0) complete = false;
+  return {
+    boards,
+    moved,
+    evaluated,
+    errors,
+    seriesSkipped,
+    seriesRevoked,
+    complete,
+  };
 }
 
 export interface KanbanOwnerContext {
@@ -676,6 +709,18 @@ export async function runBoardAutomations(
         cappedRevokes.length
     )
   );
+
+  // v1.7 (03/10/2026): sobrou ação além do teto ⇒ rodada incompleta.
+  if (
+    cappedMoves.length < moves.length ||
+    cappedSets.length < sets.length ||
+    cappedTasks.length < tasks.length ||
+    cappedSeries.length < seriesTasks.length ||
+    cappedRevokes.length < revokedSeries.length ||
+    cappedSchemaRuns.length < schemaRuns.length
+  ) {
+    summary.capped = true;
+  }
 
   const noteFailures = (
     failed: { recordId: string; message: string }[],

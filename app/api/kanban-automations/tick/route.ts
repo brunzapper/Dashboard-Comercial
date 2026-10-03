@@ -1,4 +1,12 @@
-// Versão: 1.2 | Data: 01/10/2026
+// Versão: 1.3 | Data: 03/10/2026
+// v1.3 (03/10/2026): PORTÃO DE MUDANÇA (0151, lib/ticks/gate.ts). Antes de
+//   carregar qualquer coisa, UMA RPC diz se algum dado lido pela rodada mudou
+//   ou se o dia de Brasília virou (toda condição de automação/série/ritual é
+//   por DIA). Nada mudou ⇒ responde `skipped` com 1 requisição (eram ~60 por
+//   minuto, 24h por dia — o grosso do log ingestion do Supabase). Rodada
+//   COMPLETA grava a seq lida no início; incompleta (deadline, teto de ações,
+//   erro) não grava e o minuto seguinte roda de novo, como sempre foi.
+//   "Executar agora" e o hook pós-sync seguem SEM portão.
 // v1.2 (01/10/2026): RITUAIS automáticos da Tree (0149, `runTreeRituals`) no
 //   orçamento restante — a próxima ocorrência de cada ritual com `auto` vira
 //   tarefa (trava por ocorrência; 23505 = no-op).
@@ -21,6 +29,11 @@ import { createServiceClient } from "@/lib/supabase/service";
 import { runAllKanbanAutomations } from "@/lib/kanban/automations/engine";
 import { reconcileAllKanbanAllocationFields } from "@/lib/kanban/allocation-reconcile";
 import { runTreeRituals } from "@/lib/rituals/run";
+import {
+  beginTickGate,
+  commitTickGate,
+  TICK_GATE_KEYS,
+} from "@/lib/ticks/gate";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -34,16 +47,24 @@ export async function POST(request: Request) {
     }
     const deadline = Date.now() + BUDGET_MS;
     const db = createServiceClient();
+    // v1.3: nada mudou desde a última rodada completa ⇒ nada a fazer.
+    const gate = await beginTickGate(db, TICK_GATE_KEYS.kanbanAutomations);
+    if (!gate.run) return NextResponse.json({ ok: true, skipped: true });
+
     const counters = await runAllKanbanAutomations(db, deadline);
     const allocation = await reconcileAllKanbanAllocationFields(db, deadline);
     // v1.2: rituais automáticos (best-effort — nunca derruba o tick).
     const rituals = await runTreeRituals(db, deadline).catch((e) => {
       console.error("[kanban-automations/tick] rituais:", e);
-      return { rituals: 0, created: 0, skipped: 0 };
+      return { rituals: 0, created: 0, skipped: 0, complete: false };
     });
+    const complete =
+      counters.complete && allocation.complete && rituals.complete;
+    if (complete) await commitTickGate(db, gate);
     return NextResponse.json({
       ok: true,
       ...counters,
+      complete,
       allocationBoards: allocation.boards,
       allocationUpdated: allocation.updated,
       ritualsChecked: rituals.rituals,

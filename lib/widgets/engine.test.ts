@@ -1,3 +1,6 @@
+// Versão: 1.2 | Data: 03/10/2026
+// v1.2 (03/10/2026): dublê de `goals` no formato da leitura memoizada de
+//   lib/metas/resolve.ts v1.2 (lista por ano×métrica).
 // Versão: 1.1 | Data: 26/07/2026
 // Testes do ENGINE com cliente fake (tests/helpers/fake-supabase — mesmo shape
 // do snapshotClient de produção). Travam os comportamentos que os RPCs não
@@ -847,15 +850,18 @@ describe("operando de META em métrica calculada", () => {
       },
       tables: {
         goals: (q) => {
-          const single = q.steps.some((s) => s.method === "maybeSingle");
           const eqs = Object.fromEntries(
             q.steps
               .filter((s) => s.method === "eq")
               .map((s) => [s.args[0], s.args[1]])
           );
-          if (single && eqs.scope === "global" && eqs.metric === "mrr")
-            return { data: { target: "50000" }, error: null };
-          return { data: single ? null : [], error: null };
+          if (eqs.metric !== "mrr") return { data: [], error: null };
+          return {
+            data: [
+              { period_month: 3, scope: "global", operation_id: null, responsible_id: null, target: "50000" },
+            ],
+            error: null,
+          };
         },
       },
     });

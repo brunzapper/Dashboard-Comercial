@@ -1,4 +1,9 @@
-// Versão: 1.2 | Data: 12/09/2026
+// Versão: 1.3 | Data: 03/10/2026
+// v1.3 (03/10/2026): memberships E a org ativa saem do MESMO loader da sessão
+//   (`session_context`, 0151 — uma RPC SECURITY INVOKER em vez de
+//   organization_members + organizations por request). A regra do cookie
+//   (validado contra a membership, nunca confiado) não mudou; sem a RPC, as
+//   consultas de sempre.
 // v1.2 (12/09/2026): ActiveOrg.uiPrefs — padrão de INTERFACE da org + travas
 //   por chave (ui_prefs, 0141), consumido por resolveUiPrefs
 //   (lib/config/ui-prefs.ts). O select tolera a coluna ausente pelo MESMO
@@ -19,7 +24,7 @@ import { cache } from "react";
 import { cookies } from "next/headers";
 
 import { createClient } from "@/lib/supabase/server";
-import { getSessionInfo } from "@/lib/auth/session";
+import { getSessionInfo, getSessionMemberships } from "@/lib/auth/session";
 import { normalizeOrgTheme, type OrgThemeDefault } from "@/lib/theme";
 import {
   EMPTY_ORG_UI_PREFS,
@@ -54,6 +59,14 @@ export const getMemberships = cache(async function getMemberships(): Promise<
 > {
   const session = await getSessionInfo();
   if (!session) return [];
+  // v1.3: a RPC da sessão já trouxe as memberships (mesma RLS).
+  const fromContext = await getSessionMemberships();
+  if (fromContext) {
+    return fromContext.map((m) => ({
+      organization_id: m.organization_id,
+      is_org_admin: m.is_org_admin,
+    }));
+  }
   try {
     const supabase = await createClient();
     const { data } = await supabase
@@ -83,6 +96,27 @@ export const getActiveOrg = cache(async function getActiveOrg(): Promise<
     memberships.find((m) => m.organization_id === wanted) ??
     (memberships.length === 1 ? memberships[0] : null);
   if (!chosen) return null;
+
+  // v1.3: org embutida na membership pela RPC da sessão (null = a RLS não
+  // deixou ver — mesmo efeito do select abaixo devolvendo nada).
+  const fromContext = await getSessionMemberships();
+  if (fromContext) {
+    const org = fromContext.find(
+      (m) => m.organization_id === chosen.organization_id
+    )?.org;
+    if (!org) return null;
+    return {
+      id: org.id,
+      name: org.name ?? "",
+      appName: org.app_name || "Dashboard Comercial",
+      isOrgAdmin: chosen.is_org_admin,
+      multiOrg: memberships.length > 1,
+      theme: normalizeOrgTheme(org.theme),
+      uiPrefs: org.ui_prefs
+        ? normalizeOrgUiPrefs(org.ui_prefs)
+        : EMPTY_ORG_UI_PREFS,
+    };
+  }
 
   const supabase = await createClient();
   // Pré-migração 0108/0141 (coluna theme/ui_prefs ausente): o select completo

@@ -1,4 +1,9 @@
-// Versão: 1.7 | Data: 10/09/2026
+// Versão: 1.8 | Data: 03/10/2026
+// v1.8 (03/10/2026): `loadSyncTickState` — o que o tick de minuto fazia em ~5
+//   requisições ociosas (takeover de job preso, job em andamento, último
+//   reconcile automático, filas pendentes) numa RPC só (`sync_tick_state`,
+//   0151). Redução de log ingestion do Supabase; mesma semântica. Sem a RPC
+//   (migração não aplicada) cai nos helpers de sempre.
 // v1.7 (10/09/2026): o gancho da v1.6 estava pendurado num ramo INALCANÇÁVEL
 //   (`phaseIndex >= plan.length` com o job ainda `running` não acontece), então
 //   a leitura de volta nunca rodou — nem pelo tick, nem pelo botão Reconciliar.
@@ -366,6 +371,9 @@ export async function lastAutoReconcileAt(db: SupabaseClient): Promise<number | 
   return ts ? new Date(ts).getTime() : null;
 }
 
+const STALE_JOB_ERROR =
+  "Job expirado (sem progresso por muito tempo) — refaça a sincronização.";
+
 /**
  * Marca como 'error' jobs 'running' cujo updated_at é antigo demais (chamador
  * morreu no meio). Libera espaço para a guarda de concorrência. Retorna quantos.
@@ -376,13 +384,72 @@ export async function takeoverStale(db: SupabaseClient): Promise<number> {
     .from("sync_jobs")
     .update({
       status: "error",
-      error: "Job expirado (sem progresso por muito tempo) — refaça a sincronização.",
+      error: STALE_JOB_ERROR,
       finished_at: new Date().toISOString(),
     })
     .eq("status", "running")
     .lt("updated_at", cutoff)
     .select("id");
   return (data ?? []).length;
+}
+
+/** v1.8: o estado que o tick de minuto precisa, numa ida ao banco. */
+export interface SyncTickState {
+  staled: number;
+  running: StepProgress | null;
+  /** ms epoch do último reconcile automático criado, ou null. */
+  lastAutoReconcileAt: number | null;
+  /** Há item `pending` na fila (false ⇒ o dreno nem consulta). */
+  writebackPending: boolean;
+  taskMirrorPending: boolean;
+}
+
+/**
+ * v1.8 (03/10/2026): `takeoverStale` + `getRunningJob` + `lastAutoReconcileAt`
+ * + "há pendência nas filas?" numa RPC (`sync_tick_state`, 0151). A ordem
+ * interna é a mesma do tick (o takeover vem ANTES da leitura do job em
+ * andamento). Fail-open: sem a RPC, os helpers de sempre, e as filas contam
+ * como pendentes (o dreno consulta, como antes).
+ */
+export async function loadSyncTickState(
+  db: SupabaseClient
+): Promise<SyncTickState> {
+  try {
+    const { data, error } = await db.rpc("sync_tick_state", {
+      p_stale_before: new Date(Date.now() - STALE_JOB_MS).toISOString(),
+      p_stale_error: STALE_JOB_ERROR,
+    });
+    if (!error && data && typeof data === "object") {
+      const d = data as {
+        staled?: number;
+        running?: JobRow | null;
+        last_auto_reconcile_at?: string | null;
+        writeback_pending?: boolean;
+        task_mirror_pending?: boolean;
+      };
+      const last = d.last_auto_reconcile_at
+        ? new Date(d.last_auto_reconcile_at).getTime()
+        : null;
+      return {
+        staled: Number(d.staled ?? 0),
+        running: d.running ? snapshot(d.running) : null,
+        lastAutoReconcileAt: Number.isFinite(last) ? last : null,
+        writebackPending: d.writeback_pending !== false,
+        taskMirrorPending: d.task_mirror_pending !== false,
+      };
+    }
+  } catch {
+    // cai no caminho antigo
+  }
+  const staled = await takeoverStale(db);
+  const running = await getRunningJob(db);
+  return {
+    staled,
+    running,
+    lastAutoReconcileAt: running ? null : await lastAutoReconcileAt(db),
+    writebackPending: true,
+    taskMirrorPending: true,
+  };
 }
 
 /**

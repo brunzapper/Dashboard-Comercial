@@ -1,4 +1,8 @@
-<!-- Versão: 3.29 | Data: 02/10/2026 -->
+<!-- Versão: 3.30 | Data: 03/10/2026 -->
+<!-- v3.30 (03/10/2026): 0151 — portão de mudança dos ticks de minuto
+     (`data_change_seq` + triggers, `tick_gates`, `tick_gate_begin/commit`) e
+     RPCs consolidadas (`sync_tick_state`, `activity_inbound_owners`,
+     `session_context`) — redução do log ingestion do Supabase. -->
 <!-- v3.29 (02/10/2026): 0150 — tamanho/exibição/prazo por nó da Tree e a
      faixa de atenção do indicador; 'metas' vira legado convertido na
      leitura (Tabela Livre com colunas de meta). -->
@@ -829,6 +833,11 @@ em `data_sources.key → record_type` com fallback nos builtins; `stable`),
 | `seed_org_defaults`, `delete_organization` | 0093 | Provisionamento de org (console do Owner) — EXECUTE só service role |
 | `auth_denied_source_keys`, `auth_denied_record_types` | 0094 | Bases negadas por override individual (RLS de data_sources/sub_sources/records) |
 | `maintenance_analyze` | 0102 | `ANALYZE` de `records`/`record_matches` (SECURITY DEFINER — service role não é dona das tabelas); EXECUTE só service role. Disparada pelo runner do sync ao concluir job com >= 2.000 linhas escritas |
+| `bump_data_change_seq` | 0151 | Trigger statement-level: `nextval('data_change_seq')` — o sinal "algum dado lido pelos ticks mudou" |
+| `tick_gate_begin`, `tick_gate_commit` | 0151 | Portão de mudança dos ticks de minuto (`tick_gates`); EXECUTE só service role |
+| `sync_tick_state` | 0151 | Estado ocioso do tick de sync numa ida (inclui o takeover de job preso); EXECUTE só service role |
+| `activity_inbound_owners` | 0151 | Donos da leitura de volta do Bitrix (tarefas espelhadas abertas ∪ atributo `tree` ativo); EXECUTE só service role |
+| `session_context` | 0151 | SECURITY INVOKER: papéis, permissões e memberships (com a org) do usuário logado; EXECUTE `authenticated` |
 | `registros_populated_refs` | 0120 (recriada 0121 — lixeira fora) | Refs núcleo + chaves de `custom_fields` com >=1 valor não-vazio num `record_type` (mocks e lixeira fora) — SECURITY INVOKER (RLS de `records` recorta por usuário). Consumida pela página /registros (colunas dirigidas por dados). EXECUTE só authenticated/service_role |
 
 ## 5. Triggers
@@ -837,6 +846,10 @@ em `data_sources.key → record_type` com fallback nos builtins; `stable`),
 - **`trg_records_reuniao_freeze`** (0051) em `records` → `enforce_reuniao_freeze`.
 - **`trg_records_trash_guard`** (0121) em `records` → `enforce_records_trash_guard`.
 - **`trg_tasks_lock`** (0063) e **`trg_tasks_global`** (0066) em `tasks`.
+- **`trg_bump_data_change_seq`** (0151) em toda tabela lida pelos ticks de
+  minuto (`TICK_GATE_TABLES`) → `bump_data_change_seq` (statement-level; em
+  `automation_rules`, row-level só nas colunas de configuração). Tabela NOVA
+  lida pelo tick DEVE ganhar o trigger.
 - **Triggers de stamp de org** (0090; +0098): `trg_records_set_org`,
   `trg_audit_log_set_org`, `trg_record_matches_set_org`,
   `trg_entity_custom_values_set_org` e `trg_dashboard_ai_sessions_set_org`
@@ -1109,6 +1122,7 @@ contato de um lead alheio.
 | 0148 | tree_root | `tree_nodes` ganha a GEOMETRIA da visualização Root — `offset_x`/`offset_y` (deslocamento RELATIVO ao slot calculado, somado ao dos ancestrais: arrastar um galho leva o subgalho) e `direction` (`h`\|`v`, null = padrão do widget) —, a ANOTAÇÃO-etapa (`status` `pendente`\|`concluida`; null = texto livre) e `is_goal` (o Resultado esperado). Numa linha de exceção (`node_ref`), `parent_ref` null passa a ser "sem exceção de pai" (só geometria); `'-'` segue "raiz". No escopo `livre`, `kind='task'` + `ref_id` pendura uma tarefa no mapa (`uq_tree_nodes_map_task`, uma vez por mapa). RLS da 0133 INTOCADA |
 | 0149 | indicators_tree_ops | (a) `indicators`: o CATÁLOGO de indicadores — `key` (= `goals.metric`, única por org, imutável na prática), `label`, `description`, `unit` (`moeda\|quantidade\|percentual\|numero`), `rollup` (`soma\|ultimo\|media\|nenhum`), `direction` (`maior_melhor\|menor_melhor`), `tolerance_pct`, `owner_responsible_id`, `realized jsonb` (fórmula agregada + bases + recorte; null = só meta), `sort_order`, `preset_key`. RLS: leitura da org, escrita admin. O realizado é avaliado só no engine (`runCalculatedWidget`). (b) `tree_nodes.kind` aceita `indicator`/`plan`/`ritual`, + `payload jsonb` e `preset_key` (índice único por mapa — identidade do seed ensure-if-absent do preset). (c) `tasks.ritual_node_id` + `ritual_occurrence` com `uq_tasks_ritual_occurrence` (sem `completed_at is null`: a N-ésima ocorrência acontece uma vez). (d) CHECK de `widgets.visual_type` recriado com `'metas'`. RLS de `tree_nodes`/`tasks` INTOCADAS. Não recria as RPCs de widget |
 | 0150 | tree_node_size_display | O que o preset Metas 4T26 deixou fixo vira DADO. (a) `tree_nodes`: `width`/`height` (tamanho do cartão redimensionado na Root; null = automático; CHECK 120–1600 × 60–1600), `display` jsonb (objeto — `kindBadge` "show"/"hide" no modo Apresentar e `tone`, a cor do cartão; parse fail-closed em `lib/tree/display.ts`) e `due_date` date (prazo PRÓPRIO da anotação; antes ela exibia a data de criação, o dia do apply do preset, sem edição). Valem para nó próprio e para a exceção de fato derivado (`node_ref`), no regime da geometria da 0148; RLS da 0133 intocada. (b) `indicators.attention_pct` (0–100): até quanto de desvio o status é "Atenção"; null = 2× a tolerância (o de sempre). Loaders com fallback de colunas enquanto a migração não foi aplicada. **Não recria as RPCs de widget** — a fonte do realizado própria e as metas da Tabela Livre (que absorveu a Tabela de metas; o tipo 'metas' segue na CHECK como legado convertido na leitura) se resolvem no engine |
+| 0151 | tick_change_gate | Redução do LOG INGESTION do Supabase sem mudar comportamento (~64% das requisições eram dos dois crons de minuto, 24h por dia, para chegar à mesma conclusão — só ~20 dos 1.440 minutos do dia tinham mudança de dado). (a) `data_change_seq` (sequence — sem lock, zero contenção) avançada por `bump_data_change_seq`, trigger STATEMENT-level `trg_bump_data_change_seq` em toda tabela que o tick lê (lista = `TICK_GATE_TABLES` de `lib/ticks/gate.ts`, fiscalizada por `gate.test.ts`); em `automation_rules` é row-level e só nas colunas de CONFIGURAÇÃO (o bookkeeping `last_run_at`/`last_error`/`last_moved_count` não acorda o tick). (b) `tick_gates` (service-role-only, sem policies) + `tick_gate_begin(key, today, max_age)` / `tick_gate_commit(key, seq, today)`: UMA requisição por tick ocioso; roda quando a seq mudou, o dia de Brasília virou, há confirmação pendente (a rodada anterior viu mudança — cobre writer que avançou a seq antes de commitar) ou a última rodada completa tem > 60 min; `checked_at` é o "Última execução" da UI. (c) `sync_tick_state(stale_before, stale_error)`: takeover de job preso + job em andamento + último reconcile automático + "há pendência nas filas" numa ida. (d) `activity_inbound_owners(max)`: os donos da leitura de volta do Bitrix numa ida. (e) `session_context()` SECURITY INVOKER: papéis + permissões + memberships (com a org) numa ida — as RLS valem como nas 4 consultas que substitui. Todas com fallback no app (RPC ausente ⇒ caminho antigo). **Não recria as RPCs de widget** |
 
 
 ### 0145 — Miniaturas persistentes de dashboards
