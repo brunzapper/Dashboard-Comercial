@@ -1,4 +1,6 @@
-// Versão: 1.2 | Data: 01/10/2026
+// Versão: 1.3 | Data: 03/10/2026
+// v1.3 (03/10/2026): goals traz operation_id/responsible_id — o editor de meta
+// pré-seleciona escopo/operação/responsável.
 // Tela de Metas (admin) — Fase 6B.
 // v1.2 (01/10/2026): seção "Indicadores" (0149) — o catálogo que explica cada
 // chave de meta (unidade, total, direção, dono, fórmula do realizado). O
@@ -47,7 +49,7 @@ export default async function MetasPage() {
       supabase
         .from("goals")
         .select(
-          "id, period_year, period_month, scope, metric, target, operations(name), responsibles(display_name)"
+          "id, period_year, period_month, scope, metric, target, operation_id, responsible_id, operations(name), responsibles(display_name)"
         )
         .order("period_year", { ascending: false })
         .order("period_month", { ascending: true, nullsFirst: true }),
@@ -74,6 +76,8 @@ export default async function MetasPage() {
     period_year: g.period_year as number,
     period_month: (g.period_month as number) ?? null,
     scope: g.scope as string,
+    operation_id: (g.operation_id as string | null) ?? null,
+    responsible_id: (g.responsible_id as string | null) ?? null,
     operation_name: (g.operations as { name?: string } | null)?.name ?? null,
     responsible_name:
       (g.responsibles as { display_name?: string } | null)?.display_name ?? null,
