@@ -1,6 +1,8 @@
-// Versão: 1.3 | Data: 12/09/2026
+// Versão: 1.4 | Data: 03/10/2026
 // Navegação lateral (Client Component) com destaque do link ativo.
 // Recebe já filtrada por papel/permissão pelo layout (server).
+// v1.4 (03/10/2026): item fixado com nome cortado (dashboard, kanban…) mostra o
+//   nome inteiro em tooltip ao passar o mouse — só quando não cabe.
 // v1.3 (12/09/2026): seção "Fixados" (0141) — dashboards, kanbans e módulos de
 //   Operação que o usuário alfinetou no hub. Vem ACIMA dos itens fixos: é o
 //   atalho do dia a dia dele. Os rótulos são resolvidos no servidor a partir do
@@ -29,6 +31,7 @@ import {
 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
+import { OverflowTooltip } from "@/components/ui/overflow-tooltip";
 
 export interface NavItem {
   href: string;
@@ -113,7 +116,10 @@ export function SidebarNav({
               >
                 <span className="flex min-w-0 items-center gap-2">
                   <Icon className="size-4 shrink-0" />
-                  <span className="truncate">{item.label}</span>
+                  {/* v1.4: nome cortado mostra o nome inteiro no hover. */}
+                  <OverflowTooltip text={item.label} side="right">
+                    <span className="truncate">{item.label}</span>
+                  </OverflowTooltip>
                 </span>
                 <NavPendingHint />
               </Link>
