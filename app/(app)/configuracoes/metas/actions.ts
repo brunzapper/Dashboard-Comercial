@@ -1,4 +1,9 @@
-// Versão: 1.2 | Data: 30/07/2026
+// Versão: 1.3 | Data: 03/10/2026
+// v1.3 (03/10/2026): EDIÇÃO de metas e de dias não úteis (antes só criar/
+//   excluir). `readGoalForm` é o parse ÚNICO do formulário de meta (create e
+//   update); `updateGoal` grava por `updateGoalById` (lib/metas/upsert.ts —
+//   conflito de chave natural checado lá). `updateNonWorkingDay` troca data e/ou
+//   rótulo; dia não útil e exclusão passam a ser escopados pela org ativa.
 // Server Actions da tela de Metas (goals) — admin. RLS de goals exige admin.
 // v1.2 (30/07/2026): a dança find-then-update do upsert de goals e o append no
 //   registry de métricas foram EXTRAÍDOS para lib/metas/upsert.ts (módulo
@@ -15,7 +20,12 @@ import { isSettingsAreaDenied } from "@/lib/auth/access";
 import { getActiveOrgId } from "@/lib/auth/org";
 import { createClient } from "@/lib/supabase/server";
 import { goalMetricKeyFromLabel } from "@/lib/metas/metrics";
-import { registerGoalMetrics, upsertGoalTarget } from "@/lib/metas/upsert";
+import {
+  registerGoalMetrics,
+  updateGoalById,
+  upsertGoalTarget,
+  type GoalTargetKey,
+} from "@/lib/metas/upsert";
 
 export interface GoalState {
   ok?: boolean;
@@ -30,20 +40,17 @@ async function ensureAdmin(): Promise<string | null> {
   return null;
 }
 
-export async function createGoal(
-  _prev: GoalState,
+// v1.3 (03/10/2026): parse único do formulário de meta (create + update).
+function readGoalForm(
   formData: FormData
-): Promise<GoalState> {
-  const err = await ensureAdmin();
-  if (err) return { ok: false, message: err };
-
+): { key: GoalTargetKey; target: number } | { error: string } {
   const year = Number(formData.get("period_year")) || new Date().getFullYear();
   const monthRaw = String(formData.get("period_month") ?? "");
   const month = monthRaw === "" ? null : Number(monthRaw);
   const scope = String(formData.get("scope") ?? "global");
   const metric = String(formData.get("metric") ?? "mrr");
   const target = Number(formData.get("target"));
-  if (Number.isNaN(target)) return { ok: false, message: "Informe o alvo." };
+  if (Number.isNaN(target)) return { error: "Informe o alvo." };
 
   const operationId =
     scope === "operation" ? String(formData.get("operation_id") ?? "") || null : null;
@@ -52,21 +59,49 @@ export async function createGoal(
       ? String(formData.get("responsible_id") ?? "") || null
       : null;
   if (scope === "operation" && !operationId)
-    return { ok: false, message: "Selecione a operação." };
+    return { error: "Selecione a operação." };
   if (scope === "responsible" && !responsibleId)
-    return { ok: false, message: "Selecione o responsável." };
+    return { error: "Selecione o responsável." };
+  return {
+    key: { year, month, scope, operationId, responsibleId, metric },
+    target,
+  };
+}
+
+export async function createGoal(
+  _prev: GoalState,
+  formData: FormData
+): Promise<GoalState> {
+  const err = await ensureAdmin();
+  if (err) return { ok: false, message: err };
+  const parsed = readGoalForm(formData);
+  if ("error" in parsed) return { ok: false, message: parsed.error };
 
   const supabase = await createClient();
   const orgId = await getActiveOrgId();
-  const error = await upsertGoalTarget(
-    supabase,
-    orgId,
-    { year, month, scope, operationId, responsibleId, metric },
-    target
-  );
+  const error = await upsertGoalTarget(supabase, orgId, parsed.key, parsed.target);
   if (error) return { ok: false, message: error };
   revalidatePath("/configuracoes/metas");
   return { ok: true, message: "Meta salva." };
+}
+
+/** v1.3 (03/10/2026): edita a meta `id` (hidden do formulário de edição). */
+export async function updateGoal(
+  _prev: GoalState,
+  formData: FormData
+): Promise<GoalState> {
+  const err = await ensureAdmin();
+  if (err) return { ok: false, message: err };
+  const id = String(formData.get("id") ?? "");
+  if (!id) return { ok: false, message: "Meta não encontrada." };
+  const parsed = readGoalForm(formData);
+  if ("error" in parsed) return { ok: false, message: parsed.error };
+
+  const supabase = await createClient();
+  const error = await updateGoalById(supabase, id, parsed.key, parsed.target);
+  if (error) return { ok: false, message: error };
+  revalidatePath("/configuracoes/metas");
+  return { ok: true, message: "Meta atualizada." };
 }
 
 export async function deleteGoal(id: string): Promise<GoalState> {
@@ -151,12 +186,57 @@ export async function upsertNonWorkingDays(
   return { ok: true, message: `${byDay.size} dia(s) não útil(eis) salvo(s).` };
 }
 
+const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * v1.3 (03/10/2026): edita um dia não útil — troca a data e/ou o rótulo. A
+ * data é a PK (org, day): data nova já cadastrada na org ⇒ erro (nunca funde
+ * em silêncio dois feriados).
+ */
+export async function updateNonWorkingDay(
+  oldDay: string,
+  next: { day: string; label?: string }
+): Promise<GoalState> {
+  const err = await ensureAdmin();
+  if (err) return { ok: false, message: err };
+  const from = String(oldDay ?? "").slice(0, 10);
+  const day = String(next.day ?? "").slice(0, 10);
+  const label = String(next.label ?? "").trim().slice(0, 200);
+  if (!ISO_DAY.test(from) || !ISO_DAY.test(day))
+    return { ok: false, message: "Data inválida." };
+  const orgId = await getActiveOrgId();
+  const supabase = await createClient();
+
+  if (day !== from) {
+    let dup = supabase.from("non_working_days").select("day").eq("day", day);
+    if (orgId) dup = dup.eq("organization_id", orgId);
+    const { data: exists, error: dupError } = await dup.maybeSingle();
+    if (dupError) return { ok: false, message: dupError.message };
+    if (exists) return { ok: false, message: "Essa data já está cadastrada." };
+  }
+
+  let upd = supabase
+    .from("non_working_days")
+    .update({ day, label })
+    .eq("day", from);
+  if (orgId) upd = upd.eq("organization_id", orgId);
+  const { error } = await upd;
+  if (error) return { ok: false, message: error.message };
+  revalidatePath("/configuracoes/metas");
+  return { ok: true, message: "Dia não útil atualizado." };
+}
+
 export async function deleteNonWorkingDay(day: string): Promise<void> {
   const err = await ensureAdmin();
   if (err) return;
   const iso = String(day ?? "").slice(0, 10);
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) return;
+  if (!ISO_DAY.test(iso)) return;
   const supabase = await createClient();
-  await supabase.from("non_working_days").delete().eq("day", iso);
+  // v1.3 (03/10/2026): escopado pela org ativa — usuário de várias orgs não
+  // apaga o mesmo dia nas outras.
+  const orgId = await getActiveOrgId();
+  let del = supabase.from("non_working_days").delete().eq("day", iso);
+  if (orgId) del = del.eq("organization_id", orgId);
+  await del;
   revalidatePath("/configuracoes/metas");
 }

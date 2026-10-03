@@ -1,3 +1,8 @@
+// Versão: 1.2 | Data: 03/10/2026
+// v1.2 (03/10/2026): `updateGoalById` — EDITAR uma meta existente (Configurações
+// → Metas) pode mudar a chave natural inteira (período/escopo/métrica). Como o
+// índice único é por expressão (coalesce), o conflito é checado aqui pelo
+// MESMO `findGoal`: outra linha na chave nova ⇒ erro amigável, nunca 23505 cru.
 // Versão: 1.1 | Data: 01/10/2026
 // v1.1 (01/10/2026): `ensureGoalTarget` — a meta SÓ é criada quando a chave
 // não tem linha (ensure-if-absent das seções de dados do preset, 0149): o
@@ -76,6 +81,42 @@ export async function upsertGoalTarget(
   const { error } = existing?.id
     ? await supabase.from("goals").update({ target }).eq("id", existing.id)
     : await supabase.from("goals").insert(row);
+  return error ? error.message : null;
+}
+
+/**
+ * v1.2 (03/10/2026): edita a meta `id`, gravando a chave natural NOVA e o
+ * alvo. Outra linha já ocupando a chave nova ⇒ mensagem de erro (a própria
+ * linha encontrada é permitida — edição que só muda o alvo). Sem carimbo de
+ * org: a linha já tem a dela.
+ */
+export async function updateGoalById(
+  supabase: SupabaseClient,
+  id: string,
+  key: GoalTargetKey,
+  target: number
+): Promise<string | null> {
+  if (!id) return "Meta não encontrada.";
+  if (!Number.isFinite(target)) return "Informe o alvo.";
+  const { data: existing, error: findError } = await findGoal(
+    supabase,
+    key
+  ).maybeSingle();
+  if (findError) return findError.message;
+  if (existing?.id && existing.id !== id)
+    return "Já existe uma meta para este período, escopo e métrica.";
+  const { error } = await supabase
+    .from("goals")
+    .update({
+      period_year: key.year,
+      period_month: key.month,
+      scope: key.scope,
+      operation_id: key.operationId ?? null,
+      responsible_id: key.responsibleId ?? null,
+      metric: key.metric,
+      target,
+    })
+    .eq("id", id);
   return error ? error.message : null;
 }
 

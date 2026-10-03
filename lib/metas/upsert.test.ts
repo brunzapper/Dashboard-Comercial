@@ -1,4 +1,5 @@
-// Versão: 1.0 | Data: 30/07/2026
+// Versão: 1.1 | Data: 03/10/2026
+// v1.1 (03/10/2026): bloco de `updateGoalById` (edição na tela de Metas).
 // Testes do upsert programático de metas (módulo compartilhado Metas ↔
 // Remuneração). Invariantes: a dança find-then-update respeita a chave
 // natural inteira (coalesce do índice único ⇒ is/eq por campo); insert
@@ -9,6 +10,7 @@ import { describe, expect, it } from "vitest";
 import {
   deleteGoalTarget,
   registerGoalMetrics,
+  updateGoalById,
   upsertGoalTarget,
 } from "@/lib/metas/upsert";
 import { fakeSupabase, hasStep } from "../../tests/helpers/fake-supabase";
@@ -83,6 +85,64 @@ describe("upsertGoalTarget", () => {
     const fake = fakeSupabase({ tables: {} });
     const err = await upsertGoalTarget(fake.db, null, KEY, NaN);
     expect(err).toBe("Informe o alvo.");
+    expect(fake.queries).toHaveLength(0);
+  });
+});
+
+describe("updateGoalById", () => {
+  it("grava a chave natural nova + alvo por id (sem carimbo de org)", async () => {
+    const fake = fakeSupabase({ tables: { goals: () => ({ data: null }) } });
+    const err = await updateGoalById(
+      fake.db,
+      "g1",
+      { ...KEY, scope: "global", responsibleId: null, month: null },
+      42
+    );
+    expect(err).toBeNull();
+    const update = fake.queries.find((q) => q.steps.some((s) => s.method === "update"));
+    expect(update).toBeDefined();
+    expect(
+      hasStep(update!, "update", {
+        period_year: 2026,
+        period_month: null,
+        scope: "global",
+        operation_id: null,
+        responsible_id: null,
+        metric: "comp_vendas",
+        target: 42,
+      })
+    ).toBe(true);
+    expect(hasStep(update!, "eq", "id", "g1")).toBe(true);
+    const find = fake.queries[0];
+    expect(hasStep(find, "is", "period_month", null)).toBe(true);
+  });
+
+  it("outra linha na chave nova ⇒ erro, sem update", async () => {
+    const fake = fakeSupabase({
+      tables: {
+        goals: (q) =>
+          hasStep(q, "select", "id") ? { data: { id: "outra" } } : { data: null },
+      },
+    });
+    const err = await updateGoalById(fake.db, "g1", KEY, 10);
+    expect(err).toMatch(/Já existe uma meta/);
+    expect(fake.queries.some((q) => q.steps.some((s) => s.method === "update"))).toBe(false);
+  });
+
+  it("a própria linha na chave (só muda o alvo) é permitida", async () => {
+    const fake = fakeSupabase({
+      tables: {
+        goals: (q) =>
+          hasStep(q, "select", "id") ? { data: { id: "g1" } } : { data: null },
+      },
+    });
+    expect(await updateGoalById(fake.db, "g1", KEY, 10)).toBeNull();
+    expect(fake.queries.some((q) => q.steps.some((s) => s.method === "update"))).toBe(true);
+  });
+
+  it("alvo não-finito é rejeitado sem tocar o banco", async () => {
+    const fake = fakeSupabase({ tables: {} });
+    expect(await updateGoalById(fake.db, "g1", KEY, NaN)).toBe("Informe o alvo.");
     expect(fake.queries).toHaveLength(0);
   });
 });

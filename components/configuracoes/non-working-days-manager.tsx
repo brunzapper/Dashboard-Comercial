@@ -1,4 +1,7 @@
-// Versão: 1.0 | Data: 20/07/2026
+// Versão: 1.1 | Data: 03/10/2026
+// v1.1 (03/10/2026): linha EDITÁVEL por ✏️ (data + rótulo, Salvar/Cancelar,
+// Esc cancela) via `updateNonWorkingDay` — antes a data não era editável e o
+// rótulo era um input onBlur que não parecia campo.
 // Gerência de dias não úteis (non_working_days, 0081) — seção da tela de
 // Metas (admin). Cadastro manual, edição de rótulo, exclusão e importação de
 // CSV parseado no BROWSER (Papa.parse + coerceDate de lib/import/csv.ts —
@@ -9,7 +12,7 @@
 
 import { useRef, useState, useTransition } from "react";
 import Papa from "papaparse";
-import { CalendarOff, Plus, Trash2, Upload } from "lucide-react";
+import { CalendarOff, Check, Pencil, Plus, Trash2, Upload, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -26,6 +29,7 @@ import { coerceDate } from "@/lib/import/csv";
 import type { NonWorkingDay } from "@/lib/config/non-working-days";
 import {
   deleteNonWorkingDay,
+  updateNonWorkingDay,
   upsertNonWorkingDays,
 } from "@/app/(app)/configuracoes/metas/actions";
 
@@ -53,6 +57,34 @@ export function NonWorkingDaysManager({ rows }: { rows: NonWorkingDay[] }) {
   );
   const [pending, startTransition] = useTransition();
   const fileRef = useRef<HTMLInputElement>(null);
+  // v1.1 (03/10/2026): linha em edição (dia ORIGINAL) + rascunho.
+  const [editingDay, setEditingDay] = useState<string | null>(null);
+  const [draftDay, setDraftDay] = useState("");
+  const [draftLabel, setDraftLabel] = useState("");
+
+  function startEdit(r: NonWorkingDay) {
+    setEditingDay(r.day);
+    setDraftDay(r.day);
+    setDraftLabel(r.label);
+    setMessage(null);
+  }
+
+  function saveEdit() {
+    const from = editingDay;
+    if (!from) return;
+    if (!draftDay) {
+      setMessage({ ok: false, text: "Informe a data." });
+      return;
+    }
+    startTransition(async () => {
+      const res = await updateNonWorkingDay(from, {
+        day: draftDay,
+        label: draftLabel,
+      });
+      setMessage(res.message ? { ok: Boolean(res.ok), text: res.message } : null);
+      if (res.ok) setEditingDay(null);
+    });
+  }
 
   function submit(batch: { day: string; label?: string }[]) {
     startTransition(async () => {
@@ -199,39 +231,96 @@ export function NonWorkingDaysManager({ rows }: { rows: NonWorkingDay[] }) {
                 </TableCell>
               </TableRow>
             ) : (
-              rows.map((r) => (
-                <TableRow key={r.day}>
-                  <TableCell className="tabular-nums">
-                    {displayDate(r.day)}
-                  </TableCell>
-                  <TableCell>
-                    <Input
-                      defaultValue={r.label}
-                      aria-label={`Rótulo de ${r.day}`}
-                      className="h-8 max-w-72"
-                      onBlur={(e) => {
-                        const next = e.target.value.trim();
-                        if (next !== r.label)
-                          submit([{ day: r.day, label: next }]);
-                      }}
-                    />
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      aria-label={`Excluir ${r.day}`}
-                      onClick={() =>
-                        startTransition(async () => {
-                          await deleteNonWorkingDay(r.day);
-                        })
-                      }
-                    >
-                      <Trash2 className="size-4" />
-                    </Button>
-                  </TableCell>
-                </TableRow>
-              ))
+              rows.map((r) =>
+                editingDay === r.day ? (
+                  <TableRow
+                    key={r.day}
+                    onKeyDown={(e) => {
+                      if (e.key === "Escape") setEditingDay(null);
+                      if (e.key === "Enter") saveEdit();
+                    }}
+                  >
+                    <TableCell>
+                      <Input
+                        type="date"
+                        value={draftDay}
+                        aria-label="Data"
+                        className="h-8 w-40"
+                        autoFocus
+                        onChange={(e) => setDraftDay(e.target.value)}
+                      />
+                    </TableCell>
+                    <TableCell>
+                      <Input
+                        value={draftLabel}
+                        aria-label="Rótulo"
+                        placeholder="Ex.: Carnaval"
+                        className="h-8 max-w-72"
+                        onChange={(e) => setDraftLabel(e.target.value)}
+                      />
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <div className="flex justify-end gap-1">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          aria-label="Salvar"
+                          disabled={pending}
+                          onClick={saveEdit}
+                        >
+                          <Check className="size-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          aria-label="Cancelar"
+                          disabled={pending}
+                          onClick={() => setEditingDay(null)}
+                        >
+                          <X className="size-4" />
+                        </Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  <TableRow key={r.day}>
+                    <TableCell className="tabular-nums">
+                      {displayDate(r.day)}
+                    </TableCell>
+                    <TableCell>
+                      {r.label || (
+                        <span className="text-muted-foreground">—</span>
+                      )}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <div className="flex justify-end gap-1">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          aria-label={`Editar ${r.day}`}
+                          disabled={pending}
+                          onClick={() => startEdit(r)}
+                        >
+                          <Pencil className="size-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          aria-label={`Excluir ${r.day}`}
+                          disabled={pending}
+                          onClick={() =>
+                            startTransition(async () => {
+                              await deleteNonWorkingDay(r.day);
+                            })
+                          }
+                        >
+                          <Trash2 className="size-4" />
+                        </Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                )
+              )
             )}
           </TableBody>
         </Table>
