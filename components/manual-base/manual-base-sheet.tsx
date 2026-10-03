@@ -1,3 +1,8 @@
+// Versão: 1.1 | Data: 03/10/2026
+// v1.1 (03/10/2026): recarrega a base após cada mudança estrutural (`onChanged`
+//   do gestor) e após o "Aplicar" da IA. O painel guarda o estado da action, e
+//   o router.refresh do save não chega até ele: criar métrica, divisão ou opção
+//   aqui gravava e só aparecia ao reabrir.
 // Versão: 1.0 | Data: 17/09/2026
 // O painel "Base manual" do menu ⋮ do dashboard (0142).
 //
@@ -10,7 +15,7 @@
 // assistente de IA): é a porta de entrada de quem está montando a análise.
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { useCallback, useEffect, useState, useTransition } from "react";
 
 import {
   Sheet,
@@ -46,6 +51,15 @@ export function ManualBaseSheet({
     });
   }, [open]);
 
+  // v1.1: recarga SILENCIOSA — sem voltar a "Carregando…", que desmontaria o
+  // gestor e perderia a aba e o mês em foco.
+  const reload = useCallback(() => {
+    startTransition(async () => {
+      const next = await getManualBaseState();
+      if (next.ok) setState(next);
+    });
+  }, []);
+
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <ResizableSheetContent
@@ -78,7 +92,8 @@ export function ManualBaseSheet({
               members={state.members}
               declarations={state.declarations}
               canEdit={state.canEdit}
-              assistant={state.canEdit ? <ManualBaseAssistant /> : null}
+              onChanged={reload}
+              assistant={state.canEdit ? <ManualBaseAssistant onApplied={reload} /> : null}
             />
           )}
         </div>

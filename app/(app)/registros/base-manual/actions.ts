@@ -1,3 +1,10 @@
+// Versão: 1.2 | Data: 03/10/2026
+// v1.2 (03/10/2026): tela v2 da Base manual (renomear/reordenar tudo).
+//   * `saveManualSeries` em UPDATE só grava `default_spread` quando ele VEM no
+//     input — antes renomear uma métrica resetava a contagem padrão para
+//     "ancora" em silêncio;
+//   * `reorderManualItems` regrava `sort_order` de métricas, divisões e opções
+//     (tudo nascia com 0 e a ordem caía no alfabético). Mesmo gate e client RLS.
 // Versão: 1.1 | Data: 18/09/2026
 // v1.1 (18/09/2026): FAMÍLIAS (0143) — CRUD de família/membro/declaração e a
 //   COORDENADA no lançamento, no MESMO choke point e sob o MESMO gate. Duas
@@ -131,12 +138,15 @@ export async function saveManualSeries(
 
   if (input.id) {
     // A CHAVE não entra no update de propósito: mudá-la orfanaria toda fórmula
-    // que a cita, em silêncio.
+    // que a cita, em silêncio. v1.2: a contagem padrão só muda quando VEM —
+    // renomear não pode resetá-la.
     const { error } = await supabase
       .from("manual_series")
       .update({
         label,
-        default_spread: spread,
+        ...(isManualSpread(input.defaultSpread)
+          ? { default_spread: input.defaultSpread }
+          : {}),
         ...(input.sortOrder != null ? { sort_order: input.sortOrder } : {}),
       })
       .eq("id", input.id);
@@ -656,4 +666,44 @@ export async function setManualSeriesFamilies(
   }
   refresh(opts);
   return { ok: true, id: seriesId };
+}
+
+// ===================== ORDEM (v1.2) =====================
+
+const REORDER_TABLES = {
+  series: "manual_series",
+  families: "manual_families",
+  members: "manual_family_members",
+} as const;
+
+export type ManualReorderKind = keyof typeof REORDER_TABLES;
+
+/**
+ * Regrava a ORDEM de métricas, divisões ou opções: `sort_order` = posição na
+ * lista recebida. A lista é a ordem COMPLETA que a tela exibe (não um delta),
+ * pelo mesmo motivo da declaração de divisões: reconciliar por diferença
+ * deixaria empates de `sort_order` (tudo nascia com 0) decidirem pelo rótulo.
+ * A ordem das opções é a ordem das barras no gráfico.
+ */
+export async function reorderManualItems(
+  kind: ManualReorderKind,
+  ids: string[],
+  opts?: ManualWriteOpts
+): Promise<ManualActionState> {
+  try {
+    await requireManualWrite();
+  } catch (e) {
+    return { ok: false, message: (e as Error).message };
+  }
+  const table = REORDER_TABLES[kind];
+  if (!table) return { ok: false, message: "Tipo de item desconhecido." };
+  const unique = [...new Set(ids.filter((id) => typeof id === "string" && id))];
+  if (unique.length > 500) return { ok: false, message: "Lista grande demais." };
+  const supabase = await createClient();
+  for (const [i, id] of unique.entries()) {
+    const { error } = await supabase.from(table).update({ sort_order: i }).eq("id", id);
+    if (error) return { ok: false, message: error.message };
+  }
+  refresh(opts);
+  return { ok: true };
 }

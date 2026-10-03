@@ -1,3 +1,7 @@
+// Versão: 1.2 | Data: 03/10/2026
+// v1.2 (03/10/2026): navegação por MÊS e colunas de atribuição sob demanda
+//   (tela v2): `shiftMonth`, `rowTouchesMonth`, `rowsForMonth` e
+//   `attributionColumns`. Puros, para a grade e os testes lerem a mesma regra.
 // Versão: 1.1 | Data: 18/09/2026
 // v1.1 (18/09/2026): a COORDENADA (0143) entra na identidade da linha. Tinha de
 //   entrar: o índice único do banco passou a incluir `coords`, e esta chave é a
@@ -16,6 +20,7 @@
 // tabela do mês sem duplicar nada.
 import {
   EMPTY_MANUAL_COORDS,
+  coordDeclares,
   manualCoordsKey,
   type ManualCoords,
 } from "@/lib/manual-base/families";
@@ -114,11 +119,68 @@ export function manualColumns(
   return series.filter((s) => wanted.has(s.key));
 }
 
+const YM_RE = /^(\d{4})-(0[1-9]|1[0-2])$/;
+
+/** `YYYY-MM` válido? */
+export function isYearMonth(ym: string | null | undefined): ym is string {
+  return typeof ym === "string" && YM_RE.test(ym);
+}
+
+/** Desloca um `YYYY-MM` por `delta` meses (aritmética de calendário, sem fuso). */
+export function shiftMonth(ym: string, delta: number): string {
+  const m = ym.match(YM_RE);
+  if (!m) return ym;
+  const idx = Number(m[1]) * 12 + (Number(m[2]) - 1) + delta;
+  const y = Math.floor(idx / 12);
+  const mo = idx - y * 12 + 1;
+  return `${y}-${String(mo).padStart(2, "0")}`;
+}
+
+/** A linha ENCOSTA no mês? (intervalo do lançamento ∩ mês ≠ ∅.) Comparação
+ *  de prefixo `YYYY-MM-DD` — o read side é prefix-based (invariante 11). */
+export function rowTouchesMonth(
+  row: Pick<ManualGridRow, "periodStart" | "periodEnd">,
+  ym: string
+): boolean {
+  const from = `${ym}-01`;
+  const to = monthEnd(ym);
+  return row.periodStart <= to && row.periodEnd >= from;
+}
+
+/** As linhas exibidas para um mês; `null` = todos os meses. */
+export function rowsForMonth<T extends Pick<ManualGridRow, "periodStart" | "periodEnd">>(
+  rows: readonly T[],
+  ym: string | null
+): T[] {
+  if (!ym) return [...rows];
+  return rows.filter((r) => rowTouchesMonth(r, ym));
+}
+
+/**
+ * Quais colunas SOLTAS de atribuição (Responsável/Operação) a grade precisa.
+ * Quando a linha ENDEREÇA a divisão embutida, a atribuição já aparece como chip
+ * da coluna "Recorte" — repetir em coluna própria era a duplicação que
+ * confundia. A coluna solta só sobra para o caso legado: linha com a FK
+ * preenchida sem endereçar a divisão (a atribuição da 0142, que não reparte
+ * nada — e que por isso SOMA com as demais linhas do total).
+ */
+export function attributionColumns(
+  rows: readonly Pick<ManualGridRow, "responsibleId" | "operationId" | "coords">[]
+): { responsible: boolean; operation: boolean } {
+  return {
+    responsible: rows.some(
+      (r) => r.responsibleId != null && !coordDeclares(r.coords, "responsavel")
+    ),
+    operation: rows.some(
+      (r) => r.operationId != null && !coordDeclares(r.coords, "operacao")
+    ),
+  };
+}
+
 // O RÓTULO do período vive em lib/manual-base/label.ts, não aqui: o core do
 // assistente (server-only) monta a prévia com a MESMA frase, e duas cópias
 // fariam a prévia dizer "01/08/2026 – 31/08/2026" onde a grade diz
 // "Agosto/2026" — para a mesma linha.
-export {
-  manualPeriodLabelOf as manualPeriodLabel,
-  monthEndOf as monthEnd,
-} from "@/lib/manual-base/label";
+import { monthEndOf as monthEnd } from "@/lib/manual-base/label";
+export { monthEnd };
+export { manualPeriodLabelOf as manualPeriodLabel } from "@/lib/manual-base/label";

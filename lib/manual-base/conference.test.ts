@@ -1,7 +1,9 @@
+// Versão: 1.1 | Data: 03/10/2026
+// v1.1 (03/10/2026): `conferenceIssues` e o `mixed` restrito à janela.
 // Versão: 1.0 | Data: 18/09/2026
 import { describe, expect, it } from "vitest";
 
-import { manualConference, manualLevelLabel } from "./conference";
+import { conferenceIssues, manualConference, manualLevelLabel } from "./conference";
 import type { ManualCoords } from "./families";
 import type { ManualBaseData, ManualEntry } from "./types";
 
@@ -123,5 +125,71 @@ describe("manualConference", () => {
     const c = conf([]);
     expect(c.levels).toEqual([]);
     expect(c.referenceTotal).toBeNull();
+  });
+});
+
+// v1.1 (03/10/2026): a conferência que a TELA mostra — só o que há a corrigir.
+describe("conferenceIssues", () => {
+  const SETEMBRO = { from: "2026-09-01", to: "2026-09-30" };
+  const set = (over: Partial<ManualEntry> = {}) => ({
+    period_start: "2026-09-01",
+    period_end: "2026-09-30",
+    ...over,
+  });
+
+  it("mês sem lançamento nenhum não gera aviso (era o 'Total: 0 / Canal: 0 ✔')", () => {
+    const c = manualConference(
+      base([e(1000, {}, set()), e(1000, { canal: "ligacao" }, set())]),
+      { seriesId: "s1", window: AGOSTO }
+    );
+    expect(c.levels.map((l) => l.count)).toEqual([0, 0]);
+    expect(conferenceIssues(c)).toEqual([]);
+  });
+
+  it("divisão que fecha com o total não gera aviso", () => {
+    expect(
+      conferenceIssues(conf([e(1000, {}), e(600, { canal: "a" }), e(400, { canal: "b" })]))
+    ).toEqual([]);
+  });
+
+  it("divisão incompleta diz quanto falta", () => {
+    const out = conferenceIssues(conf([e(1000, {}), e(800, { canal: "a" })]));
+    expect(out).toHaveLength(1);
+    expect(out[0].kind).toBe("gap");
+    expect(out[0].text).toContain("Canal soma 800");
+    expect(out[0].text).toContain("faltam 200");
+  });
+
+  it("divisão que passa do total diz quanto passa", () => {
+    const out = conferenceIssues(conf([e(1000, {}), e(1200, { canal: "a" })]));
+    expect(out[0].kind).toBe("excess");
+    expect(out[0].text).toContain("passa 200");
+  });
+
+  it("total vazio no mês com divisão preenchida avisa que o card mostraria 0", () => {
+    const c = manualConference(
+      base([e(1000, {}, set()), e(500, { canal: "a" })]),
+      { seriesId: "s1", window: AGOSTO }
+    );
+    const out = conferenceIssues(c);
+    expect(out.map((i) => i.kind)).toEqual(["emptyRef"]);
+    expect(out[0].text).toContain("Canal");
+  });
+
+  it("só uma forma de lançar (sem comparação) não gera aviso", () => {
+    expect(conferenceIssues(conf([e(500, { canal: "a" }), e(500, { canal: "b" })]))).toEqual([]);
+  });
+
+  it("atribuição misturada só conta dentro da janela", () => {
+    const c = manualConference(
+      base([e(1000, {}), e(200, {}, set({ responsible_id: "r1" }))]),
+      { seriesId: "s1", window: AGOSTO }
+    );
+    expect(c.mixedAttributionAtRoot).toBe(false);
+    const c2 = manualConference(
+      base([e(1000, {}, set()), e(200, {}, set({ responsible_id: "r1" }))]),
+      { seriesId: "s1", window: SETEMBRO }
+    );
+    expect(conferenceIssues(c2).map((i) => i.kind)).toEqual(["mixed"]);
   });
 });

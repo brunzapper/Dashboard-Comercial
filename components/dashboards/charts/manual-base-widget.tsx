@@ -1,3 +1,6 @@
+// Versão: 1.2 | Data: 03/10/2026
+// v1.2 (03/10/2026): `onChanged` recarrega a base depois de uma mudança
+//   estrutural feita no próprio widget (o carimbo só muda no próximo RSC).
 // Versão: 1.1 | Data: 02/10/2026
 // v1.1 (02/10/2026): mês e distribuição iniciais da linha nova vêm da
 //   configuração do widget (antes `defaultMonth` era gravado e nunca lido).
@@ -13,7 +16,7 @@
 // widget — e os demais, pelo fingerprint deferido — recarregam.
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { useCallback, useEffect, useState, useTransition } from "react";
 
 import { ManualBaseManager } from "@/components/manual-base/manual-base-manager";
 import { useManualBaseStamp } from "@/components/manual-base/manual-base-stamp-context";
@@ -36,6 +39,13 @@ export function ManualBaseWidget({ settings }: { settings?: BaseManualSettings }
       setState(s);
     });
   }, [stamp]);
+
+  const reload = useCallback(() => {
+    startTransition(async () => {
+      const next = await getManualBaseState();
+      if (next.ok) setState(next);
+    });
+  }, []);
 
   if (!state) {
     return (
@@ -62,6 +72,7 @@ export function ManualBaseWidget({ settings }: { settings?: BaseManualSettings }
         declarations={state.declarations}
         canEdit={state.canEdit}
         compact
+        onChanged={reload}
         onlySeries={settings?.series}
         initialMonth={settings?.defaultMonth}
         initialSpread={settings?.defaultSpread}

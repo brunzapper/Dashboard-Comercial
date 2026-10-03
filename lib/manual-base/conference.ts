@@ -1,3 +1,11 @@
+// Versão: 1.1 | Data: 03/10/2026
+// v1.1 (03/10/2026): conferência CONTEXTUAL (tela v2).
+//   * `conferenceIssues` traduz a conferência em AVISOS — só o que há a
+//     corrigir no mês em tela. Antes a tela listava todo nível existente,
+//     inclusive "Total: 0 / Canal: 0 ✔" num mês sem lançamento nenhum: os
+//     níveis eram descobertos na base INTEIRA e exibidos mesmo vazios;
+//   * `mixedAttributionAtRoot` passou a olhar só a JANELA — fora dela a
+//     armadilha não afeta o número que se está conferindo.
 // Versão: 1.0 | Data: 18/09/2026
 // v1.0 (18/09/2026): a CONFERÊNCIA dos níveis (0143).
 //
@@ -98,8 +106,11 @@ export function manualConference(
   const referenceTotal = reference ? reference.total : null;
 
   const rootKey = manualLevelKey([]);
+  // v1.1: só o que conta NA JANELA — o mesmo somador do engine decide.
   const rootRows = entries.filter(
-    (e) => manualLevelKey(entryLevel(e.coords)) === rootKey
+    (e) =>
+      manualLevelKey(entryLevel(e.coords)) === rootKey &&
+      sumManualEntries([e], o.window) !== 0
   );
   const attributed = rootRows.some(
     (e) => e.responsible_id != null || e.operation_id != null
@@ -120,6 +131,75 @@ export function manualConference(
     referenceTotal,
     mixedAttributionAtRoot: attributed && unattributed,
   };
+}
+
+/** Um aviso da conferência, com a frase pronta para a tela. */
+export interface ManualConferenceIssue {
+  /**
+   * `gap`      — a divisão soma MENOS que a referência (falta lançar);
+   * `excess`   — soma MAIS que a referência;
+   * `emptyRef` — a referência (o que um card sem divisão mostra) está vazia
+   *              no mês, mas há números divididos: o card mostraria 0;
+   * `mixed`    — lançamentos com e sem atribuição convivem no total e somam.
+   */
+  kind: "gap" | "excess" | "emptyRef" | "mixed";
+  text: string;
+}
+
+/**
+ * Os AVISOS de uma conferência — vazio quando não há nada a corrigir. É o que
+ * a tela mostra (v1.1): nunca "0 ✔", nunca nível sem lançamento no mês.
+ *
+ * A referência continua sendo a do engine (`levels[0]`, descoberta na base
+ * inteira): é isso que um card sem divisão realmente mostra. Por isso, quando
+ * ela está vazia no mês e outra divisão tem número, o aviso é `emptyRef` — o
+ * card mostraria 0 mesmo havendo lançamento.
+ */
+export function conferenceIssues(
+  conf: ManualConference,
+  fmt: (n: number) => string = (n) =>
+    new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 2 }).format(n)
+): ManualConferenceIssue[] {
+  const out: ManualConferenceIssue[] = [];
+  const [ref, ...rest] = conf.levels;
+  if (ref) {
+    const refName = ref.level.length === 0 ? "o total lançado" : `a divisão por ${ref.label}`;
+    const withNumbers = rest.filter((lv) => lv.count > 0);
+    if (ref.count === 0) {
+      if (withNumbers.length > 0) {
+        const names = withNumbers.map((lv) => lv.label).join(", ");
+        out.push({
+          kind: "emptyRef",
+          text:
+            `Há números por ${names}, mas ${refName} está vazio neste mês — ` +
+            `um card sem divisão mostraria 0. Lance ${
+              ref.level.length === 0 ? "o total" : `a divisão por ${ref.label}`
+            } do mês.`,
+        });
+      }
+    } else {
+      for (const lv of withNumbers) {
+        if (lv.delta == null || lv.delta === 0) continue;
+        const diff = fmt(Math.abs(lv.delta));
+        out.push({
+          kind: lv.delta < 0 ? "gap" : "excess",
+          text:
+            `A divisão por ${lv.label} soma ${fmt(lv.total)}; ${refName} é ` +
+            `${fmt(ref.total)} — ${lv.delta < 0 ? `faltam ${diff}` : `passa ${diff}`}.`,
+        });
+      }
+    }
+  }
+  if (conf.mixedAttributionAtRoot) {
+    out.push({
+      kind: "mixed",
+      text:
+        "Há lançamentos com e sem responsável/operação no total, e eles somam " +
+        "entre si. Para um ser parte do outro, divida a métrica por Responsável " +
+        "(ou Operação) na aba Métricas.",
+    });
+  }
+  return out;
 }
 
 /** Os lançamentos de um nível — para a grade destacar o que compõe cada um. */
