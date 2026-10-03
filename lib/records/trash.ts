@@ -1,7 +1,9 @@
-// Versão: 1.0 | Data: 07/08/2026
+// Versão: 1.1 | Data: 03/10/2026
+// v1.1 (03/10/2026): os helpers de boards citados abaixo mudaram de lugar
+//   (agora lib/dashboards/trash.ts); só o comentário mudou.
 // Helpers PUROS da Lixeira de registros (soft delete 0121): janela de
 // retenção de 30 dias + rótulo de expiração. Espelham os helpers da Lixeira
-// de boards do hub (app/(app)/page.tsx, TTL 14d) — TTLs diferentes por
+// de boards do hub (lib/dashboards/trash.ts, TTL 14d) — TTLs diferentes por
 // produto: registro é DADO (janela maior), board é chrome.
 // A página /registros/lixeira usa withinRecordsTrashTtl como defesa em
 // profundidade (vencidos somem da lista mesmo sem o cron de purga instalado —
