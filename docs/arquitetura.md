@@ -1,4 +1,9 @@
-<!-- Versão: 2.4 | Data: 02/10/2026 -->
+<!-- Versão: 2.5 | Data: 03/10/2026 -->
+<!-- v2.5 (03/10/2026): §4.26 "A tela v2" — gestor da Base manual em ABAS
+     (Lançamentos · Métricas · Divisões), vocabulário de tela Métrica/Divisão/
+     Opção (`lib/manual-base/vocabulary.ts`), estado otimista de todas as peças
+     (`use-manual-base-store.ts`) + `onChanged` para o ⋮ e o widget,
+     conferência contextual (`conferenceIssues`) e `reorderManualItems`. -->
 <!-- v2.4 (02/10/2026): §4.11.4 + invariante 44 — ORQUESTRAÇÃO POR TÓPICOS dos
      assistentes de IA (roteador → recorte → escalonamento; o prompt externo é
      o MESMO texto inteiro) e os NÓS da Tree no contrato da IA de dashboards
@@ -6247,6 +6252,40 @@ explicitamente e a action falha ALTO sem org ativa.
 O widget sai da lista de widgets de DADOS nos cinco sítios que a montam (page,
 kanban-actions, viewer de snapshot, refresh, widget-scope): sem métrica, o RPC
 recusaria o SELECT vazio.
+
+#### A tela v2 (03/10/2026)
+
+O gestor virou uma casca com ABAS — **Lançamentos · Métricas · Divisões** —
+sobre `use-manual-base-store.ts`, que guarda o estado OTIMISTA de todas as peças
+(antes só os lançamentos; métricas, divisões, opções e a declaração liam das
+props). O ⋮ do dashboard e o widget guardam o estado de `getManualBaseState` e o
+`router.refresh` não chega até eles: era isso que fazia uma opção criada no ⋮
+"não aparecer". Agora o gestor dispara `onChanged` após todo save ESTRUTURAL
+bem-sucedido (e o assistente, `onApplied`), e esses hosts recarregam em
+silêncio. Lançamento não dispara — a grade já é otimista e o carimbo cobre os
+widgets.
+
+- **Vocabulário de tela** é DADO em `lib/manual-base/vocabulary.ts`:
+  Métrica manual / Divisão / Opção. As tabelas, os refs (`manual:`,
+  `manualdim:`), o contrato da IA e o SPEC seguem com dado/família/membro —
+  muda só o texto exibido (o grupo do construtor virou "Divisões da Base
+  manual"). Referência interna saiu da tela: "Copiar referência para fórmula".
+- **Navegador de mês** manda na aba Lançamentos (grade, avisos e linha nova).
+  `rowsForMonth`/`shiftMonth`/`attributionColumns` (`components/manual-base/rows.ts`)
+  são puros; colunas soltas de Responsável/Operação só aparecem para atribuição
+  legada (FK sem a divisão endereçada).
+- **Conferência contextual**: `conferenceIssues` (`lib/manual-base/conference.ts`)
+  devolve só divergências do mês em foco — nunca nível sem lançamento, nunca
+  "0 ✔". A referência continua a do engine (nível mais grosso da base INTEIRA),
+  então referência vazia no mês com divisão preenchida vira o aviso `emptyRef`
+  ("um card sem divisão mostraria 0"). `mixedAttributionAtRoot` passou a olhar
+  só a janela.
+- **Célula fora do nível**: a coordenada da linha vale para todas as colunas,
+  mas a célula só é editável na métrica que declara TODAS as divisões dela.
+- **Tudo editável**: renomear métrica/divisão/opção, contagem padrão da métrica
+  e ordem (`reorderManualItems`, lista COMPLETA → `sort_order` = índice). O
+  update de `saveManualSeries` só grava `default_spread` quando ele vem (antes
+  renomear o resetava para "ancora").
 
 #### O recálculo sem F5
 

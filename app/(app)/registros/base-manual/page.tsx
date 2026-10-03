@@ -1,3 +1,6 @@
+// Versão: 1.1 | Data: 03/10/2026
+// v1.1 (03/10/2026): cabeçalho no vocabulário da tela v2 (Métrica / Divisão /
+//   Opção) — o gestor agora é organizado em abas.
 // Versão: 1.0 | Data: 17/09/2026
 // Registros → Base manual (0142): os números DIGITADOS que se misturam aos
 // registros nas fórmulas dos dashboards.
@@ -53,11 +56,12 @@ export default async function BaseManualPage() {
         <BackLink fallback="/registros" fallbackLabel="Registros" />
         <h1 className="text-xl font-semibold">Base manual</h1>
         <p className="text-muted-foreground max-w-3xl text-sm">
-          Números que você digita em vez de cadastrar registro por registro —
-          mensagens enviadas, contas alcançadas, investimento de mídia. Cada
-          dado vira um operando das fórmulas dos dashboards, e pode ser dividido
-          por qualquer métrica que venha do Sync. Os mesmos números aparecem no
-          menu ⋮ de qualquer dashboard e no widget “Base do Dashboard”.
+          Números que você digita em vez de cadastrar registro por registro. Crie
+          uma <strong>métrica</strong> (ex.: “Ligações realizadas”), lance o valor
+          de cada mês e use-a nos dashboards — sozinha ou dividindo números que
+          vêm do Sync. Se o número tem partes, crie uma <strong>divisão</strong>{" "}
+          (ex.: “Canal”) com as <strong>opções</strong> dela. Os mesmos números
+          aparecem no menu ⋮ de qualquer dashboard e no widget “Base do Dashboard”.
         </p>
       </div>
 

@@ -1,3 +1,7 @@
+// Versão: 1.1 | Data: 03/10/2026
+// v1.1 (03/10/2026): o grupo exibido nos dropdowns passa a "Divisões da Base
+//   manual" — a tela adotou Métrica/Divisão/Opção (lib/manual-base/vocabulary.ts).
+//   As chaves e o prefixo `manualdim:` não mudam.
 // Versão: 1.0 | Data: 18/09/2026
 // v1.0 (18/09/2026): FAMÍLIAS da Base manual — o mesmo número repartido.
 //
@@ -43,8 +47,9 @@ import { MANUAL_KEY_RE } from "./types";
  */
 export const MANUAL_AXIS_PREFIX = "manualdim:";
 
-/** Grupo das famílias nos dropdowns de dimensão e de filtro. */
-export const MANUAL_FAMILY_GROUP = "Famílias da Base manual";
+/** Grupo das famílias nos dropdowns de dimensão e de filtro. v1.1: na tela a
+ *  família se chama DIVISÃO. */
+export const MANUAL_FAMILY_GROUP = "Divisões da Base manual";
 
 /**
  * As famílias EMBUTIDAS. Elas NÃO são linhas de `manual_families`: vivem aqui,

@@ -1,3 +1,8 @@
+// Versão: 1.1 | Data: 03/10/2026
+// v1.1 (03/10/2026): tela v2 da Base manual — `onApplied` avisa o host depois
+//   de aplicar (o painel do ⋮ e o widget guardam o estado por action e não
+//   recarregavam com o router.refresh); botão fechado sem a borda solta e
+//   exemplo do compositor sem métricas de uma organização específica.
 // Versão: 1.0 | Data: 17/09/2026
 // O assistente da BASE MANUAL (0142): cole a tabela que o Meetime, o Apollo ou
 // a planilha cospem e a IA devolve os lançamentos.
@@ -43,7 +48,7 @@ const toEntries = (s: ManualBaseSessionState | null): AiChatEntry[] =>
       : { kind: "ok" as const, text: c.text }
   );
 
-export function ManualBaseAssistant() {
+export function ManualBaseAssistant({ onApplied }: { onApplied?: () => void } = {}) {
   const refresh = useDebouncedRefresh();
   const [open, setOpen] = useState(false);
   const [state, setState] = useState<ManualBaseSessionState | null>(null);
@@ -115,6 +120,7 @@ export function ManualBaseAssistant() {
       // Os números mudaram: o refresh reconcilia a grade e, com o carimbo novo,
       // os widgets do dashboard.
       refresh();
+      onApplied?.();
     });
   };
 
@@ -145,13 +151,13 @@ export function ManualBaseAssistant() {
 
   if (!open) {
     return (
-      <div className="border-t pt-3">
-        <Button type="button" variant="secondary" onClick={() => setOpen(true)}>
+      <div className="flex flex-wrap items-center gap-2">
+        <Button type="button" variant="outline" size="sm" onClick={() => setOpen(true)}>
           Lançar com IA
         </Button>
-        <p className="text-muted-foreground mt-1 text-xs">
-          Cole a tabela de números (ou descreva) e revise antes de aplicar.
-        </p>
+        <span className="text-muted-foreground text-xs">
+          Cole uma tabela de números (ou descreva) e revise antes de aplicar.
+        </span>
       </div>
     );
   }
@@ -267,7 +273,7 @@ export function ManualBaseAssistant() {
         <Textarea
           rows={4}
           placeholder={
-            "Cole a tabela. Ex.:\nDados mensais de agosto\nOperação\t# Accounts emailed\t# Emails replied\nOutbound\t5261\t35"
+            "Cole a tabela. Ex.:\nNúmeros de setembro\nOperação\tLigações\tReuniões\nComercial\t320\t41"
           }
           value={draft}
           onChange={(ev) => setDraft(ev.target.value)}

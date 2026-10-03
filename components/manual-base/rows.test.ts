@@ -1,3 +1,5 @@
+// Versão: 1.1 | Data: 03/10/2026
+// v1.1 (03/10/2026): navegação por mês e colunas de atribuição sob demanda.
 // Versão: 1.0 | Data: 17/09/2026
 // A tradução entre a forma longa do banco (um lançamento por célula) e a
 // tabela que as pessoas colam. O que os testes protegem: a identidade da
@@ -8,7 +10,12 @@ import { describe, expect, it } from "vitest";
 import type { ManualEntry } from "@/lib/manual-base/types";
 
 import {
+  attributionColumns,
   buildManualGrid,
+  isYearMonth,
+  rowTouchesMonth,
+  rowsForMonth,
+  shiftMonth,
   manualColumns,
   manualPeriodLabel,
   manualRowKey,
@@ -104,5 +111,55 @@ describe("monthEnd", () => {
     expect(monthEnd("2028-02")).toBe("2028-02-29");
     expect(monthEnd("2026-02")).toBe("2026-02-28");
     expect(monthEnd("2026-12")).toBe("2026-12-31");
+  });
+});
+
+// v1.1 (03/10/2026)
+describe("navegação por mês", () => {
+  it("shiftMonth atravessa a virada do ano nos dois sentidos", () => {
+    expect(shiftMonth("2026-12", 1)).toBe("2027-01");
+    expect(shiftMonth("2026-01", -1)).toBe("2025-12");
+    expect(shiftMonth("2026-10", 0)).toBe("2026-10");
+    expect(shiftMonth("lixo", 1)).toBe("lixo");
+  });
+
+  it("isYearMonth só aceita AAAA-MM válido", () => {
+    expect(isYearMonth("2026-10")).toBe(true);
+    expect(isYearMonth("2026-13")).toBe(false);
+    expect(isYearMonth(undefined)).toBe(false);
+  });
+
+  it("uma linha ENCOSTA no mês quando os intervalos se cruzam", () => {
+    const tri = { periodStart: "2026-07-01", periodEnd: "2026-09-30" };
+    expect(rowTouchesMonth(tri, "2026-08")).toBe(true);
+    expect(rowTouchesMonth(tri, "2026-10")).toBe(false);
+  });
+
+  it("rowsForMonth(null) devolve todas", () => {
+    const grid = buildManualGrid([
+      e({ id: "a" }),
+      e({ id: "b", period_start: "2026-09-01", period_end: "2026-09-30" }),
+    ]);
+    expect(rowsForMonth(grid, null)).toHaveLength(2);
+    expect(rowsForMonth(grid, "2026-09")).toHaveLength(1);
+  });
+});
+
+describe("attributionColumns", () => {
+  it("esconde Responsável/Operação quando nenhuma linha tem atribuição solta", () => {
+    const grid = buildManualGrid([e({ id: "a" })]);
+    expect(attributionColumns(grid)).toEqual({ responsible: false, operation: false });
+  });
+
+  it("linha que ENDEREÇA a divisão Responsável não pede coluna solta", () => {
+    const grid = buildManualGrid([
+      e({ id: "a", responsible_id: "r1", coords: { responsavel: "r1" } }),
+    ]);
+    expect(attributionColumns(grid).responsible).toBe(false);
+  });
+
+  it("atribuição legada (FK sem divisão) pede a coluna", () => {
+    const grid = buildManualGrid([e({ id: "a", operation_id: "o1" })]);
+    expect(attributionColumns(grid)).toEqual({ responsible: false, operation: true });
   });
 });

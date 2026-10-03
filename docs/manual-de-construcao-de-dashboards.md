@@ -1,4 +1,8 @@
-<!-- Versão: 1.46 | Data: 02/10/2026 -->
+<!-- Versão: 1.47 | Data: 03/10/2026 -->
+<!-- v1.47 (03/10/2026): §2.7 reescrita para a tela nova da Base manual — abas
+     Lançamentos · Métricas · Divisões, termos Métrica/Divisão/Opção, navegador
+     de mês, aviso de conferência só quando algo não fecha, e tudo editável
+     (renomear, reordenar, contagem padrão). -->
 <!-- v1.46 (02/10/2026): §3.8.2 — a IA edita os NÓS da Tree (linhas do cartão,
      indicadores, Multi-fatores, rituais, anotações), mostra "sem mudança" quando
      nada mudou e escolhe o contexto por tópicos (aviso "Contexto carregado");
@@ -506,21 +510,22 @@ alimenta qualquer painel. Ele só não aparece na tela de Bases, porque não é 
 Base — não tem registros, não entra em "Fonte de dados" do widget e não pode
 ser dimensão.
 
-**Duas coisas, e a diferença importa:**
+**A tela tem três abas:**
 
-- O **dado** é a coluna: "# Emails replied", "Mensagens", "Investimento em
-  mídia". Criar um dado é dar um nome. O nome pode ser editado depois; a
-  referência interna que as fórmulas usam (`manual:emails_replied`), não — é
-  ela que mantém as fórmulas já salvas funcionando.
-- O **lançamento** é o número: um valor, um período e, se quiser, uma operação
-  ou um responsável. Vários lançamentos do mesmo dado **somam**.
+- **Métricas** — cada **métrica manual** é uma coluna: "Ligações realizadas",
+  "Investimento em mídia", "Contas alcançadas". Criar é dar um nome. Aqui você
+  também **renomeia**, muda a **ordem**, escolhe **como ela conta no período**
+  por padrão e marca **por quais divisões** ela se reparte. O nome pode mudar à
+  vontade: as fórmulas guardam uma referência interna que não muda (o menu ⋯
+  da métrica tem "Copiar referência para fórmula", para quem escreve fórmula à
+  mão).
+- **Lançamentos** — os números. No topo fica o **navegador de mês**
+  (‹ Outubro/2026 ›, ou "Todos os meses"): a tabela mostra o mês em foco, e o
+  botão **Lançar <mês>** cria a linha daquele mês. Digite na célula e pronto:
+  salva sozinho e os widgets recalculam.
+- **Divisões** — as maneiras de repartir um número (abaixo).
 
-**Como lançar.** Escolha o mês (ou um intervalo), a atribuição opcional, e
-clique em **Nova linha**. A tabela tem uma linha por período × atribuição e uma
-coluna por dado — exatamente o formato em que esses números costumam chegar.
-Digite na célula e pronto: salva sozinho e os widgets recalculam.
-
-Relançar o **mesmo** dado, no **mesmo** período, com a **mesma** atribuição
+Relançar a **mesma** métrica, no **mesmo** período, com o **mesmo** recorte
 **atualiza** o número em vez de criar outro. É o que permite acompanhar um mês
 em andamento: você relança a tabela toda semana e os valores sobem, sem
 duplicar nada.
@@ -529,7 +534,10 @@ duplicar nada.
 
 Um lançamento tem período próprio, e o dashboard tem o dele. Quando os dois não
 coincidem, é esta escolha — feita **por linha** — que decide o que acontece.
-Tome "3520 mensagens em agosto":
+O padrão de cada métrica fica na aba **Métricas**; para mudar uma linha
+específica, use o menu ⋯ da linha em **Lançamentos** (a linha mostra o modo
+embaixo do período quando ele difere do padrão). Tome "3520 mensagens em
+agosto":
 
 | Forma | O que faz | Agosto | 01–10/08 | 11–20/08 | Por dia |
 |---|---|---|---|---|---|
@@ -560,7 +568,7 @@ igual entre os dias"** — é a única em que a soma dos dias devolve o total.
   trimestre e no Total geral, porque o número manual soma como qualquer
   quantidade.
 
-#### Repartir o mesmo número: famílias (0143)
+#### Repartir o mesmo número: divisões (0143)
 
 Às vezes o número tem divisões por dentro. "Total de interações com clientes:
 1000" pode ser lido de várias maneiras ao mesmo tempo:
@@ -576,21 +584,26 @@ São **quatro leituras das MESMAS mil interações** — não são 3500. A regra
 sistema aplica é justamente essa: **as leituras nunca se somam entre si**. Ele
 escolhe UMA e mostra só ela.
 
-Uma **família** é uma dessas maneiras de repartir ("Canal", "Vendedor"), e os
-**membros** são os valores dela ("Ligação", "E-mail").
+Uma **divisão** é uma dessas maneiras de repartir ("Canal", "Vendedor"), e as
+**opções** são os valores dela ("Ligação", "E-mail"). (Nos bastidores elas se
+chamam família e membro — é o termo que a IA de dashboards usa.)
 
-**Como montar**, em Registros → Base manual:
+**Como montar**, em Registros → Base manual (ou no ⋮ do dashboard):
 
-1. Na seção **Famílias**, crie "Canal" e acrescente os membros "Ligação" e
-   "E-mail". A ordem dos membros é a ordem das barras no gráfico.
-2. Em **"Cada dado se reparte por…"**, marque "Canal" no dado "Total de
-   interações". Enquanto nada está marcado, todos os lançamentos do dado somam
-   entre si, exatamente como antes — é a marcação que liga a regra.
-3. Em **Nova linha**, o seletor "Canal" aparece com três respostas: *Não
-   repartir* (a linha é o TOTAL), *Sem Canal* (o resíduo — um grupo de verdade,
-   com número próprio) ou um membro.
-4. Lance o total numa linha e cada fatia na sua. A coluna **Reparte** mostra o
-   que cada linha endereça.
+1. Na aba **Divisões**, crie "Canal" e acrescente as opções "Ligação" e
+   "E-mail". Tudo ali é editável no lugar: renomeie a divisão ou uma opção,
+   mude a ordem com ↑/↓ (a ordem das opções é a ordem das barras no gráfico) e
+   exclua o que não usa mais. **Responsável** e **Operação** já vêm prontas —
+   as opções delas são o cadastro do sistema.
+2. Na aba **Métricas**, em **Dividida por**, marque "Canal" na métrica "Total
+   de interações". Enquanto nada está marcado, todos os lançamentos da métrica
+   somam entre si — é a marcação que liga a regra.
+3. Em **Lançamentos**, **Lançar <mês>** pergunta o recorte: *Total (não
+   dividir)*, uma opção, ou *Sem Canal* (o resíduo — um grupo de verdade, com
+   número próprio).
+4. Lance o total numa linha e cada parte na sua. A coluna **Recorte** mostra o
+   que cada linha endereça; nas métricas que não se dividem por aquele recorte
+   a célula aparece como "—".
 
 **Como usar nos widgets:**
 
@@ -599,7 +612,7 @@ Uma **família** é uma dessas maneiras de repartir ("Canal", "Vendedor"), e os
   lançado à mão, quando existe, sempre vence.
 - **Card de um membro** ("500 ligações"): a mesma métrica, mais um **filtro**
   Canal = Ligação.
-- **Gráfico destrinchando o dado**: dimensão **Canal** (grupo "Famílias da Base
+- **Gráfico destrinchando o dado**: dimensão **Canal** (grupo "Divisões da Base
   manual"), métrica `Total de interações`.
 - **Tabela cruzada**: duas dimensões, Canal e Vendedor.
 - **Numa fórmula**: além do dado inteiro, cada membro aparece como operando
@@ -608,9 +621,9 @@ Uma **família** é uma dessas maneiras de repartir ("Canal", "Vendedor"), e os
 
 **Quatro coisas que valem saber antes:**
 
-- **Escolha as métricas olhando quem se reparte por aquela família.** Um dado só
-  se destrincha pelas famílias marcadas em "Cada dado se reparte por…" — pedir
-  outra faz aquele número virar "—". E se NENHUMA métrica do widget se repartir
+- **Escolha as métricas olhando quem se reparte por aquela família.** Uma métrica só
+  se destrincha pelas divisões marcadas em "Dividida por" — pedir outra faz
+  aquele número virar "—". E se NENHUMA métrica do widget se repartir
   pelo eixo escolhido, o widget aparece com o eixo montado e todos os valores em
   "—": as barras existem, mas não há número nelas. Quando isso acontecer, o
   caminho costuma ser trocar a métrica por um dado equivalente que tenha a
@@ -620,9 +633,12 @@ Uma **família** é uma dessas maneiras de repartir ("Canal", "Vendedor"), e os
   Uma contagem de registros ao lado exibe "—", e não zero: nenhum registro
   pertence a "Ligação", e inventar um rateio seria pior que dizer "não sei".
 - **Se a repartição não fecha com o total, o gráfico mostra a repartição** — ele
-  não inventa o resto. O bloco **Conferência**, no fim da tela, mostra o total
-  de cada leitura e quanto falta. No exemplo acima o cruzamento soma 500 de
-  1000, e é ali que isso fica visível.
+  não inventa o resto. Quando isso acontece no mês em foco, a aba Lançamentos
+  mostra um aviso **"Confira <mês>"** dizendo quanto falta (ou passa) — no
+  exemplo acima, "a divisão por Canal × Vendedor soma 500; o total lançado é
+  1.000 — faltam 500". O aviso também aparece quando o mês tem partes lançadas
+  mas não tem o total (um card sem divisão mostraria 0). Mês sem lançamento ou
+  com números que batem não mostra aviso nenhum.
 - Um filtro de família recorta **só os números da Base manual**. A contagem de
   registros do mesmo widget não é afetada.
 
@@ -643,7 +659,7 @@ Uma **família** é uma dessas maneiras de repartir ("Canal", "Vendedor"), e os
 #### Quem pode
 
 Ver: qualquer pessoa da organização. Lançar e editar: quem já pode editar
-valores de registros. **Excluir um dado** (a coluna inteira, com os lançamentos
+valores de registros. **Excluir uma métrica** (a coluna inteira, com os lançamentos
 dela): só administrador — as fórmulas que citavam o dado passam a exibir "—".
 
 #### Lançar com IA
