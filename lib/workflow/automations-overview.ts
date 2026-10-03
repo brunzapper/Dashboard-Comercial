@@ -1,4 +1,8 @@
-// Versão: 1.0 | Data: 08/09/2026
+// Versão: 1.1 | Data: 03/10/2026
+// v1.1 (03/10/2026): `opts.tickCheckedAt` — a verificação do tick (0151,
+//   `tick_gates.checked_at`, lida por quem chama com service role) entra em
+//   "Última execução" via `withTickCheck`: com o portão de mudança o
+//   `last_run_at` só anda quando houve rodada de fato.
 // Todas as automações da organização num lugar só — a lista que o Workflow
 // mostra.
 //
@@ -14,6 +18,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { loadSources } from "@/lib/config/sources";
+import { withTickCheck } from "@/lib/ticks/gate";
 import { loadSourceLabels } from "@/lib/config/source-labels";
 import {
   parseAutomationRule,
@@ -58,7 +63,8 @@ interface RawRow {
  */
 export async function loadOrgAutomations(
   db: SupabaseClient,
-  orgId: string | null
+  orgId: string | null,
+  opts?: { tickCheckedAt?: string | null }
 ): Promise<OrgAutomationRow[]> {
   let query = db
     .from("automation_rules")
@@ -141,9 +147,22 @@ export async function loadOrgAutomations(
       ownerLabel,
       ownerHref,
       rule: parseAutomationRule(r.rule),
-      lastRunAt: r.last_run_at,
+      ...(() => {
+        // v1.1: minuto verificado sem mudança = nenhuma ação, como antes.
+        const seen = withTickCheck(
+          {
+            enabled: r.enabled,
+            last_run_at: r.last_run_at,
+            last_moved_count: r.last_moved_count ?? 0,
+          },
+          opts?.tickCheckedAt ?? null
+        );
+        return {
+          lastRunAt: seen.last_run_at,
+          lastActionCount: seen.last_moved_count,
+        };
+      })(),
       lastError: r.last_error,
-      lastActionCount: r.last_moved_count ?? 0,
     };
   });
 

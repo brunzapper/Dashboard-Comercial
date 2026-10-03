@@ -1,4 +1,7 @@
-// Versão: 1.0 | Data: 27/07/2026
+// Versão: 1.1 | Data: 03/10/2026
+// v1.1 (03/10/2026): `complete` de runAllKanbanAutomations — o portão de
+//   mudança do tick (0151) só grava "nada mudou desde aqui" após rodada
+//   COMPLETA; corte de deadline ou falha têm de dizer "incompleta".
 // Engine I/O das automações com fake-supabase (fail-closed — toda tabela
 // tocada é declarada): quadro por VALOR move via update de records (carimbo
 // field_modified_at + locally_modified_at, audit origin 'automation',
@@ -19,7 +22,7 @@ vi.mock("@/lib/webhooks/emit", () => ({
 import { recalcFormulaFieldsForRecords } from "@/lib/records/recalc";
 import { emitWebhookEvent } from "@/lib/webhooks/emit";
 import { fakeSupabase, hasStep, type RecordedQuery } from "@/tests/helpers/fake-supabase";
-import { runBoardAutomations } from "./engine";
+import { runAllKanbanAutomations, runBoardAutomations } from "./engine";
 import type { AutomationRule } from "./types";
 
 const recordRow = (id: string, stage: string) => ({
@@ -476,5 +479,42 @@ describe("runBoardAutomations — colunas Personalizar", () => {
       )
     ).toBe(false);
     expect(recalcFormulaFieldsForRecords).not.toHaveBeenCalled();
+  });
+});
+
+describe("runAllKanbanAutomations — completude (portão do tick, 0151)", () => {
+  const RULE_ROW = {
+    widget_id: null,
+    board_id: "b1",
+    source_key: null,
+    last_run_at: null,
+  };
+
+  it("sem regra habilitada ⇒ completa (nada a fazer)", async () => {
+    const { db } = fakeSupabase({ tables: { automation_rules: [] } });
+    const res = await runAllKanbanAutomations(db, Date.now() + 10_000);
+    expect(res.complete).toBe(true);
+    expect(res.boards).toBe(0);
+  });
+
+  it("deadline estourado antes de um dono ⇒ INCOMPLETA", async () => {
+    const { db } = fakeSupabase({ tables: { automation_rules: [RULE_ROW] } });
+    const res = await runAllKanbanAutomations(db, Date.now() - 1);
+    expect(res.complete).toBe(false);
+    expect(res.boards).toBe(0);
+  });
+
+  it("dono que falha ⇒ INCOMPLETA (o minuto seguinte tenta de novo)", async () => {
+    const { db } = fakeSupabase({
+      tables: {
+        automation_rules: (q: RecordedQuery) =>
+          hasStep(q, "eq", "board_id", "b1")
+            ? { data: [], error: { message: "falha simulada" } }
+            : { data: [RULE_ROW], error: null },
+      },
+    });
+    const res = await runAllKanbanAutomations(db, Date.now() + 10_000);
+    expect(res.errors).toBe(1);
+    expect(res.complete).toBe(false);
   });
 });

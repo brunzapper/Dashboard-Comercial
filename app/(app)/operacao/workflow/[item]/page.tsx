@@ -1,4 +1,6 @@
-// Versão: 1.0 | Data: 09/09/2026
+// Versão: 1.1 | Data: 03/10/2026
+// v1.1 (03/10/2026): "Última execução" considera a verificação do tick
+//   (`tick_gates.checked_at`, 0151 — portão de mudança).
 // A TELA DE CONSTRUÇÃO de um esquema — o destino de clicar numa linha da lista.
 //
 // O parâmetro é o id que o CATÁLOGO já emite, com namespace: `schema:<uuid>`
@@ -16,6 +18,8 @@ import { requireSettingsArea } from "@/lib/auth/access";
 import { getActiveOrgId } from "@/lib/auth/org";
 import { loadSources } from "@/lib/config/sources";
 import { createClient } from "@/lib/supabase/server";
+import { createServiceClient } from "@/lib/supabase/service";
+import { loadTickCheckedAt, TICK_GATE_KEYS } from "@/lib/ticks/gate";
 import {
   WORKFLOW_CONNECTION_KEYS,
   workflowConnectionStatus,
@@ -45,7 +49,12 @@ export default async function WorkflowItemPage({
   const supabase = await createClient();
 
   if (kind === "rule") {
-    const rows = await loadOrgAutomations(supabase, orgId);
+    // v1.1: tick_gates é service-role-only — só o instante da verificação.
+    const tickCheckedAt = await loadTickCheckedAt(
+      createServiceClient(),
+      TICK_GATE_KEYS.kanbanAutomations
+    );
+    const rows = await loadOrgAutomations(supabase, orgId, { tickCheckedAt });
     const row = rows.find((r) => r.id === id);
     // Regra que sumiu (excluída no quadro, por exemplo) não vira tela vazia.
     if (!row) notFound();

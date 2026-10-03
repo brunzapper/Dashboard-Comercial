@@ -1,4 +1,8 @@
-// Versão: 1.3 | Data: 10/09/2026
+// Versão: 1.4 | Data: 03/10/2026
+// v1.4 (03/10/2026): `sweepDueTaskMirrors` devolve também `complete` — o tick
+//   de sync põe a varredura atrás do PORTÃO DE MUDANÇA (0151,
+//   lib/ticks/gate.ts) e só grava "nada mudou desde aqui" após uma varredura
+//   que não bateu no teto nem falhou. `enqueueDueTaskMirrors` segue igual.
 // v1.3 (10/09/2026): `enqueueDueTaskMirrors` — a ocorrência de série nasce aqui
 // assim que a janela a planeja, mas só vira atividade no CRM quando o
 // vencimento entra na antecedência configurada na regra. O varredor roda no
@@ -397,6 +401,18 @@ export async function enqueueDueTaskMirrors(
   db: SupabaseClient,
   opts?: { limit?: number }
 ): Promise<number> {
+  return (await sweepDueTaskMirrors(db, opts)).queued;
+}
+
+/**
+ * v1.4: a varredura com o veredito de COMPLETUDE — `complete=false` quando a
+ * consulta bateu no teto (pode haver mais) ou falhou (o próximo tick tenta).
+ */
+export async function sweepDueTaskMirrors(
+  db: SupabaseClient,
+  opts?: { limit?: number }
+): Promise<{ queued: number; complete: boolean }> {
+  const limit = opts?.limit ?? MIRROR_SWEEP_LIMIT;
   try {
     const today = todayBrasiliaIso().slice(0, 10);
     // A janela mais larga que qualquer regra pode pedir — o recorte fino é por
@@ -412,8 +428,9 @@ export async function enqueueDueTaskMirrors(
       .not("record_id", "is", null)
       .lte("due_date", horizon)
       .order("due_date", { ascending: true })
-      .limit(opts?.limit ?? MIRROR_SWEEP_LIMIT);
-    if (!rows || rows.length === 0) return 0;
+      .limit(limit);
+    if (!rows || rows.length === 0) return { queued: 0, complete: true };
+    const complete = rows.length < limit;
 
     // A antecedência e o "nunca" vivem na regra: uma consulta para todas.
     const ruleIds = [
@@ -443,7 +460,7 @@ export async function enqueueDueTaskMirrors(
         today
       );
     });
-    if (due.length === 0) return 0;
+    if (due.length === 0) return { queued: 0, complete };
 
     const owners = await loadMirrorOwners(
       db,
@@ -465,10 +482,10 @@ export async function enqueueDueTaskMirrors(
       ];
     });
     await enqueueTaskMirrorMany(db, payload);
-    return payload.length;
+    return { queued: payload.length, complete };
   } catch (e) {
     console.error("[task-mirror] varredura da antecedência falhou:", (e as Error).message);
-    return 0;
+    return { queued: 0, complete: false };
   }
 }
 

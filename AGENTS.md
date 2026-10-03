@@ -1142,6 +1142,26 @@ This version has breaking changes — APIs, conventions, and file structure may 
   `dashboards`/`widgets`/`kanban_placements` — o fake é fail-closed) + os 80
   testes de kanban intocados (não-regressão do ramo de quadro). Ver
   `docs/arquitetura.md` §4.15.
+- **Tick de minuto só trabalha quando algo mudou (0151, 03/10/2026):** o
+  tick das automações (e a varredura da antecedência do espelho no tick de
+  sync) passa pelo PORTÃO de `lib/ticks/gate.ts` — `data_change_seq` avança
+  por trigger statement-level em toda tabela de `TICK_GATE_TABLES`, e
+  `tick_gate_begin` decide em UMA requisição (seq mudou, dia de Brasília
+  virou, confirmação pendente ou > 60 min ⇒ roda). Era o grosso do log
+  ingestion do Supabase (~60 requisições/min, 24h, para chegar à mesma
+  conclusão). Tabela NOVA lida por uma rodada gated entra na lista E na
+  migração (`gate.test.ts` compara); só rodada COMPLETA faz commit (deadline,
+  teto `capped` ou erro repete no minuto seguinte); FAIL-OPEN; o trigger de
+  `automation_rules` é restrito às colunas de configuração (o bookkeeping não
+  acorda o tick) e "Última execução" é `withTickCheck`. Condição com
+  granularidade menor que um DIA quebraria a premissa — revise o portão junto.
+  "Executar agora" e o hook pós-sync seguem sem portão. Junto: o estado ocioso
+  do sync sai de `sync_tick_state`, os donos da leitura de volta de
+  `activity_inbound_owners` (a leitura segue a cada minuto — o portal é
+  externo), sessão por `getClaims()` (JWT ES256, verificação local) +
+  `session_context` (SECURITY INVOKER), e `resolveGoal` lê metas de um memo
+  por cliente (`invalidateGoalCache` em toda escrita de `lib/metas/upsert.ts`).
+  Ver `docs/arquitetura.md` §4.15 e invariante 45.
 - **Automações do kanban e ações em massa se resolvem no ENGINE/actions, nunca
   no RPC (0109, 27/07/2026):** regras em `automation_rules` (tabela própria
   — NUNCA em `settings.kanban`: o widget-builder reconstrói o objeto no save e

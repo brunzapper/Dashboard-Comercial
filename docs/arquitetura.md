@@ -1,4 +1,8 @@
-<!-- Versão: 2.5 | Data: 03/10/2026 -->
+<!-- Versão: 2.6 | Data: 03/10/2026 -->
+<!-- v2.6 (03/10/2026): §4.15 "Portão de mudança dos ticks" + invariante 45 —
+     redução do log ingestion do Supabase (0151): tick sem mudança custa UMA
+     requisição; estado do sync, donos da leitura de volta e contexto de sessão
+     consolidados em RPCs; getClaims no lugar de getUser; metas sem N+1. -->
 <!-- v2.5 (03/10/2026): §4.26 "A tela v2" — gestor da Base manual em ABAS
      (Lançamentos · Métricas · Divisões), vocabulário de tela Métrica/Divisão/
      Opção (`lib/manual-base/vocabulary.ts`), estado otimista de todas as peças
@@ -3322,6 +3326,38 @@ criação / última alteração de campo via `field_modified_at` / entrada na
 coluna Personalizar via `kanban_placements.updated_at`). Regras em ordem
 (`position`): a PRIMEIRA que casa vence por card; ações =
 `move_to_column` e `set_field` (31/07/2026 — união extensível).
+
+**Portão de mudança dos ticks (0151, 03/10/2026).** O tick de minuto das
+automações recarregava catálogo, universo inteiro e fatos (~60 requisições ao
+PostgREST) a cada minuto, 24h por dia — e só ~20 dos 1.440 minutos do dia
+tinham qualquer mudança de dado. Era o grosso do log ingestion do Supabase.
+Como toda condição de automação, série e ritual tem granularidade de DIA
+(`todayBrasiliaIso` + `daysSince`), o resultado de uma rodada só muda se (a)
+algum dado lido por ela mudar ou (b) o dia de Brasília virar. O portão
+(`lib/ticks/gate.ts`) mede exatamente isso: `data_change_seq` avança por
+trigger statement-level em toda tabela de `TICK_GATE_TABLES` (exclusão
+inclusa — ela não deixa `updated_at`), e `tick_gate_begin` decide em UMA
+requisição. Regras do contrato:
+- só rodada **completa** faz commit (`complete` de
+  `runAllKanbanAutomations`/`reconcileAllKanbanAllocationFields`/
+  `runTreeRituals`): corte por deadline, teto de ações (`capped`) ou erro
+  repete no minuto seguinte, como sempre;
+- rodada disparada por mudança pede UMA confirmação no minuto seguinte (a seq
+  avança no fim do statement, antes do commit do writer);
+- rede de segurança: rodada completa ao menos a cada 60 min;
+- FAIL-OPEN: RPC ausente/erro ⇒ roda;
+- o bookkeeping de `automation_rules` NÃO acorda o tick (trigger row-level só
+  nas colunas de configuração), e "Última execução" na UI é
+  `max(last_run_at, tick_gates.checked_at)` via `withTickCheck`;
+- "Executar agora" e o hook pós-sync seguem SEM portão.
+O tick de sync usa o mesmo portão só na varredura da antecedência do espelho
+(`sweepDueTaskMirrors`); o estado ocioso dele sai de `sync_tick_state` e a
+leitura de volta do Bitrix segue a CADA minuto (o portal é externo), com os
+donos em `activity_inbound_owners` e as tarefas lidas uma vez por rodada. No
+lado do usuário, o proxy e `getSessionInfo` usam `getClaims()` (JWT ES256
+verificado localmente) e papéis/permissões/memberships saem de
+`session_context` (SECURITY INVOKER); `resolveGoal` lê metas de um memo por
+cliente (uma consulta por ano×métrica por request). Ver invariante 45.
 
 **Condição de campo sobre DATA compara por DIA de Brasília (12/09/2026).**
 "Antes/depois de uma data específica" era o caso que não funcionava. A avaliação
@@ -7599,6 +7635,18 @@ principalmente — para mantenedores humanos.
     inteiro; o roteador é fail-open e só soma; o escalonamento devolve o prompt
     inteiro. Todo `runJsonGenerationLoop` passa `topics:`. Conteúdo DENTRO do
     cartão da Tree é do NÓ (`mapas`), nunca de `settings.tree`.
+
+45. **Tick de minuto só trabalha quando algo mudou, e tabela nova lida por
+    ele ganha o trigger (§4.15, 0151).** O sinal é `data_change_seq`, avançada
+    por `trg_bump_data_change_seq` nas tabelas de `TICK_GATE_TABLES`
+    (`lib/ticks/gate.ts` — a lista e a migração são comparadas por
+    `gate.test.ts`). Rodada nova lida pelo tick precisa entrar nos dois, senão
+    a mudança dela só é vista pela rede de segurança de 60 min. O portão é
+    FAIL-OPEN, só faz commit após rodada COMPLETA, e nunca dispara pelo
+    bookkeeping de `automation_rules` (o trigger dali é restrito às colunas de
+    configuração — não o alargue). Condição de automação com granularidade
+    MENOR que um dia (hora/minuto) quebraria a premissa do portão: exige
+    rever o `tick_gate_begin` junto.
 
 ## 6. Convenções do projeto
 

@@ -1,4 +1,8 @@
-// Versão: 1.0 | Data: 01/10/2026
+// Versão: 1.1 | Data: 03/10/2026
+// v1.1 (03/10/2026): `complete` nos contadores — o portão de mudança do tick
+//   (0151, lib/ticks/gate.ts) só pula os minutos seguintes depois de uma
+//   rodada que viu TODOS os rituais (sem corte de deadline/teto e sem falha de
+//   inserção que não seja o 23505 da trava).
 // Executor dos RITUAIS automáticos (0149) — o modo opt-in `payload.auto` do nó
 // de ritual da Tree. Roda no tick das automações (a cada minuto, no orçamento
 // que sobrar).
@@ -29,6 +33,8 @@ export interface RitualRunCounters {
   rituals: number;
   created: number;
   skipped: number;
+  /** v1.1: todos os rituais avaliados, sem corte nem falha transitória. */
+  complete: boolean;
 }
 
 export async function runTreeRituals(
@@ -36,7 +42,12 @@ export async function runTreeRituals(
   deadline: number,
   now: Date = new Date()
 ): Promise<RitualRunCounters> {
-  const out: RitualRunCounters = { rituals: 0, created: 0, skipped: 0 };
+  const out: RitualRunCounters = {
+    rituals: 0,
+    created: 0,
+    skipped: 0,
+    complete: true,
+  };
   const { data: rows, error } = await db
     .from("tree_nodes")
     .select("id, organization_id, scope_id, label, payload, created_by")
@@ -46,7 +57,10 @@ export async function runTreeRituals(
     .filter("payload->>auto", "eq", "true")
     .order("updated_at", { ascending: true })
     .limit(MAX_RITUALS_PER_RUN);
-  if (error || !rows || rows.length === 0) return out;
+  if (error) return { ...out, complete: false };
+  if (!rows || rows.length === 0) return out;
+  // v1.1: bateu no teto ⇒ pode haver ritual além dele.
+  if (rows.length >= MAX_RITUALS_PER_RUN) out.complete = false;
 
   const today = todayBrasiliaIso(now);
   const orgCache = new Map<
@@ -81,7 +95,10 @@ export async function runTreeRituals(
     payload: unknown;
     created_by: string | null;
   }[]) {
-    if (Date.now() > deadline) break;
+    if (Date.now() > deadline) {
+      out.complete = false;
+      break;
+    }
     const payload = parseRitualPayload(row.payload);
     if (!payload?.auto) continue;
     out.rituals += 1;
@@ -124,6 +141,8 @@ export async function runTreeRituals(
       if (insErr || !task) {
         // 23505 = esta ocorrência já existe (corrida com o botão) — no-op.
         out.skipped += 1;
+        // v1.1: outra falha é transitória — o próximo tick tenta de novo.
+        if (insErr?.code !== "23505") out.complete = false;
         continue;
       }
       out.created += 1;

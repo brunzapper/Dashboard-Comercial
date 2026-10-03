@@ -1,3 +1,6 @@
+// Versão: 2.4 | Data: 03/10/2026
+// v2.4 (03/10/2026): "Última execução" das automações considera a verificação
+//   do tick (`tick_gates.checked_at`, 0151 — portão de mudança).
 // Versão: 2.3 | Data: 09/09/2026
 // v2.3 (09/09/2026): carrega as Bases — destino do passo que grava registro
 //   local e dono da automação sem quadro (a porta que a 0127 não tinha).
@@ -24,6 +27,8 @@ import { requireSettingsArea } from "@/lib/auth/access";
 import { getActiveOrgId } from "@/lib/auth/org";
 import { loadSources } from "@/lib/config/sources";
 import { createClient } from "@/lib/supabase/server";
+import { createServiceClient } from "@/lib/supabase/service";
+import { loadTickCheckedAt, TICK_GATE_KEYS } from "@/lib/ticks/gate";
 import { loadOrgAutomations } from "@/lib/workflow/automations-overview";
 import { loadWorkflowRuns } from "@/lib/workflow/runs";
 import { loadWorkflowSchemas } from "@/lib/workflow/schemas";
@@ -44,9 +49,14 @@ export default async function WorkflowPage() {
 
   const supabase = await createClient();
   await ensureDefaultWorkflowSchemas(supabase, orgId);
+  // v2.4: tick_gates é service-role-only — só o instante da verificação.
+  const tickCheckedAt = await loadTickCheckedAt(
+    createServiceClient(),
+    TICK_GATE_KEYS.kanbanAutomations
+  );
   const [schemas, automations, runs, sources] = await Promise.all([
     loadWorkflowSchemas(supabase, orgId),
-    loadOrgAutomations(supabase, orgId),
+    loadOrgAutomations(supabase, orgId, { tickCheckedAt }),
     loadWorkflowRuns(supabase, orgId),
     loadSources(supabase, orgId),
   ]);

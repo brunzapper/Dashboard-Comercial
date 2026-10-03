@@ -1,3 +1,7 @@
+// Versão: 1.3 | Data: 03/10/2026
+// v1.3 (03/10/2026): toda escrita invalida o memo de leitura de metas do
+// cliente (`invalidateGoalCache`, lib/metas/resolve.ts v1.2) — a mesma action
+// que grava e depois resolve nunca lê o valor velho.
 // Versão: 1.2 | Data: 03/10/2026
 // v1.2 (03/10/2026): `updateGoalById` — EDITAR uma meta existente (Configurações
 // → Metas) pode mudar a chave natural inteira (período/escopo/métrica). Como o
@@ -20,6 +24,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { GOAL_METRICS_CONFIG_KEY } from "@/lib/config/goal-metrics";
 import { mergeGoalMetrics, type GoalMetricDef } from "@/lib/metas/metrics";
+import { invalidateGoalCache } from "@/lib/metas/resolve";
 
 /** Chave natural de uma meta (espelha o índice único com coalesce de 0016/0090). */
 export interface GoalTargetKey {
@@ -81,6 +86,7 @@ export async function upsertGoalTarget(
   const { error } = existing?.id
     ? await supabase.from("goals").update({ target }).eq("id", existing.id)
     : await supabase.from("goals").insert(row);
+  invalidateGoalCache(supabase); // v1.3
   return error ? error.message : null;
 }
 
@@ -117,6 +123,7 @@ export async function updateGoalById(
       target,
     })
     .eq("id", id);
+  invalidateGoalCache(supabase); // v1.3
   return error ? error.message : null;
 }
 
@@ -147,6 +154,7 @@ export async function ensureGoalTarget(
     target,
     ...(orgId ? { organization_id: orgId } : {}),
   });
+  invalidateGoalCache(supabase); // v1.3
   return error ? { error: error.message } : "created";
 }
 
@@ -165,6 +173,7 @@ export async function deleteGoalTarget(
   if (findError) return findError.message;
   if (!existing?.id) return null;
   const { error } = await supabase.from("goals").delete().eq("id", existing.id);
+  invalidateGoalCache(supabase); // v1.3
   return error ? error.message : null;
 }
 

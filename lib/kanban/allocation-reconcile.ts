@@ -1,4 +1,8 @@
-// Versão: 1.0 | Data: 28/07/2026
+// Versão: 1.1 | Data: 03/10/2026
+// v1.1 (03/10/2026): `complete` no resultado de
+//   reconcileAllKanbanAllocationFields (e `failed` por quadro) para o portão de
+//   mudança do tick (0151, lib/ticks/gate.ts): corte por deadline ou falha
+//   transitória mantêm o tick rodando no minuto seguinte, como antes.
 // Reconciliação da alocação-como-campo (invariante 24): recomputa o quadro
 // inteiro com runKanban (period null — mesma leitura das automações: fallback
 // 1ª coluna, colunas ocultas e chaves órfãs resolvidos de graça), sincroniza
@@ -95,7 +99,7 @@ export async function reconcileKanbanAllocationField(
   db: SupabaseClient,
   owner: KanbanOwner,
   opts?: { deadline?: number }
-): Promise<{ updated: number; skipped?: string }> {
+): Promise<{ updated: number; skipped?: string; failed?: boolean }> {
   try {
     const ctx = await loadKanbanOwnerContext(db, owner);
     if (typeof ctx === "string") return { updated: 0, skipped: ctx };
@@ -118,7 +122,8 @@ export async function reconcileKanbanAllocationField(
       .eq("field_key", fieldKey);
     if (orgId) defQuery = defQuery.eq("organization_id", orgId);
     const { data: defRow, error: defError } = await defQuery.maybeSingle();
-    if (defError) return { updated: 0, skipped: defError.message };
+    if (defError)
+      return { updated: 0, skipped: defError.message, failed: true };
     if (!defRow) {
       await clearAllocationKey(db, owner);
       return { updated: 0, skipped: "Campo excluído — vínculo desfeito." };
@@ -162,7 +167,7 @@ export async function reconcileKanbanAllocationField(
       `[kanban-alocacao] reconcile ${owner.kind}:${owner.id} falhou:`,
       msg
     );
-    return { updated: 0, skipped: msg };
+    return { updated: 0, skipped: msg, failed: true };
   }
 }
 
@@ -174,7 +179,7 @@ export async function reconcileKanbanAllocationField(
 export async function reconcileAllKanbanAllocationFields(
   db: SupabaseClient,
   deadline: number
-): Promise<{ boards: number; updated: number }> {
+): Promise<{ boards: number; updated: number; complete: boolean }> {
   const owners: KanbanOwner[] = [];
   try {
     const [{ data: boards }, { data: widgets }] = await Promise.all([
@@ -201,16 +206,23 @@ export async function reconcileAllKanbanAllocationFields(
     }
   } catch (e) {
     console.warn("[kanban-alocacao] enumeração de quadros falhou:", e);
-    return { boards: 0, updated: 0 };
+    return { boards: 0, updated: 0, complete: false };
   }
 
   let boards = 0;
   let updated = 0;
+  let complete = true;
   for (const owner of owners) {
-    if (Date.now() >= deadline) break;
+    if (Date.now() >= deadline) {
+      complete = false;
+      break;
+    }
     const res = await reconcileKanbanAllocationField(db, owner, { deadline });
     boards += 1;
     updated += res.updated;
+    if (res.failed) complete = false;
   }
-  return { boards, updated };
+  // v1.1: a escrita dos diffs respeita o deadline — estourado, pode ter sobrado.
+  if (owners.length > 0 && Date.now() >= deadline) complete = false;
+  return { boards, updated, complete };
 }

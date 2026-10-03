@@ -1,4 +1,12 @@
-// Versão: 1.1 | Data: 10/09/2026
+// Versão: 1.2 | Data: 03/10/2026
+// v1.2 (03/10/2026): redução de LOG INGESTION do Supabase, mesma semântica.
+//   (a) A montagem dos donos (data_sources + tasks + record_attributes +
+//   records) sai de UMA RPC (`activity_inbound_owners`, 0151), com o caminho
+//   antigo de fallback. (b) As tarefas espelhadas dos donos são lidas UMA vez
+//   por rodada (em pedaços de 200) em vez de uma consulta por lote de 40 — a
+//   leitura acontece antes das chamadas ao portal, o que não muda nada: o
+//   ESTADO comparado continua sendo o de lá vs. o daqui, e quem escreve o quê
+//   segue igual.
 // v1.1 (10/09/2026): `InboundOptions.comments` (o tick de minuto concilia
 //   tarefas e deixa a timeline para o gancho pós-job — custo por registro) e a
 //   guarda de TRUNCAMENTO: lista cortada pelo teto de páginas ou pelo orçamento
@@ -166,6 +174,35 @@ export function deadlineToLocalDay(raw: unknown): string | null {
 export async function pendingActivityOwners(
   db: SupabaseClient
 ): Promise<OwnerRef[]> {
+  // v1.2: uma ida ao banco. RPC ausente/erro ⇒ o caminho de sempre.
+  try {
+    const { data, error } = await db.rpc("activity_inbound_owners", {
+      p_max: MAX_OWNERS,
+    });
+    if (!error && Array.isArray(data)) {
+      return (data as {
+        record_id: string;
+        organization_id: string;
+        source_id: string;
+        entity: MirrorOwnerEntity;
+        tree: boolean;
+      }[]).map((r) => ({
+        recordId: r.record_id,
+        orgId: r.organization_id,
+        entity: r.entity,
+        sourceId: String(r.source_id),
+        tree: Boolean(r.tree),
+      }));
+    }
+  } catch {
+    // cai no caminho de sempre
+  }
+  return pendingActivityOwnersLegacy(db);
+}
+
+async function pendingActivityOwnersLegacy(
+  db: SupabaseClient
+): Promise<OwnerRef[]> {
   // As Bases que espelham dizem em que entidade do CRM a atividade mora.
   const { data: sources } = await db
     .from("data_sources")
@@ -269,6 +306,32 @@ async function listActivities(
   return { items, truncated };
 }
 
+/** v1.2: tarefa já espelhada de um dono (o que a conciliação compara). */
+interface MirroredTaskRow {
+  id: unknown;
+  record_id: unknown;
+  title: unknown;
+  completed_at: unknown;
+  bitrix_activity_id: unknown;
+}
+
+/** v1.2: as tarefas espelhadas dos donos da rodada, numa leitura só. */
+async function loadMirroredTasks(
+  db: SupabaseClient,
+  recordIds: string[]
+): Promise<MirroredTaskRow[]> {
+  const out: MirroredTaskRow[] = [];
+  for (let i = 0; i < recordIds.length; i += 200) {
+    const { data } = await db
+      .from("tasks")
+      .select("id, record_id, title, completed_at, bitrix_activity_id")
+      .in("record_id", recordIds.slice(i, i + 200))
+      .not("bitrix_activity_id", "is", null);
+    out.push(...((data ?? []) as MirroredTaskRow[]));
+  }
+  return out;
+}
+
 /**
  * Concilia um LOTE de donos com o que existe lá.
  *
@@ -281,7 +344,8 @@ async function reconcileOwnerBatch(
   api: BitrixCallable,
   entity: MirrorOwnerEntity,
   owners: OwnerRef[],
-  deadline: number
+  deadline: number,
+  mirroredTasks: MirroredTaskRow[]
 ): Promise<InboundResult> {
   const res = { ...EMPTY };
   const bySourceId = new Map(owners.map((o) => [o.sourceId, o]));
@@ -298,13 +362,9 @@ async function reconcileOwnerBatch(
     activities.map((a) => [String(a.ID), a] as const)
   );
 
-  const recordIds = owners.map((o) => o.recordId);
-  const { data: taskRows } = await db
-    .from("tasks")
-    .select("id, record_id, title, completed_at, bitrix_activity_id")
-    .in("record_id", recordIds)
-    .not("bitrix_activity_id", "is", null);
-  const tasks = taskRows ?? [];
+  // v1.2: as tarefas do lote vêm da leitura única da rodada.
+  const batchIds = new Set(owners.map((o) => o.recordId));
+  const tasks = mirroredTasks.filter((t) => batchIds.has(t.record_id as string));
   const knownActivityIds = new Set(
     tasks.map((t) => String(t.bitrix_activity_id))
   );
@@ -522,13 +582,25 @@ export async function syncBitrixActivitiesInbound(
 
   const api: BitrixCallable = client ?? new BitrixClient();
   const total = { ...EMPTY };
+  // v1.2: tarefas espelhadas de TODOS os donos numa leitura (pedaços de 200).
+  const mirroredTasks = await loadMirroredTasks(
+    db,
+    owners.map((o) => o.recordId)
+  );
 
   for (const entity of ["deal", "lead"] as MirrorOwnerEntity[]) {
     const ofEntity = owners.filter((o) => o.entity === entity);
     for (let i = 0; i < ofEntity.length; i += OWNER_BATCH) {
       if (Date.now() >= deadline) return total;
       const batch = ofEntity.slice(i, i + OWNER_BATCH);
-      const res = await reconcileOwnerBatch(db, api, entity, batch, deadline);
+      const res = await reconcileOwnerBatch(
+        db,
+        api,
+        entity,
+        batch,
+        deadline,
+        mirroredTasks
+      );
       total.completed += res.completed;
       total.reopened += res.reopened;
       total.deleted += res.deleted;
