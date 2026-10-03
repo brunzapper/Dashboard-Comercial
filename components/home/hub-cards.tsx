@@ -1,6 +1,12 @@
-// Versão: 2.0 | Data: 12/09/2026
+// Versão: 2.1 | Data: 03/10/2026
 // Cards do hub Workspace e do painel de Operação — servem às duas telas sem
 // uma segunda régua.
+//
+// v2.1 (03/10/2026): os helpers da Lixeira (TTL e rótulo de expiração) saíram
+// daqui para lib/dashboards/trash.ts. Este módulo é "use client", e o
+// Workspace (Server Component) chamava withinTrashTtl dele: no servidor isso é
+// uma referência de cliente, e a chamada derrubava a página assim que algum
+// board ia para a Lixeira. Daqui o servidor só importa COMPONENTES e TIPOS.
 //
 // v2.0 (12/09/2026): CLIENT, lendo o que exibir do contexto de exibição
 // (hub-display-context). Antes eram RSC com as decisões em props, e por isso
@@ -52,8 +58,7 @@ import { PinButton } from "./pin-button";
 import { useHubDisplay } from "./hub-display-context";
 import { DashboardPreview, type PreviewImage } from "./dashboard-preview";
 import { sortHubItems, type HubSortDates } from "@/lib/config/hub-sort";
-
-export const TRASH_TTL_MS = 14 * 86_400_000; // purga em 14 dias (0087)
+import { boardsTrashExpiryLabel } from "@/lib/dashboards/trash";
 
 export interface DashboardRow extends HubSortDates {
   preview?: PreviewImage;
@@ -67,19 +72,6 @@ export interface DashboardRow extends HubSortDates {
   trashed_at: string | null;
   // Só para o picker da IA (preset de fábrica ≠ import) — não exibido no card.
   settings: { preset?: { key?: string } } | null;
-}
-
-/** Item da Lixeira ainda dentro da janela de 14 dias? */
-export function withinTrashTtl(trashedAt: string | null): boolean {
-  return Date.now() - new Date(trashedAt ?? 0).getTime() < TRASH_TTL_MS;
-}
-
-/** "Expira em N dias" do card na Lixeira (teto: recém-excluído = 14 dias). */
-export function trashExpiryLabel(trashedAt: string | null): string {
-  const at = trashedAt ? new Date(trashedAt).getTime() : Date.now();
-  const days = Math.ceil((at + TRASH_TTL_MS - Date.now()) / 86_400_000);
-  if (days <= 0) return "Expira hoje";
-  return days === 1 ? "Expira em 1 dia" : `Expira em ${days} dias`;
 }
 
 /** Nível de acesso de um board: papéis compartilhados, ou "Pessoal". */
@@ -127,7 +119,7 @@ export function BoardCard({
   const description = display.showDescription ? row.description : null;
   // Na Lixeira o prazo SUBSTITUI o nível de acesso (e ignora a preferência).
   const access = trashed
-    ? trashExpiryLabel(row.trashed_at)
+    ? boardsTrashExpiryLabel(row.trashed_at)
     : display.showAccess
       ? boardAccessLabel(row)
       : null;

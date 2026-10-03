@@ -1,4 +1,10 @@
-// Versão: 4.1 | Data: 12/09/2026
+// Versão: 4.2 | Data: 03/10/2026
+// v4.2 (03/10/2026): withinTrashTtl vinha de components/home/hub-cards.tsx,
+//   que é "use client" desde 12/09. Chamada num Server Component, a função é só
+//   uma referência de cliente e lança erro, e por isso o Workspace inteiro caía
+//   assim que um board ia para a Lixeira. O helper agora vem de
+//   lib/dashboards/trash.ts (módulo puro). Regra: daquele módulo client esta
+//   página importa só componentes e tipos (guarda em lib/dashboards/trash.test.ts).
 // v4.1 (12/09/2026): a exibição dos cards virou estado de CLIENTE
 //   (HubDisplayProvider). Como RSC, mudar um controle só aparecia depois de
 //   recarregar — e o refresh de reconciliação reentregava o valor antigo,
@@ -70,11 +76,11 @@ import {
   HubGrid,
   OperacaoCardItem,
   WidgetKanbanGrid,
-  withinTrashTtl,
   type DashboardRow,
   type OperacaoCardView,
 } from "@/components/home/hub-cards";
 import { HubDisplayProvider } from "@/components/home/hub-display-context";
+import { withinBoardsTrashTtl } from "@/lib/dashboards/trash";
 import { HubLayoutControls } from "@/components/home/hub-layout-controls";
 
 // A geração direta por IA (ImportDashboardSheet → generateDashboardWithAi) roda
@@ -192,7 +198,7 @@ export default async function HomePage({
   // mesmo antes de o cron de purga (pg-cron-purge-trash.sql) removê-los.
   const trashed = rows.filter(
     (r) =>
-      r.status === "trashed" && canManageRow(r) && withinTrashTtl(r.trashed_at)
+      r.status === "trashed" && canManageRow(r) && withinBoardsTrashTtl(r.trashed_at)
   );
 
   // Última view p/ restaurar na REABERTURA do app (RestoreLastView). Leitura
