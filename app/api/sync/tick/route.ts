@@ -1,4 +1,7 @@
-// Versão: 1.3 | Data: 03/10/2026
+// Versão: 1.4 | Data: 09/10/2026
+// v1.4 (09/10/2026): CARGA INICIAL pendente de Tree recém-ligado
+//   (`runPendingInitialLoads`) antes da leitura de volta — rede de segurança
+//   do `after()` da action que liga o atributo.
 // v1.3 (03/10/2026): redução de LOG INGESTION do Supabase sem mudar o que o
 //   tick faz. (a) O estado ocioso (takeover de job preso, job em andamento,
 //   último reconcile automático, filas pendentes) sai de UMA RPC
@@ -46,7 +49,10 @@ import {
   drainTaskMirrorQueue,
   sweepDueTaskMirrors,
 } from "@/lib/sync/bitrix/task-mirror";
-import { syncBitrixActivitiesInbound } from "@/lib/sync/bitrix/activity-inbound";
+import {
+  runPendingInitialLoads,
+  syncBitrixActivitiesInbound,
+} from "@/lib/sync/bitrix/activity-inbound";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -114,6 +120,11 @@ export async function POST(request: Request) {
     // `bitrix_activity_id` ANTES, senão a leitura a veria como "nasceu lá" e
     // criaria uma segunda. Comentários ficam com o gancho pós-job (uma chamada
     // por registro não cabe num tick de minuto).
+    // v1.4 (09/10/2026): Tree recém-ligado cuja carga inicial ainda não rodou.
+    const initialLoads = await runPendingInitialLoads(
+      db,
+      Math.min(deadline, Date.now() + ACTIVITY_INBOUND_TICK_MS)
+    );
     const activityInbound = await syncBitrixActivitiesInbound(
       db,
       Math.min(deadline, Date.now() + ACTIVITY_INBOUND_TICK_MS),
@@ -148,6 +159,7 @@ export async function POST(request: Request) {
       mirrorsQueued,
       taskMirror,
       activityInbound,
+      initialLoads,
       drove,
       createdAuto,
     });

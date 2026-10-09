@@ -1,4 +1,8 @@
-// Versão: 1.14 | Data: 02/10/2026
+// Versão: 1.15 | Data: 09/10/2026
+// v1.15 (09/10/2026): `TreeData.inboundLoading` — a carga inicial das
+//   atividades do Bitrix de um Tree recém-ligado ainda está rodando
+//   (`record_attributes.config.inboundLoad = 'pending'`); o widget exibe o
+//   aviso sem bloquear nada.
 // v1.14 (02/10/2026): `listTreeMaps` e `loadTreeMapOutline` — o builder da
 //   Tree escolhe o MAPA e o GALHO numa lista (antes: digitar a chave e o
 //   `preset:<chave>` do nó, sintaxe que só o preset conhecia).
@@ -183,6 +187,11 @@ export interface TreeData {
   series: TreeSeriesInfo[];
   /** Atributo que sustenta a árvore (para pausar/retomar sem excluir). */
   attribute: { id: string; status: "ativo" | "pausado" } | null;
+  /**
+   * v1.15 (09/10/2026): as atividades do Bitrix deste registro ainda estão
+   * sendo carregadas (Tree recém-ligado). Só aviso — nada espera por isso.
+   */
+  inboundLoading?: boolean;
   recordTitle: string;
   /** Há ocorrência fora da janela na direção corrente ("carregar mais"). */
   hasMore: boolean;
@@ -252,7 +261,7 @@ export async function loadRecordTree(
     // espera. Se a RLS esconder o registro, o atributo vem e é descartado.
     supabase
       .from("record_attributes")
-      .select("id, status, granted_by_rule_id")
+      .select("id, status, granted_by_rule_id, config")
       .eq("record_id", recordId)
       .eq("attribute_key", "tree")
       .maybeSingle(),
@@ -323,6 +332,10 @@ export async function loadRecordTree(
     attribute: attr
       ? { id: attr.id as string, status: attr.status as "ativo" | "pausado" }
       : null,
+    inboundLoading:
+      attr?.status === "ativo" &&
+      ((attr.config as Record<string, unknown> | null)?.inboundLoad ?? null) ===
+        "pending",
     recordTitle: (record.title as string) ?? "",
     hasMore: facts.hasMore,
     tasks: (taskRows ?? []) as unknown as TaskRow[],

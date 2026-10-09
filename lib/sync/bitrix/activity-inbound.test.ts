@@ -1,4 +1,7 @@
-// Versão: 1.1 | Data: 10/09/2026
+// Versão: 1.2 | Data: 09/10/2026
+// v1.2 (09/10/2026): atividade desconhecida só entra com Tree ATIVO; concluída
+//   só dentro de 30 dias antes da ativação, com a data de conclusão DE LÁ; e a
+//   carga inicial de um registro (`loadRecordActivitiesNow`) marca 'done'.
 // v1.1 (10/09/2026): a guarda de TRUNCAMENTO. O teste "apagada LÁ apaga AQUI"
 //   sozinho dava falsa segurança: ele prova que a ausência apaga, e o que
 //   faltava provar é que a ausência de uma lista CORTADA não apaga.
@@ -15,8 +18,11 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  activityCompletedAt,
   deadlineToLocalDay,
   isTodoActivity,
+  loadRecordActivitiesNow,
+  shouldImportActivity,
   syncBitrixActivitiesInbound,
 } from "./activity-inbound";
 
@@ -115,6 +121,20 @@ const OWNER_SEED = {
       organization_id: "org1",
       record_type: "negocio",
       source_id: "123",
+    },
+  ],
+};
+
+/** v1.2: o mesmo dono, com o Tree ligado em 01/10/2026. */
+const TREE_SEED = {
+  ...OWNER_SEED,
+  attrs: [
+    {
+      id: "a1",
+      record_id: "r1",
+      status: "ativo",
+      config: { activatedAt: "2026-10-01T12:00:00Z" },
+      created_at: "2026-09-01T12:00:00Z",
     },
   ],
 };
@@ -292,8 +312,8 @@ describe("syncBitrixActivitiesInbound", () => {
     expect(methods).not.toContain("crm.timeline.comment.list");
   });
 
-  it("atividade desconhecida vira tarefa", async () => {
-    const { db, ops } = fakeDb({ ...OWNER_SEED, tasks: [] });
+  it("atividade desconhecida vira tarefa (registro com Tree ativo)", async () => {
+    const { db, ops } = fakeDb({ ...TREE_SEED, tasks: [] });
     const out = await syncBitrixActivitiesInbound(
       db,
       Date.now() + 9999,
@@ -310,8 +330,50 @@ describe("syncBitrixActivitiesInbound", () => {
   });
 
   // Ligação e e-mail SÃO atividades. Importá-las encheria a lista de tarefas.
-  it("atividade que não é CRM_TODO é ignorada", async () => {
+  // v1.2: dono que entra só por ter tarefa espelhada aberta concilia as JÁ
+  // conhecidas, mas não importa o resto da timeline.
+  it("sem Tree ativo, atividade desconhecida NÃO vira tarefa", async () => {
     const { db, ops } = fakeDb({ ...OWNER_SEED, tasks: [] });
+    const out = await syncBitrixActivitiesInbound(
+      db,
+      Date.now() + 9999,
+      apiWith([TODO])
+    );
+    expect(out.created).toBe(0);
+    expect(ops.some((o) => o.table === "tasks" && o.op === "insert")).toBe(false);
+  });
+
+  it("concluída dentro da janela entra com a data de conclusão DE LÁ", async () => {
+    const { db, ops } = fakeDb({ ...TREE_SEED, tasks: [] });
+    const out = await syncBitrixActivitiesInbound(
+      db,
+      Date.now() + 9999,
+      apiWith([
+        { ...TODO, COMPLETED: "Y", LAST_UPDATED: "2026-09-20T12:00:00+03:00" },
+      ])
+    );
+    expect(out.created).toBe(1);
+    const ins = ops.find((o) => o.table === "tasks" && o.op === "insert");
+    expect((ins!.payload as { completed_at: string }).completed_at).toBe(
+      "2026-09-20T09:00:00.000Z"
+    );
+  });
+
+  it("concluída antes da janela de 30 dias fica só lá", async () => {
+    const { db, ops } = fakeDb({ ...TREE_SEED, tasks: [] });
+    const out = await syncBitrixActivitiesInbound(
+      db,
+      Date.now() + 9999,
+      apiWith([
+        { ...TODO, COMPLETED: "Y", LAST_UPDATED: "2026-08-01T12:00:00+03:00" },
+      ])
+    );
+    expect(out.created).toBe(0);
+    expect(ops.some((o) => o.table === "tasks" && o.op === "insert")).toBe(false);
+  });
+
+  it("atividade que não é CRM_TODO é ignorada", async () => {
+    const { db, ops } = fakeDb({ ...TREE_SEED, tasks: [] });
     const out = await syncBitrixActivitiesInbound(
       db,
       Date.now() + 9999,
@@ -347,8 +409,93 @@ describe("syncBitrixActivitiesInbound", () => {
   });
 
   it("orçamento estourado para antes de escrever", async () => {
-    const { db, ops } = fakeDb({ ...OWNER_SEED, tasks: [] });
+    const { db, ops } = fakeDb({ ...TREE_SEED, tasks: [] });
     await syncBitrixActivitiesInbound(db, Date.now() - 1, apiWith([TODO]));
     expect(ops.some((o) => o.op === "insert")).toBe(false);
+  });
+});
+
+describe("shouldImportActivity", () => {
+  const owner = { tree: true, treeActivatedAt: "2026-10-01T12:00:00Z" };
+  const todo = { ID: 1, PROVIDER_ID: "CRM_TODO" };
+
+  it("aberta entra sempre (com Tree)", () => {
+    expect(shouldImportActivity(owner, { ...todo, COMPLETED: "N" })).toBe(true);
+  });
+
+  it("sem Tree nada entra", () => {
+    expect(shouldImportActivity({ tree: false }, { ...todo, COMPLETED: "N" })).toBe(false);
+  });
+
+  it("a borda: exatamente 30 dias antes da ativação entra", () => {
+    expect(
+      shouldImportActivity(owner, {
+        ...todo,
+        COMPLETED: "Y",
+        LAST_UPDATED: "2026-09-01T12:00:00Z",
+      })
+    ).toBe(true);
+    expect(
+      shouldImportActivity(owner, {
+        ...todo,
+        COMPLETED: "Y",
+        LAST_UPDATED: "2026-09-01T11:59:00Z",
+      })
+    ).toBe(false);
+  });
+
+  it("concluída sem data não entra (não dá para provar a janela)", () => {
+    expect(shouldImportActivity(owner, { ...todo, COMPLETED: "Y" })).toBe(false);
+  });
+});
+
+describe("activityCompletedAt", () => {
+  it("LAST_UPDATED primeiro, END_TIME de fallback", () => {
+    expect(
+      activityCompletedAt({
+        LAST_UPDATED: "2026-09-20T12:00:00+03:00",
+        END_TIME: "2026-09-01T12:00:00+03:00",
+      })
+    ).toBe("2026-09-20T09:00:00.000Z");
+    expect(activityCompletedAt({ END_TIME: "2026-09-01T12:00:00+03:00" })).toBe(
+      "2026-09-01T09:00:00.000Z"
+    );
+    expect(activityCompletedAt({})).toBeNull();
+  });
+});
+
+describe("loadRecordActivitiesNow", () => {
+  it("carrega o registro e marca a carga como concluída", async () => {
+    const { db, ops } = fakeDb({
+      ...TREE_SEED,
+      attrs: [
+        {
+          ...TREE_SEED.attrs[0],
+          config: { activatedAt: "2026-10-01T12:00:00Z", inboundLoad: "pending" },
+        },
+      ],
+      tasks: [],
+    });
+    const out = await loadRecordActivitiesNow(db, "r1", {
+      deadline: Date.now() + 9999,
+      client: apiWith([TODO]),
+    });
+    expect(out.created).toBe(1);
+    const mark = ops.find((o) => o.table === "record_attributes" && o.op === "update");
+    expect(mark!.payload).toMatchObject({
+      config: { activatedAt: "2026-10-01T12:00:00Z", inboundLoad: "done" },
+    });
+  });
+
+  it("Tree pausado não carrega nada", async () => {
+    const { db, ops } = fakeDb({
+      ...TREE_SEED,
+      attrs: [{ ...TREE_SEED.attrs[0], status: "pausado" }],
+      tasks: [],
+    });
+    const api = apiWith([TODO]);
+    await loadRecordActivitiesNow(db, "r1", { client: api });
+    expect(api.call).not.toHaveBeenCalled();
+    expect(ops).toHaveLength(0);
   });
 });

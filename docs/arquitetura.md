@@ -1,4 +1,8 @@
-<!-- Versão: 2.6 | Data: 03/10/2026 -->
+<!-- Versão: 2.7 | Data: 09/10/2026 -->
+<!-- v2.7 (09/10/2026): §4.25 "Atividades que nascem no Bitrix" + invariante
+     38 — atividade desconhecida só entra com Tree ATIVO, concluída só de até
+     30 dias antes da ativação (data de conclusão de lá), carga inicial ao
+     ligar o Tree (0152) e série de regra desligada sem tronco na Tree. -->
 <!-- v2.6 (03/10/2026): §4.15 "Portão de mudança dos ticks" + invariante 45 —
      redução do log ingestion do Supabase (0151): tick sem mudança custa UMA
      requisição; estado do sync, donos da leitura de volta e contexto de sessão
@@ -6018,6 +6022,31 @@ voltar como uma segunda anotação. `comments` NÃO ganhou `organization_id`: é
 transitiva ao registro desde a 0066 e a RLS depende disso; o inbound escopa
 pelos registros da org.
 
+**Atividades que nascem no Bitrix (09/10/2026, 0152).** O acompanhamento
+passou a ser criado pela automação DO Bitrix, e a regra de série daqui foi
+desligada. Três ajustes na leitura de volta (`activity-inbound.ts` v1.3):
+- atividade CRM_TODO DESCONHECIDA só vira tarefa em registro com o atributo
+  `tree` ATIVO. O dono que entra só por ter tarefa espelhada aberta continua
+  conciliando conclusão/exclusão das tarefas já conhecidas, mas não importa o
+  resto da timeline;
+- concluída lá só entra se a conclusão (`LAST_UPDATED`, fallback `END_TIME`)
+  cair a partir de `TREE_IMPORT_LOOKBACK_DAYS` (30) antes da ATIVAÇÃO do Tree
+  (`record_attributes.config.activatedAt`, senão `created_at` — devolvida pela
+  RPC `activity_inbound_owners` desde a 0152), e entra com essa data em
+  `completed_at`, não com `now()`. Sem data de conclusão não entra;
+- **carga inicial**: ligar o Tree (`grantRecordAttribute` na inserção,
+  `setRecordAttributeStatus(…,'ativo')` ao retomar) grava `activatedAt` +
+  `inboundLoad: 'pending'` e dispara `loadRecordActivitiesNow` por `after()` —
+  quem clicou não espera. Ela reusa `reconcileOwnerBatch`/`pullComments` com um
+  lote de um dono e grava `'done'`/`'error'`. Rede de segurança:
+  `runPendingInitialLoads` no tick de sync, antes da rodada normal. A Tree lê o
+  estado (`TreeData.inboundLoading`) e mostra uma faixa discreta, re-buscando
+  em silêncio a cada 5 s até terminar.
+Junto: série de regra DESLIGADA não projeta tronco na Tree
+(`projectableSeries`, `lib/tree/series-rules.ts`) — o tick não criaria mais
+aquelas ocorrências, e desenhá-las seria uma fila de ocorrências que nunca vão
+existir.
+
 **Fora de escopo, dito:** ler o feed inteiro do Bitrix (mudança de etapa já
 chega pelo sync de campo, e reimportá-la duplicaria o `audit_log`) e espelhar
 EDIÇÃO de comentário.
@@ -7520,7 +7549,10 @@ principalmente — para mantenedores humanos.
     volta. Do lado de saída, `reopenTask`/`moveTaskPhase`/`rescheduleTask` TÊM
     de enfileirar `update` (senão a leitura re-fecha a tarefa reaberta, para
     sempre) e `deleteTask` enfileira `delete` ANTES de apagar a linha (a FK da
-    fila é `on delete set null` justamente para a ordem sobreviver).
+    fila é `on delete set null` justamente para a ordem sobreviver). Desde
+    09/10/2026 (0152): atividade desconhecida só é importada em registro com
+    Tree ATIVO e, se concluída, só de até 30 dias antes da ativação; ligar o
+    Tree dispara a carga inicial em segundo plano (`after()` + tick).
 39. **Vocabulário de domínio é DADO, nunca literal no fonte (10/09/2026,
     §4.25).** O substantivo de cada ocorrência vive em `SeriesConfig.noun` e
     `tasks.occurrence_noun`, com padrão `DEFAULT_SERIES_NOUN` e um dono único da
