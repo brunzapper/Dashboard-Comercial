@@ -1048,7 +1048,15 @@ This version has breaking changes — APIs, conventions, and file structure may 
   ATIVO — é uma chamada por registro. `comments.bitrix_comment_id` é o que
   impede o nosso próprio comentário de virar uma segunda anotação;
   `comments` NÃO ganha `organization_id` (é transitiva ao registro desde a 0066
-  e a RLS depende disso). Ver `docs/arquitetura.md` §4.24 e invariante 38.
+  e a RLS depende disso). **Desde 09/10/2026 (0152)** as atividades de
+  acompanhamento nascem NO Bitrix: a atividade CRM_TODO desconhecida só vira
+  tarefa em registro com Tree ATIVO, a concluída só se a conclusão for de até
+  30 dias antes da ativação (`TREE_IMPORT_LOOKBACK_DAYS`, data de lá em
+  `completed_at`), e ligar o Tree dispara a CARGA INICIAL em segundo plano
+  (`config.inboundLoad` 'pending'→'done', `after()` + `runPendingInitialLoads`
+  no tick; a Tree só AVISA, nunca bloqueia). Série de regra desligada não
+  projeta tronco (`projectableSeries`). Ver `docs/arquitetura.md` §4.24 e
+  invariante 38.
 - **Vocabulário de domínio é DADO, nunca literal no fonte (10/09/2026):** o
   substantivo de cada ocorrência de uma série vive em `SeriesConfig.noun`
   (a automação) e `tasks.occurrence_noun` (a tarefa), com padrão

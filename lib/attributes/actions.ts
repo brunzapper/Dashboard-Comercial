@@ -1,4 +1,10 @@
-// Versão: 1.0 | Data: 09/09/2026
+// Versão: 1.1 | Data: 09/10/2026
+// v1.1 (09/10/2026): ligar o Tree (conceder ou RETOMAR) grava
+//   `config.activatedAt` + `config.inboundLoad = 'pending'` e dispara, DEPOIS
+//   da resposta (`after()`), a carga inicial das atividades do Bitrix daquele
+//   registro (`loadRecordActivitiesNow`). Quem clicou não espera; a Tree exibe
+//   o aviso enquanto o estado for 'pending', e o tick termina o serviço se este
+//   processo morrer.
 // Server Actions dos atributos de registro (0131).
 //
 // Duas operações e uma distinção que é o coração do pedido:
@@ -14,10 +20,31 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { after } from "next/server";
 
 import { getActiveOrgId } from "@/lib/auth/org";
 import { getSessionInfo } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
+import { createServiceClient } from "@/lib/supabase/service";
+import { loadRecordActivitiesNow } from "@/lib/sync/bitrix/activity-inbound";
+
+/** v1.1: o atributo cuja ativação dispara a carga inicial do Bitrix. */
+const TREE_KEY = "tree";
+
+/**
+ * v1.1: carga inicial em segundo plano. Service role porque a leitura de
+ * volta escreve tarefas de SISTEMA (`created_by` nulo) — o mesmo escritor do
+ * tick. Nunca lança: falha vira `inboundLoad: 'error'` lá dentro.
+ */
+function scheduleTreeInitialLoad(recordId: string): void {
+  after(async () => {
+    try {
+      await loadRecordActivitiesNow(createServiceClient(), recordId);
+    } catch {
+      // O tick (`runPendingInitialLoads`) tenta de novo.
+    }
+  });
+}
 
 import type { AttributeStatus } from "./registry";
 
@@ -39,11 +66,31 @@ export async function setRecordAttributeStatus(
   if (!session) return { ok: false, message: "Sessão expirada." };
 
   const supabase = await createClient();
+  // v1.1: retomar o Tree marca a carga inicial (merge no config — a linha
+  // guarda outras chaves lá). Pausar não mexe no config.
+  let patch: Record<string, unknown> = { status };
+  if (status === "ativo") {
+    const { data: cur } = await supabase
+      .from("record_attributes")
+      .select("attribute_key, status, config")
+      .eq("id", attributeId)
+      .maybeSingle();
+    if (cur?.attribute_key === TREE_KEY && cur.status !== "ativo") {
+      patch = {
+        status,
+        config: {
+          ...((cur.config as Record<string, unknown> | null) ?? {}),
+          activatedAt: new Date().toISOString(),
+          inboundLoad: "pending",
+        },
+      };
+    }
+  }
   const { data, error } = await supabase
     .from("record_attributes")
-    .update({ status })
+    .update(patch)
     .eq("id", attributeId)
-    .select("id")
+    .select("id, record_id")
     .maybeSingle();
   if (error) return { ok: false, message: `Falha ao salvar: ${error.message}` };
   if (!data) {
@@ -54,6 +101,8 @@ export async function setRecordAttributeStatus(
       message: "Você não pode alterar este acompanhamento — fale com um administrador.",
     };
   }
+
+  if (patch.config) scheduleTreeInitialLoad(data.record_id as string);
 
   if (opts.revalidate !== false) revalidatePath("/registros");
   return {
@@ -78,16 +127,31 @@ export async function grantRecordAttribute(
   if (!orgId) return { ok: false, message: "Organização ativa não identificada." };
 
   const supabase = await createClient();
-  const { error } = await supabase.from("record_attributes").upsert(
-    {
-      organization_id: orgId,
-      record_id: recordId,
-      attribute_key: attributeKey,
-      created_by: session.user.id,
-    },
-    { onConflict: "record_id,attribute_key", ignoreDuplicates: true }
-  );
+  const isTree = attributeKey === TREE_KEY;
+  const { data: inserted, error } = await supabase
+    .from("record_attributes")
+    .upsert(
+      {
+        organization_id: orgId,
+        record_id: recordId,
+        attribute_key: attributeKey,
+        created_by: session.user.id,
+        // v1.1: só vale na INSERÇÃO (ignoreDuplicates) — conceder de novo não
+        // reabre a carga de quem já está ligado.
+        ...(isTree
+          ? {
+              config: {
+                activatedAt: new Date().toISOString(),
+                inboundLoad: "pending",
+              },
+            }
+          : {}),
+      },
+      { onConflict: "record_id,attribute_key", ignoreDuplicates: true }
+    )
+    .select("id");
   if (error) return { ok: false, message: `Falha ao conceder: ${error.message}` };
+  if (isTree && (inserted ?? []).length > 0) scheduleTreeInitialLoad(recordId);
 
   if (opts.revalidate !== false) revalidatePath("/registros");
   return { ok: true };

@@ -1,4 +1,17 @@
-// Versão: 1.2 | Data: 03/10/2026
+// Versão: 1.3 | Data: 09/10/2026
+// v1.3 (09/10/2026): as atividades da automação passaram a nascer NO Bitrix, e
+//   o sistema deixou de criá-las. Três mudanças, todas nesta leitura:
+//   (a) atividade CRM_TODO DESCONHECIDA só vira tarefa em registro com o
+//   atributo `tree` ATIVO — os donos que entram só por terem tarefa espelhada
+//   aberta seguem conciliando conclusão/exclusão das tarefas JÁ conhecidas,
+//   mas não importam o resto da timeline (decisão do usuário);
+//   (b) concluída lá só é importada se a conclusão cair a partir de 30 dias
+//   ANTES da ativação do Tree (`TREE_IMPORT_LOOKBACK_DAYS`) — e entra com a
+//   data de conclusão DE LÁ (`LAST_UPDATED`/`END_TIME`), não com `now()`;
+//   (c) CARGA INICIAL ao ligar o Tree (`loadRecordActivitiesNow` +
+//   `runPendingInitialLoads`): `record_attributes.config.inboundLoad` =
+//   'pending' → 'done'|'error', que a Tree lê para exibir o aviso de
+//   carregamento. Reusa `reconcileOwnerBatch` — nenhum caminho paralelo.
 // v1.2 (03/10/2026): redução de LOG INGESTION do Supabase, mesma semântica.
 //   (a) A montagem dos donos (data_sources + tasks + record_attributes +
 //   records) sai de UMA RPC (`activity_inbound_owners`, 0151), com o caminho
@@ -115,9 +128,26 @@ interface OwnerRef {
   orgId: string;
   entity: MirrorOwnerEntity;
   sourceId: string;
-  /** Tem o atributo `tree` ativo — só esses puxam comentários. */
+  /**
+   * Tem o atributo `tree` ativo — só esses puxam comentários e (v1.3) só esses
+   * importam atividade desconhecida.
+   */
   tree: boolean;
+  /**
+   * v1.3: quando o Tree foi ligado (`config.activatedAt`, senão `created_at`
+   * do atributo). Base do corte das concluídas. Null = sem Tree.
+   */
+  treeActivatedAt?: string | null;
 }
+
+/**
+ * v1.3 (09/10/2026): concluídas de até N dias ANTES de ligar o Tree entram na
+ * carga; as mais antigas ficam só lá (decisão do usuário: 30 dias).
+ */
+export const TREE_IMPORT_LOOKBACK_DAYS = 30;
+
+/** v1.3: estados da carga inicial, em `record_attributes.config.inboundLoad`. */
+export type TreeInboundLoadState = "pending" | "done" | "error";
 
 interface BitrixActivity {
   ID: string | number;
@@ -129,6 +159,9 @@ interface BitrixActivity {
   DEADLINE?: string;
   PROVIDER_ID?: string;
   RESPONSIBLE_ID?: string | number;
+  /** v1.3: base da data de conclusão importada. */
+  LAST_UPDATED?: string;
+  END_TIME?: string;
 }
 
 const ACTIVITY_SELECT = [
@@ -141,6 +174,8 @@ const ACTIVITY_SELECT = [
   "DEADLINE",
   "PROVIDER_ID",
   "RESPONSIBLE_ID",
+  "LAST_UPDATED",
+  "END_TIME",
 ];
 
 /** O TODO da timeline — o único tipo que vira tarefa aqui. */
@@ -166,6 +201,59 @@ export function deadlineToLocalDay(raw: unknown): string | null {
 }
 
 /**
+ * v1.3: o instante em que a atividade foi concluída LÁ (ISO), ou null quando o
+ * portal não diz. `LAST_UPDATED` primeiro: numa atividade concluída é o
+ * momento da conclusão (ou de um ajuste posterior, que só a deixa mais
+ * recente); `END_TIME` é o fim PLANEJADO, fallback.
+ */
+export function activityCompletedAt(a: {
+  LAST_UPDATED?: unknown;
+  END_TIME?: unknown;
+}): string | null {
+  for (const raw of [a.LAST_UPDATED, a.END_TIME]) {
+    if (typeof raw !== "string" || raw.trim() === "") continue;
+    const ts = Date.parse(raw);
+    if (Number.isFinite(ts)) return new Date(ts).toISOString();
+  }
+  return null;
+}
+
+/**
+ * v1.3: a atividade DESCONHECIDA deste dono deve virar tarefa aqui?
+ *
+ * Só em registro com Tree ativo. Aberta entra sempre; concluída só se a
+ * conclusão for a partir de `TREE_IMPORT_LOOKBACK_DAYS` antes da ativação — e
+ * sem data de conclusão não entra (não dá para provar que está na janela).
+ */
+export function shouldImportActivity(
+  owner: Pick<OwnerRef, "tree" | "treeActivatedAt">,
+  activity: BitrixActivity
+): boolean {
+  if (!owner.tree) return false;
+  if (!isTodoActivity(activity)) return false;
+  if (String(activity.COMPLETED ?? "") !== "Y") return true;
+  const doneAt = activityCompletedAt(activity);
+  if (!doneAt) return false;
+  const activated = Date.parse(owner.treeActivatedAt ?? "");
+  // Sem data de ativação (linha antiga): a janela conta de agora.
+  const base = Number.isFinite(activated) ? activated : Date.now();
+  const cutoff = base - TREE_IMPORT_LOOKBACK_DAYS * 86_400_000;
+  return Date.parse(doneAt) >= cutoff;
+}
+
+/** v1.3: a data de ativação do Tree numa linha de `record_attributes`. */
+function treeActivatedAtOf(row: {
+  config?: unknown;
+  created_at?: unknown;
+}): string | null {
+  const cfg = (row.config ?? {}) as Record<string, unknown>;
+  if (typeof cfg.activatedAt === "string" && cfg.activatedAt) {
+    return cfg.activatedAt;
+  }
+  return typeof row.created_at === "string" ? row.created_at : null;
+}
+
+/**
  * Quais registros conferir FORA do período: os que têm tarefa aberta já
  * espelhada (a conclusão/exclusão feita lá é invisível de outro jeito) e os
  * que têm o atributo `tree` ativo (é neles que o acompanhamento é lido, e são
@@ -186,12 +274,16 @@ export async function pendingActivityOwners(
         source_id: string;
         entity: MirrorOwnerEntity;
         tree: boolean;
+        tree_activated_at?: string | null;
       }[]).map((r) => ({
         recordId: r.record_id,
         orgId: r.organization_id,
         entity: r.entity,
         sourceId: String(r.source_id),
         tree: Boolean(r.tree),
+        // v1.3: RPC anterior à 0152 não devolve a coluna — o corte conta de
+        // agora (ver `shouldImportActivity`).
+        treeActivatedAt: r.tree_activated_at ?? null,
       }));
     }
   } catch {
@@ -228,15 +320,16 @@ async function pendingActivityOwnersLegacy(
     if (t.record_id) ids.add(t.record_id as string);
   }
 
-  const treeIds = new Set<string>();
+  // v1.3: id → data de ativação do Tree.
+  const treeIds = new Map<string, string | null>();
   const { data: attrs } = await db
     .from("record_attributes")
-    .select("record_id")
+    .select("record_id, config, created_at")
     .eq("attribute_key", "tree")
     .eq("status", "ativo")
     .limit(MAX_OWNERS * 4);
   for (const a of attrs ?? []) {
-    treeIds.add(a.record_id as string);
+    treeIds.set(a.record_id as string, treeActivatedAtOf(a));
     ids.add(a.record_id as string);
   }
   if (ids.size === 0) return [];
@@ -258,6 +351,7 @@ async function pendingActivityOwnersLegacy(
         entity,
         sourceId: String(r.source_id),
         tree: treeIds.has(r.id as string),
+        treeActivatedAt: treeIds.get(r.id as string) ?? null,
       });
     }
   }
@@ -424,12 +518,14 @@ async function reconcileOwnerBatch(
   }
 
   // Atividade CRM_TODO que não conhecemos: nasceu lá, vira tarefa aqui.
+  // v1.3: só em registro com Tree ativo, e concluída só dentro da janela.
   for (const activity of activities) {
     if (Date.now() >= deadline) return res;
     if (!isTodoActivity(activity)) continue;
     if (knownActivityIds.has(String(activity.ID))) continue;
     const owner = bySourceId.get(String(activity.OWNER_ID ?? ""));
     if (!owner) continue;
+    if (!shouldImportActivity(owner, activity)) continue;
     res.created += (await createTaskFromActivity(db, owner, activity)) ? 1 : 0;
   }
 
@@ -465,8 +561,11 @@ async function createTaskFromActivity(
       description: String(activity.DESCRIPTION ?? "").trim() || null,
       record_id: owner.recordId,
       due_date: deadlineToLocalDay(activity.DEADLINE),
+      // v1.3: a data de conclusão é a DE LÁ (a de agora só sem ela).
       completed_at:
-        String(activity.COMPLETED ?? "") === "Y" ? new Date().toISOString() : null,
+        String(activity.COMPLETED ?? "") === "Y"
+          ? activityCompletedAt(activity) ?? new Date().toISOString()
+          : null,
       responsible_id: await localResponsible(db, activity.RESPONSIBLE_ID),
       // Autoria de SISTEMA: ninguém daqui a criou.
       created_by: null,
@@ -617,4 +716,123 @@ export async function syncBitrixActivitiesInbound(
     );
   }
   return total;
+}
+
+/**
+ * v1.3 (09/10/2026): marca a carga inicial de um Tree recém-ligado.
+ *
+ * Escrita só no `config` (merge — o atributo guarda outras chaves lá). É o
+ * estado que a Tree lê para dizer "carregando atividades do Bitrix" sem
+ * bloquear nada.
+ */
+async function setInboundLoad(
+  db: SupabaseClient,
+  attributeId: string,
+  config: Record<string, unknown>,
+  state: TreeInboundLoadState,
+  error?: string
+): Promise<void> {
+  const next: Record<string, unknown> = { ...config, inboundLoad: state };
+  if (error) next.inboundLoadError = error.slice(0, 300);
+  else delete next.inboundLoadError;
+  await db.from("record_attributes").update({ config: next }).eq("id", attributeId);
+}
+
+/**
+ * v1.3 (09/10/2026): a CARGA INICIAL das atividades de UM registro, assim que
+ * o Tree é ligado nele — sem esperar a rodada de minuto.
+ *
+ * Reusa a mesma conciliação do tick (`reconcileOwnerBatch`) com um lote de um
+ * dono só, e a mesma leitura de timeline (`pullComments`). Service role com a
+ * org da PRÓPRIA linha. Best-effort: falha vira `inboundLoad: 'error'` (a
+ * rodada normal segue tentando a cada minuto), nunca exceção para quem chamou.
+ */
+export async function loadRecordActivitiesNow(
+  db: SupabaseClient,
+  recordId: string,
+  opts: { deadline?: number; client?: BitrixCallable } = {}
+): Promise<InboundResult> {
+  const deadline = opts.deadline ?? Date.now() + 45_000;
+  const { data: attr } = await db
+    .from("record_attributes")
+    .select("id, status, config, created_at")
+    .eq("record_id", recordId)
+    .eq("attribute_key", "tree")
+    .maybeSingle();
+  if (!attr || attr.status !== "ativo") return { ...EMPTY };
+  const config = ((attr.config ?? {}) as Record<string, unknown>) ?? {};
+
+  try {
+    const { data: rec } = await db
+      .from("records")
+      .select("id, organization_id, record_type, source_id")
+      .eq("id", recordId)
+      .maybeSingle();
+    const { data: src } = rec
+      ? await db
+          .from("data_sources")
+          .select("bitrix_activity_owner")
+          .eq("record_type", rec.record_type as string)
+          .maybeSingle()
+      : { data: null };
+    const entity = (src?.bitrix_activity_owner ?? null) as MirrorOwnerEntity | null;
+    if (!rec || !rec.source_id || !entity) {
+      // Sem par no CRM não há o que carregar — e não é erro.
+      await setInboundLoad(db, attr.id as string, config, "done");
+      return { ...EMPTY };
+    }
+
+    const owner: OwnerRef = {
+      recordId,
+      orgId: rec.organization_id as string,
+      entity,
+      sourceId: String(rec.source_id),
+      tree: true,
+      treeActivatedAt: treeActivatedAtOf(attr),
+    };
+    const api: BitrixCallable = opts.client ?? new BitrixClient();
+    const mirrored = await loadMirroredTasks(db, [recordId]);
+    const res = await reconcileOwnerBatch(db, api, entity, [owner], deadline, mirrored);
+    res.comments = await pullComments(db, api, [owner], deadline);
+    await setInboundLoad(db, attr.id as string, config, "done");
+    return res;
+  } catch (e) {
+    await setInboundLoad(
+      db,
+      attr.id as string,
+      config,
+      "error",
+      e instanceof Error ? e.message : String(e)
+    );
+    return { ...EMPTY };
+  }
+}
+
+/** v1.3: teto de cargas iniciais por tick (cada uma lê a timeline inteira). */
+const MAX_INITIAL_LOADS = 10;
+
+/**
+ * v1.3 (09/10/2026): REDE DE SEGURANÇA da carga inicial. O disparo normal é o
+ * `after()` da action que ligou o Tree; se aquele processo morreu, o tick de
+ * minuto encontra o `inboundLoad: 'pending'` e termina o serviço.
+ */
+export async function runPendingInitialLoads(
+  db: SupabaseClient,
+  deadline: number,
+  client?: BitrixCallable
+): Promise<number> {
+  const { data } = await db
+    .from("record_attributes")
+    .select("record_id")
+    .eq("attribute_key", "tree")
+    .eq("status", "ativo")
+    .eq("config->>inboundLoad", "pending")
+    .limit(MAX_INITIAL_LOADS);
+  let done = 0;
+  for (const row of data ?? []) {
+    if (Date.now() >= deadline) break;
+    await loadRecordActivitiesNow(db, row.record_id as string, { deadline, client });
+    done += 1;
+  }
+  return done;
 }

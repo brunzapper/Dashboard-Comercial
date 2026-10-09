@@ -1,4 +1,6 @@
-// Versão: 1.8 | Data: 02/10/2026
+// Versão: 1.9 | Data: 09/10/2026
+// v1.9 (09/10/2026): série de regra DESLIGADA não projeta tronco
+//   (`projectableSeries`, lib/tree/series-rules.ts).
 // v1.8 (02/10/2026): leitura de `tree_nodes` com as colunas da 0150 (tamanho,
 //   exibição e data própria) e FALLBACK para as anteriores (selectTreeNodes).
 // v1.7 (01/10/2026): o mapa devolve `presetRefs` (resolve o `rootRef` do
@@ -55,7 +57,6 @@
 // a da 0133 já recortam. Nada de service role.
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-import { parseAutomationRule } from "@/lib/kanban/automations/types";
 import { resolveCadence } from "@/lib/series/cadence";
 import { loadSeriesSettings } from "@/lib/series/load";
 import { loadFieldHistory } from "@/lib/records/field-history";
@@ -65,6 +66,7 @@ import type { AvailableField } from "@/lib/widgets/fields";
 import type { RecordRow } from "@/lib/records/types";
 
 import { TREE_WINDOW_STEP } from "./model";
+import { projectableSeries } from "./series-rules";
 import type { TreeFact, TreeNodeGeometry, TreeParentOverride } from "./model";
 import {
   parseTreeNodeRows,
@@ -163,23 +165,15 @@ export async function loadRecordTreeFacts(
   if (ruleIds.length > 0) {
     const { data: ruleRows } = await db
       .from("automation_rules")
-      .select("id, name, rule")
+      .select("id, name, rule, enabled")
       .in("id", ruleIds);
     // A ORDEM de `ruleIds` manda: a primária é a primeira, e é a janela dela
     // que recorta os fatos avulsos. O `.in()` devolve na ordem do banco.
-    const byId = new Map((ruleRows ?? []).map((r) => [r.id as string, r]));
+    // v1.9 (09/10/2026): regra DESLIGADA não projeta ocorrências
+    // (`projectableSeries`) — o tick não as criaria mais.
+    const configs: { ruleId: string; name: string; config: SeriesConfig }[] =
+      projectableSeries(ruleIds, ruleRows ?? []);
     // As exceções de cadência de TODAS as séries numa consulta só.
-    const configs: { ruleId: string; name: string; config: SeriesConfig }[] = [];
-    for (const id of ruleIds) {
-      const row = byId.get(id);
-      const parsed = row ? parseAutomationRule(row.rule) : null;
-      if (parsed?.action.type !== "create_task_series") continue;
-      configs.push({
-        ruleId: id,
-        name: (row?.name as string) || "",
-        config: parsed.action.series,
-      });
-    }
     const settings = await loadSeriesSettings(
       db,
       input.orgId,

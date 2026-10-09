@@ -1,4 +1,8 @@
-// Versão: 1.14 | Data: 02/10/2026
+// Versão: 1.15 | Data: 09/10/2026
+// v1.15 (09/10/2026): aviso "Carregando atividades do Bitrix…" enquanto a
+//   carga inicial de um Tree recém-ligado roda (`data.inboundLoading`) — faixa
+//   discreta, sem overlay; re-busca SILENCIOSA a cada 5 s até terminar (a
+//   troca de estado da carga não passa pelo event bus).
 // v1.14 (02/10/2026): o widget deixa de depender de escolhas fixas do preset.
 //   (a) MODO APRESENTAR: rótulo de tipo, "+", concluir etapa, "Agendar
 //       próxima", avisos e o cabeçalho "Mapa · …" somem por padrão
@@ -528,6 +532,15 @@ export function TreeWidget({
   }, [scopeKey, layout, order, limit]);
 
   const originOf = useRefetchOrigin(scopeKey);
+
+  // v1.15 (09/10/2026): carga inicial do Bitrix em curso — confere de 5 em 5 s.
+  // O `refresh` não re-renderiza com payload idêntico, então nada pisca.
+  const inboundLoading = Boolean(data?.inboundLoading);
+  useEffect(() => {
+    if (!inboundLoading) return;
+    const t = window.setInterval(() => void refresh(), 5000);
+    return () => window.clearInterval(t);
+  }, [inboundLoading, refresh]);
 
   useEffect(() => {
     // A ORIGEM decide o ritmo (§4.10): o que o usuário causou vai agora; o
@@ -1357,7 +1370,12 @@ export function TreeWidget({
             const next = data.attribute!.status === "pausado" ? "ativo" : "pausado";
             // Pausar NÃO remove o acompanhamento: o registro continua na
             // funcionalidade e a árvore continua inteira.
-            patchData({ ...data, attribute: { ...data.attribute!, status: next } });
+            patchData({
+              ...data,
+              attribute: { ...data.attribute!, status: next },
+              // v1.15: retomar dispara a carga inicial do Bitrix.
+              inboundLoading: next === "ativo" ? true : data.inboundLoading,
+            });
             save({
               key: "tree-status",
               context: "Não foi possível alterar o acompanhamento",
@@ -1382,6 +1400,17 @@ export function TreeWidget({
       ) : null}
     </div>
   );
+
+  // v1.15 (09/10/2026): carga inicial do Bitrix — aviso, nunca bloqueio.
+  const inboundNote = data.inboundLoading ? (
+    <p
+      className="text-muted-foreground flex items-center gap-1.5 text-xs"
+      role="status"
+    >
+      <Loader2 className="size-3 animate-spin" />
+      Carregando atividades do Bitrix… você pode seguir usando a árvore.
+    </p>
+  ) : null;
 
   const pausedNote =
     data.attribute?.status === "pausado" ? (
@@ -1437,6 +1466,7 @@ export function TreeWidget({
       <TreeOpsProvider value={opsValue}>
       <div className="flex h-full min-h-0 flex-col gap-2 overflow-hidden p-3">
         {header}
+        {inboundNote}
         {pausedNote}
         {rootMissingNote}
         {/* v1.10: sem o compositor externo — na Root a criação é um rascunho
@@ -1502,6 +1532,7 @@ export function TreeWidget({
     <TreeOpsProvider value={opsValue}>
     <div className="flex h-full flex-col gap-2 overflow-auto p-3">
       {header}
+      {inboundNote}
       {pausedNote}
       {rootMissingNote}
       {composer ?? topActions}
