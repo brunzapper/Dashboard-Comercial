@@ -2331,7 +2331,8 @@ This version has breaking changes — APIs, conventions, and file structure may 
   `docs/arquitetura.md` §4.26 e invariante 41.
 - **Estilo do dashboard é LEITURA de tokens, escopada ao board (02/10/2026,
   §4.28, invariante 43):** `DashboardSettings.style` (registry em
-  `lib/dashboards/style.ts`: classico/editorial/editorial_escuro/executivo)
+  `lib/dashboards/style.ts`: classico/editorial/editorial_escuro/executivo/
+  operacional)
   com cascata ÚNICA `resolveDashboardStyle` — board → padrão da org
   (`organizations.ui_prefs.dashboardStyle`, só org_admin, sem camada de
   usuário) → Clássico. Clássico não emite variável e os widgets seguem pelo
@@ -2356,7 +2357,26 @@ This version has breaking changes — APIs, conventions, and file structure may 
   recalcula); PDF dos slides = impressão das camadas `[data-slide-layer]`
   (página nomeada `slide`); tamanho de fonte em `components/dashboards` só da
   escala nomeada (`text-2xs`/`text-micro`) — `text-[Npx]` é barrado por
-  `tests/no-arbitrary-font-size.test.ts`.
+  `tests/no-arbitrary-font-size.test.ts`. **Operacional (10/10/2026):**
+  estilo SEM paleta própria que segue o tema do sistema — `colors: null` NÃO
+  é mais sinônimo de Clássico (`isClassicStyle` olha a CHAVE;
+  `followsSystemTheme`), as cores `--ds-*` dele vêm de CSS ESTÁTICO
+  `[data-ds="operacional"]` (nada gravado chega ao CSS) e as decisões novas
+  (`kpi`, `delta`, `note`) repetem o comportamento antigo nos 4 estilos
+  existentes. O "Tentar de novo" do erro de widget vale para todos.
+- **Shell da nova aparência (10/10/2026, §4.7):** a BARRA DE LOCAL
+  (`components/layout/location-bar.tsx`) é o lugar do botão de menu e do
+  sino — não volte a usar controles `fixed` nos cantos nem `pr-8`/`pl-12` para
+  desviar deles. Migalhas SÓ por `breadcrumbsFor` (`lib/nav/breadcrumbs.ts`)
+  + `usePublishLocationTitle` (nunca um id na tela); rótulos de Configurações
+  SÓ em `lib/nav/settings-tabs.ts`. Operação é item da barra lateral
+  (`/?aba=operacao` redireciona); a contagem dela é o `dueCount` do sino —
+  nada de consulta nova no layout autenticado. Número vivo dos cards de
+  Operação SÓ em `lib/operacao/metrics.ts` (RLS do usuário, best-effort, só
+  nas páginas de cards). Lista de Painéis = linha densa; dono pelo
+  responsável vinculado (nunca `auth.admin.listUsers` no hub). Vazio por
+  `EmptyState`, loading por `PageSkeleton`. Paleta "Nova" é OPÇÃO do Tema
+  (`data-palette`, cookie `theme_palette`, whitelist `normalizeThemePalette`).
 - **Lixeira de registros (0121): `deleted_at` só muda por ADMIN e toda leitura
   nova de `records` decide EXPLICITAMENTE sobre a lixeira (07/08/2026):**
   soft delete de 30 dias — enviar/restaurar/purgar SÓ pelas actions de
