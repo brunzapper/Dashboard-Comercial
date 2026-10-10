@@ -1,4 +1,6 @@
-// Versão: 3.8 | Data: 28/09/2026
+// Versão: 3.9 | Data: 10/10/2026
+// v3.9 (10/10/2026): filtro "Tem tarefa" (`task:`) resolvido no choke point da
+//   basis (resolveTaskFilters), como no runWidget.
 // v3.8 (28/09/2026): `filterAlternatives` — recorte como UNIÃO de conjuntos
 //   DISJUNTOS de filtros (o filtro do RPC só faz E). A basis é resolvida uma vez
 //   por alternativa (cada uma em E com `filters`) e DOBRADA por
@@ -96,6 +98,7 @@ import {
 } from "@/lib/sources";
 import { loadManualBase } from "@/lib/manual-base/load";
 import { splitManualCoordFilters } from "@/lib/manual-base/coord-filters";
+import { resolveTaskFilters } from "@/lib/tasks/task-filter-resolve";
 import { resolveManualLevel } from "@/lib/manual-base/levels";
 import type { ManualEntry } from "@/lib/manual-base/types";
 import { sumManualEntries } from "@/lib/manual-base/spread";
@@ -343,7 +346,11 @@ export async function runCalculatedWidget(
     // mesmo split do `runWidget`. Ele é o que faz um card mostrar "500 ligações":
     // sem dimensão nenhuma na tela, o recorte por membro é a única forma de pedir
     // um número de dentro do total.
-    const recordFilters = splitManualCoordFilters(filterList).record;
+    // v3.9 (10/10/2026): filtro "Tem tarefa" → `id in (...)` (mesmo choke point
+    // do runWidget; lib/tasks/task-filter-resolve.ts).
+    const recordFilters = splitManualCoordFilters(
+      await resolveTaskFilters(supabase, filterList)
+    ).record;
     const namedFilters = await resolveFkFilterNames(
       supabase,
       resolveFilters(recordFilters)

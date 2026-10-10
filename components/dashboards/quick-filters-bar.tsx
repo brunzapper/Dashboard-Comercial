@@ -1,4 +1,6 @@
-// Versão: 1.5 | Data: 04/09/2026
+// Versão: 1.6 | Data: 10/10/2026
+// v1.6 (10/10/2026): entry "Tem tarefa" (isTaskQuickEntry) vira o chip
+//   TaskQuickFilter — estado + janela de dias; mesma gravação da barra.
 // v1.5 (04/09/2026): a gravação SOBREVIVE ao desmonte do card. A troca de aba
 // do dashboard é client-side e desmonta os widgets da aba anterior — o cleanup
 // do debounce (400ms) matava o timer e o filtro recém-aplicado/limpo nunca era
@@ -56,6 +58,7 @@ import {
 import {
   hasQuickValue,
   isPeriodEntry,
+  isTaskQuickEntry,
   type QuickFilterValue,
   type WidgetQuickFilters,
 } from "@/lib/widgets/quick-filters";
@@ -66,6 +69,7 @@ import { saveQuickFilterValue } from "@/app/(app)/dashboards/actions";
 import { useSnapshotMode } from "@/components/snapshots/snapshot-mode";
 import { useNavPending } from "./pending-context";
 import { PeriodRangeDraft } from "./period-range-inputs";
+import { TaskQuickFilter } from "./task-quick-filter";
 
 // Valores otimistas por widget, vivos enquanto a página está aberta: a troca de
 // aba desmonta o card e o remonta com as props RSC do último render, que ainda
@@ -240,7 +244,14 @@ export function QuickFiltersBar({
   return (
     <div className={cn("flex flex-wrap items-center gap-1.5", className)}>
       {qf.entries.map((entry) =>
-        isPeriodEntry(entry, available) ? (
+        isTaskQuickEntry(entry) ? (
+          <TaskQuickFilter
+            key={entry.id}
+            label={entry.label?.trim() || "Tem tarefa"}
+            value={values[entry.id]}
+            onChange={(v) => setValue(entry.id, v)}
+          />
+        ) : isPeriodEntry(entry, available) ? (
           <PeriodQuickFilter
             key={entry.id}
             label={entryLabel(entry, available)}

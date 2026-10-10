@@ -1,4 +1,7 @@
-// Versão: 2.6 | Data: 02/10/2026
+// Versão: 2.7 | Data: 10/10/2026
+// v2.7 (10/10/2026): FilterRow reconhece o filtro "Tem tarefa" (`task:`) — sem
+//   operador; estado e janela de dias no editor próprio
+//   (components/dashboards/task-filter-options.tsx).
 // v2.6 (02/10/2026): tamanhos de fonte fixos (10px/11px em classe) trocados
 //   pela escala nomeada text-2xs/text-micro (globals.css); guarda em
 //   tests/no-arbitrary-font-size.test.ts.
@@ -99,6 +102,12 @@ import { SourceConceptsHint } from "@/components/formula/source-concepts-hint";
 import type { SourceDef, SourceKey } from "@/lib/sources";
 import { cn } from "@/lib/utils";
 import { isClosedWeekTransform } from "@/lib/widgets/closed-week";
+import { isTaskFilterField } from "@/lib/tasks/task-filter";
+import {
+  filterFieldDisplayValue,
+  filterFieldPatch,
+  TaskFilterRowValue,
+} from "./task-filter-options";
 import type {
   Aggregation,
   DateAgg,
@@ -927,15 +936,19 @@ export function FilterRow({
           className="flex-1"
           options={fieldOptions}
           chips={fieldChips}
-          value={filter.field}
+          value={filterFieldDisplayValue(filter.field)}
           placeholder="— campo —"
-          onValueChange={(field) => onChange({ field })}
+          onValueChange={(field) => onChange(filterFieldPatch(filter, field))}
           aria-label="Campo do filtro"
         />
         <Button type="button" variant="ghost" size="icon" onClick={onRemove}>
           <Trash2 className="size-4" />
         </Button>
       </div>
+      {isTaskFilterField(filter.field) ? (
+        // v2.7: "Tem tarefa" não tem operador — estado + janela de dias.
+        <TaskFilterRowValue filter={filter} onChange={onChange} />
+      ) : (
       <div className="flex items-center gap-2">
         <Combobox
           className="w-32 shrink-0"
@@ -963,7 +976,9 @@ export function FilterRow({
           )
         ) : null}
       </div>
-      {sourceOptions && sourceOptions.length > 1 ? (
+      )}
+      {/* v2.7: "Tem tarefa" vale para o registro inteiro — sem alvo por Base. */}
+      {sourceOptions && sourceOptions.length > 1 && !isTaskFilterField(filter.field) ? (
         <div className="flex flex-col gap-1">
           <Label className="text-muted-foreground text-xs">Bases</Label>
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1">

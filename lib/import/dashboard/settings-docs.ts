@@ -1,4 +1,5 @@
-// Versão: 1.13 | Data: 02/10/2026
+// Versão: 1.14 | Data: 10/10/2026
+// v1.14 (10/10/2026): quickFilters documenta a entry "Tem tarefa" (`task:`).
 // v1.13 (02/10/2026): `tree` deixa de ser `null` — a justificativa ("depende
 //   de série e de registro concreto") envelheceu com o mapa livre, os
 //   indicadores e a Root, e foi esse `null` que deixou a IA cega para a Tree.
@@ -263,7 +264,8 @@ export const WIDGET_SETTINGS_DOC = {
   { "id": "qf1", "field": "responsible_id" },
   { "id": "qf2", "field": "operation_id" },
   { "id": "qf3", "field": "closed_at" },                          // dropdown de período
-  { "id": "qf4", "field": "closed_at", "transform": "month_name" } // multi-seleção de meses
+  { "id": "qf4", "field": "closed_at", "transform": "month_name" }, // multi-seleção de meses
+  { "id": "qf5", "field": "task:" }                               // "Tem tarefa": estado + dias atrás/à frente
 ],`,
   comparison: `"comparison": {                            // variação vs outro período
   "enabled": true,

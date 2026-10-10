@@ -1,4 +1,7 @@
-// Versão: 2.0 | Data: 07/08/2026
+// Versão: 2.1 | Data: 10/10/2026
+// v2.1 (10/10/2026): filtro "Tem tarefa" (`tarefa`/`t_atras`/`t_frente`) —
+//   embutido `tasks!inner()` com o MESMO predicado do modo lista
+//   (lib/tasks/task-filter-resolve.ts); contagem segue exata.
 // Registros: listagem com filtros + edição por permissão + campos dinâmicos.
 // v2.0 (07/08/2026): 100% dos campos + ordenação.
 //   - Colunas dirigidas por DADOS: registros_populated_refs (0120) informa as
@@ -84,6 +87,11 @@ import { SyncPanel } from "@/components/sync/sync-panel";
 import { WritebackPendingBadge } from "@/components/sync/writeback-pending-badge";
 import { ExportCsvButton } from "@/components/registros/export-csv-button";
 import { FiltersBar } from "@/components/registros/filters-bar";
+import { parseTaskFilter, TASK_FILTER_PREFIX } from "@/lib/tasks/task-filter";
+import {
+  applyTaskEmbedFilters,
+  taskEmbedSelect,
+} from "@/lib/tasks/task-filter-resolve";
 import { RecordCreateSheet } from "@/components/registros/record-create-sheet";
 import { RecordsAiInsertSheet } from "@/components/registros/ai-insert-sheet";
 import { RecordsAiUpdateSheet } from "@/components/registros/ai-update-sheet";
@@ -118,6 +126,13 @@ export default async function RegistrosPage({
   const de = str(sp.de);
   const ate = str(sp.ate);
   const busca = str(sp.busca);
+  // v2.1: filtro "Tem tarefa". Valor inválido é ignorado (mesma régua do widget).
+  const taskSpec = parseTaskFilter({
+    field: `${TASK_FILTER_PREFIX}${str(sp.tarefa)}`,
+    op: "eq",
+    value: `${str(sp.t_atras)},${str(sp.t_frente)}`,
+  });
+  const taskSpecs = taskSpec ? [taskSpec] : [];
   const page = Math.max(1, Number(str(sp.page)) || 1);
 
   const session = await getSessionInfo();
@@ -254,13 +269,14 @@ export default async function RegistrosPage({
   const to = from + PAGE_SIZE - 1;
   let query = supabase
     .from("records")
-    .select(RECORD_COLS, { count: "exact" })
+    .select(RECORD_COLS + taskEmbedSelect(taskSpecs), { count: "exact" })
     .eq("record_type", recordType)
     // Fase 12: leads mock de "Data Reunião" (records.is_mock) ficam fora da
     // listagem e da contagem — só existem para consultas por Data Reunião.
     .eq("is_mock", false)
     // Lixeira (0121): soft delete fora da listagem — só /registros/lixeira.
     .is("deleted_at", null);
+  query = applyTaskEmbedFilters(query, taskSpecs);
   query = (
     sort
       ? query.order(sortColumnExpr(sort, fields), {

@@ -1,4 +1,6 @@
-// Versão: 2.2 | Data: 07/08/2026
+// Versão: 2.3 | Data: 10/10/2026
+// v2.3 (10/10/2026): filtro "Tem tarefa" (`task:`) no modo lista/kanban — vira
+//   embutido `tasks!inner()` com o predicado de lib/tasks/task-filter-resolve.ts.
 // v2.2 (07/08/2026): stage_semantic no RECORD_COLS — paridade da grade núcleo
 //   do painel de detalhe (coreDetailRows pula refs ausentes do select; sem a
 //   coluna, o kanban não exibia a Situação no card).
@@ -53,6 +55,11 @@
 // perde o id), aqui consultamos `records` DIRETO — 1 linha por registro, com id
 // — para permitir edição inline das colunas personalizadas na própria tabela do
 // dashboard. Reaproveita os helpers de filtro/fonte/período do engine.
+import {
+  applyTaskEmbedFilters,
+  splitTaskFilters,
+  taskEmbedSelect,
+} from "@/lib/tasks/task-filter-resolve";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type { FieldDefinition, RecordRow } from "@/lib/records/types";
@@ -261,9 +268,19 @@ function buildRecordListQuery(
   const passThrough = (rts: string[]) => `record_type.not.in.(${rts.join(",")})`;
 
   // Filtros primeiro (FilterBuilder), depois order/limit (TransformBuilder).
+  // v2.3 (10/10/2026): filtro "Tem tarefa" (`task:`) — aqui não vira lista de
+  // ids (estouraria a URL do GET): vira embutido `tasks!inner()` com o MESMO
+  // predicado do agregado (lib/tasks/task-filter-resolve.ts).
+  const { record: listFilters, tasks: taskSpecs } = splitTaskFilters(
+    filters as WidgetFilter[]
+  );
   let q = supabase
     .from("records")
-    .select(RECORD_COLS, opts?.count ? { count: "exact" } : undefined);
+    .select(
+      RECORD_COLS + taskEmbedSelect(taskSpecs),
+      opts?.count ? { count: "exact" } : undefined
+    );
+  q = applyTaskEmbedFilters(q, taskSpecs);
   // Lixeira (0121): soft delete fora de TODO modo lista/kanban/agenda/card.
   // No viewer de snapshot o predicado é no-op (snapshot_records.deleted_at é
   // o espelho morto sempre-null da 0121).
@@ -271,7 +288,7 @@ function buildRecordListQuery(
   if (opts?.orgId) q = q.eq("organization_id", opts.orgId);
   if (opts?.onlyMocks) q = q.eq("is_mock", true);
   else if (!includeMocks) q = q.eq("is_mock", false);
-  for (const f of filters as WidgetFilter[]) {
+  for (const f of listFilters) {
     if (f.field === BUCKET_FIELD_SENTINEL) {
       const bf = bucketFilterValue(f);
       if (bf && bf.keys.length > 0) bucketFilters.push(bf);

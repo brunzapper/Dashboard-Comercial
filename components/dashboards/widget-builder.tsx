@@ -1,4 +1,6 @@
-// Versão: 1.32 | Data: 02/10/2026
+// Versão: 1.33 | Data: 10/10/2026
+// v1.33 (10/10/2026): filtros do widget oferecem "Tem tarefa" (estado + janela
+//   de dias) — opção de task-filter-options; a lógica fica fora deste arquivo.
 // v1.32 (02/10/2026) — também: (f) widget "Base do Dashboard" ganha seção
 //   própria (quais dados aparecem, mês e distribuição da linha nova) — antes
 //   `baseManual.series` só era gravado pelo preset e `defaultMonth` nunca era
@@ -245,6 +247,10 @@ import {
   manualAxisFieldOptions,
   manualAxisValueSource,
 } from "@/components/dashboards/manual-axis-options";
+import {
+  TASK_FILTER_FIELD_OPTIONS,
+  TASK_QUICK_FIELD_OPTIONS,
+} from "@/components/dashboards/task-filter-options";
 import { parseManualAxisRef } from "@/lib/manual-base/families";
 import { MANUAL_COORD_OPS } from "@/lib/manual-base/coord-filters";
 import { useSourceFolders } from "@/components/source-folders-context";
@@ -1408,7 +1414,7 @@ export function WidgetBuilder({
         (f.isDate && !f.displayOnly)
     ),
     sourceLabels
-  );
+  ).concat(TASK_QUICK_FIELD_OPTIONS); // v1.33: "Tem tarefa" (estado no valor)
   // Formato do dropdown de data: padrão = período (presets/personalizado);
   // demais = multi-seleção de buckets (os mesmos formatos das dimensões).
   const quickFormatOptions: ComboboxOption[] = [
@@ -3998,6 +4004,8 @@ export function WidgetBuilder({
                 fieldOptions={[
                   ...rpcFieldOptions,
                   ...manualAxisFieldOptions(manualAxes),
+                  // v1.33 (10/10/2026): filtro "Tem tarefa" (task-filter-options).
+                  ...TASK_FILTER_FIELD_OPTIONS,
                 ]}
                 fieldChips={axisChips}
                 // 0143: num eixo de família só `=`/`≠`/`em (lista)` fazem

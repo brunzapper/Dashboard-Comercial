@@ -1,4 +1,6 @@
-// Versão: 1.14 | Data: 02/10/2026
+// Versão: 1.15 | Data: 10/10/2026
+// v1.15 (10/10/2026): filtro "Tem tarefa" (`task:`) na seção Filtros — estados
+//   e teto derivados de lib/tasks/task-filter.ts.
 // v1.14 (02/10/2026): (a) seção "mapas" — os NÓS da Tree (indicador,
 //   Multi-fatores, ritual, anotação) entram no contrato, com as linhas do
 //   cartão (payload.rows) derivadas de INDICATOR_ROW_LABELS e a cadência de
@@ -117,6 +119,11 @@ import {
 } from "@/lib/tree/payload";
 import { CHILDREN_OPS } from "@/lib/indicators/model";
 import { RITUAL_CADENCE_LABELS } from "@/lib/rituals/cadence";
+import {
+  MAX_TASK_FILTER_DAYS,
+  TASK_FILTER_STATUS_LABELS,
+  TASK_FILTER_STATUSES,
+} from "@/lib/tasks/task-filter";
 import {
   MAX_NEW_MAP_NODES,
   TREE_MAP_NODE_KINDS,
@@ -525,6 +532,13 @@ promovida a tipo próprio).
   (as outras passam livres).
 - responsible_id/operation_id aceitam o NOME exato do cadastro como "value"
   ("in" = lista de nomes) — NUNCA invente UUID; nome inexistente é erro.
+- "Tem tarefa": { "field": "task:<estado>", "op": "eq", "value": "<dias atrás>,<dias à frente>" }
+  — só passa o registro com ao menos uma TAREFA no estado pedido e PRAZO entre
+  hoje − atrás e hoje + à frente. Estados: ${TASK_FILTER_STATUSES.map(
+    (st) => `"${st}" (${TASK_FILTER_STATUS_LABELS[st]})`
+  ).join(", ")}; "atrasadas" = pendente com prazo antes de hoje. Dias: inteiros
+  de 0 a ${String(MAX_TASK_FILTER_DAYS)}; lado vazio = sem limite (ex.: "30,60",
+  "15,15", ",7", ""). Com janela, tarefa sem prazo não conta. Não aceita "sources".
 
 ### Settings do widget (todos opcionais; omitir = padrão)
 

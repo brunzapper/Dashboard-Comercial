@@ -1,4 +1,6 @@
-// Versão: 1.14 | Data: 17/09/2026
+// Versão: 1.15 | Data: 10/10/2026
+// v1.15 (10/10/2026): filtro "Tem tarefa" (`task:`) resolvido no engine — vira
+//   `id in (...)` antes do RPC (resolveTaskFilters).
 // v1.14 (17/09/2026): CORREÇÃO — card sem dimensão cuja única métrica é da Base
 // manual mandava SELECT vazio ao RPC ("Widget sem dimensões nem métricas"). A
 // guarda que empurra a contagem descartável só cobria métrica calculada e
@@ -152,6 +154,7 @@ import {
   loadManualSeries,
 } from "@/lib/manual-base/load";
 import { splitManualCoordFilters } from "@/lib/manual-base/coord-filters";
+import { resolveTaskFilters } from "@/lib/tasks/task-filter-resolve";
 import {
   manualFamilyLabel,
   manualMemberLabel,
@@ -1728,8 +1731,13 @@ export async function runWidget(
   // Como `legFiltersFor` é a fonte ÚNICA dos filtros de toda perna, separar
   // aqui cobre o RPC principal, as auxiliares de condição, as pernas por
   // métrica e a rodada de comparação de uma vez.
+  // v1.15 (10/10/2026): filtro "Tem tarefa" (`task:`) vira `id in (...)` ANTES de
+  // tudo (lib/tasks/task-filter-resolve.ts) — o RPC não conhece tarefas; a 0153
+  // só abriu `id` na whitelist. Sem filtro de tarefa, mesma lista (sem consulta).
   const { record: recordFilters, coords: coordFilters } =
-    splitManualCoordFilters(config.filters ?? []);
+    splitManualCoordFilters(
+      await resolveTaskFilters(supabase, config.filters ?? [])
+    );
   const resolved = expandResponsibleFilters(
     await resolveFkFilterNames(supabase, resolveFilters(recordFilters)),
     respCanon

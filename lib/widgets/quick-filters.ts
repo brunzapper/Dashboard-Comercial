@@ -1,4 +1,7 @@
-// Versão: 1.1 | Data: 23/07/2026
+// Versão: 1.2 | Data: 10/10/2026
+// v1.2 (10/10/2026): filtro rápido "Tem tarefa" — entry com `field = "task:"`
+//   (TASK_QUICK_FIELD) e valor `{kind:"tasks", status, back, ahead}`; vira o
+//   `WidgetFilter` `task:` por `quickTaskFilters` (page e widget-scope).
 // v1.1 (23/07/2026): FF_ROW_KEY/FF_COL_KEY + parseSharedFieldFilter — valor
 // COMPARTILHADO do "Filtro por campo" (settings.valueScope 'all').
 // Filtros rápidos por widget: helpers compartilhados entre o RSC (page.tsx), o
@@ -17,6 +20,13 @@
 //   0048) e pós-filtrado no modo lista (record-list.ts) com a MESMA chave
 //   canônica (canonicalBucketKey).
 import type { RecordRow } from "@/lib/records/types";
+import {
+  parseTaskFilterDays,
+  serializeTaskFilter,
+  TASK_FILTER_PREFIX,
+  TASK_FILTER_STATUS_LABELS,
+  type TaskFilterStatus,
+} from "@/lib/tasks/task-filter";
 import type { AvailableField } from "./fields";
 import { MONTH_NAMES_PT, WEEKDAY_NAMES_PT } from "./date-buckets";
 import { unifiedMemberRef } from "@/lib/correspondences";
@@ -122,7 +132,36 @@ export interface BucketFilterValue {
 /** Valor persistido de um filtro rápido. */
 export type QuickFilterValue =
   | { kind: "options"; values: string[] } // multi-seleção (ids/buckets)
-  | { kind: "period"; preset?: string; de?: string; ate?: string }; // data padrão
+  | { kind: "period"; preset?: string; de?: string; ate?: string } // data padrão
+  // v1.2: "Tem tarefa" — estado + janela de dias sobre o prazo (null = sem limite).
+  | {
+      kind: "tasks";
+      status: TaskFilterStatus;
+      back: number | null;
+      ahead: number | null;
+    };
+
+/** v1.2: `field` da entry de filtro rápido "Tem tarefa" (o estado vai no VALOR). */
+export const TASK_QUICK_FIELD = TASK_FILTER_PREFIX;
+
+/** v1.2: a entry é o filtro rápido "Tem tarefa"? */
+export function isTaskQuickEntry(entry: { field: string }): boolean {
+  return entry.field === TASK_QUICK_FIELD;
+}
+
+/** v1.2: valor "Tem tarefa" → o `WidgetFilter` `task:` que o engine resolve. */
+export function quickTaskFilters(
+  value: QuickFilterValue | null | undefined
+): WidgetFilter[] {
+  if (!value || value.kind !== "tasks") return [];
+  return [
+    serializeTaskFilter({
+      status: value.status,
+      back: value.back,
+      ahead: value.ahead,
+    }),
+  ];
+}
 
 /** Payload por widget entregue ao cliente (card). */
 export interface WidgetQuickFilters {
@@ -167,6 +206,15 @@ export function parseQuickFilterValue(raw: unknown): QuickFilterValue | null {
   if (o.kind === "options" && Array.isArray(o.values)) {
     return { kind: "options", values: o.values.map(String).filter(Boolean) };
   }
+  if (o.kind === "tasks") {
+    // v1.2: mesma régua do filtro do widget (estado no enum, dias 0–180).
+    if (typeof o.status !== "string" || !(o.status in TASK_FILTER_STATUS_LABELS))
+      return null;
+    const back = parseTaskFilterDays(o.back);
+    const ahead = parseTaskFilterDays(o.ahead);
+    if (back === undefined || ahead === undefined) return null;
+    return { kind: "tasks", status: o.status as TaskFilterStatus, back, ahead };
+  }
   if (o.kind === "period") {
     return {
       kind: "period",
@@ -182,6 +230,7 @@ export function parseQuickFilterValue(raw: unknown): QuickFilterValue | null {
 export function hasQuickValue(v: QuickFilterValue | null | undefined): boolean {
   if (!v) return false;
   if (v.kind === "options") return v.values.length > 0;
+  if (v.kind === "tasks") return true;
   return Boolean(v.preset || v.de || v.ate);
 }
 

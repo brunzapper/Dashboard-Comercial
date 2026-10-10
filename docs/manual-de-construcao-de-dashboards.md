@@ -1,4 +1,6 @@
-<!-- Versão: 1.47 | Data: 03/10/2026 -->
+<!-- Versão: 1.48 | Data: 10/10/2026 -->
+<!-- v1.48 (10/10/2026): filtro "Tem tarefa" (estado + dias atrás/à frente) em
+     §6.4 (filtro do widget) e §6.5 (filtro rápido). -->
 <!-- v1.47 (03/10/2026): §2.7 reescrita para a tela nova da Base manual — abas
      Lançamentos · Métricas · Divisões, termos Métrica/Divisão/Opção, navegador
      de mês, aviso de conferência só quando algo não fecha, e tudo editável
@@ -2167,6 +2169,17 @@ Filtros fixos do widget (sempre aplicados, invisíveis ao leitor). Por linha:
   que presets criam "fechamento ≥ início do mês" sem data fixa).
 - **"Mostrar barra de busca/filtro na tabela"** (só Tabela): liga/desliga a
   barra do §4.5.
+- **"Tem tarefa (estado e prazo)"** (grupo "Tarefas" no seletor de campo):
+  deixa passar só o registro que tem ao menos uma TAREFA no estado escolhido
+  — **Pendentes**, **Atrasadas** (pendente com prazo antes de hoje),
+  **Concluídas** ou **Pendentes e concluídas** — com o **prazo** dentro da
+  janela "**dias atrás**" / "**dias à frente**" a partir de hoje (inteiros de
+  0 a 180; campo vazio = sem limite daquele lado). Ex.: 30 atrás e 60 à
+  frente; 15 e 15. Com janela definida, tarefa sem prazo não conta. Não tem
+  operador nem alvo por Base. Vale em gráficos, KPIs, tabelas e kanban; a
+  pessoa só "vê" as tarefas que as permissões dela alcançam (o vendedor, as
+  dele). No link público de snapshot o filtro é ignorado (o snapshot não
+  guarda tarefas).
 
 ### 6.5 Bloco "Filtros rápidos" (dropdowns no card)
 
@@ -2174,8 +2187,9 @@ Disponível em Tabela, Barra, Barra horizontal, Linha, Pizza, Funil, Card e
 Métrica calculada. Cada entrada configura um dropdown exibido no card:
 
 - **Campo** — apenas: responsável (`responsible_id`), operação
-  (`operation_id`) ou um campo de DATA (incluindo unificados e campos do
-  registro casado).
+  (`operation_id`), um campo de DATA (incluindo unificados e campos do
+  registro casado) ou **"Tem tarefa (estado e prazo)"** — este vira no card um
+  seletor de estado + "dias atrás"/"dias à frente" (mesma régua do §6.4).
 - **"Formato"** (só data): "Padrão (período)" → o dropdown é um seletor de
   período (13 opções do §4.1); OU um formato de bucket (tabela do §6.2) → o
   dropdown é multi-seleção de buckets (ex.: meses específicos).

@@ -1,4 +1,6 @@
-// Versão: 1.10 | Data: 02/10/2026
+// Versão: 1.11 | Data: 10/10/2026
+// v1.11 (10/10/2026): filtro "Tem tarefa" IGNORADO no link público — o
+//   snapshot não guarda tarefas (withoutTaskFilters, lib/tasks/task-filter.ts).
 // v1.10 (02/10/2026): Tabela de metas legada ('metas', congelada em
 //   snapshots antigos) vira Tabela Livre NA LEITURA (normalizeLegacyWidget);
 //   as metas não aparecem no link público (aviso na própria tabela).
@@ -118,6 +120,7 @@ import {
 } from "@/lib/config/responsible-canon";
 import { normalizeGridSpace } from "@/lib/widgets/grid-space";
 import { normalizeLegacyWidget } from "@/lib/widgets/quick-table/goal-convert";
+import { withoutTaskFilters } from "@/lib/tasks/task-filter";
 import {
   applySourceScope,
   collectBoardSourceKeys,
@@ -295,7 +298,11 @@ async function SnapshotContent({
   // congelado — por isso a conversão runtime aqui é permanente). Read-only.
   const gridNorm = normalizeGridSpace(
     (cfg.dashboard.settings ?? {}) as DashboardSettings,
-    (cfg.widgets as Widget[]).map(normalizeLegacyWidget)
+    // v1.11 (10/10/2026): filtro "Tem tarefa" é ignorado no link público
+    // (o snapshot não guarda tarefas) — withoutTaskFilters.
+    (cfg.widgets as Widget[]).map((w) =>
+      withoutTaskFilters(normalizeLegacyWidget(w))
+    )
   );
   const widgets = gridNorm.widgets;
   const fields = (cfg.fields ?? []) as FieldDefinition[];

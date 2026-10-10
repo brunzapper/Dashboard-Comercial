@@ -1,4 +1,7 @@
-<!-- Versão: 2.7 | Data: 09/10/2026 -->
+<!-- Versão: 2.8 | Data: 10/10/2026 -->
+<!-- v2.8 (10/10/2026): §4.10 "Filtro Tem tarefa" + invariante 46 — filtro por
+     estado/janela de prazo das tarefas, resolvido no ENGINE (id in / embutido);
+     0153 só abre `id` no ramo de FILTRO dos dois RPCs. -->
 <!-- v2.7 (09/10/2026): §4.25 "Atividades que nascem no Bitrix" + invariante
      38 — atividade desconhecida só entra com Tree ATIVO, concluída só de até
      30 dias antes da ativação (data de conclusão de lá), carga inicial ao
@@ -2337,6 +2340,30 @@ invariantes 9/10).
   `period-resolve.ts`).
 
 ### 4.10 Filtros → widgets deferidos e feedback de carregamento (21/07/2026)
+
+**Filtro "Tem tarefa" (10/10/2026, 0153).** Pseudo-campo `task:<estado>`
+(`pendentes`/`atrasadas`/`concluidas`/`todas`), `op = "eq"`, `value =
+"<dias atrás>,<dias à frente>"` (0–180; lado vazio = sem limite). Dono ÚNICO
+da representação e do predicado: `lib/tasks/task-filter.ts`
+(`taskFilterWindow` — atrasada = pendente com prazo antes de hoje, dia de
+Brasília; com janela, tarefa sem prazo fica de fora). Dois transportes, UM
+predicado (`lib/tasks/task-filter-resolve.ts`):
+- **agregado** (`runWidget`, `runCalculatedWidget`): `resolveTaskFilters` troca
+  o filtro por `id in (<registros>)` antes do RPC; nenhum casa ⇒ uuid-zero
+  (vazio, nunca sem filtro); mais de `MAX_TASK_FILTER_RECORDS` (20.000) ⇒ erro
+  ALTO. A 0153 só deixou o ramo de FILTRO dos dois RPCs aceitar `id` — `id`
+  NÃO entrou em `v_allowed_cols` (dimensão/métrica por id seguem recusadas);
+- **modo lista / kanban / /registros** (PostgREST direto — uma lista de ids
+  estouraria a URL do GET): embutido VAZIO `tfN:tasks!inner()` com os mesmos
+  predicados (`taskEmbedSelect` + `applyTaskEmbedFilters`).
+A leitura de `tasks` usa o client de quem consulta: a RLS (0091) vale, então o
+vendedor só "vê" as tarefas que pode ver. Filtro rápido: entry `field = "task:"`
+e valor `{kind:"tasks", status, back, ahead}` → `quickTaskFilters` (page e
+widget-scope). Automação: condição `task_filter`, avaliada em memória por
+`taskMatchesFilter` sobre as tarefas carregadas só quando alguma regra ativa a
+usa. Snapshot: `withoutTaskFilters` remove o filtro (o dataset congelado não
+guarda tarefas e o adapter é fail-closed para `tasks`). Editor único:
+`components/filters/task-filter-editor.tsx`.
 
 O dashboard tem DOIS transportes de filtro com gatilhos de recompute
 diferentes:
@@ -7679,6 +7706,15 @@ principalmente — para mantenedores humanos.
     configuração — não o alargue). Condição de automação com granularidade
     MENOR que um dia (hora/minuto) quebraria a premissa do portão: exige
     rever o `tick_gate_begin` junto.
+46. **Filtro "Tem tarefa" se resolve no ENGINE, e o predicado é UM só
+    (10/10/2026, §4.10, 0153).** `taskFilterWindow` (`lib/tasks/task-filter.ts`)
+    é a régua de todas as superfícies: o caminho agregado vira `id in (...)`
+    (`resolveTaskFilters`), o modo lista vira embutido `tasks!inner()`
+    (`applyTaskEmbedFilters`) e a automação casa em memória
+    (`taskMatchesFilter`). Nunca ensine o RPC sobre tarefas: a 0153 abriu SÓ
+    `id` no ramo de filtro (espelhado nas duas funções — invariante 1). Lista
+    vazia vira o uuid-zero, nunca "sem filtro"; recorte grande demais falha
+    alto, nunca é cortado em silêncio.
 
 ## 6. Convenções do projeto
 

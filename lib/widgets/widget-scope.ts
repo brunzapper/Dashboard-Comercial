@@ -1,4 +1,6 @@
-// Versão: 1.8 | Data: 02/10/2026
+// Versão: 1.9 | Data: 10/10/2026
+// v1.9 (10/10/2026): filtro rápido "Tem tarefa" vira o filtro `task:`
+//   (quickTaskFilters) — o engine o resolve em `id in (...)`.
 // v1.8 (02/10/2026): Tabela de metas legada ('metas') vira Tabela Livre na
 //   leitura (normalizeLegacyWidget) — as actions enxergam o mesmo widget que
 //   a page.
@@ -80,7 +82,9 @@ import {
   hasQuickValue,
   isPeriodEntry,
   parsePeriodWindowChoice,
+  isTaskQuickEntry,
   parseQuickFilterValue,
+  quickTaskFilters,
   quickOptionsFilter,
   type QuickFilterValue,
 } from "@/lib/widgets/quick-filters";
@@ -280,6 +284,12 @@ export async function resolveWidgetViewScope(
             viewFilters.push(...applied);
           }
         }
+        continue;
+      }
+      // v1.9 (10/10/2026): filtro rápido "Tem tarefa" → `task:` (o engine
+      // resolve). Mesma regra da page.
+      if (isTaskQuickEntry(entry)) {
+        viewFilters.push(...quickTaskFilters(stored));
         continue;
       }
       let vals = stored?.kind === "options" ? stored.values : [];
