@@ -1,4 +1,6 @@
-// Versão: 1.7 | Data: 12/09/2026
+// Versão: 1.8 | Data: 10/10/2026
+// v1.8 (10/10/2026): sem o pr-8 do cabeçalho (o sino foi para a barra de
+//   local) e o nome do quadro vira a última migalha (usePublishLocationTitle).
 // v1.7 (12/09/2026): botão de VOLTAR no topo (leva à tela anterior, não a um
 //   destino fixo) — o quadro não tinha saída além da barra lateral, que pode
 //   estar oculta.
@@ -87,6 +89,7 @@ import { MetricsPopover } from "./metrics-popover";
 import { BoardAppearancePopover } from "./board-appearance-popover";
 import { AutomationsSheet } from "./automations-sheet";
 import { KanbanAiSheet } from "@/components/kanban/kanban-ai-sheet";
+import { usePublishLocationTitle } from "@/components/layout/location-title-context";
 
 const PERIOD_OPTIONS: ComboboxOption[] = [
   { value: "", label: "Todo o período" },
@@ -150,6 +153,8 @@ export function KanbanPageClient({
   // Event bus: os dados do quadro vêm do RSC e revalidateTasks() não cobre
   // /kanbans/[id] — tarefa mudada em outra superfície força o re-render aqui.
   useDataChanged(() => router.refresh());
+  // Nome do quadro na última migalha da barra de local.
+  usePublishLocationTitle(boardName);
 
   // Persistência das colunas (spread completo do settings — os dois saves
   // sobrescrevem o jsonb inteiro). Widget: grava em widgets.settings.kanban
@@ -284,8 +289,8 @@ export function KanbanPageClient({
       {/* Saída do quadro: leva à tela anterior (a barra lateral pode estar
           oculta, e o kanban é aberto por link direto o tempo todo). */}
       <BackLink fallback="/" fallbackLabel="Workspace" className="-ml-2 self-start" />
-      {/* pr-8: afasta a toolbar do sino fixo (TaskBell, topo-direito) */}
-      <div className="flex flex-wrap items-center justify-between gap-3 pr-8">
+      {/* sem pr-8 desde 10/10/2026: o sino mora na barra de local. */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="min-w-0">
           <h1 className="text-2xl font-semibold">{boardName}</h1>
           {widgetCtx ? (

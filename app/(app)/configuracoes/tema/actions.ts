@@ -1,4 +1,6 @@
-// Versão: 1.3 | Data: 02/10/2026
+// Versão: 1.4 | Data: 10/10/2026
+// v1.4 (10/10/2026): paleta da interface ("atual" | "nova") — pessoal e padrão
+//   da org; vira o cookie theme_palette com o valor EFETIVO.
 // v1.3 (02/10/2026): `saveOrgDashboardStyle` — estilo padrão dos dashboards
 //   da org (ui_prefs.dashboardStyle). saveOrgUiPrefs PRESERVA a chave (o form
 //   de preferências não a envia; sem isso cada save de interface apagaria o
@@ -35,11 +37,13 @@ import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
 import {
   ACCENT_COOKIE,
+  PALETTE_COOKIE,
   THEME_COOKIE,
   TOKENS_COOKIE,
   hasThemeTokens,
   normalizeHexColor,
   normalizeThemeMode,
+  normalizeThemePalette,
   normalizeThemeTokens,
   resolveTheme,
   resolveThemeTokens,
@@ -69,6 +73,7 @@ async function setEffectiveCookies(
     theme?: string | null;
     accentColor?: string | null;
     themeTokens?: unknown;
+    palette?: string | null;
   },
   org: OrgThemeDefault | null
 ): Promise<void> {
@@ -81,6 +86,12 @@ async function setEffectiveCookies(
     sameSite: "lax",
   });
   store.set(ACCENT_COOKIE, effective.accent, {
+    path: "/",
+    maxAge: YEAR,
+    sameSite: "lax",
+  });
+  // v1.4 (10/10/2026): paleta EFETIVA — só valor da whitelist chega aqui.
+  store.set(PALETTE_COOKIE, effective.palette, {
     path: "/",
     maxAge: YEAR,
     sameSite: "lax",
@@ -111,6 +122,8 @@ export async function saveThemePreferences(input: {
   laserColor?: string | null;
   /** Tokens por modo (0141); ausente/vazio = herda a org. */
   themeTokens?: unknown;
+  /** v1.4 (10/10/2026): paleta da interface; null/inválido = herda a org. */
+  palette?: string | null;
 }): Promise<ThemeActionState> {
   const session = await getSessionInfo();
   if (!session) return { ok: false, message: "Sessão expirada." };
@@ -118,6 +131,7 @@ export async function saveThemePreferences(input: {
   const theme = normalizeThemeMode(input.theme);
   const accentColor = normalizeHexColor(input.accentColor);
   const laserColor = normalizeHexColor(input.laserColor);
+  const palette = normalizeThemePalette(input.palette);
   const parsedTokens = normalizeThemeTokens(input.themeTokens);
   const themeTokens: ThemeTokens | null = hasThemeTokens(parsedTokens)
     ? parsedTokens
@@ -133,14 +147,24 @@ export async function saveThemePreferences(input: {
   const { error } = await supabase.from("user_settings").upsert(
     {
       user_id: session.user.id,
-      settings: { ...current, theme, accentColor, laserColor, themeTokens },
+      settings: {
+        ...current,
+        theme,
+        accentColor,
+        laserColor,
+        themeTokens,
+        palette,
+      },
     },
     { onConflict: "user_id" }
   );
   if (error) return { ok: false, message: error.message };
 
   const org = await getActiveOrg();
-  await setEffectiveCookies({ theme, accentColor, themeTokens }, org?.theme ?? null);
+  await setEffectiveCookies(
+    { theme, accentColor, themeTokens, palette },
+    org?.theme ?? null
+  );
   revalidatePath("/", "layout");
   return { ok: true, message: "Tema salvo." };
 }
@@ -153,6 +177,8 @@ export async function saveOrgThemeDefault(input: {
   mode?: string | null;
   accentColor?: string | null;
   themeTokens?: unknown;
+  /** v1.4 (10/10/2026): paleta padrão da org; null = padrão do app. */
+  palette?: string | null;
 }): Promise<ThemeActionState> {
   const org = await getActiveOrg();
   if (!org) return { ok: false, message: "Organização não encontrada." };
@@ -167,6 +193,8 @@ export async function saveOrgThemeDefault(input: {
   if (mode) theme.mode = mode;
   if (accentColor) theme.accentColor = accentColor;
   if (hasThemeTokens(parsedTokens)) theme.tokens = parsedTokens;
+  const palette = normalizeThemePalette(input.palette);
+  if (palette) theme.palette = palette;
 
   const supabase = await createClient();
   const { error } = await supabase
@@ -188,6 +216,7 @@ export async function saveOrgThemeDefault(input: {
       mode: (mode ?? undefined) as ThemeMode | undefined,
       accentColor: accentColor ?? undefined,
       tokens: hasThemeTokens(parsedTokens) ? parsedTokens : undefined,
+      palette: palette ?? undefined,
     });
   }
   revalidatePath("/", "layout");

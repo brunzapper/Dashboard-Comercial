@@ -1,4 +1,15 @@
-// Versão: 1.0 | Data: 02/10/2026
+// Versão: 1.1 | Data: 10/10/2026
+// v1.1 (10/10/2026): estilo OPERACIONAL — denso, para trabalho diário (KPI com
+//   rótulo pequeno em caixa-alta e número em peso 650 de tracking fechado,
+//   variação toda colorida, nota com tinta de alerta, barra de período em
+//   cartão — esta última é CSS de [data-ds="operacional"]). Diferente dos outros, ele NÃO tem paleta própria: acompanha o
+//   claro/escuro e a paleta da interface (lib/theme.ts), e o destaque é a cor
+//   da marca. Por isso `colors: null` deixou de significar "Clássico" —
+//   isClassicStyle passa a olhar a CHAVE — e as cores --ds-* dele vêm de CSS
+//   ESTÁTICO em globals.css ([data-ds="operacional"]), nunca de valor gravado.
+//   Campos novos do registro (`kpi`, `delta`, `note`) carregam as
+//   decisões estruturais; nos 4 estilos existentes eles repetem o
+//   comportamento de antes (byte-idêntico).
 // v1.0 (02/10/2026): ESTILO DO DASHBOARD — um conjunto de tokens semânticos
 //   (cor, tipografia, forma dos cards, tabela e gráfico) escolhido POR
 //   DASHBOARD, com padrão da ORGANIZAÇÃO e o Clássico como padrão do app.
@@ -31,6 +42,7 @@ export const DASHBOARD_STYLE_KEYS = [
   "editorial",
   "editorial_escuro",
   "executivo",
+  "operacional",
 ] as const;
 
 export type DashboardStyleKey = (typeof DASHBOARD_STYLE_KEYS)[number];
@@ -115,7 +127,8 @@ export interface DashboardStyleDef {
   key: DashboardStyleKey;
   label: string;
   description: string;
-  /** null = Clássico: nenhuma variável, widgets no ramo histórico. */
+  /** null = sem paleta própria: o Clássico (ramo histórico) ou um estilo que
+   * ACOMPANHA o tema do sistema (v1.1 — Operacional; cores por CSS estático). */
   colors: DashboardStyleColors | null;
   scheme: "light" | "dark";
   fonts: { display: DashboardFontKey; body: DashboardFontKey };
@@ -151,6 +164,15 @@ export interface DashboardStyleDef {
     table: number;
     chart: number;
   };
+  /** v1.1: número-herói do KPI. `label: "caixa_alta"` = rótulo pequeno em
+   * caixa-alta espaçada acima do número. */
+  kpi: { label: "normal" | "caixa_alta"; valueWeight: number; valueTracking: string };
+  /** v1.1: variação — só o sinal colorido (texto cinza) ou a variação inteira
+   * colorida com seta. */
+  delta: "sinal" | "colorido";
+  /** v1.1: nota sem cor própria — post-it amarelo, sem papel, ou tinta suave
+   * da cor de alerta do tema. */
+  note: "papel" | "sem_papel" | "tinta";
 }
 
 const UNIT_SCALE = { title: 1, value: 1, labels: 1, table: 1, chart: 1 };
@@ -170,6 +192,9 @@ export const DASHBOARD_STYLES: Record<DashboardStyleKey, DashboardStyleDef> = {
     chart: { solidGrid: false, axisLine: true, barRadius: 4, palette: "tema" },
     weights: { regular: 400, strong: 600 },
     fontScale: UNIT_SCALE,
+    kpi: { label: "normal", valueWeight: 600, valueTracking: "normal" },
+    delta: "colorido",
+    note: "papel",
   },
   editorial: {
     key: "editorial",
@@ -199,6 +224,9 @@ export const DASHBOARD_STYLES: Record<DashboardStyleKey, DashboardStyleDef> = {
     chart: { solidGrid: true, axisLine: false, barRadius: 2, palette: "mono" },
     weights: { regular: 400, strong: 600 },
     fontScale: { title: 1.35, value: 1.3, labels: 1.05, table: 1.1, chart: 1.1 },
+    kpi: { label: "normal", valueWeight: 400, valueTracking: "-0.01em" },
+    delta: "sinal",
+    note: "sem_papel",
   },
   editorial_escuro: {
     key: "editorial_escuro",
@@ -228,6 +256,9 @@ export const DASHBOARD_STYLES: Record<DashboardStyleKey, DashboardStyleDef> = {
     chart: { solidGrid: true, axisLine: false, barRadius: 2, palette: "mono" },
     weights: { regular: 400, strong: 600 },
     fontScale: { title: 1.35, value: 1.3, labels: 1.05, table: 1.1, chart: 1.1 },
+    kpi: { label: "normal", valueWeight: 400, valueTracking: "-0.01em" },
+    delta: "sinal",
+    note: "sem_papel",
   },
   executivo: {
     key: "executivo",
@@ -257,6 +288,29 @@ export const DASHBOARD_STYLES: Record<DashboardStyleKey, DashboardStyleDef> = {
     chart: { solidGrid: true, axisLine: false, barRadius: 2, palette: "mono" },
     weights: { regular: 400, strong: 600 },
     fontScale: { title: 1.25, value: 1.25, labels: 1.05, table: 1.05, chart: 1.05 },
+    kpi: { label: "normal", valueWeight: 400, valueTracking: "-0.01em" },
+    delta: "sinal",
+    note: "sem_papel",
+  },
+  // v1.1 (10/10/2026): sem paleta própria — acompanha o tema do sistema.
+  operacional: {
+    key: "operacional",
+    label: "Operacional",
+    description:
+      "Denso para o dia a dia: segue o claro/escuro do sistema, destaque na cor da marca e números firmes.",
+    colors: null,
+    scheme: "light",
+    fonts: { display: "sistema", body: "sistema" },
+    card: "moldura",
+    title: "faixa",
+    radius: 8,
+    table: { header: "linha", density: "preencher", zebra: false },
+    chart: { solidGrid: true, axisLine: false, barRadius: 3, palette: "tema" },
+    weights: { regular: 400, strong: 600 },
+    fontScale: UNIT_SCALE,
+    kpi: { label: "caixa_alta", valueWeight: 650, valueTracking: "-0.035em" },
+    delta: "colorido",
+    note: "tinta",
   },
 };
 
@@ -351,7 +405,13 @@ function applyOverrides(
 }
 
 export function isClassicStyle(s: DashboardStyleDef): boolean {
-  return s.colors === null;
+  // v1.1: pela CHAVE — `colors: null` também é o Operacional (segue o tema).
+  return s.key === "classico";
+}
+
+/** v1.1: estilo sem paleta própria que acompanha o tema do sistema. */
+export function followsSystemTheme(s: DashboardStyleDef): boolean {
+  return s.colors === null && s.key !== "classico";
 }
 
 /** Títulos em serifa ficam em peso regular (serifa em negrito pesa). */
@@ -373,8 +433,11 @@ export function dashboardStyleVars(
   s: DashboardStyleDef
 ): Record<string, string> {
   const c = s.colors;
-  if (!c) return {};
+  if (isClassicStyle(s)) return {};
   const out: Record<string, string> = {};
+  // v1.1: sem paleta (Operacional) ⇒ só fontes, raio e pesos; as cores --ds-*
+  // vêm do CSS estático [data-ds="operacional"] sobre o tema do sistema.
+  if (!c) return Object.assign(out, structuralVars(s));
   const put = (name: string, value: string | null | undefined) => {
     // Re-valida na SAÍDA: último ponto antes do DOM.
     const hex = normalizeHexColor(value);
@@ -416,13 +479,18 @@ export function dashboardStyleVars(
   put("--chart-4", c.seq[5]);
   put("--chart-5", c.seq[1]);
 
-  // Fontes: valor sai do CATÁLOGO, nunca de string gravada.
-  out["--ds-font-display"] = DASHBOARD_FONTS[s.fonts.display].stack;
-  out["--ds-font-body"] = DASHBOARD_FONTS[s.fonts.body].stack;
-  out["--ds-radius"] = `${clampInt(s.radius, 0, 24)}px`;
-  out["--ds-w-regular"] = String(s.weights.regular);
-  out["--ds-w-strong"] = String(s.weights.strong);
-  return out;
+  return Object.assign(out, structuralVars(s));
+}
+
+/** Fontes (do CATÁLOGO, nunca string gravada), raio e pesos. */
+function structuralVars(s: DashboardStyleDef): Record<string, string> {
+  return {
+    "--ds-font-display": DASHBOARD_FONTS[s.fonts.display].stack,
+    "--ds-font-body": DASHBOARD_FONTS[s.fonts.body].stack,
+    "--ds-radius": `${clampInt(s.radius, 0, 24)}px`,
+    "--ds-w-regular": String(s.weights.regular),
+    "--ds-w-strong": String(s.weights.strong),
+  };
 }
 
 function clampInt(v: number, min: number, max: number): number {

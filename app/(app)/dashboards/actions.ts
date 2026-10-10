@@ -1,4 +1,6 @@
-// Versão: 1.19 | Data: 02/10/2026
+// Versão: 1.20 | Data: 10/10/2026
+// v1.20 (10/10/2026): UserAppSettings.palette (paleta da interface,
+//   lib/theme.ts).
 // v1.19 (02/10/2026): IA de dashboards alcança os NÓS da Tree.
 //   (a) `applyDashboardEditJson`/`importDashboardJson` aplicam a seção `mapas`
 //       (lib/import/dashboard/tree-maps.ts) pelos choke points da Tree
@@ -990,6 +992,8 @@ export interface UserAppSettings {
   laserColor?: string | null;
   // Tokens de tema por modo (0141): null/ausente herda o padrão da org.
   themeTokens?: ThemeTokens | null;
+  // v1.20 (10/10/2026): paleta da interface ("atual" | "nova"); null herda a org.
+  palette?: "atual" | "nova" | null;
   // Controles da Agenda do Workspace (/agenda): conteúdo ("todas" | "propria"
   // | "widget:<id>"), recortes e visão — a página reabre como ficou.
   agendaHub?: {

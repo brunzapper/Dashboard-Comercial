@@ -1,4 +1,7 @@
-<!-- Versão: 1.48 | Data: 10/10/2026 -->
+<!-- Versão: 1.49 | Data: 10/10/2026 -->
+<!-- v1.49 (10/10/2026): §5.19 estilo **Operacional** (segue o tema do
+     sistema; KPI denso, variação colorida, nota com tinta) e "Tentar de novo"
+     no erro do widget. -->
 <!-- v1.48 (10/10/2026): filtro "Tem tarefa" (estado + dias atrás/à frente) em
      §6.4 (filtro do widget) e §6.5 (filtro rápido). -->
 <!-- v1.47 (03/10/2026): §2.7 reescrita para a tela nova da Base manual — abas
@@ -1921,8 +1924,19 @@ dashboard inteiro — tipografia, cores, blocos, tabelas e gráficos:
   projetor);
 - **Executivo** — sans neutra, superfícies brancas de um nível sobre cinza
   frio.
+- **Operacional** — denso, para o dia a dia: **segue o claro/escuro e a
+  paleta do sistema** (Configurações → Tema) com destaque na cor da marca.
+  Mantém a moldura com faixa de título (compacta; o ⋮ aparece ao passar o
+  mouse), o título do **Card/KPI** vira um rótulo pequeno em caixa-alta acima
+  de um número firme, a variação aparece inteira colorida com seta, a Nota sem
+  cor própria ganha uma tinta suave de alerta e a barra de período vira um
+  cartão. Como não tem paleta própria, as cores de destaque/papel/tinta do
+  formulário não se aplicam a ele.
 
-Nos estilos novos: o título do bloco vira um **título-conclusão** (sem faixa,
+Em qualquer estilo, um widget que não carregou mostra o motivo e o botão
+**Tentar de novo**.
+
+Nos estilos Editorial, Editorial escuro e Executivo: o título do bloco vira um **título-conclusão** (sem faixa,
 na fonte de exibição; o ⋮ aparece ao passar o mouse) com **kicker** opcional
 (Aparência → Título e borda → Kicker); tabelas ganham cabeçalho em rótulo
 pequeno com filete; as **células de meta** da Tabela Livre (§5.16) usam linhas de altura fixa, unidade

@@ -1,4 +1,6 @@
-// Versão: 3.2 | Data: 19/08/2026
+// Versão: 3.3 | Data: 10/10/2026
+// v3.3 (10/10/2026): atributo data-period-bar (o estilo Operacional desenha a
+//   barra como cartão).
 // v3.2 (19/08/2026): com escopo POR ABA, a engrenagem configura a ABA ATIVA —
 //   período padrão, campo primário, campo por Base e visibilidade da barra vão
 //   para `periodBar.byTab[<aba>]` (herança do global resolvida em
@@ -124,7 +126,12 @@ export function PeriodFilter({
   const field = sp.get(keys.campo) || defaultField;
 
   return (
-    <div className="flex flex-wrap items-center gap-2 rounded-lg border px-3 py-2">
+    // v3.3 (10/10/2026): data-period-bar — âncora do estilo Operacional, que
+    // põe a barra num cartão (CSS de globals.css; os demais estilos ignoram).
+    <div
+      data-period-bar
+      className="flex flex-wrap items-center gap-2 rounded-lg border px-3 py-2"
+    >
       <CalendarDays className="text-muted-foreground size-4 shrink-0" />
       <PeriodControls
         // `key` força o controle a reidratar (estado interno) ao trocar de aba.

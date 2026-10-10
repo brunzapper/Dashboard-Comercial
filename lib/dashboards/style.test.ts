@@ -1,4 +1,6 @@
-// Versão: 1.0 | Data: 02/10/2026
+// Versão: 1.1 | Data: 10/10/2026
+// v1.1 (10/10/2026): estilo Operacional (segue o tema; só variáveis
+//   estruturais) e campos novos byte-equivalentes nos estilos existentes.
 // v1.0 (02/10/2026): estilo do dashboard — cascata board → org → Clássico,
 //   whitelist de entrada E de saída, e o Clássico sem variável nenhuma (é o
 //   que mantém o visual histórico byte-idêntico).
@@ -9,6 +11,7 @@ import {
   DASHBOARD_STYLES,
   DASHBOARD_STYLE_KEYS,
   dashboardStyleVars,
+  followsSystemTheme,
   isClassicStyle,
   normalizeDashboardStyleSetting,
   resolveDashboardStyle,
@@ -34,7 +37,7 @@ describe("estilo do dashboard", () => {
 
   it("estilos novos redefinem o tema shadcn só com #RRGGBB e fontes do catálogo", () => {
     for (const key of DASHBOARD_STYLE_KEYS) {
-      if (key === "classico") continue;
+      if (key === "classico" || key === "operacional") continue;
       const vars = dashboardStyleVars(DASHBOARD_STYLES[key]);
       expect(vars["--ds-page"]).toMatch(/^#[0-9a-f]{6}$/);
       expect(vars["--card"]).toMatch(/^#[0-9a-f]{6}$/);
@@ -71,5 +74,30 @@ describe("estilo do dashboard", () => {
       colors: { ...DASHBOARD_STYLES.editorial.colors!, accent: "expression(alert(1))" },
     };
     expect(dashboardStyleVars(tampered)["--ds-accent"]).toBeUndefined();
+  });
+
+  it("v1.1: Operacional segue o tema — sem cor gravada, só fontes/raio/pesos", () => {
+    const s = DASHBOARD_STYLES.operacional;
+    expect(isClassicStyle(s)).toBe(false);
+    expect(followsSystemTheme(s)).toBe(true);
+    const vars = dashboardStyleVars(s);
+    expect(Object.keys(vars).sort()).toEqual(
+      ["--ds-font-body", "--ds-font-display", "--ds-radius", "--ds-w-regular", "--ds-w-strong"].sort()
+    );
+    // Overrides de cor não valem (não há paleta para sobrepor).
+    const r = resolveDashboardStyle({ key: "operacional", overrides: { accent: "#123456" } }, null);
+    expect(r.colors).toBeNull();
+    expect(dashboardStyleVars(r)["--ds-accent"]).toBeUndefined();
+  });
+
+  it("v1.1: campos estruturais repetem o comportamento antigo nos estilos existentes", () => {
+    for (const key of ["editorial", "editorial_escuro", "executivo"] as const) {
+      const s = DASHBOARD_STYLES[key];
+      expect(s.kpi).toEqual({ label: "normal", valueWeight: 400, valueTracking: "-0.01em" });
+      expect(s.delta).toBe("sinal");
+      expect(s.note).toBe("sem_papel");
+    }
+    expect(DASHBOARD_STYLES.operacional.kpi.label).toBe("caixa_alta");
+    expect(DASHBOARD_STYLES.operacional.delta).toBe("colorido");
   });
 });

@@ -1,4 +1,5 @@
-// Versão: 1.0 | Data: 09/09/2026
+// Versão: 1.1 | Data: 10/10/2026
+// v1.1 (10/10/2026): vazio pelo EmptyState compartilhado.
 // Aba EXECUÇÕES do Workflow: o histórico que a 0125 já gravava e ninguém via.
 //
 // Duas coisas moram aqui e em nenhum outro lugar: a prévia do que uma
@@ -9,13 +10,14 @@
 "use client";
 
 import { useState } from "react";
-import { AlertTriangle, CheckCircle2, Clock, FlaskConical } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Clock, FlaskConical, History } from "lucide-react";
 
 import { retryWorkflowRun } from "@/app/(app)/operacao/workflow/runs-actions";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useBackgroundSave } from "@/lib/feedback/use-background-save";
 import { runCanRetry, type WorkflowRunRow } from "@/lib/workflow/runs";
+import { EmptyState } from "@/components/ui/empty-state";
 
 const STATUS_LABEL: Record<WorkflowRunRow["status"], string> = {
   // 'iniciado' é execução reivindicada sem desfecho gravado — o processo morreu
@@ -154,9 +156,10 @@ export function WorkflowRunsList({
 }) {
   if (runs.length === 0) {
     return (
-      <p className="text-muted-foreground text-sm">
-        Nenhuma execução registrada ainda.
-      </p>
+      <EmptyState icon={History} title="Nenhuma execução ainda">
+        Cada formulário enviado e cada regra que roda deixa uma linha aqui —
+        com o resultado de cada passo.
+      </EmptyState>
     );
   }
   return (

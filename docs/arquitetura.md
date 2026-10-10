@@ -1,4 +1,9 @@
-<!-- Versão: 2.8 | Data: 10/10/2026 -->
+<!-- Versão: 2.9 | Data: 10/10/2026 -->
+<!-- v2.9 (10/10/2026): NOVA APARÊNCIA do shell (§4.7 — barra de local,
+     barra lateral com Painéis/Operação, lista densa, Operação com número
+     vivo, Configurações com menu vertical, EmptyState/PageSkeleton), paleta
+     "Nova" da interface como opção do Tema e o estilo "Operacional" do
+     dashboard (§4.28 Etapa 4 + invariante 43). -->
 <!-- v2.8 (10/10/2026): §4.10 "Filtro Tem tarefa" + invariante 46 — filtro por
      estado/janela de prazo das tarefas, resolvido no ENGINE (id in / embutido);
      0153 só abre `id` no ramo de FILTRO dos dois RPCs. -->
@@ -1348,6 +1353,40 @@ RLS ligado com **zero políticas de escrita** — escrita só via service role.
 
 ### 4.7 Outros subsistemas
 
+- **Nova aparência do shell (10/10/2026).** Quatro mudanças de ESTRUTURA que
+  valem para todos (a paleta é opção — ver tema abaixo):
+  (1) **Barra de local** (`components/layout/location-bar.tsx`): faixa sticky
+  de 38px no topo do conteúdo com o botão de menu (só com a barra lateral
+  solta), as MIGALHAS e o sino. Substituiu os dois controles `fixed` (o ⋮ do
+  canto esquerdo e o sino do direito) que obrigavam `pl-12` no `<main>` e
+  `pr-8` em 8 cabeçalhos — NÃO os reintroduza. As migalhas saem SÓ de
+  `breadcrumbsFor` (`lib/nav/breadcrumbs.ts`, PURO e testado): rótulo de topo
+  fixo, último nível sem link, e o nome do objeto chega por
+  `usePublishLocationTitle` (dashboard, kanban, formulário) — a barra nunca
+  mostra um id. As migalhas SOBEM um nível; o `BackLink` segue sendo o
+  "voltar à tela anterior". Some em tela cheia, no Apresentar e na prévia.
+  (2) **Barra lateral**: Painéis (`/`, acende também em `/dashboards` e
+  `/kanbans`) e **Operação** (`/operacao`) viraram itens — eram abas do hub, e
+  aba só serve a vistas irmãs do mesmo objeto; `/?aba=operacao` REDIRECIONA
+  para `/operacao`. Itens com ícone (chave serializável `NavIconKey`) e a
+  contagem de Operação é o MESMO `dueCount` do sino — o layout roda em toda
+  navegação e não ganha consulta nova.
+  (3) **Painéis em lista = linha densa** (`BoardListRow`, hub-cards): pontinhos
+  com as cores das abas (só hex válido, máx. 5), nº de abas, nº de widgets
+  (do join `widgets(updated_at)` que já existia), última abertura
+  (`relativeTimeLabel`, `lib/format/relative-time.ts`) e dono (nome do
+  responsável VINCULADO ao usuário — uma consulta RLS; nunca
+  `auth.admin.listUsers` no hub). Fixados agrupados no topo; recorte EFÊMERO
+  Todos | Meus | Compartilhados no `HubDisplayProvider` (não é preferência
+  gravada). Cartão e prévia ficaram intocados.
+  (4) **Operação com número vivo** (`lib/operacao/metrics.ts`, server-only):
+  client RLS do usuário, org explícita, best-effort por card e SÓ nas páginas
+  que exibem os cards; frases e tons em `metric-format.ts` (puro).
+  Configurações trocou a tira de abas por um **menu vertical agrupado**
+  (`settings-nav.tsx`; catálogo único em `lib/nav/settings-tabs.ts`, também
+  lido pelas migalhas) — todos os itens seguem visíveis e a um clique, então
+  não é a navegação focada revertida em 12/09. Vazios usam `EmptyState` e os
+  `loading.tsx` usam `PageSkeleton` (`components/ui/`).
 - **Preferências de INTERFACE em três camadas (0141, 12/09/2026):** padrão do
   app → padrão da ORGANIZAÇÃO (`organizations.ui_prefs`, com `locked` por
   chave) → escolha do USUÁRIO (`user_settings.settings.uiPrefs`). A resolução
@@ -1475,6 +1514,16 @@ RLS ligado com **zero políticas de escrita** — escrita só via service role.
   variáveis saem no HTML do servidor (sem FOUC); em "sistema" quem as aplica é
   o mesmo script pré-paint que decide a classe `.dark`, e ele REMOVE as do
   outro modo (uma cor definida só no claro não pode sobreviver à troca).
+  **Paleta da interface (10/10/2026):** "Atual" | "Nova" (`THEME_PALETTES`,
+  `lib/theme.ts`) — a Nova (neutros oklch de matiz 275, bordas discretas,
+  `--success/--warning/--info/--border-strong`) é OPÇÃO, nunca substituição:
+  sem escolha vale "atual" e o estilo Clássico dos dashboards (que herda o
+  tema) segue byte-idêntico. Mesma cascata usuário ?? org ?? padrão
+  (`resolveTheme`), cookie `theme_palette` com o valor EFETIVO, whitelist
+  `normalizeThemePalette` e só o atributo `data-palette="nova"` no `<html>`
+  (SSR + script pré-paint + ThemeSync); os tokens são CSS estático de
+  `globals.css` (`html[data-palette="nova"]`), e os `THEME_TOKENS` do usuário
+  continuam vencendo por estilo inline. `/s/*` fica sempre na Atual.
   **Superfície externa do dashboard (12/09/2026):** `DashboardSettings.
   outerBackground` pinta o ENTORNO (cabeçalho, abas, barra de período e a
   janela), que antes ficava sempre no tema do sistema; `background` segue sendo
@@ -1949,7 +1998,8 @@ RLS ligado com **zero políticas de escrita** — escrita só via service role.
   card com `area` (Remuneração) aparece só com `checkSettingsArea(area)` ok
   (feature-off > deny > allow > papel) — liga/desliga por org via
   `org_features` no console `/owner`. A área `/operacao` tem layout de
-  sub-abas (reusa `SettingsTabs`; index redireciona à 1ª visível) espelhando
+  sub-abas (index redireciona à 1ª visível; o `SettingsTabs` foi removido em
+  10/10/2026 — Configurações usa o menu vertical `settings-nav.tsx`) espelhando
   os mesmos cards via `allowedOperacaoCards()` (cache()d — hub/layout/index
   na mesma request sem custo extra). Card novo org-específico = entrada no
   catálogo + chave em `ORG_FEATURES` + `AREA_GATES`/`AREA_FEATURES` (chave de
@@ -6939,6 +6989,27 @@ RPCs de widget INTOCADAS; nenhuma migração (`settings` jsonb e a coluna
 - `slide.date` fixa a data do topo do slide (reunião); `headline`/`kicker`
   aceitam as expressões `{=…}` da Nota (`lib/dashboards/slide-text.ts`).
 
+**Etapa 4 (10/10/2026): estilo Operacional.** Quinto estilo do registry,
+ACRESCENTADO (os quatro anteriores seguem iguais): denso para o dia a dia,
+**sem paleta própria** — acompanha o claro/escuro e a paleta da interface, com
+o destaque na cor da marca. Por isso `colors: null` deixou de significar
+Clássico: `isClassicStyle` olha a CHAVE e `followsSystemTheme` identifica o
+caso; `dashboardStyleVars` emite só fontes/raio/pesos e as cores `--ds-*`
+vêm de CSS ESTÁTICO (`[data-ds="operacional"]` em `globals.css`) apontando
+para o tema — nenhum valor gravado chega ao CSS, e overrides de cor não se
+aplicam. Decisões estruturais novas no registro, com os valores antigos nos
+estilos existentes: `kpi` (rótulo em caixa-alta + peso/tracking do
+número-herói — no Operacional 650 / −0.035em, a "quebra deliberada"),
+`delta` (`sinal` = só o sinal colorido; `colorido` = seta + cor) e `note`
+(`papel` | `sem_papel` | `tinta` — tinta suave de `--warning`). Faixa de
+título compacta com ⋮ no hover, título do KPI vira rótulo acima do número,
+cabeçalho de tabela discreto e barra de período em cartão
+(`[data-period-bar]`). O erro de widget ganhou **"Tentar de novo"** em TODOS
+os estilos (refaz o RSC e avisa o event bus, que re-busca o lote deferido em
+silêncio); o bloco redesenhado (ícone + hierarquia) é só do Operacional.
+Fora do escopo (recursos de dado, não de estilo): sparkline no KPI, badge de
+etapa e avatar em tabela, faixa de cor no card do kanban.
+
 ## 5. Invariantes críticas (NÃO QUEBRAR)
 
 Estas regras já causaram ou causariam bugs graves e silenciosos. Elas também estão
@@ -7681,7 +7752,9 @@ principalmente — para mantenedores humanos.
     grid nunca calcula a própria altura descontando faixas à mão), o
     número-herói só RE-APRESENTA o texto já formatado (`splitValueText`) e
     tamanho de fonte em `components/dashboards` é da escala nomeada, nunca
-    `text-[Npx]`.
+    `text-[Npx]`. Estilo SEM paleta própria (Operacional, 10/10/2026) lê o tema por CSS
+    ESTÁTICO de `[data-ds="<chave>"]` — `colors: null` não é mais sinônimo de
+    Clássico (use `isClassicStyle`, que olha a chave).
 
 44. **Feature voltada à IA tem caminho estruturado, e o prompt é UM texto
     particionado (§4.11.4).** O que a IA se propõe a facilitar precisa de:

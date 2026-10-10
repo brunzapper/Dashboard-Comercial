@@ -1,4 +1,8 @@
-// Versão: 4.2 | Data: 03/10/2026
+// Versão: 4.3 | Data: 10/10/2026
+// v4.3 (10/10/2026): a página vira PAINÉIS: a aba Operação saiu para a barra
+//   lateral (/?aba=operacao redireciona para /operacao); lista densa recebe
+//   contagem de widgets e o dono (responsável vinculado, uma consulta); recorte
+//   Todos | Meus | Compartilhados; estado vazio com ações; sem o pr-8 do sino.
 // v4.2 (03/10/2026): withinTrashTtl vinha de components/home/hub-cards.tsx,
 //   que é "use client" desde 12/09. Chamada num Server Component, a função é só
 //   uma referência de cliente e lança erro, e por isso o Workspace inteiro caía
@@ -47,7 +51,8 @@
 // v2.2 (17/07/2026): <RestoreLastView /> — ao REABRIR o app (sessão nova do
 //   navegador), redireciona ao último board visitado (user_settings.lastView).
 // v2.1 (16/07/2026): botão "Criar" (Dashboard | Kanban) no lugar do form fixo.
-import Link from "next/link";
+import { redirect } from "next/navigation";
+import { LayoutDashboard } from "lucide-react";
 
 import { getSessionInfo } from "@/lib/auth/session";
 import { getActiveOrg } from "@/lib/auth/org";
@@ -63,9 +68,6 @@ import {
 import { CreateMenu } from "@/components/dashboards/create-menu";
 import { ImportDashboardSheet } from "@/components/dashboards/import-dashboard-sheet";
 import { loadOrgAiConfigPublic } from "@/lib/ai/config";
-import { allowedOperacaoCards, applyCardDescriptions } from "@/lib/operacao/cards";
-import { areaAccessLabel } from "@/lib/auth/access";
-import { cn } from "@/lib/utils";
 import {
   resolveUiPrefs,
   userSidebarPins,
@@ -73,12 +75,11 @@ import {
 } from "@/lib/config/ui-prefs";
 import {
   BoardGrid,
-  HubGrid,
-  OperacaoCardItem,
+  HubOwnerFilterChips,
   WidgetKanbanGrid,
   type DashboardRow,
-  type OperacaoCardView,
 } from "@/components/home/hub-cards";
+import { EmptyState } from "@/components/ui/empty-state";
 import { HubDisplayProvider } from "@/components/home/hub-display-context";
 import { withinBoardsTrashTtl } from "@/lib/dashboards/trash";
 import { HubLayoutControls } from "@/components/home/hub-layout-controls";
@@ -121,10 +122,11 @@ export default async function HomePage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  // Aba interna do hub (?aba=): "paineis" (default) = dashboards/kanbans;
-  // "operacao" = cards de Operação. Qualquer outro valor cai no default.
+  // v4.3 (10/10/2026): a aba "Operação" do hub virou item da barra lateral
+  // (/operacao, que já renderiza os mesmos cards). O endereço antigo segue
+  // valendo por redirecionamento — favoritos e links colados não quebram.
   const sp = await searchParams;
-  const aba = sp.aba === "operacao" ? "operacao" : "paineis";
+  if (sp.aba === "operacao") redirect("/operacao");
   const session = await getSessionInfo();
   const canCreate = session?.permissions.includes("create_dashboards") ?? false;
   const isAdmin = session?.roles.includes("admin") ?? false;
@@ -143,12 +145,46 @@ export default async function HomePage({
   if (orgId) boardsQuery = boardsQuery.eq("organization_id", orgId);
   const { data } = await boardsQuery;
   // Inclui edições anteriores à 0144; o trigger cobre também exclusões futuras.
+  // v4.3 (10/10/2026): o mesmo join vira a CONTAGEM de widgets da lista densa.
   const rows = (data ?? []).map(({ widgets, ...row }) => ({
     ...row,
+    widget_count: (widgets ?? []).length,
     updated_at: (widgets ?? []).reduce((latest, widget) =>
       Date.parse(widget.updated_at) > Date.parse(latest) ? widget.updated_at : latest,
     row.updated_at),
   })) as DashboardRow[];
+  // v4.3 (10/10/2026): DONO na lista densa — o nome do responsável vinculado
+  // ao usuário (RLS da org), UMA consulta. Nada de auth.admin.listUsers (service
+  // role) no hub: sem responsável vinculado, a coluna fica vazia ("Você" para
+  // os próprios).
+  const ownerIds = [
+    ...new Set(rows.map((r) => r.owner_user_id).filter((v): v is string => Boolean(v))),
+  ];
+  if (ownerIds.length > 0) {
+    let ownersQuery = supabase
+      .from("responsibles")
+      .select("user_id, display_name, canonical_id")
+      .in("user_id", ownerIds);
+    if (orgId) ownersQuery = ownersQuery.eq("organization_id", orgId);
+    const { data: owners } = await ownersQuery;
+    const nameByUser = new Map<string, string>();
+    // Principal (canonical_id nulo) vence apelido do mesmo usuário.
+    for (const o of (owners ?? []) as {
+      user_id: string;
+      display_name: string | null;
+      canonical_id: string | null;
+    }[]) {
+      if (!o.display_name) continue;
+      if (!nameByUser.has(o.user_id) || o.canonical_id === null) {
+        nameByUser.set(o.user_id, o.display_name);
+      }
+    }
+    for (const row of rows) {
+      row.owner_name = row.owner_user_id
+        ? (nameByUser.get(row.owner_user_id) ?? null)
+        : null;
+    }
+  }
   // Só metadados (arquivos privados são buscados depois, fora do RSC).
   const { data: savedPreviews } = session && rows.length ? await supabase.from("dashboard_preview_images")
     .select("dashboard_id, version, width, height, access_version").in("dashboard_id", rows.map(r => r.id)) : { data: null };
@@ -216,8 +252,6 @@ export default async function HomePage({
   const prefs = resolveUiPrefs(userUiPrefs(settings), org?.uiPrefs);
   const lockedKeys = [...prefs.locked];
   const pins = userSidebarPins(settings);
-  const isPinned = (kind: string, id: string) =>
-    pins.some((p) => p.kind === kind && p.id === id);
 
 
   // Insumos do diálogo "Criar kanban" (fontes + campos p/ o agrupamento).
@@ -235,31 +269,11 @@ export default async function HomePage({
       };
     });
 
-  // Cards de Operação (aba "Operação"): catálogo em código recortado por
-  // área (checkSettingsArea é cache()d — o layout de /operacao reusa), com a
-  // descrição eventualmente sobrescrita pela organização.
-  // O `accessLabel` é derivado AQUI (areaAccessLabel é server-only) e desce
-  // pronto: o card virou Client Component para responder aos controles na hora.
-  const operacaoCards: OperacaoCardView[] =
-    aba === "operacao"
-      ? applyCardDescriptions(
-          await allowedOperacaoCards(),
-          org?.uiPrefs.operacaoDescriptions
-        ).map((c) => ({
-          key: c.key,
-          label: c.label,
-          description: c.description,
-          href: c.href,
-          kind: c.kind,
-          accessLabel: areaAccessLabel(c.area),
-        }))
-      : [];
-
   let sources: Awaited<ReturnType<typeof loadSources>> = [];
   let fields: FieldDefinition[] = [];
   let aiConfig: Awaited<ReturnType<typeof loadOrgAiConfigPublic>> = null;
-  // Insumos dos botões Criar/Importar — só existem na aba Painéis.
-  if (canCreate && aba === "paineis") {
+  // Insumos dos botões Criar/Importar.
+  if (canCreate) {
     sources = await loadSources(supabase, orgId);
     aiConfig = await loadOrgAiConfigPublic(orgId);
     // Campos p/ o seletor de colunas do kanban: NÃO filtramos por show_in_builder
@@ -281,17 +295,15 @@ export default async function HomePage({
   return (
     <div className="flex flex-col gap-6">
       <RestoreLastView target={restoreTarget} hadStored={storedView !== null} />
-      {/* pr-8: afasta o cluster de botões do sino fixo (TaskBell, topo-direito) */}
-      <div className="flex items-start justify-between gap-4 pr-8">
+      {/* sem pr-8 desde 10/10/2026: o sino mora na barra de local. */}
+      <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-semibold">Workspace</h1>
+          <h1 className="text-2xl font-semibold">Painéis</h1>
           <p className="text-muted-foreground text-sm">
-            {aba === "operacao"
-              ? "Módulos de operação do dia a dia: agenda, tarefas e os módulos da sua organização."
-              : "Seu workspace: crie dashboards e kanbans a partir dos seus registros."}
+            Dashboards e kanbans sobre os seus registros.
           </p>
         </div>
-        {canCreate && aba === "paineis" ? (
+        {canCreate ? (
           <div className="flex items-center gap-2">
             <ImportDashboardSheet
               sources={sources}
@@ -303,65 +315,7 @@ export default async function HomePage({
         ) : null}
       </div>
 
-      {/* Abas internas do hub (?aba=) — <Link>s puros, estilo do SettingsTabs
-          (que não serve aqui: destaca por usePathname, cego a query). */}
-      <nav className="flex flex-wrap gap-1 border-b">
-        {(
-          [
-            { key: "paineis", href: "/", label: "Painéis" },
-            { key: "operacao", href: "/?aba=operacao", label: "Operação" },
-          ] as const
-        ).map((t) => (
-          <Link
-            key={t.key}
-            href={t.href}
-            className={cn(
-              "-mb-px border-b-2 px-3 py-2 text-sm font-medium transition-colors",
-              aba === t.key
-                ? "border-brand text-foreground"
-                : "border-transparent text-muted-foreground hover:text-foreground",
-            )}
-          >
-            {t.label}
-          </Link>
-        ))}
-      </nav>
-
-      {aba === "operacao" ? (
         <HubDisplayProvider
-          key="operacao"
-          keys={{
-            layout: "operacaoLayout",
-            columns: "operacaoColumns",
-            cardHeight: "operacaoCardHeight",
-            showDescription: "operacaoShowDescription",
-            showAccess: "operacaoShowAccess",
-          }}
-          initial={{
-            layout: prefs.values.operacaoLayout,
-            columns: prefs.values.operacaoColumns,
-            cardHeight: prefs.values.operacaoCardHeight,
-            showDescription: prefs.values.operacaoShowDescription,
-            showAccess: prefs.values.operacaoShowAccess,
-          }}
-          locked={lockedKeys}
-        >
-          <div className="flex flex-col gap-6">
-            <HubLayoutControls isAdmin={isAdmin} accessLabel="Quem acessa" />
-            <HubGrid>
-              {operacaoCards.map((c) => (
-                <OperacaoCardItem
-                  key={c.key}
-                  card={c}
-                  pinned={isPinned("operacao", c.key)}
-                />
-              ))}
-            </HubGrid>
-          </div>
-        </HubDisplayProvider>
-      ) : (
-        <HubDisplayProvider
-          key="paineis"
           keys={{
             layout: "hubLayout",
             sort: "hubSort",
@@ -381,13 +335,36 @@ export default async function HomePage({
           locked={lockedKeys}
         >
           <div className="flex flex-col gap-6">
-          <HubLayoutControls isAdmin={isAdmin} />
+          <div className="flex flex-wrap items-center gap-2">
+            <HubOwnerFilterChips />
+            <span aria-hidden className="bg-border mx-1 hidden h-5 w-px sm:block" />
+            <HubLayoutControls isAdmin={isAdmin} />
+          </div>
 
           {dashboards.length === 0 ? (
-            <p className="text-muted-foreground text-sm">
-              Nenhum dashboard no workspace ainda.
-              {canCreate ? " Use o botão Criar acima." : ""}
-            </p>
+            // v4.3 (10/10/2026): estado vazio que diz o que fazer.
+            <EmptyState
+              icon={LayoutDashboard}
+              title="Nenhum painel ainda"
+              actions={
+                canCreate ? (
+                  <>
+                    <ImportDashboardSheet
+                      sources={sources}
+                      ai={aiConfig}
+                      boards={aiBoards}
+                    />
+                    <CreateMenu sources={sources} fields={fields} />
+                  </>
+                ) : null
+              }
+            >
+              Painéis reúnem gráficos, tabelas e metas sobre os registros da
+              sua base.
+              {canCreate
+                ? " Comece do zero ou importe um modelo pronto."
+                : " Quando alguém compartilhar um com você, ele aparece aqui."}
+            </EmptyState>
           ) : (
             cardGrid(dashboards)
           )}
@@ -437,7 +414,6 @@ export default async function HomePage({
           ) : null}
           </div>
         </HubDisplayProvider>
-      )}
     </div>
   );
 }

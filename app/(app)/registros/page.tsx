@@ -1,4 +1,6 @@
-// Versão: 2.1 | Data: 10/10/2026
+// Versão: 2.2 | Data: 10/10/2026
+// v2.2 (10/10/2026): sem o pr-8 do cabeçalho: o sino saiu do canto fixo para a
+//   barra de local.
 // v2.1 (10/10/2026): filtro "Tem tarefa" (`tarefa`/`t_atras`/`t_frente`) —
 //   embutido `tasks!inner()` com o MESMO predicado do modo lista
 //   (lib/tasks/task-filter-resolve.ts); contagem segue exata.
@@ -454,8 +456,8 @@ export default async function RegistrosPage({
           própria de pastas/bases e nenhuma saída além da barra lateral, que
           pode estar oculta. */}
       <BackLink fallback="/" fallbackLabel="Workspace" className="-ml-2 self-start" />
-      {/* pr-8: afasta o cluster de botões do sino fixo (TaskBell, topo-direito) */}
-      <div className="flex items-start justify-between gap-4 pr-8">
+      {/* sem pr-8 desde 10/10/2026: o sino mora na barra de local. */}
+      <div className="flex items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl font-semibold">Registros</h1>
           <p className="text-muted-foreground text-sm">

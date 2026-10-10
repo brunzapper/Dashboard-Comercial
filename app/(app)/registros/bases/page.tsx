@@ -1,4 +1,6 @@
-// Versão: 2.4 | Data: 28/07/2026
+// Versão: 2.5 | Data: 10/10/2026
+// v2.5 (10/10/2026): sem o pr-8 do cabeçalho: o sino saiu do canto fixo para a
+//   barra de local.
 // Registros → Bases (admin).
 // v2.4 (28/07/2026): campo de período por BASE aceita campo custom de DATA
 //   (0110) e o picker (bases E subs) oferece "só colunas com dados": probe
@@ -174,8 +176,8 @@ export default async function FontesPage() {
 
   return (
     <div className="flex flex-col gap-8">
-      {/* pr-8: afasta o botão do sino fixo (TaskBell, topo-direito) */}
-      <div className="flex items-start justify-between gap-4 pr-8">
+      {/* sem pr-8 desde 10/10/2026: o sino mora na barra de local. */}
+      <div className="flex items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl font-semibold">Bases</h1>
           <p className="text-muted-foreground text-sm">

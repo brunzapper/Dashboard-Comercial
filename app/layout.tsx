@@ -1,4 +1,6 @@
-// Versão: 1.5 | Data: 02/10/2026
+// Versão: 1.6 | Data: 10/10/2026
+// v1.6 (10/10/2026): PALETA da interface — cookie theme_palette normalizado
+//   vira data-palette="nova" no <html> já no SSR (sem FOUC); fora de /s/.
 // v1.5 (02/10/2026): fontes do ESTILO DO DASHBOARD (lib/dashboards/style.ts)
 //   via @fontsource — servidas pelo próprio app, sem fetch no build (o motivo
 //   da remoção do next/font na v1.1). O @font-face só baixa o arquivo quando
@@ -32,10 +34,12 @@ import { cookies } from "next/headers";
 import {
   ACCENT_COOKIE,
   DEFAULT_ACCENT,
+  PALETTE_COOKIE,
   THEME_COOKIE,
   TOKENS_COOKIE,
   normalizeHexColor,
   normalizeThemeMode,
+  normalizeThemePalette,
   normalizeThemeTokens,
   themeTokenStyle,
 } from "@/lib/theme";
@@ -59,7 +63,12 @@ const themeInitScript = (
   light: Record<string, string>,
   dark: Record<string, string>
 ) => `(function(){
-  if (location.pathname.indexOf('/s/') === 0) return;
+  // v1.6 (10/10/2026): o viewer público fica sempre na paleta Atual (as cores
+  // congeladas do snapshot foram escolhidas nela).
+  if (location.pathname.indexOf('/s/') === 0) {
+    document.documentElement.removeAttribute('data-palette');
+    return;
+  }
   var m = ${JSON.stringify(mode)};
   var vars = { light: ${JSON.stringify(light)}, dark: ${JSON.stringify(dark)} };
   var mq = window.matchMedia('(prefers-color-scheme: dark)');
@@ -87,6 +96,8 @@ export default async function RootLayout({
   const mode = normalizeThemeMode(store.get(THEME_COOKIE)?.value) ?? "light";
   const accent = normalizeHexColor(store.get(ACCENT_COOKIE)?.value);
   const tokens = normalizeThemeTokens(store.get(TOKENS_COOKIE)?.value);
+  // v1.6 (10/10/2026): paleta da interface — só "nova" vira atributo.
+  const palette = normalizeThemePalette(store.get(PALETTE_COOKIE)?.value);
   const lightVars = themeTokenStyle(tokens.light);
   const darkVars = themeTokenStyle(tokens.dark);
   // Em modo explícito o servidor já sabe qual conjunto vale e o emite no HTML
@@ -105,6 +116,7 @@ export default async function RootLayout({
       lang="pt-BR"
       className="h-full antialiased"
       style={htmlStyle}
+      data-palette={palette === "nova" ? "nova" : undefined}
       suppressHydrationWarning
     >
       <head>

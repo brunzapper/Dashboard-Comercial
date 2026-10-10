@@ -1,4 +1,7 @@
-// Versão: 1.7 | Data: 12/09/2026
+// Versão: 1.8 | Data: 10/10/2026
+// v1.8 (10/10/2026): MENU VERTICAL agrupado (settings-nav.tsx) no lugar da
+//   tira de abas; o catálogo de sub-áreas foi para lib/nav/settings-tabs.ts
+//   (compartilhado com as migalhas).
 // v1.7 (12/09/2026): as sub-abas VOLTARAM. A navegação focada da v1.6 (só o
 //   item ativo + voltar, no molde de /operacao) foi revertida a pedido: aqui
 //   as áreas são poucas, relacionadas e visitadas em sequência — trocar de
@@ -40,29 +43,14 @@ import {
   type OverrideEffect,
 } from "@/lib/auth/access";
 import { loadOrgFeatures } from "@/lib/config/org-features";
-import {
-  SettingsTabs,
-  type SettingsTab,
-} from "@/components/configuracoes/settings-tabs";
+import { SettingsNav } from "@/components/configuracoes/settings-nav";
+import { SETTINGS_TABS, type SettingsTab } from "@/lib/nav/settings-tabs";
 import { BackLink } from "@/components/ui/back-link";
 
-// Tema (preferências visuais) e Conta (senha própria) não têm gating: valem
-// para qualquer autenticado. As demais seguem restritas por papel/permissão;
-// "Organização" exige org_admin (0089). Bases/Log vivem em /registros/* e
-// Moedas em /campos (mesmas chaves de área — ver AREA_GATES).
-const ALL_TABS: SettingsTab[] = [
-  { href: "/configuracoes/organizacao", label: "Organização" },
-  { href: "/configuracoes/operacoes", label: "Operações" },
-  { href: "/configuracoes/responsaveis", label: "Responsáveis" },
-  { href: "/configuracoes/metas", label: "Metas" },
-  { href: "/configuracoes/presets", label: "Presets" },
-  { href: "/configuracoes/snapshots", label: "Snapshots" },
-  { href: "/configuracoes/integracoes", label: "Integrações" },
-  { href: "/configuracoes/acessos", label: "Acessos" },
-  { href: "/configuracoes/usuarios", label: "Usuários" },
-  { href: "/configuracoes/tema", label: "Tema e interface" },
-  { href: "/configuracoes/conta", label: "Conta" },
-];
+// v1.8 (10/10/2026): o catálogo (rótulo, ordem e GRUPO) mora em
+// lib/nav/settings-tabs.ts — as migalhas da barra de local leem os mesmos
+// rótulos. Aqui só se decide quais itens mostrar.
+const ALL_TABS: SettingsTab[] = SETTINGS_TABS;
 
 const areaKeyOf = (href: string) => href.split("/").pop() ?? "";
 
@@ -84,7 +72,7 @@ export function allowedSettingsTabs(
       areaRoleAllowed(key, roles, permissions, isOrgAdmin),
       overrides.get(key)
     );
-  }).map(({ href, label }) => ({ href, label }));
+  }).map(({ href, label, group }) => ({ href, label, group }));
 }
 
 /** Áreas com recurso sob demanda DESLIGADO para a org ativa (0114). */
@@ -126,8 +114,12 @@ export default async function ConfiguracoesLayout({
     <div className="flex flex-col gap-4">
       <BackLink fallback="/" fallbackLabel="Workspace" className="-ml-2 self-start" />
       <h1 className="text-2xl font-semibold">Configurações</h1>
-      <SettingsTabs tabs={tabs} />
-      <div>{children}</div>
+      {/* v1.8 (10/10/2026): menu vertical agrupado (coluna de 186px) no
+          lugar da tira de abas que quebrava em duas linhas. */}
+      <div className="grid items-start gap-4 md:grid-cols-[186px_minmax(0,1fr)] md:gap-6">
+        <SettingsNav tabs={tabs} />
+        <div className="min-w-0">{children}</div>
+      </div>
     </div>
   );
 }

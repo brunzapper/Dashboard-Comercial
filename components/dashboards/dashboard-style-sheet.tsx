@@ -1,5 +1,7 @@
 "use client";
-// Versão: 1.2 | Data: 02/10/2026
+// Versão: 1.3 | Data: 10/10/2026
+// v1.3 (10/10/2026): miniatura do estilo Operacional (sem paleta própria) usa
+//   as cores do tema e a da marca.
 // v1.2 (02/10/2026): o que só o preset sabia configurar ganhou controle aqui —
 //   (a) TODAS as abas listadas, com "Incluir na apresentação"
 //   (presentation.hiddenTabs) e "Fundo da aba" (tabs[].background, a capa
@@ -536,7 +538,8 @@ function StyleOption({
   const ink = c?.ink ?? "var(--foreground)";
   const rule = c?.rule ?? "var(--border)";
   const dim = c?.dim ?? "var(--muted-foreground)";
-  const accent = c?.accent ?? "var(--chart-1)";
+  // v1.3 (10/10/2026): estilo que segue o tema (Operacional) destaca na marca.
+  const accent = c?.accent ?? (def.key === "classico" ? "var(--chart-1)" : "var(--brand)");
   return (
     <button
       type="button"

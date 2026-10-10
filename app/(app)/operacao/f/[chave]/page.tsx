@@ -1,4 +1,6 @@
-// Versão: 1.1 | Data: 12/09/2026
+// Versão: 1.2 | Data: 10/10/2026
+// v1.2 (10/10/2026): o nome do formulário vira a última migalha da barra de
+//   local.
 // v1.1 (12/09/2026): duas colunas — o formulário e, ao lado, os lançamentos
 //   dos últimos 7 dias na Base de destino (com link do CRM). Quem lança em
 //   série precisava sair da tela para conferir o que acabou de mandar. Junto, o
@@ -26,6 +28,7 @@ import { loadWorkflowSchemaByKey } from "@/lib/workflow/schemas";
 import { visibleFields } from "@/lib/workflow/types";
 import { WorkflowRunner } from "@/components/operacao/workflow-runner";
 import { WorkflowRecentPanel } from "@/components/operacao/workflow-recent-panel";
+import { PublishLocationTitle } from "@/components/layout/location-title-context";
 
 // Uma execução encadeia várias chamadas ao sistema externo, em série.
 export const maxDuration = 120;
@@ -80,6 +83,7 @@ export default async function FormularioPage({
   // registro local.
   return (
     <div className="grid gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
+      <PublishLocationTitle title={schema.label} />
       <WorkflowRunner
         schemaKey={schema.key}
         schemaLabel={schema.label}

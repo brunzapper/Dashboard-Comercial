@@ -1,6 +1,7 @@
-// Versão: 2.0 | Data: 17/07/2026
-// Sino de ALERTAS de tarefas (in-app): botão flutuante fixo no topo-direito
-// (o shell não tem header; segue o padrão dos controles flutuantes).
+// Versão: 2.1 | Data: 10/10/2026
+// v2.1 (10/10/2026): o sino vira ícone da BARRA DE LOCAL (deixa de ser fixed
+//   top-3 right-3).
+// Sino de ALERTAS de tarefas (in-app): mora na barra de local (v2.1).
 // v2.0 (17/07/2026): duas seções — "Novas" (tarefas criadas/reatribuídas p/
 //   mim desde a última visualização; abrir o sino carimba a marca d'água
 //   tasksSeenAt) e "Com prazo" (vencidas/próximas). Ambas filtradas pela regra
@@ -131,15 +132,17 @@ export function TaskBell({ initialCount }: { initialCount: number }) {
       }}
     >
       <PopoverTrigger asChild>
+        {/* v2.1 (10/10/2026): ícone discreto da barra de local, não mais o
+            botão redondo fixo no canto (que obrigava cabeçalhos com pr-8). */}
         <Button
-          variant="outline"
+          variant="ghost"
           size="icon"
           aria-label={`Alertas de tarefas (${count})`}
-          className="bg-background/80 fixed top-3 right-3 z-40 size-9 rounded-full shadow-sm backdrop-blur"
+          className="text-muted-foreground hover:text-foreground relative size-7"
         >
           <Bell className="size-4" />
           {count > 0 ? (
-            <span className="bg-destructive text-destructive-foreground absolute -top-1 -right-1 flex size-4.5 items-center justify-center rounded-full text-[10px] font-semibold">
+            <span className="bg-destructive text-destructive-foreground text-2xs absolute -top-0.5 -right-0.5 flex size-4 items-center justify-center rounded-full font-semibold tabular-nums">
               {count > 9 ? "9+" : count}
             </span>
           ) : null}

@@ -1,4 +1,7 @@
-// Versão: 2.1 | Data: 12/09/2026
+// Versão: 2.2 | Data: 10/10/2026
+// v2.2 (10/10/2026): virou o destino do item "Operação" da barra lateral; cada
+//   card ganha o NÚMERO VIVO (lib/operacao/metrics.ts) e o vazio usa o
+//   EmptyState.
 // v2.1 (12/09/2026): exibição dos cards pelo contexto de cliente
 //   (HubDisplayProvider) — os controles passam a valer no mesmo frame, sem
 //   recarregar. Controles: cartão↔lista para todo mundo; engrenagem (colunas,
@@ -26,6 +29,9 @@ import {
 } from "@/components/home/hub-cards";
 import { HubDisplayProvider } from "@/components/home/hub-display-context";
 import { HubLayoutControls } from "@/components/home/hub-layout-controls";
+import { EmptyState } from "@/components/ui/empty-state";
+import { loadOperacaoMetrics } from "@/lib/operacao/metrics";
+import { LayoutGrid } from "lucide-react";
 
 export const metadata = { title: "Operação" };
 
@@ -47,6 +53,12 @@ export default async function OperacaoIndex() {
     kind: c.kind,
     accessLabel: areaAccessLabel(c.area),
   }));
+  // Número vivo por card (best-effort; formulários ficam sem número).
+  const metrics = await loadOperacaoMetrics(
+    cards.map((c) => c.key),
+    org?.id ?? null
+  );
+  for (const c of cards) c.metric = metrics[c.key] ?? null;
   const settings = session ? await loadUserSettings(session.user.id) : {};
   const prefs = resolveUiPrefs(userUiPrefs(settings), org?.uiPrefs);
   const pins = userSidebarPins(settings);
@@ -76,9 +88,10 @@ export default async function OperacaoIndex() {
         </p>
         <HubLayoutControls isAdmin={isAdmin} accessLabel="Quem acessa" />
         {cards.length === 0 ? (
-          <p className="text-muted-foreground text-sm">
-            Nenhum módulo de operação liberado para a sua organização.
-          </p>
+          <EmptyState icon={LayoutGrid} title="Operação ainda sem módulos">
+            Agenda, tarefas e os módulos da sua organização aparecem aqui assim
+            que forem liberados para você.
+          </EmptyState>
         ) : (
           <HubGrid>
             {cards.map((c) => (

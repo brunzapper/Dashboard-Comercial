@@ -1,4 +1,8 @@
-/* Versão: 1.7 | Data: 02/10/2026 */
+/* Versão: 1.8 | Data: 10/10/2026 */
+/* v1.8 (10/10/2026): paleta "Nova" da interface como OPÇÃO
+   (html[data-palette="nova"]); utilitários success/warning/info/border-strong
+   com fallback na paleta Atual; --ease-product; lista densa do hub, barra de
+   local e o estilo "Operacional" do dashboard (regras mais abaixo). */
 /* v1.7 (02/10/2026): escala nomeada --text-2xs (10px) e --text-micro (11px)
    no lugar dos text-[10px]/text-[11px] soltos; impressão dos SLIDES em PDF
    (body[data-printing="slides"], página nomeada `slide` 1280×720). */
@@ -117,6 +121,86 @@
   color-scheme: dark;
 }
 
+/* v1.8 (10/10/2026): PALETA "NOVA" da interface (lib/theme.ts THEME_PALETTES).
+   OPÇÃO, nunca substituição: só vale com data-palette="nova" no <html>
+   (cookie theme_palette, resolvido usuário ?? org ?? "atual"). Neutros oklch
+   de matiz 275 — fundo levemente tingido, cartão branco, bordas discretas — e
+   cores semânticas próprias (success/warning/info). Os seletores carregam o
+   `html[...]` para vencer :root/.dark por especificidade; os tokens que o
+   usuário recolore (THEME_TOKENS, style inline) continuam vencendo tudo.
+   --brand NÃO muda: a cor de destaque segue a de sempre. */
+html[data-palette="nova"] {
+  --radius: 0.5rem;
+  --background: oklch(0.972 0.003 275);
+  --foreground: oklch(0.225 0.012 275);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.225 0.012 275);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.225 0.012 275);
+  --primary: oklch(0.268 0.016 275);
+  --primary-foreground: oklch(0.985 0.002 275);
+  --secondary: oklch(0.952 0.004 275);
+  --secondary-foreground: oklch(0.268 0.016 275);
+  --muted: oklch(0.957 0.004 275);
+  --muted-foreground: oklch(0.502 0.014 275);
+  --accent: oklch(0.93 0.006 275);
+  --accent-foreground: oklch(0.268 0.016 275);
+  --border: oklch(0.912 0.005 275);
+  --border-strong: oklch(0.855 0.007 275);
+  --input: oklch(0.885 0.006 275);
+  --destructive: oklch(0.552 0.208 27);
+  --success: oklch(0.548 0.118 158);
+  --warning: oklch(0.672 0.135 72);
+  --info: oklch(0.56 0.118 244);
+  --sidebar: oklch(0.958 0.004 275);
+  --sidebar-foreground: oklch(0.225 0.012 275);
+  --sidebar-primary: oklch(0.268 0.016 275);
+  --sidebar-primary-foreground: oklch(0.985 0.002 275);
+  --sidebar-accent: oklch(0.925 0.006 275);
+  --sidebar-accent-foreground: oklch(0.225 0.012 275);
+  --sidebar-border: oklch(0.888 0.006 275);
+  --chart-1: oklch(0.556 0.172 262);
+  --chart-2: oklch(0.558 0.118 168);
+  --chart-3: oklch(0.648 0.138 66);
+  --chart-4: oklch(0.548 0.182 305);
+  --chart-5: oklch(0.588 0.164 22);
+}
+html[data-palette="nova"].dark {
+  --background: oklch(0.172 0.008 275);
+  --foreground: oklch(0.955 0.003 275);
+  --card: oklch(0.212 0.009 275);
+  --card-foreground: oklch(0.955 0.003 275);
+  --popover: oklch(0.238 0.01 275);
+  --popover-foreground: oklch(0.955 0.003 275);
+  --primary: oklch(0.918 0.004 275);
+  --primary-foreground: oklch(0.212 0.009 275);
+  --secondary: oklch(0.272 0.01 275);
+  --secondary-foreground: oklch(0.955 0.003 275);
+  --muted: oklch(0.262 0.01 275);
+  --muted-foreground: oklch(0.712 0.012 275);
+  --accent: oklch(0.305 0.012 275);
+  --accent-foreground: oklch(0.955 0.003 275);
+  --border: oklch(1 0 0 / 10%);
+  --border-strong: oklch(1 0 0 / 20%);
+  --input: oklch(1 0 0 / 16%);
+  --destructive: oklch(0.684 0.178 24);
+  --success: oklch(0.712 0.126 158);
+  --warning: oklch(0.792 0.132 72);
+  --info: oklch(0.706 0.118 244);
+  --sidebar: oklch(0.198 0.009 275);
+  --sidebar-foreground: oklch(0.955 0.003 275);
+  --sidebar-primary: oklch(0.918 0.004 275);
+  --sidebar-primary-foreground: oklch(0.212 0.009 275);
+  --sidebar-accent: oklch(0.272 0.01 275);
+  --sidebar-accent-foreground: oklch(0.955 0.003 275);
+  --sidebar-border: oklch(1 0 0 / 10%);
+  --chart-1: oklch(0.712 0.148 262);
+  --chart-2: oklch(0.722 0.106 168);
+  --chart-3: oklch(0.792 0.128 66);
+  --chart-4: oklch(0.712 0.158 305);
+  --chart-5: oklch(0.732 0.142 22);
+}
+
 @theme inline {
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
@@ -155,6 +239,14 @@
   --color-sidebar-ring: var(--sidebar-ring);
   --color-brand: var(--brand);
   --color-brand-foreground: var(--brand-foreground);
+  /* v1.8 (10/10/2026): cores semânticas e borda forte. Só a paleta Nova as
+     define; na Atual caem nos tokens que já existiam (nada muda). */
+  --color-success: var(--success, var(--chart-2));
+  --color-warning: var(--warning, var(--chart-4));
+  --color-info: var(--info, var(--chart-3));
+  --color-border-strong: var(--border-strong, var(--border));
+  /* Curva de movimento do produto (barra lateral, linhas do hub). */
+  --ease-product: cubic-bezier(0.16, 0.84, 0.44, 1);
   /* v1.6: tokens do estilo do dashboard como utilitários (font-display,
      text-ds-muted, border-ds-rule…) — fora de um board com estilo, caem nas
      variáveis do tema. */
@@ -201,6 +293,21 @@
    CROMO, marcado explicitamente. */
 main[data-app-main] {
   background: var(--app-surface, transparent);
+}
+
+/* v1.8 (10/10/2026): barra de local (components/layout/location-bar.tsx) —
+   mesma superfície da janela, translúcida sobre o conteúdo que rola por baixo.
+   Texto do cromo segue a cor legível derivada do fundo externo, quando há. */
+[data-location-bar] {
+  background: color-mix(
+    in oklab,
+    var(--app-surface, var(--background)) 88%,
+    transparent
+  );
+  color: var(--app-surface-text, inherit);
+}
+[data-location-bar] .text-muted-foreground {
+  color: var(--app-surface-muted, var(--muted-foreground));
 }
 
 /* Cromo do board = cabeçalho, abas e barra de período. NUNCA o grid: o
@@ -258,6 +365,53 @@ main[data-app-main] {
 [data-ds][data-ds-outer] [data-board-chrome] .text-muted-foreground {
   color: var(--ds-muted);
 }
+/* v1.8 (10/10/2026): estilo OPERACIONAL (lib/dashboards/style.ts). Não tem
+   paleta própria: os tokens --ds-* apontam para o TEMA do sistema (claro/
+   escuro e a paleta da interface), com a cor da marca no destaque. CSS
+   ESTÁTICO — nenhum valor gravado chega aqui (a whitelist do estilo segue
+   intacta: o que vem do banco é só a chave). */
+[data-ds="operacional"] {
+  --ds-page: var(--background);
+  --ds-surface: var(--card);
+  --ds-ink: var(--foreground);
+  --ds-muted: var(--muted-foreground);
+  --ds-rule: var(--border);
+  --ds-wash: color-mix(in oklab, var(--accent) 55%, transparent);
+  --ds-accent: var(--brand);
+  --ds-dim: color-mix(in oklab, var(--muted-foreground) 45%, transparent);
+  --ds-good: var(--success, var(--chart-2));
+  --ds-bad: var(--destructive);
+  --ds-warn: var(--warning, var(--chart-4));
+}
+/* Cabeçalho de tabela discreto (rótulo pequeno, sem caixa-alta) com filete
+   mais firme embaixo — o denso não grita. */
+[data-ds="operacional"] [data-slot="table-head"] {
+  font-size: 0.78em;
+  font-weight: 500;
+  letter-spacing: normal;
+  text-transform: none;
+  color: var(--muted-foreground);
+  border-bottom: 1px solid var(--border-strong, var(--border));
+}
+/* Barra de período em cartão (DashboardStyleDef.chrome.periodCard). Só o
+   fundo e a borda — a cor do texto do cromo segue a regra acima. */
+[data-ds="operacional"] [data-period-bar] {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--ds-radius);
+  padding: 0.4rem 0.6rem;
+}
+/* Número-herói do KPI e rótulo (v1.8): a quebra deliberada — rótulo abaixo
+   do piso da escala, número em peso que a escala não tem. */
+[data-ds] .ds-kpi-label {
+  font-size: 0.625rem;
+  line-height: 0.875rem;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ds-muted);
+}
+
 /* Entrada do slide: fade + deslocamento curto, ease-out, escalonado pelo
    --ds-enter-delay de cada bloco. Só na entrada (as camadas já estavam
    montadas); sem animação para quem pediu menos movimento. */

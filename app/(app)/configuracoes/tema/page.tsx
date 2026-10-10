@@ -1,4 +1,5 @@
-// Versão: 1.3 | Data: 02/10/2026
+// Versão: 1.4 | Data: 10/10/2026
+// v1.4 (10/10/2026): paleta pessoal e padrão da org descem aos forms.
 // v1.3 (02/10/2026): "Estilo padrão dos dashboards" (org_admin) — o estilo que
 //   todo dashboard sem estilo próprio herda (lib/dashboards/style.ts).
 // Versão: 1.2 | Data: 12/09/2026
@@ -20,6 +21,7 @@ import {
   EMPTY_THEME_TOKENS,
   normalizeHexColor,
   normalizeThemeMode,
+  normalizeThemePalette,
   normalizeThemeTokens,
 } from "@/lib/theme";
 import { OrgUiPrefsForm } from "@/components/configuracoes/org-ui-prefs-form";
@@ -43,6 +45,7 @@ export default async function TemaPage() {
     accentColor?: string | null;
     laserColor?: string | null;
     themeTokens?: unknown;
+    palette?: unknown;
   };
 
   return (
@@ -60,6 +63,7 @@ export default async function TemaPage() {
           userAccent={normalizeHexColor(prefs.accentColor)}
           userLaser={normalizeHexColor(prefs.laserColor)}
           userTokens={normalizeThemeTokens(prefs.themeTokens)}
+          userPalette={normalizeThemePalette(prefs.palette)}
           orgTheme={org?.theme ?? null}
         />
         <p className="text-muted-foreground text-xs">
@@ -82,6 +86,7 @@ export default async function TemaPage() {
             orgMode={org.theme?.mode ?? null}
             orgAccent={org.theme?.accentColor ?? null}
             orgTokens={org.theme?.tokens ?? EMPTY_THEME_TOKENS}
+            orgPalette={org.theme?.palette ?? null}
           />
         </div>
       ) : null}
