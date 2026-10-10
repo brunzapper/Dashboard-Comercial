@@ -1,4 +1,5 @@
-// Versão: 1.23 | Data: 02/10/2026
+// Versão: 1.24 | Data: 10/10/2026
+// v1.24 (10/10/2026): DashboardSettings.style.key aceita "operacional".
 // v1.23 (02/10/2026): a Tabela Livre absorve a Tabela de metas — colunas
 //   rowLabel/goal/goalTotal, linhas ligadas a indicador (QuickTableRowBind),
 //   `quickTable.goals` e `quickTable.display`. O tipo "metas" vira legado,
@@ -1505,7 +1506,8 @@ export interface DashboardSettings {
   // Ausente = herda o padrão da organização; sem ele, "classico" (visual
   // histórico, byte-idêntico). Só tokens — nunca reescreve os widgets.
   style?: {
-    key: "classico" | "editorial" | "editorial_escuro" | "executivo";
+    // v1.24 (10/10/2026): + "operacional" (segue o tema do sistema).
+    key: "classico" | "editorial" | "editorial_escuro" | "executivo" | "operacional";
     overrides?: {
       accent?: string;
       page?: string;

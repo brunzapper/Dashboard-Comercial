@@ -1,4 +1,5 @@
-// Versão: 1.14 | Data: 10/10/2026
+// Versão: 1.15 | Data: 10/10/2026
+// v1.15 (10/10/2026): linha `style` descreve o estilo operacional.
 // v1.14 (10/10/2026): quickFilters documenta a entry "Tem tarefa" (`task:`).
 // v1.13 (02/10/2026): `tree` deixa de ser `null` — a justificativa ("depende
 //   de série e de registro concreto") envelheceu com o mapa livre, os
@@ -443,5 +444,5 @@ export const DASHBOARD_SETTINGS_DOC = {
   // v1.10 (02/10/2026): esqueleto de slide.
   slide: `"slide": { "kicker": "Comercial · 4T26", "footer": "Fonte: CRM", "showDate": true, "showNumber": true, "date": "2026-10-15" },   // ESQUELETO DE SLIDE: o mesmo topo (filete com kicker à esquerda e data à direita) e rodapé (fonte + nº do slide) em todas as abas-slide; "date" (opcional, AAAA-MM-DD) fixa a data exibida (ausente = hoje); o título-conclusão de cada aba vai em "tabs[].headline" (aceita {= … } como a Nota, ex.: "{= [Meta: MRR novo] }") e o kicker próprio da aba em "tabs[].kicker"`,
   // v1.9 (02/10/2026): estilo visual do board (lib/dashboards/style.ts).
-  style: `"style": { "key": "editorial", "overrides": { "accent": "#b4532a" } },   // estilo do dashboard: ${DASHBOARD_STYLE_KEYS.join(" | ")}. classico = visual de sempre; editorial = papel off-white, títulos em serifa, divisórias finas; editorial_escuro = quase-preto quente (capas/projetor); executivo = sans, superfícies brancas. overrides (opcional): accent/page/surface/ink (#RRGGBB) e fontDisplay/fontBody (${Object.keys(DASHBOARD_FONTS).join(" | ")}). Ausente = padrão da organização`,
+  style: `"style": { "key": "editorial", "overrides": { "accent": "#b4532a" } },   // estilo do dashboard: ${DASHBOARD_STYLE_KEYS.join(" | ")}. classico = visual de sempre; editorial = papel off-white, títulos em serifa, divisórias finas; editorial_escuro = quase-preto quente (capas/projetor); executivo = sans, superfícies brancas; operacional = denso para o dia a dia, segue o claro/escuro e a paleta do sistema com destaque na cor da marca (sem paleta própria: overrides de cor não se aplicam). overrides (opcional): accent/page/surface/ink (#RRGGBB) e fontDisplay/fontBody (${Object.keys(DASHBOARD_FONTS).join(" | ")}). Ausente = padrão da organização`,
 } satisfies Record<keyof DashboardSettings, string | null>;

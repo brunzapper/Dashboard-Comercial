@@ -1,4 +1,6 @@
-// Versão: 3.8 | Data: 02/10/2026
+// Versão: 3.9 | Data: 10/10/2026
+// v3.9 (10/10/2026): número-herói do KPI com peso/tracking do registro de
+//   estilo (Operacional: 650 / -0.035em, tabular).
 // v3.8 (02/10/2026): tamanhos de fonte fixos (10px/11px em classe) trocados
 //   pela escala nomeada text-2xs/text-micro (globals.css); guarda em
 //   tests/no-arbitrary-font-size.test.ts. E o deck: ANOTAÇÕES (appearance.
@@ -416,11 +418,15 @@ export const WidgetChart = memo(function WidgetChart({
   );
   // v3.7: número-herói nos estilos novos — peso LEVE na fonte de exibição
   // (número grande em negrito pesa; leve e grande é o que parece desenhado).
+  // v3.9 (10/10/2026): peso e tracking saem do REGISTRO (dstyle.kpi) — nos
+  // estilos editoriais seguem regular/-0.01em; o Operacional usa 650/-0.035em
+  // (a "quebra deliberada": número firme, fechado, em algarismos tabulares).
   const heroFace: React.CSSProperties | undefined = styled
     ? {
         fontFamily: "var(--ds-font-display)",
-        fontWeight: dstyle.weights.regular,
-        letterSpacing: "-0.01em",
+        fontWeight: dstyle.kpi.valueWeight,
+        letterSpacing: dstyle.kpi.valueTracking,
+        fontVariantNumeric: "tabular-nums",
       }
     : undefined;
   const valueStyleBase = fontStyle(

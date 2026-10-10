@@ -1,5 +1,7 @@
 "use client";
-// Versão: 1.1 | Data: 02/10/2026
+// Versão: 1.2 | Data: 10/10/2026
+// v1.2 (10/10/2026): variação "só o sinal" só nos estilos com delta "sinal"; o
+//   Operacional mostra seta + cor.
 // v1.1 (02/10/2026): num dashboard com ESTILO a variação é TEXTO discreto —
 //   sem seta, em cinza, com cor só no sinal ("+18%" com o "+" verde). Pílula
 //   e seta coloridas competem com o número que importa; no Clássico, igual.
@@ -55,7 +57,11 @@ export function VariationBadge({
   hideWhenUnavailable?: boolean;
 }) {
   // v1.1: estilo do board (Clássico ⇒ seta + cor, como sempre).
-  const styled = !isClassicStyle(useDashboardStyle());
+  // v1.2 (10/10/2026): o ramo "só o sinal colorido" é dos estilos com
+  // `delta: "sinal"` (editoriais/executivo); o Operacional (`colorido`) usa a
+  // seta + cor do ramo histórico.
+  const dstyle = useDashboardStyle();
+  const styled = !isClassicStyle(dstyle) && dstyle.delta === "sinal";
   const v = computeVariation(cur, prev);
   if (!v) {
     if (hideWhenUnavailable) return null;

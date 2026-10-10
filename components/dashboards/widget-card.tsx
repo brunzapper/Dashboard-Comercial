@@ -1,4 +1,8 @@
-// Versão: 2.22 | Data: 02/10/2026
+// Versão: 2.23 | Data: 10/10/2026
+// v2.23 (10/10/2026): estilo OPERACIONAL — faixa compacta com ⋮ só no hover,
+//   título do KPI como rótulo pequeno em caixa-alta (sem divisória), nota com
+//   tinta suave da cor de alerta; erro do widget ganha "Tentar de novo" em todos
+//   os estilos (visual novo só no Operacional).
 // v2.22 (02/10/2026): a Tree e a Tabela Livre recebem o catálogo do editor
 //   de REALIZADO (o mesmo do gerenciador de indicadores — RealizedCatalog);
 //   a Tree também o papel admin (metas no próprio nó). A Tabela de metas
@@ -93,11 +97,13 @@ import {
   useState,
   useTransition,
 } from "react";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
+import { emitDataChanged } from "@/lib/tasks/events";
 import dynamic from "next/dynamic";
 import {
   Copy,
   Download,
+  AlertCircle,
   GripVertical,
   Layers,
   Loader2,
@@ -512,6 +518,19 @@ export const WidgetCard = memo(function WidgetCard({
   const styled = !isClassicStyle(dstyle);
   const cardVariant = styled ? dstyle.card : "moldura";
   const conclusionTitle = styled && dstyle.title === "conclusao";
+  // v2.23 (10/10/2026): estilo com FAIXA (Operacional) — faixa compacta, ⋮ só
+  // no hover; no KPI o título vira o rótulo pequeno em caixa-alta acima do
+  // número (sem divisória).
+  const compactBand = styled && dstyle.title === "faixa";
+  const kpiCapsLabel = compactBand && isKpi && dstyle.kpi.label === "caixa_alta";
+  // v2.23: "Tentar de novo" no erro do widget — refaz o RSC (widgets da page)
+  // e avisa o event bus (o lote de widgets DEFERIDOS re-busca por ele, em
+  // silêncio, como num tick do sync). Vale para todos os estilos.
+  const router = useRouter();
+  const retryWidget = () => {
+    emitDataChanged({ kind: "record" });
+    router.refresh();
+  };
   // Nota com papel de TEXTO (sem papel/moldura) não tem cromo de card.
   const noteChromeless =
     isNote && noteAp?.variant != null && noteAp.variant !== "postit";
@@ -778,7 +797,7 @@ export const WidgetCard = memo(function WidgetCard({
     manualSeries,
   ]);
 
-  // v2.22: catálogo do editor de realizado — nó de indicador da Tree e
+  // v2.23: catálogo do editor de realizado — nó de indicador da Tree e
   // linha de meta da Tabela Livre.
   const treeCatalog: RealizedCatalog | null = useMemo(
     () =>
@@ -1302,7 +1321,7 @@ export const WidgetCard = memo(function WidgetCard({
       className={
         cardVariant === "moldura"
           ? `bg-card relative flex h-full flex-col overflow-hidden rounded-lg border${
-              titleHidden ? " group" : ""
+              titleHidden || compactBand ? " group" : ""
             }`
           : // v2.21: estilos sem moldura — `group` sempre (o ⋮ é de hover).
             cn(
@@ -1318,11 +1337,23 @@ export const WidgetCard = memo(function WidgetCard({
           (isNote
             ? // v2.21: num board com estilo, nota sem cor própria não é
               // post-it amarelo — o texto senta na superfície do estilo.
-              (noteAp?.bg ?? (styled ? undefined : "#fef9c3"))
+              // v2.23: no Operacional, tinta suave da cor de alerta do tema.
+              (noteAp?.bg ??
+                (!styled
+                  ? "#fef9c3"
+                  : dstyle.note === "tinta"
+                    ? "color-mix(in oklab, var(--warning, var(--chart-4)) 16%, var(--card))"
+                    : undefined))
             : isCalculator
               ? appearance?.calculator?.bg
               : undefined),
-        borderColor: title?.border ?? kpi?.border ?? filterAp?.border,
+        borderColor:
+          title?.border ??
+          kpi?.border ??
+          filterAp?.border ??
+          (isNote && styled && dstyle.note === "tinta" && !noteAp?.bg
+            ? "color-mix(in oklab, var(--warning, var(--chart-4)) 34%, var(--border))"
+            : undefined),
         borderRadius: cardVariant === "moldura" ? undefined : "var(--ds-radius)",
       }}
     >
@@ -1400,7 +1431,12 @@ export const WidgetCard = memo(function WidgetCard({
         </div>
       ) : (
         <div
-          className="flex items-center gap-2 border-b px-3 py-2"
+          className={cn(
+            "flex items-center gap-2",
+            // v2.23: faixa compacta do Operacional; no KPI, sem divisória.
+            compactBand ? "px-3 py-1.5" : "px-3 py-2",
+            !kpiCapsLabel && "border-b"
+          )}
           style={{ background: title?.bg }}
         >
           {editMode ? (
@@ -1409,10 +1445,19 @@ export const WidgetCard = memo(function WidgetCard({
             </span>
           ) : null}
           <span
-            className="flex-1 truncate text-sm font-medium"
+            className={cn(
+              "flex-1 truncate",
+              kpiCapsLabel
+                ? "ds-kpi-label"
+                : compactBand
+                  ? "text-sm font-semibold tracking-tight"
+                  : "text-sm font-medium"
+            )}
             style={{
               color: title?.color,
-              ...fontStyle(fonts?.title, FONT_DEFAULTS.title, fontScale),
+              ...(kpiCapsLabel
+                ? {}
+                : fontStyle(fonts?.title, FONT_DEFAULTS.title, fontScale)),
             }}
           >
             {widget.title ?? "Sem título"}
@@ -1420,7 +1465,19 @@ export const WidgetCard = memo(function WidgetCard({
           {/* "+" no header SÓ com a barra de filtro oculta (slot primário é a
               barra, ao lado do botão de filtros). */}
           {!showTableBar ? addRecordButton : null}
-          {menu}
+          {compactBand && menu ? (
+            <div
+              className={cn(
+                "flex items-center",
+                !editMode &&
+                  "opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100"
+              )}
+            >
+              {menu}
+            </div>
+          ) : (
+            menu
+          )}
           {isCalculator && canEdit ? (
             // Fechar fácil (sem confirmação): a exclusão entra no histórico do
             // dashboard, então Desfazer restaura a calculadora.
@@ -1563,17 +1620,54 @@ export const WidgetCard = memo(function WidgetCard({
           ) : data.error ? (
             // Erro ao computar o widget no servidor (WidgetData.error): mostra
             // a mensagem em vez de uma tabela/gráfico silenciosamente em branco.
-            <div className="flex h-full flex-col items-center justify-center gap-1 p-2 text-center">
-              <span className="text-destructive text-sm font-medium">
-                Não foi possível carregar este widget.
-              </span>
-              <span
-                className="text-muted-foreground max-w-full truncate text-xs"
-                title={data.error}
-              >
-                {data.error}
-              </span>
-            </div>
+            // v2.23 (10/10/2026): + "Tentar de novo" (todos os estilos); no
+            // Operacional, o bloco ganha o ícone e a hierarquia do redesenho.
+            compactBand ? (
+              <div className="flex h-full flex-col items-center justify-center gap-1.5 p-4 text-center">
+                <span className="bg-destructive/10 text-destructive grid size-7 place-items-center rounded-md">
+                  <AlertCircle className="size-4" aria-hidden />
+                </span>
+                <span className="text-xs font-semibold">
+                  Não foi possível carregar
+                </span>
+                <span
+                  className="text-muted-foreground text-micro line-clamp-2 max-w-[26ch]"
+                  title={data.error}
+                >
+                  {data.error}
+                </span>
+                {snapshotReadOnly ? null : (
+                  <button
+                    type="button"
+                    onClick={retryWidget}
+                    className="text-brand text-micro font-semibold hover:underline"
+                  >
+                    Tentar de novo
+                  </button>
+                )}
+              </div>
+            ) : (
+              <div className="flex h-full flex-col items-center justify-center gap-1 p-2 text-center">
+                <span className="text-destructive text-sm font-medium">
+                  Não foi possível carregar este widget.
+                </span>
+                <span
+                  className="text-muted-foreground max-w-full truncate text-xs"
+                  title={data.error}
+                >
+                  {data.error}
+                </span>
+                {snapshotReadOnly ? null : (
+                  <button
+                    type="button"
+                    onClick={retryWidget}
+                    className="text-brand text-xs font-medium hover:underline"
+                  >
+                    Tentar de novo
+                  </button>
+                )}
+              </div>
+            )
           ) : isEntityList ? (
             <EntityListTable
               rows={entityList}

@@ -365,6 +365,53 @@ main[data-app-main] {
 [data-ds][data-ds-outer] [data-board-chrome] .text-muted-foreground {
   color: var(--ds-muted);
 }
+/* v1.8 (10/10/2026): estilo OPERACIONAL (lib/dashboards/style.ts). Não tem
+   paleta própria: os tokens --ds-* apontam para o TEMA do sistema (claro/
+   escuro e a paleta da interface), com a cor da marca no destaque. CSS
+   ESTÁTICO — nenhum valor gravado chega aqui (a whitelist do estilo segue
+   intacta: o que vem do banco é só a chave). */
+[data-ds="operacional"] {
+  --ds-page: var(--background);
+  --ds-surface: var(--card);
+  --ds-ink: var(--foreground);
+  --ds-muted: var(--muted-foreground);
+  --ds-rule: var(--border);
+  --ds-wash: color-mix(in oklab, var(--accent) 55%, transparent);
+  --ds-accent: var(--brand);
+  --ds-dim: color-mix(in oklab, var(--muted-foreground) 45%, transparent);
+  --ds-good: var(--success, var(--chart-2));
+  --ds-bad: var(--destructive);
+  --ds-warn: var(--warning, var(--chart-4));
+}
+/* Cabeçalho de tabela discreto (rótulo pequeno, sem caixa-alta) com filete
+   mais firme embaixo — o denso não grita. */
+[data-ds="operacional"] [data-slot="table-head"] {
+  font-size: 0.78em;
+  font-weight: 500;
+  letter-spacing: normal;
+  text-transform: none;
+  color: var(--muted-foreground);
+  border-bottom: 1px solid var(--border-strong, var(--border));
+}
+/* Barra de período em cartão (DashboardStyleDef.chrome.periodCard). Só o
+   fundo e a borda — a cor do texto do cromo segue a regra acima. */
+[data-ds="operacional"] [data-period-bar] {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--ds-radius);
+  padding: 0.4rem 0.6rem;
+}
+/* Número-herói do KPI e rótulo (v1.8): a quebra deliberada — rótulo abaixo
+   do piso da escala, número em peso que a escala não tem. */
+[data-ds] .ds-kpi-label {
+  font-size: 0.625rem;
+  line-height: 0.875rem;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ds-muted);
+}
+
 /* Entrada do slide: fade + deslocamento curto, ease-out, escalonado pelo
    --ds-enter-delay de cada bloco. Só na entrada (as camadas já estavam
    montadas); sem animação para quem pediu menos movimento. */
