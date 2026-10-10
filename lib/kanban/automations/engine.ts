@@ -1,4 +1,7 @@
-// Versão: 1.7 | Data: 03/10/2026
+// Versão: 1.8 | Data: 10/10/2026
+// v1.8 (10/10/2026): condição `task_filter` — carrega as tarefas (prazo +
+//   conclusão) dos cards SÓ quando alguma regra ativa a usa (molde do
+//   `needTasks`), paginando por fatia de registros.
 // v1.7 (03/10/2026): sinais de COMPLETUDE para o portão de mudança do tick
 //   (0151, lib/ticks/gate.ts) — `runAllKanbanAutomations` devolve `complete`
 //   (todos os donos avaliados, sem corte de orçamento/teto e sem erro) e o
@@ -430,6 +433,8 @@ export async function runBoardAutomations(
   // 4) Fatos por card — só o que as regras ativas pedem.
   const conds = rules.flatMap((r) => r.rule.conditions);
   const needTasks = conds.some((c) => c.kind === "tasks");
+  // v1.8: "Tem tarefa" precisa de TODAS as tarefas (abertas e concluídas).
+  const needTaskRows = conds.some((c) => c.kind === "task_filter");
   // Campos cujo HISTÓRICO de alteração a rodada precisa. Vazio = ninguém
   // pergunta por tempo de campo e o loader nem roda.
   // v1.1 (09/09/2026): antes isto lia `records.field_modified_at`, que é o
@@ -541,6 +546,36 @@ export async function runBoardAutomations(
     }
   }
 
+  // v1.8 (10/10/2026): tarefas inteiras (prazo + conclusão) para `task_filter`.
+  const taskRowsByRecord = new Map<
+    string,
+    { due_date: string | null; completed_at: string | null }[]
+  >();
+  if (needTaskRows) {
+    const PAGE = 1000;
+    for (const slice of chunksOf(recordIds)) {
+      for (let from = 0; ; from += PAGE) {
+        let q = db
+          .from("tasks")
+          .select("id, record_id, due_date, completed_at")
+          .in("record_id", slice);
+        if (orgId) q = q.eq("organization_id", orgId);
+        const { data } = await q.order("id").range(from, from + PAGE - 1);
+        const rows = data ?? [];
+        for (const t of rows) {
+          const k = t.record_id as string;
+          const list = taskRowsByRecord.get(k) ?? [];
+          list.push({
+            due_date: (t.due_date as string | null) ?? null,
+            completed_at: (t.completed_at as string | null) ?? null,
+          });
+          taskRowsByRecord.set(k, list);
+        }
+        if (rows.length < PAGE) break;
+      }
+    }
+  }
+
   // v1.2 (09/09/2026): atributos PAUSADOS do registro. Só consulta quando
   // alguma regra ativa concede atributo — pausar precisa parar a série, e
   // até aqui o status era escrito e nunca lido (a 0131 prometia o contrário).
@@ -638,6 +673,7 @@ export async function runBoardAutomations(
       isMock: card.isMock,
       openTasks: needTasks ? (openByRecord.get(card.id) ?? 0) : card.openTasks,
       overdueTasks: overdueByRecord.get(card.id) ?? 0,
+      taskRows: taskRowsByRecord.get(card.id) ?? [],
       relatedCounts,
       changedAt: historyFields.size > 0 ? (history.get(card.id) ?? null) : null,
       sourceCreatedAt: card.record.source_created_at ?? null,

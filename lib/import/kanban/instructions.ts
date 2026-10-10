@@ -1,4 +1,6 @@
-// Versão: 1.2 | Data: 02/10/2026
+// Versão: 1.3 | Data: 10/10/2026
+// v1.3 (10/10/2026): condição `task_filter` ("Tem tarefa") no SPEC — enum e
+//   teto derivados de lib/tasks/task-filter.ts.
 // v1.2 (02/10/2026): "Regras gerais" vira CABEÇALHO — é o que separa as duas seções escolhíveis
 //   ("quadro"/"automacoes") do núcleo na orquestração por tópicos
 //   (lib/ai/topics/catalogs.ts). Sem ele as regras gerais iriam junto do último
@@ -14,6 +16,10 @@
 // (instructions.test.ts) fiscaliza e roda o EXEMPLO pelo validador real. O
 // MESMO texto serve o chat interno (system do runJsonGenerationLoop) e o
 // "Copiar prompt" para IA externa — um contrato, duas entradas.
+import {
+  MAX_TASK_FILTER_DAYS,
+  TASK_FILTER_STATUSES,
+} from "@/lib/tasks/task-filter";
 import { MAX_RULE_CONDITIONS } from "@/lib/kanban/automations/types";
 import {
   KANBAN_AGG_LABELS,
@@ -124,6 +130,10 @@ Condições (todas em E; misture as famílias à vontade):
 - { "kind": "related_count", "source": "<Base RAIZ>", "filters": [...], "op": "gte|lte|eq", "value": 3 }
   — quantos registros CONECTADOS daquela Base o card tem.
 - { "kind": "tasks", "metric": "open" | "overdue", "op": "gte|lte|eq", "value": 0 }
+- { "kind": "task_filter", "status": ${TASK_FILTER_STATUSES.map((v) => `"${v}"`).join(" | ")}, "back": 30, "ahead": 60 }
+  — o card TEM ao menos uma tarefa no estado pedido com PRAZO entre hoje − back
+  e hoje + ahead dias (0 a ${String(MAX_TASK_FILTER_DAYS)}; null = sem limite daquele lado).
+  "atrasadas" = pendente com prazo antes de hoje.
 - { "kind": "time", "basis": {...}, "op": "gte|lte", "days": 7 } — dias corridos.
   basis: { "type": "created" } (criação na origem) |
          { "type": "in_column" } (entrada na coluna atual — só colunas "Personalizar") |

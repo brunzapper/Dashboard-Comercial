@@ -1057,6 +1057,19 @@ This version has breaking changes — APIs, conventions, and file structure may 
   no tick; a Tree só AVISA, nunca bloqueia). Série de regra desligada não
   projeta tronco (`projectableSeries`). Ver `docs/arquitetura.md` §4.24 e
   invariante 38.
+- **Filtro "Tem tarefa" se resolve no ENGINE, nunca no RPC (0153,
+  10/10/2026):** pseudo-campo `task:<pendentes|atrasadas|concluidas|todas>`
+  com `value = "<dias atrás>,<dias à frente>"` (0–180, vazio = sem limite)
+  sobre o PRAZO; régua e predicado ÚNICOS em `lib/tasks/task-filter.ts`
+  (`taskFilterWindow`). Agregado: `resolveTaskFilters` → `id in (...)` (a 0153
+  só abriu `id` no ramo de FILTRO dos dois RPCs, espelhado); modo lista/
+  kanban//registros: embutido vazio `tasks!inner()` (`applyTaskEmbedFilters`);
+  automação: condição `task_filter` (`taskMatchesFilter`); filtro rápido:
+  entry `field = "task:"` + valor `{kind:"tasks"}` (`quickTaskFilters`);
+  snapshot IGNORA (`withoutTaskFilters`). Lista vazia = uuid-zero, nunca sem
+  filtro; acima de `MAX_TASK_FILTER_RECORDS` falha alto. RLS de `tasks` vale
+  (vendedor vê as dele). Editor único `components/filters/task-filter-editor.tsx`.
+  Ver `docs/arquitetura.md` §4.10 e invariante 46.
 - **Vocabulário de domínio é DADO, nunca literal no fonte (10/09/2026):** o
   substantivo de cada ocorrência de uma série vive em `SeriesConfig.noun`
   (a automação) e `tasks.occurrence_noun` (a tarefa), com padrão

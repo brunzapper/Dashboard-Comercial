@@ -1,4 +1,6 @@
-// Versão: 3.8 | Data: 02/10/2026
+// Versão: 3.9 | Data: 10/10/2026
+// v3.9 (10/10/2026): filtro rápido "Tem tarefa" (quickTaskFilters) — o
+//   valor vira o filtro `task:` do widget.
 // v3.8 (02/10/2026): a Tabela de metas ('metas') é LEGADO convertido na
 //   leitura para a Tabela Livre (normalizeLegacyWidget) — o resto da page só
 //   conhece 'tabela_editavel'.
@@ -130,7 +132,9 @@ import {
   hasQuickValue,
   isBucketEntry,
   isPeriodEntry,
+  isTaskQuickEntry,
   parseQuickFilterValue,
+  quickTaskFilters,
   quickOptionsFilter,
   staticBucketOptions,
   type PeriodWindowChoice,
@@ -775,6 +779,16 @@ export default async function DashboardPage({
             };
           }
           if (val) values[entry.id] = val;
+          continue;
+        }
+
+        // --- v3.9 (10/10/2026): "Tem tarefa" — estado + janela de dias ------
+        // Vira o filtro `task:` (lib/tasks/task-filter.ts); o engine o resolve.
+        if (isTaskQuickEntry(entry)) {
+          if (stored?.kind === "tasks") {
+            values[entry.id] = stored;
+            filters.push(...quickTaskFilters(stored));
+          }
           continue;
         }
 

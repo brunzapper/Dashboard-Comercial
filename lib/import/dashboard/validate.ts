@@ -1,4 +1,7 @@
-// Versão: 1.14 | Data: 02/10/2026
+// Versão: 1.15 | Data: 10/10/2026
+// v1.15 (10/10/2026): filtro "Tem tarefa" (`task:<estado>`, value
+//   "<atrás>,<à frente>") — ramo próprio antes do checkRef, com a MESMA régua
+//   do runtime (parseTaskFilter, lib/tasks/task-filter.ts).
 // v1.14 (02/10/2026): (a) `settings.tree` deixa de ser passthrough — saneado
 //   por lib/import/dashboard/tree-settings.ts (chave inventada = aviso +
 //   descarte; foi uma `settings.tree.rows` gravada em silêncio que fez a IA
@@ -81,6 +84,14 @@
 // (perRecordCalcOperands / buildAggOperandCatalog) — para que uma fórmula
 // aceita aqui seja exatamente a que os editores aceitariam. Nenhum I/O aqui:
 // client-safe e testável (npx tsx) sem banco.
+import {
+  isTaskFilterField,
+  MAX_TASK_FILTER_DAYS,
+  parseTaskFilter,
+  serializeTaskFilter,
+  TASK_FILTER_PREFIX,
+  TASK_FILTER_STATUSES,
+} from "@/lib/tasks/task-filter";
 import { goalTableSettingsToQuickTable } from "@/lib/widgets/quick-table/goal-convert";
 import {
   DASHBOARD_STYLE_KEYS,
@@ -1324,6 +1335,18 @@ export function validateDashboardImport(
       // operadores restritos: só `=`/`≠`/`em (lista)`. `is_null` fica FORA de
       // propósito — ele confundiria "não declarou a família" (outro nível) com
       // "declarou o residual" (este nível), que é a distinção inteira.
+      // v1.15: filtro "Tem tarefa". Não é coluna — régua do runtime.
+      if (isTaskFilterField(field)) {
+        const spec = parseTaskFilter({ field, op, value: f.value });
+        if (!spec) {
+          errors.push(
+            `${fw}: filtro "Tem tarefa" inválido. Use field "task:<${TASK_FILTER_STATUSES.join("|")}>", op "eq" e value "<dias atrás>,<dias à frente>" (inteiros de 0 a ${MAX_TASK_FILTER_DAYS}; lado vazio = sem limite).`
+          );
+          return;
+        }
+        filters.push(serializeTaskFilter(spec));
+        return;
+      }
       const filterAxis = parseManualAxisRef(field);
       if (filterAxis != null) {
         if (!manualFamilyKeys.has(filterAxis)) {
@@ -1567,9 +1590,11 @@ export function validateDashboardImport(
       wSettings.quickFilters = wSettings.quickFilters.filter((q, j) => {
         if (!isRecord(q) || !asString(q.field)) return false;
         const qf = asString(q.field);
+        // v1.15: "task:" = filtro rápido "Tem tarefa" (estado no VALOR).
         const okField =
           qf === "responsible_id" ||
           qf === "operation_id" ||
+          qf === TASK_FILTER_PREFIX ||
           checkRef(qf, `${where}.settings.quickFilters[${j}]`);
         if (!q.id) (q as { id?: string }).id = `qf_${wKeySlug}_${j}`;
         return okField;

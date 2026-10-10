@@ -1,4 +1,6 @@
-// Versão: 1.2 | Data: 12/09/2026
+// Versão: 1.3 | Data: 10/10/2026
+// v1.3 (10/10/2026): condição `task_filter` ("Tem tarefa") — casa pela janela
+//   do prazo; valor fora da faixa derruba a regra (fail-closed).
 // v1.2 (12/09/2026): condição de campo sobre DATA compara por DIA de Brasília.
 //   Cada caso novo aqui estava ERRADO na comparação lexical anterior: formato
 //   BR, "até <dia>" perdendo o próprio dia, e o dia UTC do PostgREST.
@@ -400,6 +402,38 @@ describe("evaluateCondition", () => {
         CTX
       )
     ).toBe(true);
+  });
+
+  // v1.3 (10/10/2026): "Tem tarefa" — mesma régua do filtro de widget.
+  it("task_filter: estado + janela sobre o prazo", () => {
+    const cond = {
+      kind: "task_filter" as const,
+      status: "pendentes" as const,
+      back: 15,
+      ahead: 15,
+    };
+    expect(
+      evaluateCondition(
+        cond,
+        facts({ taskRows: [{ due_date: "2026-08-05", completed_at: null }] }),
+        CTX
+      )
+    ).toBe(true);
+    expect(
+      evaluateCondition(
+        cond,
+        facts({ taskRows: [{ due_date: "2026-09-30", completed_at: null }] }),
+        CTX
+      )
+    ).toBe(false);
+    expect(evaluateCondition(cond, facts({ taskRows: [] }), CTX)).toBe(false);
+    expect(
+      parseAutomationRule({
+        v: 1,
+        conditions: [{ kind: "task_filter", status: "atrasadas", back: null, ahead: 200 }],
+        action: { type: "move_to_column", targetKey: "quente" },
+      })
+    ).toBeNull();
   });
 
   it("time: base ausente não casa; gte/lte por dia de calendário", () => {

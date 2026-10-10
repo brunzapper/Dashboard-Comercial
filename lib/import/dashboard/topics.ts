@@ -1,4 +1,6 @@
-// Versão: 1.0 | Data: 02/10/2026
+// Versão: 1.1 | Data: 10/10/2026
+// v1.1 (10/10/2026): tópico "filtros" cobre o filtro "Tem tarefa" (palavras-
+//   chave tarefa/atrasad/pendente).
 // v1.0 (02/10/2026): o CATÁLOGO DE TÓPICOS do assistente de dashboards — a
 // partição do prompt (SPEC + dicionários + dados) que o roteador lê
 // (lib/ai/topics/). O texto continua UM só (instructions.ts); aqui só se diz a
@@ -82,8 +84,8 @@ export const DASHBOARD_TOPICS = [
     key: "filtros",
     title: "Filtros",
     summary:
-      "Filtros fixos do widget (operadores, por nome de responsável/operação), filtros rápidos (quickFilters) e os widgets \"filtro\"/\"filtro_campo\".",
-    keywords: ["filtr", "responsavel", "operacao", "busca", "somente", "apenas"],
+      "Filtros fixos do widget (operadores, por nome de responsável/operação, \"Tem tarefa\" por estado e prazo), filtros rápidos (quickFilters) e os widgets \"filtro\"/\"filtro_campo\".",
+    keywords: ["filtr", "responsavel", "operacao", "busca", "somente", "apenas", "tarefa", "atrasad", "pendente"],
     headings: ["Filtros"],
   },
   {

@@ -1,4 +1,7 @@
-// Versão: 1.6 | Data: 10/09/2026
+// Versão: 1.7 | Data: 10/10/2026
+// v1.7 (10/10/2026): condição `task_filter` — o registro tem tarefa no estado
+//   e na janela de prazo pedidos (mesma régua do filtro "Tem tarefa",
+//   lib/tasks/task-filter.ts). A condição `tasks` (contagem) segue intacta.
 // v1.6 (10/09/2026): só vocabulário — o substantivo da ocorrência
 //   da série saiu do código e virou dado (SeriesConfig.noun, e
 //   tasks.occurrence_noun por tarefa).
@@ -45,6 +48,11 @@
 // adicional no save (actions.ts) p/ mensagem imediata. IDEMPOTENTE por
 // desenho: valor atual igual ao alvo consome o card SEM escrever (decidido no
 // avaliador — zero churn de audit/webhook no tick por minuto).
+import {
+  parseTaskFilter,
+  TASK_FILTER_PREFIX,
+  type TaskFilterStatus,
+} from "@/lib/tasks/task-filter";
 import { parseSeriesConfig, type SeriesConfig } from "@/lib/series/types";
 import type { WidgetFilter } from "@/lib/widgets/types";
 
@@ -82,7 +90,16 @@ export type AutomationCondition =
   // (d) Tempo, em DIAS de calendário (prefixo YYYY-MM-DD, dia de Brasília —
   // todayIso injetado). Base ausente (campo nunca alterado, sem posição na
   // coluna) → condição NÃO casa.
-  | { kind: "time"; basis: AutomationTimeBasis; op: "gte" | "lte"; days: number };
+  | { kind: "time"; basis: AutomationTimeBasis; op: "gte" | "lte"; days: number }
+  // (e) v1.7: "Tem tarefa" — ao menos uma tarefa no ESTADO pedido com prazo na
+  // janela [hoje − back, hoje + ahead] (null = sem limite). Mesma régua do
+  // filtro de widget (lib/tasks/task-filter.ts).
+  | {
+      kind: "task_filter";
+      status: TaskFilterStatus;
+      back: number | null;
+      ahead: number | null;
+    };
 
 /** Ação da regra — união EXTENSÍVEL (v3: criar tarefa, …). `set_field`
  *  grava valor FIXO (string; coerção por tipo no executor); alvo de data/
@@ -223,6 +240,15 @@ function parseCondition(raw: unknown): AutomationCondition | null {
       if (typeof value !== "number" || !Number.isFinite(value) || value < 0)
         return null;
       return { kind: "tasks", metric, op: op as AutomationNumOp, value };
+    }
+    case "task_filter": {
+      // v1.7: fail-closed pela MESMA régua do filtro (estado no enum, 0–180).
+      const spec = parseTaskFilter({
+        field: `${TASK_FILTER_PREFIX}${String(raw.status ?? "")}`,
+        op: "eq",
+        value: `${raw.back ?? ""},${raw.ahead ?? ""}`,
+      });
+      return spec ? { kind: "task_filter", ...spec } : null;
     }
     case "time": {
       const basisRaw = raw.basis;

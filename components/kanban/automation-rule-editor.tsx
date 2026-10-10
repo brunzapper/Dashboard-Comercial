@@ -1,4 +1,6 @@
-// Versão: 1.4 | Data: 10/09/2026
+// Versão: 1.5 | Data: 10/10/2026
+// v1.5 (10/10/2026): condição "Tem tarefa (estado e prazo)" (`task_filter`) —
+//   mesmo editor do filtro de widget (components/filters/task-filter-editor).
 // v1.4 (10/09/2026): `emptyRuleDraft()` — o rascunho em branco virou função
 //   exportada. Ele estava escrito por extenso no "Nova regra" do sheet do
 //   quadro, e a Tree passou a precisar do MESMO ponto de partida para criar uma
@@ -44,6 +46,13 @@
 "use client";
 
 import { Trash2 } from "lucide-react";
+
+import {
+  draftFromSpec,
+  specFromDraft,
+  TaskFilterEditor,
+  type TaskFilterDraft,
+} from "@/components/filters/task-filter-editor";
 
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -148,6 +157,7 @@ export const KIND_OPTIONS: ComboboxOption[] = [
   { value: "field", label: "Campo do registro" },
   { value: "related_count", label: "Registros conectados" },
   { value: "tasks", label: "Tarefas do card" },
+  { value: "task_filter", label: "Tem tarefa (estado e prazo)" },
   { value: "time", label: "Tempo" },
 ];
 
@@ -171,7 +181,7 @@ export interface RelFilterDraft {
 }
 
 export interface CondDraft {
-  kind: "field" | "related_count" | "tasks" | "time";
+  kind: "field" | "related_count" | "tasks" | "time" | "task_filter";
   field: string;
   op: string;
   value: string | string[];
@@ -184,6 +194,8 @@ export interface CondDraft {
   timeField: string; // ref do catálogo (custom:<k> | coluna core)
   timeOp: "gte" | "lte";
   timeDays: string;
+  /** v1.5: rascunho da condição "Tem tarefa" (dias como texto). */
+  taskFilter: TaskFilterDraft;
 }
 
 export function emptyCond(): CondDraft {
@@ -201,6 +213,7 @@ export function emptyCond(): CondDraft {
     timeField: "",
     timeOp: "gte",
     timeDays: "7",
+    taskFilter: { status: "pendentes", back: "", ahead: "" },
   };
 }
 
@@ -431,6 +444,11 @@ export function draftToRule(draft: RuleDraft): AutomationRule | null {
       const n = Number(c.numValue);
       if (!Number.isFinite(n) || n < 0) return null;
       conditions.push({ kind: "tasks", metric: c.taskMetric, op: c.numOp, value: n });
+    } else if (c.kind === "task_filter") {
+      // v1.5: mesma régua do filtro (estado obrigatório, dias 0–180).
+      const spec = specFromDraft(c.taskFilter);
+      if (!spec) return null;
+      conditions.push({ kind: "task_filter", ...spec });
     } else {
       const days = Number(c.timeDays);
       if (!Number.isFinite(days) || days < 0) return null;
@@ -640,6 +658,9 @@ export function ruleToDraft(row: AutomationRow, fieldOptions: ComboboxOption[]):
       d.taskMetric = c.metric;
       d.numOp = c.op;
       d.numValue = String(c.value);
+    } else if (c.kind === "task_filter") {
+      d.kind = "task_filter";
+      d.taskFilter = draftFromSpec(c);
     } else {
       d.kind = "time";
       d.timeBasis = c.basis.type;
@@ -1138,6 +1159,14 @@ export function AutomationRuleEditor({
                       + Filtrar os conectados
                     </Button>
                   </div>
+                ) : null}
+
+                {c.kind === "task_filter" ? (
+                  // v1.5: "Tem tarefa" — estado + janela de dias sobre o prazo.
+                  <TaskFilterEditor
+                    value={c.taskFilter}
+                    onChange={(taskFilter) => patchCond(i, { taskFilter })}
+                  />
                 ) : null}
 
                 {c.kind === "tasks" ? (

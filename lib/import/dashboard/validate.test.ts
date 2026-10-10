@@ -1,4 +1,5 @@
-// Versão: 1.4 | Data: 02/10/2026
+// Versão: 1.5 | Data: 10/10/2026
+// v1.5 (10/10/2026): filtro "Tem tarefa" (task:) — válido passa, inválido é erro.
 // v1.4 (02/10/2026): "metas" + goalTable vira Tabela Livre com colunas de
 //   meta (a Tabela de metas foi absorvida) — aviso, nunca erro.
 // Versão: 1.3 | Data: 18/09/2026
@@ -893,5 +894,28 @@ describe("Tabela de metas → Tabela Livre (v1.4)", () => {
     });
     expect(w.settings?.quickTable?.goals).toEqual({ editable: true });
     expect(res.warnings.join("\n")).toContain("virou Tabela Livre");
+  });
+});
+
+// v1.5 (10/10/2026): filtro "Tem tarefa" — régua do runtime (parseTaskFilter).
+describe('filtro "Tem tarefa" (task:)', () => {
+  it("estado + janela válidos passam", () => {
+    const res = validateDashboardImport(
+      docWith({ filters: [{ field: "task:pendentes", op: "eq", value: "30,60" }] }),
+      ctx
+    );
+    expect(res.errors).toEqual([]);
+    expect(res.ok).toBe(true);
+  });
+
+  it("estado desconhecido ou dia acima de 180 é erro amigável", () => {
+    for (const f of [
+      { field: "task:abertas", op: "eq", value: "" },
+      { field: "task:todas", op: "eq", value: "200,0" },
+    ]) {
+      const res = validateDashboardImport(docWith({ filters: [f] }), ctx);
+      expect(res.ok).toBe(false);
+      expect(res.errors.join("\n")).toContain('filtro "Tem tarefa" inválido');
+    }
   });
 });

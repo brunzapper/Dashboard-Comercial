@@ -1,4 +1,6 @@
-// Versão: 1.7 | Data: 12/09/2026
+// Versão: 1.8 | Data: 10/10/2026
+// v1.8 (10/10/2026): condição `task_filter` avaliada por `taskMatchesFilter`
+//   (lib/tasks/task-filter.ts) sobre `CardFacts.taskRows`.
 // v1.7 (12/09/2026): condição de campo sobre DATA compara por DIA de Brasília,
 //   não por string. "Antes/depois de uma data específica" simplesmente não
 //   funcionava: o caminho local termina em localeCompare, então "15/08/2026" <
@@ -63,6 +65,7 @@
 // regra INERTE + ruleError — o catálogo pode mudar depois da regra criada) e
 // IDEMPOTÊNCIA decidida no snapshot: valor atual igual ao alvo consome o card
 // SEM emitir escrita (zero churn de audit/webhook no tick por minuto).
+import { taskMatchesFilter } from "@/lib/tasks/task-filter";
 import { addDaysIso, daysSince } from "@/lib/date/days";
 import { brasiliaDayOf } from "@/lib/date/normalize";
 import { coerceDate } from "@/lib/import/csv";
@@ -102,6 +105,12 @@ export interface CardFacts {
   isMock: boolean;
   openTasks: number;
   overdueTasks: number;
+  /**
+   * v1.8 (10/10/2026): TODAS as tarefas do registro (prazo + conclusão) — só
+   * carregadas quando alguma regra ativa usa a condição `task_filter`; vazio
+   * nos demais casos.
+   */
+  taskRows?: { due_date: string | null; completed_at: string | null }[];
   // Contagens de conectados por chave canônica da condição (relatedCountKey).
   relatedCounts: Record<string, number>;
   // records.field_modified_at ({ campo: timestamp }) — null = nunca carimbado.
@@ -405,6 +414,8 @@ export function evaluateCondition(
         cond.op,
         cond.value
       );
+    case "task_filter":
+      return taskMatchesFilter(facts.taskRows ?? [], cond, ctx.todayIso);
     case "time": {
       const iso =
         cond.basis.type === "field_changed"

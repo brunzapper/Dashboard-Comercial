@@ -1,4 +1,5 @@
-// Versão: 1.3 | Data: 10/09/2026
+// Versão: 1.4 | Data: 10/10/2026
+// v1.4 (10/10/2026): frase da condição `task_filter` (taskFilterSummary).
 // v1.3 (10/09/2026): só vocabulário — o substantivo da ocorrência
 //   da série saiu do código e virou dado (SeriesConfig.noun, e
 //   tasks.occurrence_noun por tarefa).
@@ -15,6 +16,7 @@
 // rótulos de operador/ação já existem no editor. Este módulo não valida nada e
 // não decide nada — só descreve. A régua continua sendo `parseAutomationRule`
 // (fail-closed) e `decideActions`.
+import { taskFilterSummary } from "@/lib/tasks/task-filter";
 import type { AutomationCondition, AutomationRule } from "./types";
 
 const NUM_OP: Record<string, string> = {
@@ -37,6 +39,7 @@ function conditionText(c: AutomationCondition): string {
     const what = c.metric === "open" ? "tarefa(s) aberta(s)" : "tarefa(s) atrasada(s)";
     return `${NUM_OP[c.op] ?? c.op} ${c.value} ${what}`;
   }
+  if (c.kind === "task_filter") return taskFilterSummary(c).toLowerCase();
   // time
   const basis =
     c.basis.type === "field_changed"
