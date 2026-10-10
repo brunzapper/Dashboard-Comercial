@@ -1,4 +1,6 @@
-// Versão: 1.1 | Data: 30/07/2026
+// Versão: 1.2 | Data: 10/10/2026
+// v1.2 (10/10/2026): sem o pr-8 do cabeçalho: o sino saiu do canto fixo para a
+//   barra de local.
 // Registros → Importar CSV (admin): wizard de import em massa — cria fontes e
 // campos a partir do arquivo e insere/atualiza registros de forma idempotente
 // (source_system='csv'). Parsing no browser; dados sobem em chunks JSON para
@@ -53,8 +55,8 @@ export default async function ImportarPage() {
 
   return (
     <div className="flex flex-col gap-6">
-      {/* pr-8: afasta o botão do sino fixo (TaskBell, topo-direito) */}
-      <div className="flex items-start justify-between gap-4 pr-8">
+      {/* sem pr-8 desde 10/10/2026: o sino mora na barra de local. */}
+      <div className="flex items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl font-semibold">Importar CSV</h1>
           <p className="text-muted-foreground text-sm">

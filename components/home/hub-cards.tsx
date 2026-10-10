@@ -1,4 +1,8 @@
-// Versão: 2.2 | Data: 03/10/2026
+// Versão: 2.3 | Data: 10/10/2026
+// v2.3 (10/10/2026): formato LISTA vira LINHA DENSA (pontinhos com as cores
+//   das abas, nº de abas e de widgets, última abertura, dono, ações no hover)
+//   com os fixados agrupados no topo; recorte Todos | Meus | Compartilhados;
+//   cards de Operação ganham o NÚMERO VIVO (metric) e o ícone em caixinha.
 //
 // v2.2 (03/10/2026): o nome do board ganha tooltip com o nome inteiro quando
 // está cortado (OverflowTooltip — o modo prévia limita o título a 2 linhas).
@@ -62,6 +66,8 @@ import { PinButton } from "./pin-button";
 import { useHubDisplay } from "./hub-display-context";
 import { DashboardPreview, type PreviewImage } from "./dashboard-preview";
 import { sortHubItems, type HubSortDates } from "@/lib/config/hub-sort";
+import { nameInitials, relativeTimeLabel } from "@/lib/format/relative-time";
+import { normalizeHexColor } from "@/lib/theme";
 import { boardsTrashExpiryLabel } from "@/lib/dashboards/trash";
 
 export interface DashboardRow extends HubSortDates {
@@ -75,7 +81,29 @@ export interface DashboardRow extends HubSortDates {
   status: BoardStatus;
   trashed_at: string | null;
   // Só para o picker da IA (preset de fábrica ≠ import) — não exibido no card.
-  settings: { preset?: { key?: string } } | null;
+  // v2.3 (10/10/2026): `tabs` alimenta os pontinhos/contagem da lista densa.
+  settings: {
+    preset?: { key?: string };
+    tabs?: { id?: string; color?: string }[];
+  } | null;
+  /** v2.3 (10/10/2026): quantos widgets o board tem (lista densa). */
+  widget_count?: number;
+  /** v2.3: nome do dono (responsável vinculado ao usuário), quando conhecido. */
+  owner_name?: string | null;
+}
+
+/** v2.3 (10/10/2026): cores das abas para os pontinhos (máx. 5, só hex). */
+export function boardTabColors(row: DashboardRow): string[] {
+  const tabs = Array.isArray(row.settings?.tabs) ? row.settings!.tabs! : [];
+  return tabs
+    .map((t) => normalizeHexColor(t?.color))
+    .filter((c): c is string => c !== null)
+    .slice(0, 5);
+}
+
+export function boardTabCount(row: DashboardRow): number {
+  const tabs = Array.isArray(row.settings?.tabs) ? row.settings!.tabs! : [];
+  return Math.max(1, tabs.length);
 }
 
 /** Nível de acesso de um board: papéis compartilhados, ou "Pessoal". */
@@ -182,6 +210,159 @@ export function BoardCard({
   );
 }
 
+/**
+ * v2.3 (10/10/2026): LINHA DENSA do formato "lista" — 38px em vez de um card,
+ * e cada coluna carrega um dado real: as cores das abas (os pontinhos, que o
+ * usuário já escolhe em dashboard-tabs.tsx — reconhecimento sem custo de
+ * miniatura), nº de abas, nº de widgets, última abertura e dono. A regra: se
+ * não mostra dado, não é card — é linha. Ações (alfinete e ⋮) aparecem no
+ * hover/foco. Na Lixeira, o prazo de expiração ocupa a coluna do dono.
+ */
+export function BoardListRow({
+  row,
+  canManage,
+  canDuplicate,
+  pinned,
+  isOwn,
+}: {
+  row: DashboardRow;
+  canManage: boolean;
+  canDuplicate: boolean;
+  pinned: boolean;
+  isOwn: boolean;
+}) {
+  const { display } = useHubDisplay();
+  const kanban = row.kind === "kanban";
+  const trashed = row.status === "trashed";
+  const href = kanban ? `/kanbans/${row.id}` : `/dashboards/${row.id}`;
+  const colors = kanban ? [] : boardTabColors(row);
+  const tabs = kanban ? null : boardTabCount(row);
+  const widgets = kanban ? null : (row.widget_count ?? null);
+  const owner = row.owner_name ?? (isOwn ? "Você" : null);
+  const description = display.showDescription ? row.description : null;
+  const access = display.showAccess && !trashed ? boardAccessLabel(row) : null;
+
+  return (
+    <div
+      data-hub-row
+      className={cn(
+        "group/row hover:bg-accent/50 ease-product grid h-[38px] items-center gap-3 border-b px-3 text-sm transition-colors last:border-b-0",
+        "grid-cols-[26px_minmax(0,1fr)_56px] sm:grid-cols-[26px_minmax(0,1fr)_62px_74px_92px_26px_56px]",
+        trashed && "opacity-70"
+      )}
+    >
+      <span className="flex items-center" aria-hidden>
+        {kanban ? (
+          <SquareKanban className="text-muted-foreground size-3.5" />
+        ) : colors.length > 0 ? (
+          colors.map((c, i) => (
+            <i
+              key={i}
+              className={cn("block size-[7px] rounded-[2px] ring-[1.5px] ring-card", i > 0 && "-ml-0.5")}
+              style={{ background: c }}
+            />
+          ))
+        ) : (
+          <i className="bg-muted-foreground/40 block size-[7px] rounded-[2px]" />
+        )}
+      </span>
+      <span className="flex min-w-0 items-baseline gap-2">
+        {trashed ? (
+          <span className="text-muted-foreground truncate font-semibold">{row.name}</span>
+        ) : (
+          <Link href={href} className="truncate font-semibold tracking-tight hover:underline">
+            {row.name}
+          </Link>
+        )}
+        {description ? (
+          <em className="text-muted-foreground min-w-0 truncate text-xs not-italic">
+            {description}
+          </em>
+        ) : null}
+        {access ? (
+          <em className="text-muted-foreground hidden min-w-0 truncate text-xs not-italic md:inline">
+            {access}
+          </em>
+        ) : null}
+      </span>
+      <span className="text-muted-foreground hidden text-xs tabular-nums sm:inline">
+        {tabs === null ? "Kanban" : `${tabs} ${tabs === 1 ? "aba" : "abas"}`}
+      </span>
+      <span className="text-muted-foreground hidden text-xs tabular-nums sm:inline">
+        {widgets === null ? "" : `${widgets} ${widgets === 1 ? "widget" : "widgets"}`}
+      </span>
+      <span className="text-muted-foreground hidden truncate text-xs tabular-nums sm:inline">
+        {trashed ? boardsTrashExpiryLabel(row.trashed_at) : relativeTimeLabel(row.last_opened_at)}
+      </span>
+      <span className="hidden sm:inline" title={owner ?? undefined}>
+        {owner ? (
+          <i className="bg-muted text-muted-foreground text-2xs grid size-5 place-items-center rounded-full font-semibold not-italic">
+            {row.owner_name ? nameInitials(row.owner_name) : "EU"}
+          </i>
+        ) : null}
+      </span>
+      <span
+        className={cn(
+          "flex items-center justify-end transition-opacity",
+          // O alfinete ativo fica sempre à vista: é estado, não ação.
+          pinned ? "" : "opacity-0 group-focus-within/row:opacity-100 group-hover/row:opacity-100"
+        )}
+      >
+        {trashed ? null : (
+          <PinButton
+            kind={kanban ? "kanban" : "dashboard"}
+            id={row.id}
+            label={row.name}
+            pinned={pinned}
+            className="p-1"
+          />
+        )}
+        <span className="opacity-0 transition-opacity group-focus-within/row:opacity-100 group-hover/row:opacity-100">
+          <BoardCardMenu
+            id={row.id}
+            kanban={kanban}
+            status={row.status}
+            canManage={canManage}
+            canDuplicate={canDuplicate}
+            description={row.description ?? ""}
+          />
+        </span>
+      </span>
+    </div>
+  );
+}
+
+/** v2.3 (10/10/2026): rótulo de grupo com filete (Fixados / Todos). */
+function GroupLabel({ children }: { children: ReactNode }) {
+  return (
+    <p className="text-muted-foreground mt-2 mb-1 flex items-center gap-2 text-xs font-semibold after:h-px after:flex-1 after:bg-border">
+      {children}
+    </p>
+  );
+}
+
+/** Contêiner único da lista densa: borda, cantos e divisórias entre linhas. */
+function DenseList({ children }: { children: ReactNode }) {
+  return (
+    <div data-hub-dense className="bg-card overflow-hidden rounded-lg border">
+      {children}
+    </div>
+  );
+}
+
+/** v2.3: aplica o recorte efêmero por dono (Todos | Meus | Compartilhados). */
+function applyOwnerFilter(
+  rows: DashboardRow[],
+  filter: "todos" | "meus" | "compartilhados",
+  userId?: string
+): DashboardRow[] {
+  if (filter === "meus") return rows.filter((r) => r.owner_user_id === userId);
+  if (filter === "compartilhados") {
+    return rows.filter((r) => r.visible_to_roles.length > 0);
+  }
+  return rows;
+}
+
 // Ícone por key de card de Operação — mapeado AQUI (o catálogo de
 // lib/operacao/cards.ts fica dados puros); key nova cai no fallback.
 const OPERACAO_ICONS: Record<string, LucideIcon> = {
@@ -207,6 +388,34 @@ export interface OperacaoCardView {
   kind?: string;
   /** Quem alcança a área — derivado de AREA_GATES no SERVIDOR. */
   accessLabel: string;
+  /** v2.3 (10/10/2026): número vivo (lib/operacao/metrics.ts); ausente = sem. */
+  metric?: OperacaoMetricView | null;
+}
+
+/** v2.3 (10/10/2026): "12 vencem hoje", "2 falharam" — um número dá motivo
+ * para clicar e diz onde é urgente antes de entrar. */
+export interface OperacaoMetricView {
+  value: string;
+  caption: string;
+  tone: "neutral" | "ok" | "warn" | "bad";
+}
+
+const METRIC_TONE: Record<OperacaoMetricView["tone"], string> = {
+  neutral: "text-foreground",
+  ok: "text-success",
+  warn: "text-warning",
+  bad: "text-destructive",
+};
+
+function OperacaoMetric({ metric }: { metric: OperacaoMetricView }) {
+  return (
+    <span className="ml-auto shrink-0 text-right whitespace-nowrap">
+      <b className={cn("block text-sm font-semibold tracking-tight tabular-nums", METRIC_TONE[metric.tone])}>
+        {metric.value}
+      </b>
+      <span className="text-muted-foreground block text-micro">{metric.caption}</span>
+    </span>
+  );
 }
 
 // Card de OPERAÇÃO: módulo do catálogo em código ou formulário do Workflow —
@@ -232,10 +441,13 @@ export function OperacaoCardItem({
     <Card data-hub-card className={shellClass(display.layout)}>
       <CardHeader className={headerClass(display.layout)}>
         <CardTitle className="flex items-center gap-2">
-          <Icon className="text-muted-foreground size-4 shrink-0" />
+          <span className="bg-muted text-muted-foreground grid size-7 shrink-0 place-items-center rounded-md">
+            <Icon className="size-4" />
+          </span>
           <Link href={card.href} className="hover:underline">
             {card.label}
           </Link>
+          {card.metric ? <OperacaoMetric metric={card.metric} /> : null}
         </CardTitle>
         {display.showDescription ? (
           <CardDescription>{card.description}</CardDescription>
@@ -307,9 +519,42 @@ export function BoardGrid({ rows, canCreate, userId, isAdmin, pins }: {
   isAdmin: boolean;
   pins: string[];
 }) {
-  const { display } = useHubDisplay();
-  return <HubGrid>{sortHubItems(rows, display.sort ?? "created_desc").map((row) => (
-    <BoardCard key={row.id} row={row} previewScope={userId ?? "anonymous"} canManage={isAdmin || row.owner_user_id === userId}
+  const { display, ownerFilter } = useHubDisplay();
+  const sorted = sortHubItems(
+    applyOwnerFilter(rows, ownerFilter, userId),
+    display.sort ?? "created_desc"
+  );
+  const canManage = (row: DashboardRow) => isAdmin || row.owner_user_id === userId;
+
+  // v2.3 (10/10/2026): no formato LISTA, linhas densas com os fixados no topo
+  // (o mesmo alfinete da barra lateral). Cartão e prévia seguem como antes.
+  if (display.layout === "list") {
+    if (sorted.length === 0) {
+      return <p className="text-muted-foreground text-sm">Nada neste recorte.</p>;
+    }
+    const renderRow = (row: DashboardRow) => (
+      <BoardListRow key={row.id} row={row} canManage={canManage(row)}
+        canDuplicate={canCreate} pinned={pins.includes(row.id)} isOwn={row.owner_user_id === userId} />
+    );
+    const pinnedRows = sorted.filter((r) => pins.includes(r.id) && r.status !== "trashed");
+    const rest = sorted.filter((r) => !pinnedRows.includes(r));
+    if (pinnedRows.length === 0) return <DenseList>{rest.map(renderRow)}</DenseList>;
+    return (
+      <div className="flex flex-col">
+        <GroupLabel>Fixados</GroupLabel>
+        <DenseList>{pinnedRows.map(renderRow)}</DenseList>
+        {rest.length > 0 ? (
+          <>
+            <GroupLabel>Todos</GroupLabel>
+            <DenseList>{rest.map(renderRow)}</DenseList>
+          </>
+        ) : null}
+      </div>
+    );
+  }
+
+  return <HubGrid>{sorted.map((row) => (
+    <BoardCard key={row.id} row={row} previewScope={userId ?? "anonymous"} canManage={canManage(row)}
       canDuplicate={canCreate} pinned={pins.includes(row.id)} />
   ))}</HubGrid>;
 }
@@ -331,5 +576,38 @@ export function HubGrid({ children }: { children: ReactNode }) {
     >
       {children}
     </CardGrid>
+  );
+}
+
+/**
+ * v2.3 (10/10/2026): recorte Todos | Meus | Compartilhados da aba Painéis.
+ * "Meus" = sou o dono; "Compartilhados" = visível a algum papel.
+ */
+export function HubOwnerFilterChips() {
+  const { ownerFilter, setOwnerFilter } = useHubDisplay();
+  const options = [
+    { value: "todos", label: "Todos" },
+    { value: "meus", label: "Meus" },
+    { value: "compartilhados", label: "Compartilhados" },
+  ] as const;
+  return (
+    <div className="flex items-center gap-1.5" role="group" aria-label="Recorte por dono">
+      {options.map((o) => (
+        <button
+          key={o.value}
+          type="button"
+          aria-pressed={ownerFilter === o.value}
+          onClick={() => setOwnerFilter(o.value)}
+          className={cn(
+            "h-7 rounded-md border px-2.5 text-xs font-medium transition-colors",
+            ownerFilter === o.value
+              ? "border-brand/40 bg-brand/10 text-brand"
+              : "bg-card text-muted-foreground hover:bg-accent hover:text-foreground"
+          )}
+        >
+          {o.label}
+        </button>
+      ))}
+    </div>
   );
 }

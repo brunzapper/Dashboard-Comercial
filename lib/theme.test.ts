@@ -1,4 +1,5 @@
-// Versão: 1.0 | Data: 12/09/2026
+// Versão: 1.1 | Data: 10/10/2026
+// v1.1 (10/10/2026): paleta da interface: whitelist e precedência.
 // Guarda dos TOKENS DE TEMA (0141): a whitelist é a muralha — nome de token
 // fora de THEME_TOKENS e valor fora de #RRGGBB nunca podem chegar a um style
 // ou script, venham de cookie, do banco ou do cliente.
@@ -10,7 +11,9 @@ import {
   THEME_TOKEN_LABELS,
   hasThemeTokens,
   normalizeOrgTheme,
+  normalizeThemePalette,
   normalizeThemeTokens,
+  resolveTheme,
   resolveThemeTokens,
   themeTokenStyle,
 } from "./theme";
@@ -114,5 +117,36 @@ describe("catálogo de tokens", () => {
     for (const t of THEME_TOKENS) {
       expect(THEME_TOKEN_LABELS[t], `rótulo ausente para ${t}`).toBeTruthy();
     }
+  });
+});
+
+describe("paleta da interface (v1.3)", () => {
+  it("whitelist: só atual | nova", () => {
+    expect(normalizeThemePalette("nova")).toBe("nova");
+    expect(normalizeThemePalette("atual")).toBe("atual");
+    for (const v of [null, undefined, "", "NOVA", "x\"><script>", 1, {}]) {
+      expect(normalizeThemePalette(v)).toBeNull();
+    }
+  });
+
+  it("precedência usuário ?? org ?? atual", () => {
+    expect(resolveTheme(null, null).palette).toBe("atual");
+    expect(resolveTheme(null, { palette: "nova" }).palette).toBe("nova");
+    expect(resolveTheme({ palette: "atual" }, { palette: "nova" }).palette).toBe(
+      "atual"
+    );
+    expect(resolveTheme({ palette: "lixo" }, { palette: "nova" }).palette).toBe(
+      "nova"
+    );
+  });
+
+  it("normalizeOrgTheme guarda só paleta válida", () => {
+    expect(normalizeOrgTheme({ palette: "nova" })).toEqual({
+      mode: undefined,
+      accentColor: undefined,
+      tokens: undefined,
+      palette: "nova",
+    });
+    expect(normalizeOrgTheme({ palette: "roxa" })).toBeNull();
   });
 });

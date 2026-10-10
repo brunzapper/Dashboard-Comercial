@@ -1,4 +1,6 @@
-// Versão: 1.1 | Data: 03/10/2026
+// Versão: 1.2 | Data: 10/10/2026
+// v1.2 (10/10/2026): não-admin volta para /operacao (a aba Operação do hub
+//   virou item da barra lateral).
 // v1.1 (03/10/2026): "Última execução" considera a verificação do tick
 //   (`tick_gates.checked_at`, 0151 — portão de mudança).
 // A TELA DE CONSTRUÇÃO de um esquema — o destino de clicar numa linha da lista.
@@ -39,7 +41,7 @@ export default async function WorkflowItemPage({
   const session = await requireSettingsArea("workflow");
   const orgId = await getActiveOrgId();
   if (!orgId) return null;
-  if (!session.roles.includes("admin")) redirect("/?aba=operacao");
+  if (!session.roles.includes("admin")) redirect("/operacao");
 
   const { item } = await params;
   const [kind, ...rest] = decodeURIComponent(item).split(":");

@@ -1,4 +1,6 @@
-// Versão: 2.1 | Data: 27/07/2026
+// Versão: 2.2 | Data: 10/10/2026
+// v2.2 (10/10/2026): sem o pr-8 do cabeçalho: o sino saiu do canto fixo para a
+//   barra de local.
 // Registros → Log. Duas seções:
 //   1) Sincronizações (sync_jobs): reconciliações (manuais/automáticas) e
 //      backfills — visível a qualquer autenticado (gestor/vendedor inclusos).
@@ -82,8 +84,8 @@ export default async function LogPage() {
 
   return (
     <div className="flex flex-col gap-8">
-      {/* pr-8: afasta o botão do sino fixo (TaskBell, topo-direito) */}
-      <div className="flex items-start justify-between gap-4 pr-8">
+      {/* sem pr-8 desde 10/10/2026: o sino mora na barra de local. */}
+      <div className="flex items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl font-semibold">Log</h1>
           <p className="text-muted-foreground text-sm">

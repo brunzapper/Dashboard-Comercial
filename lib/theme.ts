@@ -1,4 +1,11 @@
-// Versão: 1.2 | Data: 12/09/2026
+// Versão: 1.3 | Data: 10/10/2026
+// v1.3 (10/10/2026): PALETA DA INTERFACE ("atual" | "nova"). A paleta nova
+//   (neutros oklch de matiz 275, bordas mais suaves, success/warning/info) é
+//   uma OPÇÃO, nunca substituição: sem escolha vale "atual", e o estilo
+//   Clássico dos dashboards (que herda o tema) segue byte-idêntico. Mesma
+//   cascata do modo (usuário ?? org ?? padrão) e mesmo trato de whitelist: o
+//   valor só chega ao <html> como `data-palette="nova"` depois de passar por
+//   normalizeThemePalette — os tokens em si são CSS estático de globals.css.
 // v1.2 (12/09/2026): TOKENS DE TEMA (0141). Além da cor de destaque, um
 //   conjunto CURADO de superfícies do sistema passa a ser configurável —
 //   fundo, texto, cartão, silenciado, borda e as três cores da barra lateral —
@@ -29,6 +36,26 @@ export const ACCENT_COOKIE = "theme_accent";
 // Cookie ÚNICO com os tokens dos dois modos (JSON). Um cookie por token seriam
 // 18 cabeçalhos em toda request; o payload aqui é pequeno e já sanitizado.
 export const TOKENS_COOKIE = "theme_tokens";
+// v1.3 (10/10/2026): paleta EFETIVA (só "atual" | "nova" chegam aqui).
+export const PALETTE_COOKIE = "theme_palette";
+
+export const THEME_PALETTES = ["atual", "nova"] as const;
+export type ThemePalette = (typeof THEME_PALETTES)[number];
+export const DEFAULT_PALETTE: ThemePalette = "atual";
+
+/** Rótulos pt-BR — donos únicos do texto do seletor de paleta. */
+export const THEME_PALETTE_LABELS: Record<ThemePalette, string> = {
+  atual: "Atual",
+  nova: "Nova (neutros suaves)",
+};
+
+/** Whitelist da paleta; qualquer outra coisa ⇒ null. */
+export function normalizeThemePalette(v: unknown): ThemePalette | null {
+  return typeof v === "string" &&
+    (THEME_PALETTES as readonly string[]).includes(v)
+    ? (v as ThemePalette)
+    : null;
+}
 
 export type ThemeMode = "light" | "dark" | "system";
 
@@ -37,6 +64,8 @@ export interface OrgThemeDefault {
   accentColor?: string;
   /** Tokens padrão da org (0141) — mesma precedência campo a campo. */
   tokens?: ThemeTokens;
+  /** v1.3 (10/10/2026): paleta padrão da org. */
+  palette?: ThemePalette;
 }
 
 /** Whitelist do modo de tema; qualquer outra coisa ⇒ null. */
@@ -53,15 +82,26 @@ export function normalizeHexColor(v: unknown): string | null {
 /** Normaliza o jsonb organizations.theme ({} ⇒ sem padrão). */
 export function normalizeOrgTheme(v: unknown): OrgThemeDefault | null {
   if (v == null || typeof v !== "object") return null;
-  const raw = v as { mode?: unknown; accentColor?: unknown; tokens?: unknown };
+  const raw = v as {
+    mode?: unknown;
+    accentColor?: unknown;
+    tokens?: unknown;
+    palette?: unknown;
+  };
   const mode = normalizeThemeMode(raw.mode) ?? undefined;
   const accentColor = normalizeHexColor(raw.accentColor) ?? undefined;
   const tokens = normalizeThemeTokens(
     (raw as { tokens?: unknown }).tokens
   );
   const hasTokens = hasThemeTokens(tokens);
-  if (!mode && !accentColor && !hasTokens) return null;
-  return { mode, accentColor, tokens: hasTokens ? tokens : undefined };
+  const palette = normalizeThemePalette(raw.palette) ?? undefined;
+  if (!mode && !accentColor && !hasTokens && !palette) return null;
+  return {
+    mode,
+    accentColor,
+    tokens: hasTokens ? tokens : undefined,
+    ...(palette ? { palette } : {}),
+  };
 }
 
 /**
@@ -184,6 +224,8 @@ export function themeTokenStyle(map: ThemeTokenMap): Record<string, string> {
 export interface ResolvedTheme {
   mode: ThemeMode;
   accent: string;
+  /** v1.3 (10/10/2026): paleta da interface efetiva. */
+  palette: ThemePalette;
 }
 
 /**
@@ -192,7 +234,11 @@ export interface ResolvedTheme {
  * independentes (usuário pode sobrepor só o modo e herdar a cor, e vice-versa).
  */
 export function resolveTheme(
-  user: { theme?: string | null; accentColor?: string | null } | null,
+  user: {
+    theme?: string | null;
+    accentColor?: string | null;
+    palette?: string | null;
+  } | null,
   org: OrgThemeDefault | null
 ): ResolvedTheme {
   const mode =
@@ -201,7 +247,11 @@ export function resolveTheme(
     normalizeHexColor(user?.accentColor) ??
     normalizeHexColor(org?.accentColor) ??
     DEFAULT_ACCENT;
-  return { mode, accent };
+  const palette =
+    normalizeThemePalette(user?.palette) ??
+    normalizeThemePalette(org?.palette) ??
+    DEFAULT_PALETTE;
+  return { mode, accent, palette };
 }
 
 /** Cor do Ponteiro Laser: escolha do USUÁRIO ?? padrão do app (vermelho). */

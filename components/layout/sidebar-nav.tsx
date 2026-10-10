@@ -1,4 +1,6 @@
-// Versão: 1.4 | Data: 03/10/2026
+// Versão: 1.5 | Data: 10/10/2026
+// v1.5 (10/10/2026): itens fixos com ÍCONE e contagem opcional, ativo com
+//   barrinha interna na marca; Painéis acende também em /dashboards e /kanbans.
 // Navegação lateral (Client Component) com destaque do link ativo.
 // Recebe já filtrada por papel/permissão pelo layout (server).
 // v1.4 (03/10/2026): item fixado com nome cortado (dashboard, kanban…) mostra o
@@ -18,7 +20,10 @@ import Link, { useLinkStatus } from "next/link";
 import { usePathname } from "next/navigation";
 import {
   CalendarDays,
+  Database,
   FileInput,
+  Layers,
+  Settings,
   HandCoins,
   LayoutDashboard,
   LayoutGrid,
@@ -36,7 +41,24 @@ import { OverflowTooltip } from "@/components/ui/overflow-tooltip";
 export interface NavItem {
   href: string;
   label: string;
+  /** v1.5 (10/10/2026): ícone do item fixo (chave de NAV_ICONS). */
+  icon?: NavIconKey;
+  /** v1.5: número ao lado do rótulo (ex.: tarefas exigindo atenção). */
+  count?: number;
+  /** v1.5: prefixos que também ativam o item (Painéis ⇐ /dashboards…). */
+  matches?: string[];
 }
+
+// v1.5 (10/10/2026): ícones dos itens FIXOS — chave serializável (o item é
+// montado no servidor e o componente de ícone não atravessa a fronteira).
+const NAV_ICONS = {
+  paineis: LayoutDashboard,
+  operacao: LayoutGrid,
+  registros: Database,
+  campos: Layers,
+  configuracoes: Settings,
+} satisfies Record<string, LucideIcon>;
+export type NavIconKey = keyof typeof NAV_ICONS;
 
 /** Item fixado já resolvido pelo servidor (rótulo + destino existentes). */
 export interface PinnedNavItem extends NavItem {
@@ -81,7 +103,9 @@ function NavPendingHint() {
 
 const LINK_BASE =
   "flex items-center justify-between gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors";
-const LINK_ACTIVE = "bg-brand/10 text-brand";
+// v1.5 (10/10/2026): item ativo com a barrinha interna de 2px na marca — o
+// fundo sozinho some em telas lavadas/projetores.
+const LINK_ACTIVE = "bg-brand/10 text-brand shadow-[inset_2px_0_0_var(--brand)]";
 const LINK_IDLE =
   "text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground";
 
@@ -93,8 +117,10 @@ export function SidebarNav({
   pinned?: PinnedNavItem[];
 }) {
   const pathname = usePathname();
-  const isActive = (href: string) =>
-    pathname === href || (href !== "/" && pathname.startsWith(`${href}/`));
+  const isActive = (href: string, matches: string[] = []) =>
+    pathname === href ||
+    (href !== "/" && pathname.startsWith(`${href}/`)) ||
+    matches.some((m) => pathname === m || pathname.startsWith(`${m}/`));
 
   return (
     <div className="flex flex-col gap-3">
@@ -129,19 +155,31 @@ export function SidebarNav({
       ) : null}
 
       <nav className="flex flex-col gap-1">
-        {items.map((item) => (
-          <Link
-            key={item.href}
-            href={item.href}
-            className={cn(
-              LINK_BASE,
-              isActive(item.href) ? LINK_ACTIVE : LINK_IDLE
-            )}
-          >
-            <span>{item.label}</span>
-            <NavPendingHint />
-          </Link>
-        ))}
+        {items.map((item) => {
+          const Icon = item.icon ? NAV_ICONS[item.icon] : null;
+          const active = isActive(item.href, item.matches);
+          return (
+            <Link
+              key={item.href}
+              href={item.href}
+              aria-current={active ? "page" : undefined}
+              className={cn(LINK_BASE, active ? LINK_ACTIVE : LINK_IDLE)}
+            >
+              <span className="flex min-w-0 items-center gap-2">
+                {Icon ? <Icon className="size-4 shrink-0 opacity-85" /> : null}
+                <span className="truncate">{item.label}</span>
+              </span>
+              <span className="flex items-center gap-1.5">
+                {item.count ? (
+                  <span className="text-muted-foreground text-micro tabular-nums">
+                    {item.count > 99 ? "99+" : item.count}
+                  </span>
+                ) : null}
+                <NavPendingHint />
+              </span>
+            </Link>
+          );
+        })}
       </nav>
     </div>
   );

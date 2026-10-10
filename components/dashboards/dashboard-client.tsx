@@ -1,4 +1,6 @@
-// Versão: 3.8 | Data: 02/10/2026
+// Versão: 3.9 | Data: 10/10/2026
+// v3.9 (10/10/2026): barra de local: o board PUBLICA o próprio nome
+//   (usePublishLocationTitle) e o cabeçalho perde o pr-8 do sino flutuante.
 // v3.8 (02/10/2026): (a) o fundo PRÓPRIO da aba vale também fora da
 //   apresentação (innerSurfaceCss) — a capa escura ficava com o texto claro
 //   sobre o papel do board; (b) "Exportar PDF" pelo menu ⋮: o MESMO caminho do
@@ -237,6 +239,7 @@ import { DashboardPendingProvider } from "./pending-context";
 import { WidgetFocusProvider } from "./focus-context";
 import { PeriodFilter } from "./period-filter";
 import { WidgetBuilder } from "./widget-builder";
+import { usePublishLocationTitle } from "@/components/layout/location-title-context";
 
 // Id determinístico da aba sintética que abriga os widgets SEM etiqueta
 // (settings.tab ausente) durante a reconstrução. Constante (não uuid) para não
@@ -870,6 +873,9 @@ export function DashboardClient({
     setSeedName(dashboardName);
     setName(dashboardName);
   }
+  // Nome do board na última migalha da barra de local (otimista: acompanha o
+  // renomear inline).
+  usePublishLocationTitle(name);
   function commitName(value: string) {
     setRenaming(false);
     const next = value.trim();
@@ -1433,8 +1439,8 @@ export function DashboardClient({
       {/* Saída do board: leva à tela anterior (a barra lateral pode estar
           oculta, e o dashboard é onde mais se entra por link direto). */}
       <BackLink fallback="/" fallbackLabel="Workspace" className="-ml-2 self-start" />
-      {/* pr-8: afasta a toolbar do sino fixo (TaskBell, topo-direito) */}
-      <div className="flex items-center justify-between pr-8">
+      {/* sem pr-8 desde 10/10/2026: o sino mora na barra de local. */}
+      <div className="flex items-center justify-between">
         {renaming ? (
           <Input
             autoFocus

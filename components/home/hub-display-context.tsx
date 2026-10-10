@@ -1,4 +1,6 @@
-// Versão: 1.0 | Data: 12/09/2026
+// Versão: 1.1 | Data: 10/10/2026
+// v1.1 (10/10/2026): recorte EFÊMERO por dono (Todos | Meus | Compartilhados)
+//   no mesmo contexto de exibição.
 // Estado de EXIBIÇÃO do hub (formato, colunas, altura do card, descrição,
 // nível de acesso) no CLIENTE.
 //
@@ -49,7 +51,13 @@ export interface HubDisplayKeys {
   showAccess: UiPrefKey;
 }
 
+/** v1.1 (10/10/2026): recorte por dono — efêmero (não é preferência gravada:
+ * é a pergunta do momento, "quais são os meus?"). */
+export type HubOwnerFilter = "todos" | "meus" | "compartilhados";
+
 interface HubDisplayValue {
+  ownerFilter: HubOwnerFilter;
+  setOwnerFilter: (f: HubOwnerFilter) => void;
   display: HubDisplay;
   keys: HubDisplayKeys;
   locked: ReadonlySet<UiPrefKey>;
@@ -83,6 +91,7 @@ export function HubDisplayProvider({
   children: ReactNode;
 }) {
   const [display, setDisplay] = useState(initial);
+  const [ownerFilter, setOwnerFilter] = useState<HubOwnerFilter>("todos");
   const current = useRef(initial);
   const confirmed = useRef(initial);
   const revisions = useRef<Partial<Record<keyof HubDisplay, number>>>({});
@@ -144,6 +153,8 @@ export function HubDisplayProvider({
 
   const value = useMemo<HubDisplayValue>(
     () => ({
+      ownerFilter,
+      setOwnerFilter,
       display,
       keys,
       locked: lockedSet,
@@ -151,7 +162,7 @@ export function HubDisplayProvider({
       set,
       saving: pendingKeys.size > 0,
     }),
-    [display, keys, lockedSet, isLocked, set, pendingKeys]
+    [ownerFilter, display, keys, lockedSet, isLocked, set, pendingKeys]
   );
 
   return <Ctx.Provider value={value}><PreviewQueueProvider>{children}</PreviewQueueProvider></Ctx.Provider>;

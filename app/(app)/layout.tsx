@@ -1,4 +1,8 @@
-// Versão: 1.10 | Data: 12/09/2026
+// Versão: 1.11 | Data: 10/10/2026
+// v1.11 (10/10/2026): barra lateral redesenhada — itens Painéis e Operação
+//   (antes abas do hub) com ícones, contagem de tarefas em Operação (o mesmo
+//   número do sino), marca com quadradinho na cor de destaque e avatar com
+//   iniciais no rodapé.
 // v1.10 (12/09/2026): <RouteTracker /> — registra a rota atual para o botão
 //   "voltar" levar à tela ANTERIOR. Antes ele apontava para um destino fixo e
 //   mandava ao Workspace quem tinha chegado de outro lugar.
@@ -77,11 +81,45 @@ import { Toaster } from "@/components/ui/sonner";
 // sub-abas de "Configurações" — o item pai é inserido abaixo conforme o acesso.
 // Agenda/Tarefas viraram cards de Operação no hub (aba "Operação" de /).
 // Registros só é visível a Gestores/Administradores.
+// v1.11 (10/10/2026): "Workspace" virou DOIS itens — Painéis (/) e Operação
+// (/operacao). Eram abas DENTRO do hub; aba só serve a vistas irmãs do mesmo
+// objeto, e estas são áreas. Operação não tem gate: Agenda e Tarefas são cards
+// padrão de toda org (lib/operacao/cards.ts).
 const NAV: (NavItem & { permission?: string; role?: string; roles?: string[] })[] = [
-  { href: "/", label: "Workspace" },
-  { href: "/registros", label: "Registros", roles: ["admin", "gestor"] },
-  { href: "/campos", label: "Campos", permission: "manage_field_definitions" },
+  {
+    href: "/",
+    label: "Painéis",
+    icon: "paineis",
+    matches: ["/dashboards", "/kanbans"],
+  },
+  { href: "/operacao", label: "Operação", icon: "operacao" },
+  {
+    href: "/registros",
+    label: "Registros",
+    icon: "registros",
+    roles: ["admin", "gestor"],
+  },
+  {
+    href: "/campos",
+    label: "Campos",
+    icon: "campos",
+    permission: "manage_field_definitions",
+  },
 ];
+
+/** Inicial do nome do app para o quadradinho da marca. */
+function initialOf(name: string): string {
+  return name.trim().charAt(0).toUpperCase() || "D";
+}
+
+/** Iniciais do avatar a partir do e-mail ("renata.machado@…" ⇒ "RM"). */
+function emailInitials(email: string): string {
+  const local = email.split("@")[0] ?? "";
+  const parts = local.split(/[._-]+/).filter(Boolean);
+  const letters =
+    parts.length >= 2 ? parts[0][0] + parts[1][0] : local.slice(0, 2);
+  return letters.toUpperCase() || "?";
+}
 
 // Título da aba segue o branding da org ativa (multi-org, 0089+). O template
 // permite que cada página filha exporte um título curto ("Registros",
@@ -130,7 +168,11 @@ export default async function AppLayout({
   // (preferências visuais) e Conta (senha) valem para todo mundo, então a
   // seção aparece para qualquer autenticado. Bases/Log vivem em /registros/* e
   // Moedas em /campos.
-  items.push({ href: "/configuracoes", label: "Configurações" });
+  items.push({
+    href: "/configuracoes",
+    label: "Configurações",
+    icon: "configuracoes",
+  });
   const roleLabel = roles
     .map((r) => ROLE_LABELS[r as RoleKey] ?? r)
     .join(", ");
@@ -167,6 +209,12 @@ export default async function AppLayout({
     loadManualAxes(supabase, org?.id),
   ]);
   const sourceLabels = mergeSourceLabels(labelsValue, sources);
+  // v1.11 (10/10/2026): Operação mostra quantas tarefas pedem atenção — o
+  // MESMO número do sino, já calculado acima (nenhuma consulta nova: este
+  // layout roda em toda navegação).
+  const navItems = items.map((item) =>
+    item.href === "/operacao" ? { ...item, count: dueCount ?? 0 } : item
+  );
   // Preferências de interface: padrão do app → org (com trava) → usuário.
   const uiPrefs = resolveUiPrefs(userUiPrefs(settings), org?.uiPrefs);
   // Itens fixados: só consulta se houver lista (o caso comum é vazio, e este
@@ -185,7 +233,11 @@ export default async function AppLayout({
   // Tema efetivo (usuário ?? org ?? padrão) — o ThemeSync abaixo corrige
   // cookie defasado (dispositivo novo / padrão da org alterado).
   const resolvedTheme = resolveTheme(
-    settings as { theme?: string | null; accentColor?: string | null },
+    settings as {
+      theme?: string | null;
+      accentColor?: string | null;
+      palette?: string | null;
+    },
     org?.theme ?? null
   );
   // Tokens de tema (0141): mesma precedência, token a token.
@@ -198,15 +250,33 @@ export default async function AppLayout({
   // o AppShell (client) controla ocultar/fixar/tela cheia.
   const sidebarContent = (
     <>
-      <div className="mb-6 px-3 pr-8">
-        <p className="text-sm font-semibold">
-          {org?.appName ?? "Dashboard Comercial"}
+      {/* v1.11 (10/10/2026): marca com o quadradinho na cor de destaque. */}
+      <div className="mb-6 px-1 pr-8">
+        <div className="flex items-center gap-2">
+          <span
+            aria-hidden
+            className="bg-brand text-brand-foreground grid size-5 shrink-0 place-items-center rounded-md text-micro font-bold"
+          >
+            {initialOf(org?.appName ?? "Dashboard Comercial")}
+          </span>
+          <p className="truncate text-sm font-semibold">
+            {org?.appName ?? "Dashboard Comercial"}
+          </p>
+        </div>
+        <p className="text-muted-foreground mt-0.5 truncate pl-7 text-xs">
+          {org?.name ?? "Zapper"}
         </p>
-        <p className="text-muted-foreground text-xs">{org?.name ?? "Zapper"}</p>
       </div>
-      <SidebarNav items={items} pinned={pinnedItems} />
+      <SidebarNav items={navItems} pinned={pinnedItems} />
       <div className="mt-auto border-t pt-3">
-        <div className="px-3 pb-2">
+        <div className="flex items-start gap-2 px-1 pb-2">
+          <span
+            aria-hidden
+            className="bg-accent text-accent-foreground text-2xs grid size-7 shrink-0 place-items-center rounded-full font-semibold"
+          >
+            {emailInitials(user.email ?? "")}
+          </span>
+          <div className="min-w-0">
           <p className="truncate text-xs font-medium">{user.email}</p>
           <p className="text-muted-foreground text-xs">
             {[org?.isOrgAdmin ? "Administrador de Organização" : null, roleLabel]
@@ -221,6 +291,7 @@ export default async function AppLayout({
               Trocar organização
             </Link>
           ) : null}
+          </div>
         </div>
         <LogoutButton />
       </div>

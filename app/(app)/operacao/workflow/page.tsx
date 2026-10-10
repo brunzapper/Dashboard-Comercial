@@ -1,4 +1,6 @@
-// Versão: 2.4 | Data: 03/10/2026
+// Versão: 2.5 | Data: 10/10/2026
+// v2.5 (10/10/2026): não-admin volta para /operacao (a aba Operação do hub
+//   virou item da barra lateral).
 // v2.4 (03/10/2026): "Última execução" das automações considera a verificação
 //   do tick (`tick_gates.checked_at`, 0151 — portão de mudança).
 // Versão: 2.3 | Data: 09/09/2026
@@ -45,7 +47,7 @@ export default async function WorkflowPage() {
 
   // Não-admin não tem o que fazer aqui: a página é só configuração. Manda para
   // o hub, onde estão os cards dos formulários que ele PODE usar.
-  if (!session.roles.includes("admin")) redirect("/?aba=operacao");
+  if (!session.roles.includes("admin")) redirect("/operacao");
 
   const supabase = await createClient();
   await ensureDefaultWorkflowSchemas(supabase, orgId);

@@ -1,4 +1,6 @@
-// Versão: 1.2 | Data: 12/09/2026
+// Versão: 1.3 | Data: 10/10/2026
+// v1.3 (10/10/2026): PALETA da interface (Atual | Nova) no form pessoal e no
+//   padrão da org; prévia ao vivo pelo atributo data-palette do <html>.
 // v1.2 (12/09/2026): editor dos TOKENS DE TEMA (0141) — o conjunto curado de
 //   superfícies (fundo, texto, cartão, silenciado, borda e as três da barra
 //   lateral), com colunas separadas para CLARO e ESCURO: são cores diferentes
@@ -30,6 +32,8 @@ import {
   DEFAULT_ACCENT,
   DEFAULT_LASER,
   EMPTY_THEME_TOKENS,
+  THEME_PALETTES,
+  THEME_PALETTE_LABELS,
   THEME_TOKENS,
   THEME_TOKEN_LABELS,
   normalizeHexColor,
@@ -38,6 +42,7 @@ import {
   themeTokenStyle,
   type OrgThemeDefault,
   type ThemeMode,
+  type ThemePalette,
   type ThemeToken,
   type ThemeTokenMap,
   type ThemeTokens,
@@ -64,9 +69,13 @@ const MODE_LABELS: Record<ThemeMode, string> = {
 function applyThemeClient(
   mode: ThemeMode,
   accent: string,
-  tokens: ThemeTokens = EMPTY_THEME_TOKENS
+  tokens: ThemeTokens = EMPTY_THEME_TOKENS,
+  palette: ThemePalette = "atual"
 ) {
   const el = document.documentElement;
+  // v1.3 (10/10/2026): paleta — só o atributo; os tokens são CSS estático.
+  if (palette === "nova") el.setAttribute("data-palette", "nova");
+  else el.removeAttribute("data-palette");
   const dark =
     mode === "dark" ||
     (mode === "system" &&
@@ -201,7 +210,46 @@ function ModePicker({
   );
 }
 
+/**
+ * v1.3 (10/10/2026): seletor da PALETA da interface. Mesmo desenho do
+ * ModePicker; clicar no ativo com `allowClear` volta a herdar.
+ */
+function PalettePicker({
+  value,
+  onPick,
+  allowClear,
+}: {
+  value: ThemePalette | null;
+  onPick: (palette: ThemePalette | null) => void;
+  allowClear?: boolean;
+}) {
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {THEME_PALETTES.map((key) => {
+        const active = value === key;
+        return (
+          <button
+            key={key}
+            type="button"
+            aria-pressed={active}
+            onClick={() => onPick(active && allowClear ? null : key)}
+            className={cn(
+              "rounded-md border px-3 py-1.5 text-sm transition-colors",
+              active
+                ? "border-brand bg-brand text-brand-foreground"
+                : "text-muted-foreground hover:text-foreground"
+            )}
+          >
+            {THEME_PALETTE_LABELS[key]}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 interface UserThemePrefs {
+  palette: ThemePalette | null;
   theme: ThemeMode | null;
   accent: string | null;
   laser: string | null;
@@ -213,8 +261,11 @@ export function TemaForm({
   userAccent,
   userLaser,
   userTokens = EMPTY_THEME_TOKENS,
+  userPalette = null,
   orgTheme,
 }: {
+  /** v1.3 (10/10/2026): paleta pessoal (null = herda). */
+  userPalette?: ThemePalette | null;
   userTheme: ThemeMode | null;
   userAccent: string | null;
   userLaser: string | null;
@@ -224,12 +275,13 @@ export function TemaForm({
   // Estado ÚNICO: a action sobrescreve todas as chaves a cada save, então todo
   // save precisa carregar o conjunto inteiro.
   const [prefs, setPrefs] = useState<UserThemePrefs>({
+    palette: userPalette,
     theme: userTheme,
     accent: userAccent,
     laser: userLaser,
     tokens: userTokens,
   });
-  const { theme, accent, laser, tokens } = prefs;
+  const { theme, accent, laser, tokens, palette } = prefs;
   const [hexDraft, setHexDraft] = useState<string>(userAccent ?? "");
   const [laserHexDraft, setLaserHexDraft] = useState<string>(userLaser ?? "");
   const [state, setState] = useState<ThemeActionState>({});
@@ -237,7 +289,7 @@ export function TemaForm({
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const effective = resolveTheme(
-    { theme, accentColor: accent },
+    { theme, accentColor: accent, palette },
     orgTheme
   );
   // O que a org define serve de placeholder: o campo mostra a cor que VALE
@@ -263,6 +315,7 @@ export function TemaForm({
         accentColor: next.accent,
         laserColor: next.laser,
         themeTokens: next.tokens,
+        palette: next.palette,
       });
       setState(res);
     });
@@ -272,13 +325,14 @@ export function TemaForm({
     const next = { ...prefs, ...patch };
     setPrefs(next);
     const eff = resolveTheme(
-      { theme: next.theme, accentColor: next.accent },
+      { theme: next.theme, accentColor: next.accent, palette: next.palette },
       orgTheme
     );
     applyThemeClient(
       eff.mode,
       eff.accent,
-      resolveThemeTokens(next.tokens, orgTheme?.tokens)
+      resolveThemeTokens(next.tokens, orgTheme?.tokens),
+      eff.palette
     );
     if (saveTimer.current) clearTimeout(saveTimer.current);
     if (debounce) {
@@ -297,8 +351,31 @@ export function TemaForm({
     ? `padrão da organização (${orgTheme.accentColor})`
     : `padrão do app (${DEFAULT_ACCENT})`;
 
+  const origemPaleta = orgTheme?.palette
+    ? `padrão da organização (${THEME_PALETTE_LABELS[orgTheme.palette]})`
+    : `padrão do app (${THEME_PALETTE_LABELS.atual})`;
+
   return (
     <div className="flex flex-col gap-6">
+      <div className="flex flex-col gap-2">
+        <Label className="text-xs">Paleta da interface</Label>
+        <p className="text-muted-foreground text-xs">
+          A paleta Nova usa neutros mais suaves, bordas discretas e cores
+          próprias para sucesso, alerta e informação. Vale no claro e no
+          escuro; dashboards em estilo Clássico acompanham a paleta escolhida.
+        </p>
+        <PalettePicker
+          value={palette}
+          allowClear
+          onPick={(p) => update({ palette: p })}
+        />
+        {palette == null ? (
+          <p className="text-muted-foreground text-xs">
+            Herdando o {origemPaleta}.
+          </p>
+        ) : null}
+      </div>
+
       <div className="flex flex-col gap-2">
         <Label className="text-xs">Modo</Label>
         <ModePicker
@@ -417,7 +494,13 @@ export function TemaForm({
           onClick={() => {
             setHexDraft("");
             setLaserHexDraft("");
-            update({ theme: null, accent: null, laser: null, tokens: EMPTY_THEME_TOKENS });
+            update({
+              palette: null,
+              theme: null,
+              accent: null,
+              laser: null,
+              tokens: EMPTY_THEME_TOKENS,
+            });
           }}
         >
           Restaurar padrão
@@ -441,7 +524,10 @@ export function OrgThemeDefaultForm({
   orgMode,
   orgAccent,
   orgTokens = EMPTY_THEME_TOKENS,
+  orgPalette = null,
 }: {
+  /** v1.3 (10/10/2026): paleta padrão da org. */
+  orgPalette?: ThemePalette | null;
   orgMode: ThemeMode | null;
   orgAccent: string | null;
   orgTokens?: ThemeTokens;
@@ -450,6 +536,7 @@ export function OrgThemeDefaultForm({
   const [mode, setMode] = useState<ThemeMode | null>(orgMode);
   const [accent, setAccentState] = useState<string | null>(orgAccent);
   const [tokens, setTokens] = useState<ThemeTokens>(orgTokens);
+  const [palette, setPalette] = useState<ThemePalette | null>(orgPalette);
   const [hexDraft, setHexDraft] = useState<string>(orgAccent ?? "");
   const [state, setState] = useState<ThemeActionState>({});
   const [pending, startTransition] = useTransition();
@@ -460,6 +547,7 @@ export function OrgThemeDefaultForm({
         mode,
         accentColor: accent,
         themeTokens: tokens,
+        palette,
       });
       setState(res);
       if (res.ok) router.refresh();
@@ -468,6 +556,15 @@ export function OrgThemeDefaultForm({
 
   return (
     <div className="flex flex-col gap-4">
+      <div className="flex flex-col gap-2">
+        <Label className="text-xs">Paleta padrão</Label>
+        <PalettePicker value={palette} allowClear onPick={setPalette} />
+        {palette == null ? (
+          <p className="text-muted-foreground text-xs">
+            Sem padrão — vale a paleta {THEME_PALETTE_LABELS.atual}.
+          </p>
+        ) : null}
+      </div>
       <div className="flex flex-col gap-2">
         <Label className="text-xs">Modo padrão</Label>
         <ModePicker value={mode} allowClear onPick={setMode} />

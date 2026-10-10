@@ -1,4 +1,8 @@
-// Versão: 1.9 | Data: 02/10/2026
+// Versão: 1.10 | Data: 10/10/2026
+// v1.10 (10/10/2026): BARRA DE LOCAL (location-bar.tsx): o botão de menu e o
+//   sino deixam de ser controles flutuantes fixos e vão para uma barra sticky de
+//   38px com as migalhas; some o recuo pl-12 do <main>. Barra aberta pelo botão
+//   ganha um X próprio (a barra lateral cobre a de local).
 // v1.9 (02/10/2026): `presenting` — o dashboard avisa que está no modo
 //   Apresentar e o controle flutuante do topo-direito (sino de tarefas) some.
 //   Antes ele só sumia no modo tela cheia, e aparecia sobre a capa do slide.
@@ -57,13 +61,15 @@ import {
   useTransition,
   type ReactNode,
 } from "react";
-import { MoreVertical, PanelLeftClose, PanelLeftOpen, Pin, PinOff, X } from "lucide-react";
+import { PanelLeftClose, PanelLeftOpen, Pin, PinOff, X } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { markAppSessionActive } from "@/lib/app-session";
 import { notifyOnError } from "@/lib/feedback/notify";
 import { saveUiPrefs } from "@/app/(app)/dashboards/actions";
 import { usePathname } from "next/navigation";
+import { LocationBar } from "./location-bar";
+import { LocationTitleProvider } from "./location-title-context";
 
 interface AppChrome {
   chromeHidden: boolean;
@@ -206,6 +212,7 @@ export function AppShell({
 
   return (
     <AppChromeContext.Provider value={chromeValue}>
+      <LocationTitleProvider>
       {preview ? (
         <main data-app-main className="h-screen overflow-hidden p-6" inert>{children}</main>
       ) : (
@@ -222,7 +229,7 @@ export function AppShell({
               }
             }}
             className={cn(
-              "bg-sidebar text-sidebar-foreground relative flex w-60 shrink-0 flex-col overflow-y-auto overscroll-contain border-r p-4 transition-transform duration-200",
+              "bg-sidebar text-sidebar-foreground ease-product relative flex w-60 shrink-0 flex-col overflow-y-auto overscroll-contain border-r p-4 transition-transform duration-200",
               !overlay && "sticky top-0 h-screen self-start",
               overlay &&
                 "fixed inset-y-0 left-0 z-40 shadow-lg " +
@@ -230,6 +237,22 @@ export function AppShell({
             )}
           >
             <div className="absolute top-2 right-2 flex flex-col items-end gap-0.5">
+              {/* v1.10 (10/10/2026): fechar a barra aberta pelo botão de menu.
+                  O botão de menu mora agora na barra de local, que a barra
+                  lateral cobre quando abre — sem este X o toque não fecha. */}
+              {overlay && openedByButton ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setOpenedByButton(false);
+                    setHovering(false);
+                  }}
+                  aria-label="Fechar menu de navegação"
+                  className="text-muted-foreground hover:text-foreground hover:bg-sidebar-accent rounded-md p-1.5 transition-colors"
+                >
+                  <X className="size-4" />
+                </button>
+              ) : null}
               {/* Acima do pin, como pedido: abrir (ou não) ao aproximar da
                   borda. Irrelevante com a barra fixada — some para não
                   oferecer um controle sem efeito. */}
@@ -290,58 +313,48 @@ export function AppShell({
           />
         ) : null}
 
-        {/* Botão de menu: única forma de abrir a barra desafixada por toque ou
-            teclado (a faixa de hover é aria-hidden e só reage a mouse). */}
-        {overlay ? (
-          <button
-            type="button"
-            id="sidebar-menu-button"
-            onClick={() => {
-              // Alterna pela VISIBILIDADE efetiva: se a barra já está à vista
-              // (hover ou botão), fecha; senão abre e mantém aberta.
-              if (sidebarVisible) {
-                setOpenedByButton(false);
-                setHovering(false);
-              } else {
-                setOpenedByButton(true);
-              }
-            }}
-            aria-label={
-              sidebarVisible ? "Fechar menu de navegação" : "Abrir menu de navegação"
-            }
-            aria-expanded={sidebarVisible}
+        {/* v1.10 (10/10/2026): o botão de menu e o sino saíram de `fixed` para
+            a BARRA DE LOCAL — uma coluna com a barra sticky em cima e o <main>
+            embaixo. A coluna não rola (quem rola é a janela), então o sticky
+            prende no topo da tela. */}
+        <div className="flex min-w-0 flex-1 flex-col">
+          {!chromeHidden && !presenting ? (
+            <LocationBar
+              showMenuButton={overlay}
+              menuOpen={sidebarVisible}
+              onToggleMenu={() => {
+                // Alterna pela VISIBILIDADE efetiva: se a barra já está à vista
+                // (hover ou botão), fecha; senão abre e mantém aberta.
+                if (sidebarVisible) {
+                  setOpenedByButton(false);
+                  setHovering(false);
+                } else {
+                  setOpenedByButton(true);
+                }
+              }}
+              right={topRight}
+            />
+          ) : null}
+
+          <main
+            // data-app-main: âncora da regra que consome --app-surface /
+            // --app-surface-text (globals.css). Sem as variáveis definidas, a
+            // janela segue no tema do sistema.
+            data-app-main
             className={cn(
-              "bg-background/80 text-muted-foreground hover:text-foreground hover:bg-accent focus-visible:ring-ring/50 fixed top-3 z-50 rounded-md border p-1 shadow-sm backdrop-blur transition-[left] duration-200 focus-visible:ring-[3px] focus-visible:outline-none",
-              sidebarVisible ? "left-[15.5rem]" : "left-3"
+              "flex-1 overflow-auto",
+              // v1.10: sem o ⋮ flutuante não há mais recuo à esquerda (pl-12);
+              // o topo é menor porque a barra de local já dá o respiro. No
+              // Apresentar a barra some e o topo volta ao de antes.
+              chromeHidden ? "p-0" : presenting ? "p-6" : "px-6 pt-3 pb-6"
             )}
           >
-            {sidebarVisible ? (
-              <X className="size-4" />
-            ) : (
-              <MoreVertical className="size-4" />
-            )}
-          </button>
-        ) : null}
-
-        {!chromeHidden && !presenting ? topRight : null}
-
-        <main
-          // data-app-main: âncora da regra que consome --app-surface /
-          // --app-surface-text (globals.css). Sem as variáveis definidas, a
-          // janela segue no tema do sistema.
-          data-app-main
-          className={cn(
-            "flex-1 overflow-auto",
-            // Em overlay o botão de menu (fixed, left-3, ~32px) divide o canto
-            // superior-esquerdo com o título da página: o recuo extra abre
-            // espaço para os dois sem sobreposição.
-            chromeHidden ? "p-0" : overlay ? "p-6 pl-12" : "p-6"
-          )}
-        >
-          {children}
-        </main>
+            {children}
+          </main>
+        </div>
       </div>
       )}
+      </LocationTitleProvider>
     </AppChromeContext.Provider>
   );
 }

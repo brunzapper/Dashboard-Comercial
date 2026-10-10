@@ -1,9 +1,12 @@
+// Versão: 1.0 | Data: 10/10/2026
+// v1.0 (10/10/2026): lista densa (colunas, cores de aba saneadas, grupo
+//   Fixados) e recorte por dono.
 // @vitest-environment jsdom
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { HubDisplayProvider, useHubDisplay, type HubDisplay } from "./hub-display-context";
 import { HubLayoutControls } from "./hub-layout-controls";
-import { BoardGrid, type DashboardRow } from "./hub-cards";
+import { BoardGrid, HubOwnerFilterChips, type DashboardRow } from "./hub-cards";
 import type { UiPrefKey } from "@/lib/config/ui-prefs";
 
 const { save, refresh, errorToast } = vi.hoisted(() => ({ save: vi.fn(), refresh: vi.fn(), errorToast: vi.fn() }));
@@ -57,7 +60,8 @@ describe("exibição imediata dos cards", () => {
     save.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
     const { container } = setup();
     fireEvent.click(screen.getByRole("button", { name: "Lista" }));
-    expect(container.querySelector("[data-hub-list]")).toBeInTheDocument();
+    // v1.1 (10/10/2026): a lista de boards é a LINHA DENSA.
+    expect(container.querySelector("[data-hub-dense]")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Descrição" }));
     expect(screen.getByText("Descrição nova")).toBeInTheDocument();
     fireEvent.change(screen.getByRole("combobox", { name: "Ordenar cards" }), { target: { value: "created_asc" } });
@@ -93,5 +97,42 @@ describe("exibição imediata dos cards", () => {
     fireEvent.click(screen.getByRole("button", { name: "Patch misto" }));
     await waitFor(() => expect(save).toHaveBeenCalledWith({ hubColumns: 4 }));
     expect(screen.getByTestId("state")).toHaveTextContent('"layout":"grid"');
+  });
+});
+
+describe("lista densa (v1.1, 10/10/2026)", () => {
+  const dense: DashboardRow[] = [
+    { id: "a", name: "Comercial", description: null, owner_user_id: "me", owner_name: "Paula Costa",
+      visible_to_roles: [], kind: "dashboard", status: "active", trashed_at: null, widget_count: 18,
+      settings: { tabs: [{ id: "t1", color: "#ff0000" }, { id: "t2", color: "javascript:x" }, { id: "t3" }] } },
+    { id: "b", name: "Metas", description: null, owner_user_id: "other", visible_to_roles: ["gestor"],
+      kind: "dashboard", status: "active", trashed_at: null, widget_count: 1, settings: null },
+  ];
+  function setupDense(pins: string[] = []) {
+    return render(<HubDisplayProvider initial={{ ...initial, layout: "list" }} keys={keys} locked={[]}>
+      <HubOwnerFilterChips />
+      <BoardGrid rows={dense} canCreate={false} isAdmin={false} pins={pins} userId="me" />
+    </HubDisplayProvider>);
+  }
+  it("cada linha mostra abas, widgets, dono e só as cores hex das abas", () => {
+    const { container } = setupDense();
+    const first = container.querySelectorAll("[data-hub-row]")[0];
+    expect(first.textContent).toContain("3 abas");
+    expect(first.textContent).toContain("18 widgets");
+    expect(first.textContent).toContain("PC");
+    expect(first.querySelectorAll("i[style]")).toHaveLength(1);
+    expect(container.querySelectorAll("[data-hub-row]")[1].textContent).toContain("1 aba");
+  });
+  it("fixados vão para o grupo do topo", () => {
+    setupDense(["b"]);
+    expect(screen.getByText("Fixados")).toBeInTheDocument();
+    expect(screen.getAllByRole("link").map((l) => l.textContent)).toEqual(["Metas", "Comercial"]);
+  });
+  it("recorte Meus / Compartilhados", () => {
+    setupDense();
+    fireEvent.click(screen.getByRole("button", { name: "Meus" }));
+    expect(screen.getAllByRole("link").map((l) => l.textContent)).toEqual(["Comercial"]);
+    fireEvent.click(screen.getByRole("button", { name: "Compartilhados" }));
+    expect(screen.getAllByRole("link").map((l) => l.textContent)).toEqual(["Metas"]);
   });
 });

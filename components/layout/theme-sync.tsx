@@ -1,4 +1,6 @@
-// Versão: 1.1 | Data: 12/09/2026
+// Versão: 1.2 | Data: 10/10/2026
+// v1.2 (10/10/2026): reconcilia também a PALETA (cookie theme_palette +
+//   atributo data-palette).
 // v1.1 (12/09/2026): reconcilia também os TOKENS DE TEMA (0141). O cookie
 //   theme_tokens é comparado como TEXTO com o JSON dos efetivos — é o mesmo
 //   texto que a action grava, então a comparação é estável. O script aplica as
@@ -18,6 +20,7 @@ import { cookies } from "next/headers";
 import {
   ACCENT_COOKIE,
   DEFAULT_ACCENT,
+  PALETTE_COOKIE,
   THEME_COOKIE,
   TOKENS_COOKIE,
   hasThemeTokens,
@@ -33,7 +36,8 @@ const syncScript = (
   accent: string,
   tokensCookie: string | null,
   light: Record<string, string>,
-  dark: Record<string, string>
+  dark: Record<string, string>,
+  palette: string
 ) => `(function(){
   var m = ${JSON.stringify(mode)};
   var a = ${JSON.stringify(accent)};
@@ -43,6 +47,9 @@ const syncScript = (
   var isDark = m === 'dark' || (m === 'system' && mq.matches);
   var el = document.documentElement;
   el.classList.toggle('dark', isDark);
+  if (${JSON.stringify(palette)} === 'nova') el.setAttribute('data-palette', 'nova');
+  else el.removeAttribute('data-palette');
+  document.cookie = ${JSON.stringify(PALETTE_COOKIE)} + '=' + ${JSON.stringify(palette)} + '; path=/; max-age=${YEAR}; samesite=lax';
   if (a === ${JSON.stringify(DEFAULT_ACCENT)}) el.style.removeProperty('--brand-base');
   else el.style.setProperty('--brand-base', a);
   var on = isDark ? vars.dark : vars.light;
@@ -70,11 +77,13 @@ export async function ThemeSync({
   const cookieMode = store.get(THEME_COOKIE)?.value ?? null;
   const cookieAccent = store.get(ACCENT_COOKIE)?.value ?? null;
   const cookieTokens = store.get(TOKENS_COOKIE)?.value ?? null;
+  const cookiePalette = store.get(PALETTE_COOKIE)?.value ?? null;
   const wanted = hasThemeTokens(tokens) ? JSON.stringify(tokens) : null;
   if (
     cookieMode === resolved.mode &&
     cookieAccent === resolved.accent &&
-    cookieTokens === wanted
+    cookieTokens === wanted &&
+    cookiePalette === resolved.palette
   ) {
     return null;
   }
@@ -86,7 +95,8 @@ export async function ThemeSync({
           resolved.accent,
           wanted,
           themeTokenStyle(tokens.light),
-          themeTokenStyle(tokens.dark)
+          themeTokenStyle(tokens.dark),
+          resolved.palette
         ),
       }}
     />
