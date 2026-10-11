@@ -1,4 +1,7 @@
-// Versão: 1.0 | Data: 09/09/2026
+// Versão: 1.1 | Data: 11/10/2026
+// v1.1 (11/10/2026): a entidade dona é `BitrixEntity` (lead, negócio OU
+//   processo inteligente `dynamic_<id>`, 0155). OWNER_TYPE_ID saiu daqui para
+//   o dono único `ownerTypeIdOf` (lib/sync/bitrix/entities.ts).
 // QUEM ESPELHA NO BITRIX — a resolução dos três níveis, pura.
 //
 // A configuração é em cascata, do mais geral para o mais específico, e cada
@@ -20,8 +23,10 @@
 // Módulo PURO: o formulário é client e precisa mostrar a caixa já no estado
 // certo antes de qualquer ida ao servidor. Quem lê o banco é o enfileirador.
 
-/** A entidade do CRM onde a atividade fica pendurada. */
-export type MirrorOwnerEntity = "deal" | "lead";
+import type { BitrixEntity } from "@/lib/sync/bitrix/entities";
+
+/** A entidade do CRM onde a atividade fica pendurada (v1.1: + processos inteligentes). */
+export type MirrorOwnerEntity = BitrixEntity;
 
 /**
  * A escolha de um nível que pode HERDAR. "herdar" não é o mesmo que "nunca":
@@ -103,12 +108,6 @@ export function resolveMirror(input: MirrorInput): MirrorDecision {
     ownerSourceId: input.sourceId,
   };
 }
-
-/** OWNER_TYPE_ID do Bitrix — os códigos do CRM. Lead = 1, Deal = 2. */
-export const BITRIX_OWNER_TYPE_ID: Record<MirrorOwnerEntity, number> = {
-  lead: 1,
-  deal: 2,
-};
 
 export function parseMirrorChoice(raw: unknown): MirrorChoice {
   return raw === "sempre" || raw === "nunca" ? raw : "herdar";

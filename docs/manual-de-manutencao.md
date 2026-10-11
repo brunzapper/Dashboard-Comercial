@@ -1,4 +1,7 @@
-<!-- Versão: 1.47 | Data: 01/10/2026 -->
+<!-- Versão: 1.48 | Data: 11/10/2026 -->
+<!-- v1.48 (11/10/2026): §4.6 — Processos Inteligentes do Bitrix (0155):
+     triagem "Novas bases de Sync", carga inicial, write-back e atividades;
+     ligar as atividades dos LEADS (runbook enable-lead-activities.sql). -->
 <!-- v1.47 (01/10/2026): §4.18 — Apresentar v2 (menu ⋮, preparação dos
      slides) e preset de metas v2 (reaplicar para o novo layout). -->
 <!-- v1.46 (01/10/2026): §4.18 — preset de metas (seções de dados),
@@ -566,6 +569,28 @@ npm run build      # o que a Vercel roda no deploy
   seletores" = olho desligado na aba **Núcleo** do /campos (a linha core
   oculta remove o campo de todos os dropdowns; religue o olho). "Options do
   pipeline erradas" = conferir `crm.dealcategory.list` e rodar um sync.
+- [ ] **Processos Inteligentes (0155).** Funil criado no Bitrix como Processo
+  Inteligente entra pela triagem: Registros → **Novas bases de Sync** (admin)
+  → "Avaliar" (amostra ao vivo, nada gravado) → "Solicitar como Base" →
+  ajustar campos/rótulos/período/fuso/espelho/funis → "Aprovar e importar".
+  A aprovação cria a Base e um job só dela; se outro job estiver rodando, a
+  carga completa entra no próximo (enquanto `bitrix_spa_loaded_at` for NULL a
+  fase lê o processo inteiro). Para RELER um processo inteiro depois (ex.:
+  campo novo incluído), zere a coluna:
+  `update data_sources set bitrix_spa_loaded_at = null where key = '<chave>';`
+  e rode um Reconciliar. Incluir/renomear campos de uma Base JÁ aprovada é
+  editar `bitrix_spa_config` (mesmo formato do rascunho: `{v:1, fields:[{id,
+  key, label}], categoryIds:[]}`) — o próximo job cataloga. **Webhook**: o
+  usuário do `BITRIX_WEBHOOK_URL` precisa de acesso ao CRM dos processos
+  (`crm.type.list`/`crm.item.*`); sem isso a triagem mostra o erro do portal.
+  Nunca grave `source_id` de item SPA sem o prefixo `<tipo>:` — colidiria com
+  lead/negócio de mesmo número (invariante 47).
+- [ ] **Atividades dos LEADS.** O código já cobre leads; o que liga é a Base:
+  Registros → Bases → Leads → "Espelhar tarefas no Bitrix" = "Como atividade
+  do lead" (ou `supabase/apply/enable-lead-activities.sql`). A descoberta
+  percebe o tipo novo e recomeça a varredura (pendentes de qualquer idade +
+  concluídas de 90 dias, somente leitura) — acompanhe em
+  `sync_config.bitrix_activity_discovery`.
 
 ### 4.7 Dias não úteis, métricas de meta e presets (20/07/2026)
 

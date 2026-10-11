@@ -1,4 +1,10 @@
-// Versão: 1.3 | Data: 08/09/2026
+// Versão: 1.4 | Data: 11/10/2026
+// v1.4 (11/10/2026): etapas dos PROCESSOS INTELIGENTES (0155) — o
+//   crm.status.list já devolvia `DYNAMIC_<tipo>_STAGE_<funil>` e o preload as
+//   DESCARTAVA. Passam a ser guardadas (`spaStages`, código → nome; o código
+//   "DT<tipo>_<funil>:<ETAPA>" é único no portal) com a SEMÂNTICA (S/F) —
+//   que dá `stage_semantic`/`closed` ao item, já que o crm.item não as traz.
+//   Entram no serializeContext; o write-back de `stageId` usa spaStageCodes.
 // v1.3 (08/09/2026): statusNames(entity)/statusCodes() — a lista de RÓTULOS de
 //   uma família de crm_status (para as options do catálogo) e o mapa
 //   rótulo→código das três famílias (para o caminho de ESCRITA: SOURCE_ID e
@@ -21,6 +27,7 @@ interface StatusRow {
   STATUS_ID: string;
   NAME: string;
   ENTITY_ID: string;
+  SEMANTICS?: string | null;
 }
 interface CategoryRow {
   ID: string;
@@ -68,6 +75,10 @@ export interface SerializedLookups {
   categories: Record<string, string>;
   dealEnums: Record<string, Record<string, string>>;
   leadEnums: Record<string, Record<string, string>>;
+  // v1.4: etapas de processos inteligentes (código → nome / semântica S|F).
+  // Opcionais: job serializado antes da 0155 não tem.
+  spaStages?: Record<string, string>;
+  spaStageSemantics?: Record<string, string>;
 }
 
 function mapToObj(m: Map<string, string>): Record<string, string> {
@@ -113,6 +124,8 @@ export class BitrixLookups {
   // evita a colisão de código (ex.: "NEW") entre status de lead e etapa de deal.
   private leadStatuses = new Map<string, string>();
   private dealStages = new Map<string, string>();
+  private spaStages = new Map<string, string>();
+  private spaStageSemantics = new Map<string, string>();
   private sources = new Map<string, string>();
   private categories = new Map<string, string>();
   private dealEnums = new Map<string, Map<string, string>>();
@@ -140,6 +153,10 @@ export class BitrixLookups {
       if (s.ENTITY_ID?.startsWith("DEAL_STAGE")) this.dealStages.set(key, s.NAME);
       else if (s.ENTITY_ID === "STATUS") this.leadStatuses.set(key, s.NAME);
       else if (s.ENTITY_ID === "SOURCE") this.sources.set(key, s.NAME);
+      else if (s.ENTITY_ID?.startsWith("DYNAMIC_")) {
+        this.spaStages.set(key, s.NAME);
+        if (s.SEMANTICS) this.spaStageSemantics.set(key, String(s.SEMANTICS));
+      }
     }
 
     this.categories.set("0", "Vendas"); // default (pode não vir na lista)
@@ -176,6 +193,8 @@ export class BitrixLookups {
       categories: mapToObj(this.categories),
       dealEnums: enumMapToObj(this.dealEnums),
       leadEnums: enumMapToObj(this.leadEnums),
+      spaStages: mapToObj(this.spaStages),
+      spaStageSemantics: mapToObj(this.spaStageSemantics),
     };
   }
 
@@ -205,6 +224,8 @@ export class BitrixLookups {
     l.categories = new Map(Object.entries(ctx.categories ?? {}));
     l.dealEnums = objToEnumMap(ctx.dealEnums ?? {});
     l.leadEnums = objToEnumMap(ctx.leadEnums ?? {});
+    l.spaStages = new Map(Object.entries(ctx.spaStages ?? {}));
+    l.spaStageSemantics = new Map(Object.entries(ctx.spaStageSemantics ?? {}));
     l.loaded = true;
     return l;
   }
@@ -241,6 +262,42 @@ export class BitrixLookups {
     const key = String(statusId);
     const map = entity === "deal" ? this.dealStages : this.leadStatuses;
     return map.get(key) ?? key;
+  }
+
+  /** v1.4: nome da etapa de um item de processo inteligente (código cru se desconhecido). */
+  spaStageName(stageId: string | null | undefined): string | null {
+    if (stageId == null || stageId === "") return null;
+    const key = String(stageId);
+    return this.spaStages.get(key) ?? key;
+  }
+
+  /** v1.4: semântica da etapa SPA — "S" ganho, "F" perda, null em andamento. */
+  spaStageSemantic(stageId: string | null | undefined): string | null {
+    if (stageId == null || stageId === "") return null;
+    return this.spaStageSemantics.get(String(stageId)) ?? null;
+  }
+
+  /**
+   * v1.4: RÓTULO → CÓDIGO das etapas de UM processo (write-back de `stageId`).
+   * Por processo porque rótulos se repetem entre processos ("Novo").
+   */
+  spaStageCodes(entityTypeId: number): Record<string, string> {
+    const prefix = `DT${entityTypeId}_`;
+    const out: Record<string, string> = {};
+    for (const [code, name] of this.spaStages) {
+      if (code.startsWith(prefix) && !(name in out)) out[name] = code;
+    }
+    return out;
+  }
+
+  /** v1.4: nomes das etapas de UM processo (prefixo `DT<tipo>_`), deduplicados. */
+  spaStageNames(entityTypeId: number): string[] {
+    const prefix = `DT${entityTypeId}_`;
+    const out: string[] = [];
+    for (const [code, name] of this.spaStages) {
+      if (code.startsWith(prefix)) out.push(name);
+    }
+    return [...new Set(out)];
   }
 
   // SOURCE_ID → nome da origem ("Fonte"). Fallback no código cru, como statusName.

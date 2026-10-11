@@ -1,4 +1,9 @@
-// Versão: 1.7 | Data: 08/09/2026
+// Versão: 1.8 | Data: 11/10/2026
+// v1.8 (11/10/2026): o upsert preservador de toggles foi EXTRAÍDO para
+//   `upsertCatalogRows` (mesmo comportamento) — os campos dos PROCESSOS
+//   INTELIGENTES (0155, lib/sync/bitrix/spa.ts) gravam pelo MESMO caminho, com
+//   a org da Base explícita, em vez de uma segunda cópia da regra de preservar
+//   olho/papéis/fórmula/moeda do admin.
 // v1.7 (08/09/2026): duas materializações a mais, no mesmo bloco best-effort
 //   das options do `pipeline` (só options; rótulo/olho/ordem do admin
 //   intactos):
@@ -163,7 +168,7 @@ export function buildCustomMapping(
   return Array.from(byId.values());
 }
 
-interface CatalogRow {
+export interface CatalogRow {
   field_key: string;
   label: string;
   data_type: string;
@@ -171,6 +176,8 @@ interface CatalogRow {
   source_system: "bitrix";
   source_field_id: string;
   show_in_builder: boolean; // usado só no INSERT
+  // v1.8: write_back padrão de um campo NOVO (existente preserva o do admin).
+  write_back?: boolean;
   applies_to: string[]; // record_type(s) a que a coluna pertence
 }
 
@@ -252,16 +259,32 @@ export async function syncFieldCatalog(
   }
   const rows = Array.from(byKey.values());
   if (rows.length === 0) return;
+  await upsertCatalogRows(db, rows);
+  await refreshCatalogExtras(db, lookups);
+}
 
+/**
+ * Upsert de linhas do catálogo PRESERVANDO os toggles do admin nos existentes
+ * (v1.8: extraído de syncFieldCatalog). `orgId` presente ⇒ lê e grava naquela
+ * org (Base SPA); ausente ⇒ o comportamento histórico (default da coluna).
+ */
+export async function upsertCatalogRows(
+  db: SupabaseClient,
+  rows: CatalogRow[],
+  orgId?: string | null
+): Promise<void> {
+  if (rows.length === 0) return;
   const keys = rows.map((r) => r.field_key);
   // Lê os toggles do admin dos campos já existentes para PRESERVÁ-LOS no upsert
   // (show_in_builder/visible_to_roles/editable_by_roles/is_local/formula/sort_order).
-  const { data: existing } = await db
+  let existingQuery = db
     .from("field_definitions")
     .select(
       "field_key, show_in_builder, visible_to_roles, editable_by_roles, is_local, formula, sort_order, write_back, currency_mode, currency_code, show_as_percent"
     )
     .in("field_key", keys);
+  if (orgId) existingQuery = existingQuery.eq("organization_id", orgId);
+  const { data: existing } = await existingQuery;
   const existingByKey = new Map(
     (existing ?? []).map((r) => [r.field_key as string, r])
   );
@@ -285,6 +308,7 @@ export async function syncFieldCatalog(
         }
       | undefined;
     return {
+      ...(orgId ? { organization_id: orgId } : {}),
       field_key: r.field_key,
       label: cleanText(r.label),
       data_type: r.data_type,
@@ -298,7 +322,7 @@ export async function syncFieldCatalog(
       is_local: ex ? ex.is_local ?? false : false,
       formula: ex ? ex.formula ?? null : null,
       sort_order: ex ? ex.sort_order ?? 0 : 0,
-      write_back: ex ? ex.write_back ?? false : false,
+      write_back: ex ? ex.write_back ?? false : (r.write_back ?? false),
       // Moeda: campo money novo nasce herdando a moeda do registro; nos
       // existentes preserva a configuração do admin (inherit/fixed).
       currency_mode: ex
@@ -344,6 +368,13 @@ export async function syncFieldCatalog(
       );
     }
   }
+}
+
+/** Options vivas das colunas core + cache de códigos (parte final do sync do catálogo). */
+async function refreshCatalogExtras(
+  db: SupabaseClient,
+  lookups: BitrixLookups
+): Promise<void> {
 
   // Coluna núcleo `pipeline` virada 'selecao' no /campos (linha core da 0086):
   // options sempre frescas com os funis vivos (crm.dealcategory.list), como o

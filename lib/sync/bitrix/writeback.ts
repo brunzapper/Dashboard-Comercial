@@ -1,4 +1,10 @@
-// Versão: 1.1 | Data: 08/09/2026
+// Versão: 1.2 | Data: 11/10/2026
+// v1.2 (11/10/2026): PROCESSOS INTELIGENTES (0155) — entidade `dynamic_<id>`
+//   grava por `crm.item.update {entityTypeId, id, fields}` com o schema de
+//   `crm.item.fields` (camelCase). O `source_id` do registro SPA leva o prefixo
+//   do tipo e o `source_field_id` do campo também ("<tipo>:<campo>"); os dois
+//   são traduzidos aqui, na fronteira. `stageId` vira código pela família
+//   `spaStages` (rótulo→código do PRÓPRIO processo).
 // v1.1 (08/09/2026): toBitrixValue passa a converter o tipo `crm_status`
 //   (SOURCE_ID, STATUS_ID) de RÓTULO para CÓDIGO. Antes esses campos caíam no
 //   `default:` e viajavam como texto — o Bitrix espera "UC_EN7PZM", não
@@ -21,12 +27,16 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { BitrixClient } from "./client";
+import { nativeIdOf, parseBitrixEntity, spaTypeIdOf, type BitrixEntity } from "./entities";
 import { BitrixLookups, type BitrixFieldMeta } from "./lookups";
+import { loadSpaSchema } from "./spa";
+import { spaFieldIdFromSource } from "./spa-config";
 
 const BATCH = 25;
 const MAX_ATTEMPTS = 5;
 
-export type WriteBackEntity = "deal" | "lead";
+// v1.2: + processo inteligente (`dynamic_<id>`).
+export type WriteBackEntity = BitrixEntity;
 
 export interface WriteBackChange {
   fieldKey: string;
@@ -88,6 +98,8 @@ export interface BitrixStatusCodes {
   sources?: Record<string, string>;
   leadStatuses?: Record<string, string>;
   dealStages?: Record<string, string>;
+  /** v1.2: etapas do processo inteligente da linha (rótulo → código). */
+  spaStages?: Record<string, string>;
 }
 
 /** Família de `crm_status` a que um fieldId pertence. O schema do Bitrix diz o
@@ -98,6 +110,7 @@ function statusFamilyOf(
   if (fieldId === "SOURCE_ID") return "sources";
   if (fieldId === "STATUS_ID") return "leadStatuses";
   if (fieldId === "STAGE_ID") return "dealStages";
+  if (fieldId === "stageId") return "spaStages"; // v1.2 (crm.item)
   return null;
 }
 
@@ -189,9 +202,21 @@ export async function drainWritebackQueue(
   const lookups = new BitrixLookups(client, db);
   await lookups.preload();
   const statusCodes = lookups.statusCodes(); // v1.1 (08/09/2026)
-  const metaByEntity: Record<WriteBackEntity, Map<string, BitrixFieldMeta>> = {
+  const metaByEntity: Record<"deal" | "lead", Map<string, BitrixFieldMeta>> = {
     deal: new Map(lookups.dealFieldMetas().map((m) => [m.fieldId, m])),
     lead: new Map(lookups.leadFieldMetas().map((m) => [m.fieldId, m])),
+  };
+
+  // v1.2: schema dos processos inteligentes, um crm.item.fields por tipo.
+  const spaMetas = new Map<number, Map<string, BitrixFieldMeta>>();
+  const spaMetasOf = async (typeId: number) => {
+    let m = spaMetas.get(typeId);
+    if (!m) {
+      const schema = await loadSpaSchema(client, typeId);
+      m = new Map(schema.fields.map((f) => [f.fieldId, f]));
+      spaMetas.set(typeId, m);
+    }
+    return m;
   };
 
   let done = 0;
@@ -202,20 +227,45 @@ export async function drainWritebackQueue(
     if (Date.now() >= deadline) break;
 
     try {
-      const meta = metaByEntity[row.entity].get(row.source_field_id);
-      if (!meta) {
-        throw new WriteBackFatal(
-          `Campo ${row.source_field_id} não existe no schema de ${row.entity} do Bitrix.`
-        );
+      const entity = parseBitrixEntity(row.entity);
+      if (!entity) throw new WriteBackFatal(`Entidade ${row.entity} desconhecida.`);
+      const spaType = spaTypeIdOf(entity);
+      if (spaType != null) {
+        // v1.2: processo inteligente.
+        const fieldId = spaFieldIdFromSource(row.source_field_id);
+        const meta = (await spaMetasOf(spaType)).get(fieldId);
+        if (!meta) {
+          throw new WriteBackFatal(
+            `Campo ${fieldId} não existe no processo ${spaType} do Bitrix.`
+          );
+        }
+        const nativeId = nativeIdOf(entity, row.source_id);
+        if (!nativeId) throw new WriteBackFatal("Vínculo do registro inválido.");
+        const bitrixValue = toBitrixValue(meta, row.new_value, {
+          ...statusCodes,
+          spaStages: lookups.spaStageCodes(spaType),
+        });
+        await client.call("crm.item.update", {
+          entityTypeId: spaType,
+          id: nativeId,
+          fields: { [fieldId]: bitrixValue },
+        });
+      } else {
+        const meta = metaByEntity[entity as "deal" | "lead"].get(row.source_field_id);
+        if (!meta) {
+          throw new WriteBackFatal(
+            `Campo ${row.source_field_id} não existe no schema de ${row.entity} do Bitrix.`
+          );
+        }
+        // v1.1 (08/09/2026): o drain já deu preload nos lookups — passa o mapa
+        // rótulo→código para SOURCE_ID/STATUS_ID/STAGE_ID chegarem certos.
+        const bitrixValue = toBitrixValue(meta, row.new_value, statusCodes);
+        const method = entity === "deal" ? "crm.deal.update" : "crm.lead.update";
+        await client.call(method, {
+          id: row.source_id,
+          fields: { [row.source_field_id]: bitrixValue },
+        });
       }
-      // v1.1 (08/09/2026): o drain já deu preload nos lookups — passa o mapa
-      // rótulo→código para SOURCE_ID/STATUS_ID/STAGE_ID chegarem certos.
-      const bitrixValue = toBitrixValue(meta, row.new_value, statusCodes);
-      const method = row.entity === "deal" ? "crm.deal.update" : "crm.lead.update";
-      await client.call(method, {
-        id: row.source_id,
-        fields: { [row.source_field_id]: bitrixValue },
-      });
       await db
         .from("bitrix_writeback_queue")
         .update({ status: "done", processed_at: now(), last_error: null })

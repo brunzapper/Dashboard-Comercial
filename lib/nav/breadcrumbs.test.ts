@@ -1,4 +1,5 @@
-// Versão: 1.0 | Data: 10/10/2026
+// Versão: 1.1 | Data: 11/10/2026
+// v1.1 (11/10/2026): triagem de novas Bases de Sync sob Registros › Bases.
 // v1.0 (10/10/2026): migalhas da barra de local — rótulos de topo fixos, nome
 //   do objeto só pelo `leaf`, último nível sem link, nunca um id na tela.
 import { describe, expect, it } from "vitest";
@@ -57,5 +58,13 @@ describe("breadcrumbsFor", () => {
 
   it("rota desconhecida sem nome ⇒ sem migalha", () => {
     expect(breadcrumbsFor("/escolher-organizacao")).toEqual([]);
+  });
+
+  it("triagem de novas Bases de Sync fica sob Registros › Bases", () => {
+    expect(breadcrumbsFor("/registros/bases/sync")).toEqual([
+      { label: "Registros", href: "/registros" },
+      { label: "Bases", href: "/registros/bases" },
+      { label: "Novas bases de Sync", href: null },
+    ]);
   });
 });

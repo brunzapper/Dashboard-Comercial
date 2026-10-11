@@ -1064,6 +1064,33 @@ This version has breaking changes — APIs, conventions, and file structure may 
   dias → incremental por `LAST_UPDATED`), no tick antes da leitura de volta;
   o cursor só anda pelo que foi PROCESSADO. Ver `docs/arquitetura.md` §4.24 e
   invariante 38.
+- **Processo Inteligente do Bitrix vira Base SÓ pela TRIAGEM, e a identidade
+  do item é PREFIXADA (0155, 11/10/2026):** funis criados como Processo
+  Inteligente (`crm.item.*`, um `entityTypeId` por processo) entram por
+  Registros → **Novas bases de Sync** (`/registros/bases/sync`, admin):
+  descobrir pelo nome → amostra ao vivo pelo MESMO `mapSpaItem` do sync
+  (`buildSpaPreview`, nada gravado) → solicitar (`sync_source_requests`) →
+  ajustar → aprovar (a action re-valida o rascunho GRAVADO por
+  `parseSpaRequestConfig`/`requestConfigError` — o mesmo parse da tela — e cria
+  a `data_sources` com `bitrix_entity_type_id` + `bitrix_spa_config`). O ID do
+  item recomeça em cada processo e `uq_records_source` não distingue
+  `record_type`, então `records.source_id` de item SPA é `"<tipo>:<id>"`; o ID
+  cru só existe na fronteira. O vocabulário de entidade (`lead | deal |
+  dynamic_<id>`: OWNER_TYPE_ID, ID nativo, caminho do cartão, ENTITY_TYPE da
+  timeline) tem dono ÚNICO em `lib/sync/bitrix/entities.ts` — nunca monte
+  `OWNER_TYPE_ID: 2`/`crm.deal.update` à mão, e o write-back resolve a
+  entidade por `resolveRecordEntity(ies)` (`record-entity.ts`), nunca por
+  ternário de `record_type`. Fase `crm.item.list` por Base aprovada
+  (`>=updatedTime`; `bitrix_spa_loaded_at` nulo = carga INTEIRA, carimbada ao
+  fim do job); campos com chave prefixada pela Base e `source_field_id
+  "<tipo>:<campo>"`, gravados pelo upsert preservador ÚNICO
+  (`upsertCatalogRows`, org explícita); write-back por `crm.item.update` com a
+  etapa pelo código do PRÓPRIO processo (`spaStageCodes`). A descoberta de
+  atividades guarda os TIPOS de dono (`typeIds`) e recomeça ao ganhar um (é o
+  que traz as pendentes antigas dos LEADS ao ligar a Base deles — runbook
+  `supabase/apply/enable-lead-activities.sql`). Criar item SPA a partir do app
+  fica fora. RPCs de widget INTOCADAS. Ver `docs/arquitetura.md` §4.5 e
+  invariante 47.
 - **Filtro "Tem tarefa" se resolve no ENGINE, nunca no RPC (0153,
   10/10/2026):** pseudo-campo `task:<estado>[+<estado>]` (pendentes/
   atrasadas/concluidas — VÁRIOS em OU desde 11/10/2026; legado `todas` =

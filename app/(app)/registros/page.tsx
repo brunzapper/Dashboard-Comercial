@@ -1,4 +1,6 @@
-// Versão: 2.2 | Data: 10/10/2026
+// Versão: 2.3 | Data: 11/10/2026
+// v2.3 (11/10/2026): botão "Novas bases de Sync" (admin com a área Bases) —
+//   triagem dos processos inteligentes do Bitrix antes de virarem Base (0155).
 // v2.2 (10/10/2026): sem o pr-8 do cabeçalho: o sino saiu do canto fixo para a
 //   barra de local.
 // v2.1 (10/10/2026): filtro "Tem tarefa" (`tarefa`/`t_atras`/`t_frente`) —
@@ -515,6 +517,11 @@ export default async function RegistrosPage({
           {canSeeBases ? (
             <Button asChild variant="outline">
               <Link href="/registros/bases">Bases</Link>
+            </Button>
+          ) : null}
+          {canSeeBases && isAdmin ? (
+            <Button asChild variant="outline">
+              <Link href="/registros/bases/sync">Novas bases de Sync</Link>
             </Button>
           ) : null}
           {canSeeManualBase ? (

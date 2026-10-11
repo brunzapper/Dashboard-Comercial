@@ -1,4 +1,11 @@
-// Versão: 1.0 | Data: 11/10/2026
+// Versão: 1.1 | Data: 11/10/2026
+// v1.1 (11/10/2026): entidades de PROCESSO INTELIGENTE (`dynamic_<id>`, 0155)
+//   entram pelos mesmos helpers de ./entities (OWNER_TYPE_ID e o `source_id`
+//   prefixado do item SPA). E o cursor passou a lembrar QUAIS tipos de dono ele
+//   já varreu (`typeIds`): Base que liga o espelho DEPOIS (o lead, um processo
+//   recém-aprovado) reinicia a varredura da fase 1 — sem isso o cursor já
+//   estaria no incremental e as pendentes antigas dela nunca entrariam.
+//   Reprocessar os tipos antigos é idempotente (a tarefa conhecida só concilia).
 // v1.0 (11/10/2026): DESCOBERTA das atividades do Bitrix em TODOS os registros.
 //
 // Por que existe. A conciliação por dono (`activity-inbound.ts`) só lê quem JÁ
@@ -30,10 +37,7 @@
 // derruba o tick, e o cursor só avança pelo que foi processado.
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-import {
-  BITRIX_OWNER_TYPE_ID,
-  type MirrorOwnerEntity,
-} from "@/lib/tasks/mirror-config";
+import type { MirrorOwnerEntity } from "@/lib/tasks/mirror-config";
 
 import {
   ACTIVITY_SELECT,
@@ -44,6 +48,7 @@ import {
   type BitrixActivity,
 } from "./activity-inbound";
 import { BitrixClient } from "./client";
+import { ownerTypeIdOf, parseBitrixEntity, sourceIdOf } from "./entities";
 import type { BitrixCallable } from "./task-mirror";
 
 export const DISCOVERY_CONFIG_KEY = "bitrix_activity_discovery";
@@ -61,6 +66,29 @@ export interface DiscoveryState {
   startedAt?: string;
   /** Fase 3: maior LAST_UPDATED já processado (filtro `>=`, inclusivo). */
   since?: string;
+  /** v1.1: OWNER_TYPE_IDs que esta varredura cobre (ausente = legado). */
+  typeIds?: number[];
+}
+
+/**
+ * v1.1: o cursor serve para os tipos de dono atuais? Tipo NOVO ⇒ recomeça a
+ * fase 1 (PURO — o teste pina). Estado legado sem `typeIds` cobria negócio e
+ * lead que estivessem ligados; recomeçar uma vez é seguro e idempotente.
+ */
+export function reconcileDiscoveryTypes(
+  state: DiscoveryState,
+  typeIds: number[],
+  nowIso: string
+): DiscoveryState {
+  const covered = new Set(state.typeIds ?? []);
+  const sorted = [...new Set(typeIds)].sort((a, b) => a - b);
+  if (state.typeIds && sorted.every((t) => covered.has(t))) {
+    return { ...state, typeIds: sorted };
+  }
+  if (!state.typeIds && !state.startedAt) {
+    return { ...state, typeIds: sorted };
+  }
+  return { phase: "pending", startedAt: nowIso, typeIds: sorted };
 }
 
 export interface DiscoveryResult {
@@ -77,11 +105,15 @@ export function parseDiscoveryState(raw: unknown): DiscoveryState {
   const phase =
     o.phase === "done" || o.phase === "incremental" ? o.phase : "pending";
   const str = (v: unknown) => (typeof v === "string" && v ? v : undefined);
+  const typeIds = Array.isArray(o.typeIds)
+    ? o.typeIds.map(Number).filter((n) => Number.isInteger(n) && n > 0)
+    : undefined;
   return {
     phase,
     lastId: str(o.lastId),
     startedAt: str(o.startedAt),
     since: str(o.since),
+    ...(typeIds ? { typeIds } : {}),
   };
 }
 
@@ -146,13 +178,14 @@ export async function discoverBitrixActivities(
   const typesByEntity = new Map<MirrorOwnerEntity, string[]>();
   let orgId: string | null = null;
   for (const s of sources ?? []) {
-    const e = s.bitrix_activity_owner as MirrorOwnerEntity;
+    const e = parseBitrixEntity(s.bitrix_activity_owner);
+    if (!e) continue;
     typesByEntity.set(e, [...(typesByEntity.get(e) ?? []), s.record_type as string]);
     orgId = orgId ?? ((s.organization_id as string | null) ?? null);
   }
   if (typesByEntity.size === 0 || !orgId) return null;
   const entityByTypeId = new Map<number, MirrorOwnerEntity>(
-    [...typesByEntity.keys()].map((e) => [BITRIX_OWNER_TYPE_ID[e], e])
+    [...typesByEntity.keys()].map((e) => [ownerTypeIdOf(e), e])
   );
 
   const { data: cfg } = await db
@@ -161,8 +194,13 @@ export async function discoverBitrixActivities(
     .eq("key", DISCOVERY_CONFIG_KEY)
     .eq("organization_id", orgId)
     .maybeSingle();
-  let state = parseDiscoveryState(cfg?.value);
-  if (!state.startedAt) state = { ...state, startedAt: new Date().toISOString() };
+  const nowIso = new Date().toISOString();
+  let state = reconcileDiscoveryTypes(
+    parseDiscoveryState(cfg?.value),
+    [...entityByTypeId.keys()],
+    nowIso
+  );
+  if (!state.startedAt) state = { ...state, startedAt: nowIso };
 
   const api: BitrixCallable = client ?? new BitrixClient();
   const res: DiscoveryResult = {
@@ -209,8 +247,13 @@ export async function discoverBitrixActivities(
       // Fim da fase: pendentes → concluídas recentes → incremental.
       state =
         state.phase === "pending"
-          ? { phase: "done", startedAt: state.startedAt }
-          : { phase: "incremental", startedAt: state.startedAt, since: state.startedAt };
+          ? { phase: "done", startedAt: state.startedAt, typeIds: state.typeIds }
+          : {
+              phase: "incremental",
+              startedAt: state.startedAt,
+              since: state.startedAt,
+              typeIds: state.typeIds,
+            };
       break;
     }
   }
@@ -240,13 +283,15 @@ async function processPage(
   // Registros donos (por entidade: source_id + record_types dela), numa leitura.
   const recordByKey = new Map<string, RecordRef>();
   for (const [entity, types] of typesByEntity) {
-    const typeId = BITRIX_OWNER_TYPE_ID[entity];
+    const typeId = ownerTypeIdOf(entity);
+    // v1.1: o OWNER_ID é nativo; o source_id do item SPA leva o prefixo.
     const ownerIds = [
       ...new Set(
         items
           .filter((a) => Number(a.OWNER_TYPE_ID) === typeId)
           .map((a) => String(a.OWNER_ID ?? ""))
           .filter(Boolean)
+          .map((id) => sourceIdOf(entity, id))
       ),
     ];
     if (ownerIds.length === 0) continue;
@@ -257,7 +302,7 @@ async function processPage(
       .in("source_id", ownerIds)
       .is("deleted_at", null);
     for (const r of recs ?? []) {
-      recordByKey.set(`${typeId}:${String(r.source_id)}`, {
+      recordByKey.set(`${typeId}|${String(r.source_id)}`, {
         recordId: r.id as string,
         orgId: r.organization_id as string,
       });
@@ -280,7 +325,10 @@ async function processPage(
     if (Date.now() >= deadline) return false;
     const typeId = Number(activity.OWNER_TYPE_ID);
     if (!entityByTypeId.has(typeId)) continue;
-    const owner = recordByKey.get(`${typeId}:${String(activity.OWNER_ID ?? "")}`);
+    const entity = entityByTypeId.get(typeId)!;
+    const owner = recordByKey.get(
+      `${typeId}|${sourceIdOf(entity, String(activity.OWNER_ID ?? ""))}`
+    );
     const task = taskByActivity.get(String(activity.ID));
     if (task) {
       const moved = await syncKnownTaskState(db, task, activity, owner?.orgId ?? null);
