@@ -1,4 +1,6 @@
-<!-- Versão: 3.2 | Data: 11/10/2026 -->
+<!-- Versão: 3.3 | Data: 11/10/2026 -->
+<!-- v3.3 (11/10/2026): §4.27 Tree — cores, ajuste ao texto e números
+     grandes dos cartões; Apresentar sem barras de rolagem. -->
 <!-- v3.2 (11/10/2026): §4.27 Tree — tipografia dos cartões
      (`settings.tree.typography` + `tree_nodes.display.typography`). -->
 <!-- v3.1 (11/10/2026): §4.5 "Processos inteligentes do Bitrix como Bases"
@@ -7000,6 +7002,17 @@ CONSUMIDOR de peças que a UI monta.
   papel delas por `useTreeText` — ausente = nenhum `style`, render
   byte-idêntico. O editor é UM (`TreeTypographyEditor`), na Aparência e na
   "Exibição do cartão"; o import da IA saneia pelo MESMO parse.
+  **Cartões (11/10/2026):** mesma régua de camadas para `card` (tom da paleta
+  ampliada + borda/fundo #RRGGBB, `resolveCardColors` — o Resultado ignora o
+  padrão do WIDGET), `fit` e `numbers` (`lib/tree/card-fit.ts`, puro). `fit`
+  padrão = o CARTÃO cresce: na Root ele se desenha `max-content` entre o
+  tamanho-base (automático ou o da alça) e `maxWidth`, com `padding` px, e um
+  ResizeObserver devolve o tamanho real ao layout (`measured` → `sizeOf`);
+  "texto" escala o miolo (`ShrinkToFit`); "cortar" é o anterior.
+  `numberCandidates` é o dono ÚNICO das formas do número (completo → menos
+  casas → abreviado → menos casas) e `FitNumber` mostra a 1ª que cabe na
+  célula (mede contra o `td`). Apresentando, nada de barra de rolagem: a
+  Root faz pan também a partir do cartão e a Lista usa `useGrabPan`.
 - **Preset v5.** Tabelas = Tabelas Livres pelo conversor, nós com `tag` e
   `rows` explícitas, planos com `factors`. Os títulos-conclusão seguem texto:
   o `meta:` não resolve trimestre e a barra deste deck é "todo o período".

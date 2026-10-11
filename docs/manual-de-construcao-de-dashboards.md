@@ -1,4 +1,7 @@
-<!-- Versão: 1.51 | Data: 11/10/2026 -->
+<!-- Versão: 1.52 | Data: 11/10/2026 -->
+<!-- v1.52 (11/10/2026): Tree — cor do texto por tipo, cores dos cartões
+     (paleta ampliada + livre), texto que não cabe, números grandes e o
+     Apresentar sem barras de rolagem (pan com a mão). -->
 <!-- v1.51 (11/10/2026): Tree — **Fontes e tamanhos** por tipo de texto do
      cartão (padrão do widget + individual do cartão; o cartão vence). -->
 <!-- v1.50 (11/10/2026): "Tem tarefa" aceita VÁRIOS estados de uma vez
@@ -1857,8 +1860,26 @@ linhas (Meta, Realizado…), valores e rodapé (data, progresso). É o padrão d
 widget; cada cartão sobrepõe em **Editar → Exibição do cartão → Fontes e
 tamanhos deste cartão**. A escolha do cartão vence a do widget por propriedade
 (trocar só o tamanho do título no cartão mantém a fonte do widget); campo
-vazio herda. Texto maior pode pedir um cartão maior — use a alça de
-redimensionar.
+vazio herda. Cada tipo de texto também tem **cor** própria.
+
+**Cartões** (Aparência → Tree → Cartões, e em cada cartão na "Exibição do
+cartão"; o cartão vence o widget):
+- **Cor**: tom da paleta (verde, azul, violeta, laranja, âmbar, vermelho,
+  rosa, ciano, índigo, lima, turquesa, cinza, escuro, neutro) e/ou borda e
+  fundo em cor livre (#RRGGBB), que vencem o tom.
+- **Quando o texto não cabe**: *Ajustar o cartão* (padrão — o cartão cresce
+  só o necessário, com a distância das bordas escolhida, padrão 4 px, até a
+  largura máxima; o tamanho arrastado pela alça vira o mínimo), *Diminuir o
+  texto* (o conteúdo encolhe até caber) ou *Cortar* (como era antes).
+- **Números grandes**: abreviar *só quando não couber* (padrão), *sempre* ou
+  *nunca*; formato 125,4k / 1,2M, 125,4 mil / 1,2 mi ou sufixos próprios;
+  casas decimais (padrão 1). Sem espaço, as casas decimais caem uma a uma
+  antes de abreviar (1.234,56 → 1.234,6 → 1.235 → 1,2k → 1k). O valor
+  completo aparece ao passar o mouse.
+
+**Ao apresentar**, a Tree não mostra barras de rolagem: o que não cabe se
+move segurando e arrastando (cursor de mão) — na Root em qualquer ponto do
+canvas ou dos cartões, na Lista em qualquer ponto da lista.
 
 **Pela IA** (02/10/2026): no painel "Editar com IA", os nós do mapa são
 editáveis por pedido — linhas do cartão (ocultar/mostrar/renomear/reordenar),

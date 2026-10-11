@@ -1,3 +1,6 @@
+// Versão: 1.1 | Data: 11/10/2026
+// v1.1 (11/10/2026): COR do texto por tipo (`color`, só #RRGGBB por
+//   `normalizeHexColor`), nas mesmas duas camadas e com a mesma precedência.
 // Versão: 1.0 | Data: 11/10/2026
 // v1.0 (11/10/2026): TIPOGRAFIA dos cartões da Tree — módulo PURO e
 //   client-safe (o editor é Client Component; uma segunda régua divergiria).
@@ -18,6 +21,7 @@
 
 import type { CSSProperties } from "react";
 import { DASHBOARD_FONTS, isDashboardFontKey, type DashboardFontKey } from "@/lib/dashboards/style";
+import { normalizeHexColor } from "@/lib/theme";
 
 /** Os tipos de texto que um cartão pode exibir (ordem = ordem do editor). */
 export const TREE_TEXT_ROLES = [
@@ -55,6 +59,8 @@ export interface TreeTextStyle {
   font?: DashboardFontKey;
   /** px na escala do canvas (o zoom da Root multiplica). */
   size?: number;
+  /** v1.1: cor do texto (#RRGGBB). */
+  color?: string;
 }
 
 export type TreeTypography = Partial<Record<TreeTextRole, TreeTextStyle>>;
@@ -85,6 +91,8 @@ export function parseTreeTypography(raw: unknown): TreeTypography | null {
     if (isDashboardFontKey(v.font)) s.font = v.font;
     const size = normalizeTreeTextSize(v.size);
     if (size != null) s.size = size;
+    const color = normalizeHexColor(v.color);
+    if (color) s.color = color;
     if (Object.keys(s).length > 0) out[k] = s;
   }
   return Object.keys(out).length > 0 ? out : null;
@@ -104,10 +112,12 @@ export function resolveTreeTypography(
     const n = node?.[role];
     const font = n?.font ?? w?.font;
     const size = n?.size ?? w?.size;
-    if (font || size != null) {
+    const color = n?.color ?? w?.color;
+    if (font || size != null || color) {
       const s: TreeTextStyle = {};
       if (font) s.font = font;
       if (size != null) s.size = size;
+      if (color) s.color = color;
       out[role] = s;
     }
   }
@@ -130,5 +140,7 @@ export function treeTextStyle(
     // próprio a linha acompanha (senão o texto grande se sobrepõe).
     style.lineHeight = 1.25;
   }
+  const color = normalizeHexColor(s.color);
+  if (color) style.color = color;
   return Object.keys(style).length > 0 ? style : undefined;
 }

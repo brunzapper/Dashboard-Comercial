@@ -1,3 +1,10 @@
+// Versão: 2.15 | Data: 11/10/2026
+// v2.15 (11/10/2026): seção "Tree" ganha "Cartões" — cor padrão (paleta
+//   ampliada + borda/fundo livres), o que fazer quando o texto não cabe
+//   (cartão cresce / texto encolhe / corta, respiro em px) e números grandes
+//   (abreviar só quando não couber, sempre ou nunca; k/mil/sufixos próprios;
+//   casas decimais) — settings.tree.card/fit/numbers; cada cartão sobrepõe.
+//   A tipografia ganha a cor do texto por tipo.
 // Versão: 2.14 | Data: 11/10/2026
 // v2.14 (11/10/2026): seção "Tree" ganha FONTES E TAMANHOS — fonte e tamanho
 //   padrão de cada tipo de texto dos cartões (título, etiqueta, meses,
@@ -97,7 +104,11 @@ import {
   type TreePresentationSettings,
 } from "@/lib/tree/display";
 import { parseTreeTypography, type TreeTypography } from "@/lib/tree/typography";
-import { TreeTypographyEditor } from "./charts/tree-typography";
+import {
+  TreeCardStyleEditor,
+  TreeTypographyEditor,
+  type TreeCardStyleValue,
+} from "./charts/tree-typography";
 import { fieldLabel, type AvailableField } from "@/lib/widgets/fields";
 import type { ComboboxOption } from "@/components/ui/combobox";
 import { ConditionalFormatSection } from "@/components/dashboards/conditional-format-section";
@@ -178,6 +189,12 @@ export function WidgetAppearanceSheet({
   const [ttypo, setTtypo] = useState<TreeTypography | undefined>(
     () => parseTreeTypography(widget.settings?.tree?.typography) ?? undefined
   );
+  // v2.15: cor, ajuste e números padrão dos cartões da Tree.
+  const [tcard, setTcard] = useState<TreeCardStyleValue>(() => ({
+    colors: widget.settings?.tree?.card,
+    fit: widget.settings?.tree?.fit,
+    numbers: widget.settings?.tree?.numbers,
+  }));
 
   // v2.13: metas da Tabela Livre (display/goals dentro de settings.quickTable).
   const [qtDisplayOn, setQtDisplayOn] = useState(widget.settings?.quickTable?.display != null);
@@ -400,6 +417,9 @@ export function WidgetAppearanceSheet({
                 presentation: Object.keys(tpres).length > 0 ? tpres : undefined,
                 canvas: Object.keys(tcanvas).length > 0 ? tcanvas : undefined,
                 typography: ttypo && Object.keys(ttypo).length > 0 ? ttypo : undefined,
+                card: tcard.colors && Object.keys(tcard.colors).length > 0 ? tcard.colors : undefined,
+                fit: tcard.fit && Object.keys(tcard.fit).length > 0 ? tcard.fit : undefined,
+                numbers: tcard.numbers && Object.keys(tcard.numbers).length > 0 ? tcard.numbers : undefined,
               },
             }
           : {}),
@@ -756,13 +776,18 @@ export function WidgetAppearanceSheet({
               />
               {/* v2.14: o PADRÃO do widget — cada cartão sobrepõe no editor dele. */}
               <div className="flex flex-col gap-1 pt-3">
-                <Label className="text-xs">Fontes e tamanhos dos cartões</Label>
+                <Label className="text-xs">Fontes, tamanhos e cores do texto dos cartões</Label>
                 <p className="text-muted-foreground text-xs">
-                  Padrão para todos os cartões. Cada cartão pode trocar a fonte ou o
-                  tamanho de qualquer texto em “Exibição do cartão” — a escolha do
-                  cartão vence a do widget.
+                  Padrão para todos os cartões. Cada cartão pode trocar a fonte, o
+                  tamanho ou a cor de qualquer texto em “Exibição do cartão” — a
+                  escolha do cartão vence a do widget.
                 </p>
                 <TreeTypographyEditor value={ttypo} onChange={setTtypo} inheritLabel="Padrão" />
+              </div>
+              {/* v2.15: cor, texto que não cabe e números grandes (padrão). */}
+              <div className="flex flex-col gap-1 pt-3">
+                <Label className="text-xs">Cartões</Label>
+                <TreeCardStyleEditor value={tcard} onChange={setTcard} inheritLabel="Padrão" />
               </div>
             </BuilderSection>
           ) : null}

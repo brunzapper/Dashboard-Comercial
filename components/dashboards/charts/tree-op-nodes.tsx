@@ -1,3 +1,10 @@
+// Versão: 1.4 | Data: 11/10/2026
+// v1.4 (11/10/2026): valores do indicador por `FitNumber` (abreviação de
+//   números grandes — "125,4k" só quando não cabe, por padrão); a tabela sai
+//   de `table-fixed` quando o cartão cresce ("Ajustar o cartão"); o
+//   `TreeOpsValue` carrega o padrão do widget de cor/ajuste/números e a
+//   "Exibição do cartão" ganha cores livres, ajuste e números
+//   (`TreeCardStyleEditor`) e a cor de texto por tipo.
 // Versão: 1.3 | Data: 11/10/2026
 // v1.3 (11/10/2026): TIPOGRAFIA — cada texto do corpo (etiqueta, subtítulo,
 //   recortes, meses, rótulos das linhas, valores, descrição, rodapé) lê a
@@ -65,7 +72,6 @@ import {
   CHILDREN_OP_LABELS,
   combineChildren,
   formatAttainment,
-  formatIndicatorValue,
   INDICATOR_STATUS_LABELS,
   monthLabel,
   type ChildrenOp,
@@ -100,15 +106,22 @@ import {
 } from "@/lib/rituals/cadence";
 import { TREE_NODE_KIND_LABELS, type TreeNode } from "@/lib/tree/model";
 import {
-  TREE_TONE_LABELS,
-  TREE_TONES,
   treeChrome,
+  type TreeCardColors,
   type TreeNodeDisplay,
   type TreePresentationSettings,
-  type TreeTone,
 } from "@/lib/tree/display";
 import type { TreeTypography } from "@/lib/tree/typography";
-import { TreeTypographyEditor, useTreeBadgeText, useTreeText } from "./tree-typography";
+import type { TreeCardFit, TreeNumberFormat } from "@/lib/tree/card-fit";
+import {
+  FitNumber,
+  TreeCardStyleEditor,
+  TreeTypographyEditor,
+  useNumberCandidates,
+  useTreeBadgeText,
+  useTreeCardFit,
+  useTreeText,
+} from "./tree-typography";
 import type { TreeIndicatorSeries } from "@/app/(app)/dashboards/goal-table-actions";
 import {
   RealizedSourceEditor,
@@ -135,6 +148,10 @@ export interface TreeOpsValue {
   styled?: boolean;
   /** v1.3: fonte/tamanho padrão dos textos (settings.tree.typography). */
   typography?: TreeTypography | null;
+  /** v1.4: cor, ajuste e números PADRÃO do widget (settings.tree.card/fit/numbers). */
+  card?: TreeCardColors | null;
+  fit?: TreeCardFit | null;
+  numbers?: TreeNumberFormat | null;
 }
 
 const TreeOpsContext = createContext<TreeOpsValue | null>(null);
@@ -227,14 +244,25 @@ function IndicatorBody({ node, full }: { node: TreeNode; full: boolean }) {
   const tHead = useTreeText("header");
   const tRow = useTreeText("rowLabel");
   const tVal = useTreeText("value");
+  // v1.4: números que se adaptam à célula; cartão que cresce não aperta a tabela.
+  const candidatesOf = useNumberCandidates();
+  const growing = useTreeCardFit().overflow === "cartao";
   if (!p) return chrome.warnings ? <MissingConfig text="Escolha o indicador (Editar)." /> : null;
   const s = nodeSeries(ops, node);
   const months = ops?.months ?? [];
   const labelOf = ops?.fieldLabelOf ?? ((r: string) => r);
   const rows = indicatorRows(p).filter((r) => !r.hidden);
   const rowText = (r: IndicatorRow) => r.label ?? INDICATOR_ROW_DEFAULT_TEXT[r.kind];
-  const fmt = (v: number | null | undefined) =>
-    s ? formatIndicatorValue(v, s.unit, { unit: p.unitInCell !== false }) : "—";
+  const fmt = (v: number | null | undefined, extra?: { className?: string; title?: string }) =>
+    s ? (
+      <FitNumber
+        candidates={candidatesOf(v, s.unit, p.unitInCell !== false)}
+        className={extra?.className}
+        title={extra?.title}
+      />
+    ) : (
+      "—"
+    );
   const chips = exposedFilters(p.realized);
 
   // Projetado: os filhos INDICADORES combinados pelo operador, mês a mês —
@@ -304,12 +332,10 @@ function IndicatorBody({ node, full }: { node: TreeNode; full: boolean }) {
               {s.cells.map((c) => (
                 <td key={c.month} className="truncate text-right" style={tVal}>
                   {c.elapsed > 0 ? (
-                    <span
-                      className={cn("rounded px-0.5", tone(c.status))}
-                      title={`${INDICATOR_STATUS_LABELS[c.status]} · ${formatAttainment(c.attainment)}`}
-                    >
-                      {fmt(c.realized)}
-                    </span>
+                    fmt(c.realized, {
+                      className: cn("rounded px-0.5", tone(c.status)),
+                      title: `${INDICATOR_STATUS_LABELS[c.status]} · ${formatAttainment(c.attainment)}`,
+                    })
                   ) : (
                     "—"
                   )}
@@ -422,7 +448,7 @@ function IndicatorBody({ node, full }: { node: TreeNode; full: boolean }) {
       ) : s.responsibleMissing ? (
         chrome.warnings ? <MissingConfig text={`Responsável "${p.responsible}" não encontrado.`} /> : null
       ) : (
-        <table className={cn("w-full tabular-nums", !full && "table-fixed")}>
+        <table className={cn("w-full tabular-nums", !full && !growing && "table-fixed")}>
           <thead>
             <tr className="text-muted-foreground">
               <th className="w-12 text-left font-normal" />
@@ -829,30 +855,36 @@ export function DisplaySection({
             <option value="hide">Ocultar</option>
           </select>
         </div>
-        <div className="flex flex-col gap-1.5">
-          <Label className="text-xs">Cor do cartão</Label>
-          <select
-            className="border-input h-9 rounded-md border bg-transparent px-2 text-sm"
-            value={display.tone ?? "padrao"}
-            onChange={(e) => {
-              const v = e.target.value as TreeTone;
-              const next = { ...display };
-              if (v === "padrao") delete next.tone;
-              else next.tone = v;
-              setDisplay(next);
-            }}
-          >
-            {TREE_TONES.map((t) => (
-              <option key={t} value={t}>
-                {TREE_TONE_LABELS[t]}
-              </option>
-            ))}
-          </select>
-        </div>
+      </div>
+      {/* v1.4: cor (paleta ampliada + borda/fundo livres), texto que não
+          cabe e números grandes DESTE cartão — vazio = o do widget. */}
+      <div className="pt-2">
+        <TreeCardStyleEditor
+          inheritLabel="Padrão do widget"
+          value={{
+            colors: { tone: display.tone, borderColor: display.borderColor, bgColor: display.bgColor },
+            fit: display.fit,
+            numbers: display.numbers,
+          }}
+          onChange={(v) => {
+            const next: TreeNodeDisplay = { ...display };
+            delete next.tone;
+            delete next.borderColor;
+            delete next.bgColor;
+            delete next.fit;
+            delete next.numbers;
+            if (v.colors?.tone) next.tone = v.colors.tone;
+            if (v.colors?.borderColor) next.borderColor = v.colors.borderColor;
+            if (v.colors?.bgColor) next.bgColor = v.colors.bgColor;
+            if (v.fit) next.fit = v.fit;
+            if (v.numbers) next.numbers = v.numbers;
+            setDisplay(next);
+          }}
+        />
       </div>
       {/* v1.3: fonte e tamanho DESTE cartão — vencem o padrão do widget. */}
       <div className="flex flex-col gap-1.5 pt-2">
-        <Label className="text-xs">Fontes e tamanhos deste cartão</Label>
+        <Label className="text-xs">Fontes, tamanhos e cores do texto deste cartão</Label>
         <TreeTypographyEditor
           value={display.typography}
           inheritLabel="Padrão do widget"

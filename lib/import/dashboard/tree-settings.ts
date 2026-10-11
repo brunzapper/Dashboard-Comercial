@@ -1,3 +1,8 @@
+// Versão: 1.2 | Data: 11/10/2026
+// v1.2 (11/10/2026): `card` (cor padrão dos cartões), `fit` (texto que não
+//   cabe), `numbers` (abreviação) e `typography.*.color` — mesmos parses do
+//   runtime (lib/tree/display.ts, lib/tree/card-fit.ts); o que não sobrevive
+//   ao parse vira aviso + descarte.
 // Versão: 1.1 | Data: 11/10/2026
 // v1.1 (11/10/2026): `typography` (fonte/tamanho por tipo de texto dos
 //   cartões) — saneada pelo MESMO parse do runtime (lib/tree/typography.ts);
@@ -20,7 +25,8 @@ import {
   TREE_LAYOUT_LABELS,
   TREE_VIEW_LABELS,
 } from "@/lib/tree/model";
-import { TREE_PRESENTATION_LABELS } from "@/lib/tree/display";
+import { parseCardColors, TREE_PRESENTATION_LABELS } from "@/lib/tree/display";
+import { parseCardFit, parseNumberFormat } from "@/lib/tree/card-fit";
 import { normalizeHexColor } from "@/lib/theme";
 import { DASHBOARD_FONTS } from "@/lib/dashboards/style";
 import {
@@ -47,6 +53,9 @@ const TREE_SETTINGS_KEYS = {
   canvas: true,
   presentation: true,
   typography: true,
+  card: true,
+  fit: true,
+  numbers: true,
 } satisfies Record<keyof TreeSettings, true>;
 
 function isRecord(v: unknown): v is Record<string, unknown> {
@@ -169,6 +178,8 @@ export function sanitizeTreeSettings(
           continue;
         }
         if (isRecord(v)) {
+          if (v.color !== undefined && kept.color === undefined)
+            drop(`typography.${k}.color`, "precisa ser #RRGGBB");
           if (v.font !== undefined && kept.font === undefined)
             drop(`typography.${k}.font`, `deve ser ${Object.keys(DASHBOARD_FONTS).join(" | ")}`);
           if (v.size !== undefined && kept.size === undefined)
@@ -178,5 +189,26 @@ export function sanitizeTreeSettings(
       if (Object.keys(typo).length > 0) out.typography = typo;
     } else drop("typography", "precisa ser um objeto");
   }
+  // v1.2: cada objeto passa pelo parse do runtime; chave que não sobreviveu
+  // vira aviso.
+  const checked = <T extends object>(key: "card" | "fit" | "numbers", parse: (v: unknown) => T | null): T | null => {
+    const v = raw[key];
+    if (v === undefined) return null;
+    if (!isRecord(v)) {
+      drop(key, "precisa ser um objeto");
+      return null;
+    }
+    const kept = parse(v);
+    for (const k of Object.keys(v)) {
+      if (!kept || !(k in kept)) drop(`${key}.${k}`, "valor inválido ou chave desconhecida");
+    }
+    return kept;
+  };
+  const card = checked("card", parseCardColors);
+  if (card) out.card = card;
+  const fit = checked("fit", parseCardFit);
+  if (fit) out.fit = fit;
+  const numbers = checked("numbers", parseNumberFormat);
+  if (numbers) out.numbers = numbers;
   return out;
 }

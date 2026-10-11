@@ -1,4 +1,15 @@
-// Versão: 1.7 | Data: 11/10/2026
+// Versão: 1.8 | Data: 11/10/2026
+// v1.8 (11/10/2026): TEXTO QUE NÃO CABE, CORES e APRESENTAR.
+//   (a) "Ajustar o cartão" (padrão): o cartão se desenha com largura
+//       `max-content` (mínimo = tamanho automático ou o da alça, teto =
+//       `fit.maxWidth`), altura automática e o respiro `fit.padding`; um
+//       ResizeObserver devolve o tamanho REAL e o layout reposiciona os
+//       vizinhos (`measured` → `sizeOf`). "Diminuir o texto" escala o miolo
+//       (`ShrinkToFit`); "Cortar" é o comportamento anterior;
+//   (b) cor do cartão por `resolveCardColors` (paleta ampliada, borda/fundo
+//       livres, padrão do widget que o cartão sobrepõe);
+//   (c) APRESENTANDO: o cartão não se arrasta — segurar e arrastar em
+//       qualquer ponto move o CANVAS (cursor de mão), sem barra de rolagem.
 // v1.7 (11/10/2026): TIPOGRAFIA dos cartões — cada cartão resolve o padrão do
 //   widget (`typography`) + o próprio (`display.typography`) num
 //   `TreeTextProvider`; tipo, título, selo de Resultado, descrição e
@@ -96,6 +107,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type CSSProperties,
   type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
@@ -161,13 +173,16 @@ import {
   type NodeActionsContext,
 } from "./tree-node-parts";
 import {
+  resolveCardColors,
   TREE_TONE_CLASSES,
   treeChrome,
+  type TreeCardColors,
   type TreeChrome,
   type TreePresentationSettings,
 } from "@/lib/tree/display";
 import type { TreeTypography } from "@/lib/tree/typography";
-import { TreeTextProvider, useTreeBadgeText, useTreeText } from "./tree-typography";
+import { resolveCardFit, type TreeCardFit, type TreeNumberFormat } from "@/lib/tree/card-fit";
+import { ShrinkToFit, TreeCardProvider, useTreeBadgeText, useTreeCardFit, useTreeText } from "./tree-typography";
 
 /** Arrasto abaixo disto é clique. */
 const DRAG_THRESHOLD_PX = 4;
@@ -344,6 +359,12 @@ export interface TreeRootViewProps {
   presentation?: TreePresentationSettings;
   /** v1.7: fonte/tamanho padrão dos textos dos cartões (o cartão vence). */
   typography?: TreeTypography | null;
+  /** v1.8: cor, ajuste e números PADRÃO dos cartões (o cartão vence). */
+  cardDefaults?: {
+    card?: TreeCardColors | null;
+    fit?: TreeCardFit | null;
+    numbers?: TreeNumberFormat | null;
+  } | null;
   /** v1.6: redimensionar (null = voltar ao automático). */
   onResize?: (nodeId: string, size: { w: number; h: number } | null) => void;
   /** v1.6: duplo-clique — o cartão em destaque. */
@@ -385,6 +406,7 @@ export function TreeRootView({
   canvas,
   presentation,
   typography,
+  cardDefaults,
   onResize,
   onOpenFocus,
   onEditNoteDetails,
@@ -452,6 +474,37 @@ export function TreeRootView({
   }, [shown]);
   const parents = useMemo(() => parentIndex(shown), [shown]);
 
+  // v1.8: tamanho REAL dos cartões que crescem até caber ("Ajustar o
+  // cartão"), devolvido pelo ResizeObserver de cada um — o layout o usa para
+  // abrir espaço para os vizinhos.
+  const [measured, setMeasured] = useState<ReadonlyMap<string, { w: number; h: number }>>(
+    () => new Map()
+  );
+  const onMeasure = useCallback((id: string, w: number, h: number) => {
+    setMeasured((prev) => {
+      const cur = prev.get(id);
+      if (cur && Math.abs(cur.w - w) < 1 && Math.abs(cur.h - h) < 1) return prev;
+      const next = new Map(prev);
+      next.set(id, { w, h });
+      return next;
+    });
+  }, []);
+  const growsOf = useCallback(
+    (id: string) =>
+      resolveCardFit(cardDefaults?.fit, geoById.get(id)?.display?.fit).overflow === "cartao",
+    [cardDefaults?.fit, geoById]
+  );
+  // O tamanho-BASE: o escolhido na alça (0150) vence o automático.
+  const baseSizeOf = useCallback(
+    (n: TreeNode) => {
+      if (n.id === ROOT_DRAFT_ID) return { w: ROOT_NODE_WIDTH, h: ROOT_NODE_HEIGHT };
+      const auto = sizeOf ? sizeOf(n) : { w: ROOT_NODE_WIDTH, h: ROOT_NODE_HEIGHT };
+      const g = geoById.get(n.id);
+      return { w: g?.width ?? auto.w, h: g?.height ?? auto.h };
+    },
+    [sizeOf, geoById]
+  );
+
   const layoutOpts = useMemo(
     () => ({
       defaultDirection,
@@ -460,15 +513,15 @@ export function TreeRootView({
       // v1.2: o rascunho mantém o cartão padrão (ele é um texto).
       // v1.6: o tamanho ESCOLHIDO (redimensionar, 0150) vence o automático; e
       // durante o arrasto da alça, o tamanho ao vivo.
+      // v1.8: cartão que cresce até caber ocupa o tamanho MEDIDO.
       sizeOf: (n: TreeNode) => {
-        if (n.id === ROOT_DRAFT_ID) return { w: ROOT_NODE_WIDTH, h: ROOT_NODE_HEIGHT };
         if (resizing && resizing.id === n.id) return { w: resizing.w, h: resizing.h };
-        const auto = sizeOf ? sizeOf(n) : { w: ROOT_NODE_WIDTH, h: ROOT_NODE_HEIGHT };
-        const g = geoById.get(n.id);
-        return { w: g?.width ?? auto.w, h: g?.height ?? auto.h };
+        const base = baseSizeOf(n);
+        const m = n.id !== ROOT_DRAFT_ID && growsOf(n.id) ? measured.get(n.id) : undefined;
+        return m ? { w: Math.max(base.w, m.w), h: Math.max(base.h, m.h) } : base;
       },
     }),
-    [defaultDirection, geoById, collapsed, sizeOf, resizing]
+    [defaultDirection, geoById, collapsed, resizing, baseSizeOf, growsOf, measured]
   );
 
   const layout = useMemo(
@@ -718,7 +771,8 @@ export function TreeRootView({
     }
     const nodeEl = target.closest<HTMLElement>("[data-tree-node]");
     containerRef.current?.setPointerCapture(e.pointerId);
-    if (nodeEl?.dataset.treeNode && nodeEl.dataset.treeNode !== ROOT_DRAFT_ID) {
+    // v1.8: apresentando, segurar o cartão move o CANVAS (mão), nunca o nó.
+    if (!presenting && nodeEl?.dataset.treeNode && nodeEl.dataset.treeNode !== ROOT_DRAFT_ID) {
       gesture.current = {
         kind: "node",
         pointerId: e.pointerId,
@@ -729,7 +783,7 @@ export function TreeRootView({
       };
       return;
     }
-    if (nodeEl) return;
+    if (nodeEl && !presenting) return;
     gesture.current = {
       kind: "pan",
       pointerId: e.pointerId,
@@ -1277,12 +1331,21 @@ export function TreeRootView({
                 onNewBranch={() => startDraft(node.id)}
                 body={renderBody?.(node) ?? null}
                 chrome={treeChrome(presentation, geoById.get(node.id)?.display ?? null, presenting)}
-                widgetTypography={typography ?? null}
-                nodeTypography={geoById.get(node.id)?.display?.typography ?? null}
-                tone={(() => {
-                  const t = geoById.get(node.id)?.display?.tone;
-                  return t && t !== "padrao" ? t : null;
-                })()}
+                widgetCard={{ typography, fit: cardDefaults?.fit, numbers: cardDefaults?.numbers }}
+                nodeDisplay={geoById.get(node.id)?.display ?? null}
+                colors={resolveCardColors(
+                  cardDefaults?.card,
+                  geoById.get(node.id)?.display ?? null,
+                  node.goal === true
+                )}
+                // Arrastando a alça, o tamanho ao vivo é o novo mínimo.
+                baseSize={
+                  resizing && resizing.id === node.id
+                    ? { w: resizing.w, h: resizing.h }
+                    : baseSizeOf(node)
+                }
+                onMeasure={onMeasure}
+                presenting={presenting}
                 resizable={Boolean(onResize) && !presenting && !isSynthetic(node.id)}
                 resized={geoById.get(node.id)?.width != null || geoById.get(node.id)?.height != null}
                 onResetSize={() => onResize?.(node.id, null)}
@@ -1592,9 +1655,9 @@ function ProgressBar({ progress }: { progress: TreeProgress }) {
  */
 function RootNodeTile(props: Parameters<typeof RootNodeTileBody>[0]) {
   return (
-    <TreeTextProvider widget={props.widgetTypography} node={props.nodeTypography}>
+    <TreeCardProvider widget={props.widgetCard} node={props.nodeDisplay}>
       <RootNodeTileBody {...props} />
-    </TreeTextProvider>
+    </TreeCardProvider>
   );
 }
 
@@ -1618,7 +1681,10 @@ function RootNodeTileBody({
   onNewBranch,
   body,
   chrome,
-  tone,
+  colors,
+  baseSize,
+  onMeasure,
+  presenting,
   resizable,
   resized,
   onResetSize,
@@ -1645,11 +1711,25 @@ function RootNodeTileBody({
   body?: ReactNode | null;
   /** v1.6: o que aparece (modo Apresentar — lib/tree/display.ts). */
   chrome: TreeChrome;
-  /** v1.6: cor escolhida do cartão (null = a do tipo). */
-  tone: keyof typeof TREE_TONE_CLASSES | null;
-  /** v1.7: tipografia do widget e do cartão (o cartão vence). */
-  widgetTypography: TreeTypography | null;
-  nodeTypography: TreeTypography | null;
+  /** v1.8: cor do cartão (tom e/ou borda/fundo livres; null = a do tipo). */
+  colors: { tone: keyof typeof TREE_TONE_CLASSES | null; style: CSSProperties | undefined };
+  /** v1.7/v1.8: o que o widget e o cartão resolvem (tipografia, ajuste, números). */
+  widgetCard: {
+    typography?: TreeTypography | null;
+    fit?: TreeCardFit | null;
+    numbers?: TreeNumberFormat | null;
+  };
+  nodeDisplay: {
+    typography?: TreeTypography | null;
+    fit?: TreeCardFit | null;
+    numbers?: TreeNumberFormat | null;
+  } | null;
+  /** v1.8: tamanho-base (automático ou o da alça) — o mínimo do cartão que cresce. */
+  baseSize: { w: number; h: number };
+  /** v1.8: devolve o tamanho real do cartão que cresce até caber. */
+  onMeasure: (id: string, w: number, h: number) => void;
+  /** v1.8: apresentando — o cartão vira superfície de pan. */
+  presenting: boolean;
   resizable: boolean;
   resized: boolean;
   onResetSize: () => void;
@@ -1664,8 +1744,24 @@ function RootNodeTileBody({
   const tTag = useTreeBadgeText("tag");
   const tTitle = useTreeText("title");
   const tDesc = useTreeText("description");
+  // v1.8: o que fazer quando o texto não cabe (widget → cartão).
+  const fit = useTreeCardFit();
+  const grows = fit.overflow === "cartao" && !editing;
+  const shrinks = fit.overflow === "texto" && !editing;
+  const cardRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const el = cardRef.current;
+    if (!grows || !el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(() => {
+      onMeasure(node.id, Math.ceil(el.offsetWidth), Math.ceil(el.offsetHeight));
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [grows, node.id, onMeasure]);
+  const tone = colors.tone;
   return (
     <div
+      ref={cardRef}
       data-tree-node={node.id}
       role="treeitem"
       aria-selected={selected}
@@ -1691,7 +1787,12 @@ function RootNodeTileBody({
         "group bg-card absolute flex flex-col gap-1 rounded-lg border-2 px-2 py-1.5 shadow-sm transition-[opacity,box-shadow]",
         tone ? TREE_TONE_CLASSES[tone] : (KIND_TONE[node.kind] ?? "border-muted"),
         node.goal && "border-amber-500 bg-amber-50 dark:bg-amber-950/40",
-        synthetic ? "cursor-default" : "cursor-move",
+        // v1.8: apresentando, o cartão é superfície de PAN (mão), não de arrasto.
+        presenting
+          ? "cursor-grab active:cursor-grabbing"
+          : synthetic
+            ? "cursor-default"
+            : "cursor-move",
         selected && "ring-primary ring-2 ring-offset-1",
         onPath && "ring-primary/60 ring-2",
         dropTarget && "ring-2 ring-emerald-500 ring-offset-2",
@@ -1703,8 +1804,20 @@ function RootNodeTileBody({
       style={{
         left: box.x,
         top: box.y,
-        width: box.w,
-        ...(editing ? { minHeight: box.h } : { height: box.h }),
+        // v1.8: "Ajustar o cartão" — cresce do tamanho-base até caber (teto
+        // `maxWidth`), com o respiro escolhido; o layout lê o tamanho real.
+        ...(grows
+          ? {
+              width: "max-content",
+              minWidth: baseSize.w,
+              maxWidth: Math.max(baseSize.w, fit.maxWidth),
+              minHeight: baseSize.h,
+              padding: fit.padding,
+            }
+          : editing
+            ? { width: box.w, minHeight: box.h }
+            : { width: box.w, height: box.h }),
+        ...colors.style,
       }}
     >
       <div className="flex items-center gap-1">
@@ -1755,6 +1868,9 @@ function RootNodeTileBody({
           </button>
         ) : null}
       </div>
+      {/* v1.8: "Diminuir o texto" escala o miolo até caber; nos outros
+          modos o invólucro não existe. */}
+      <ShrinkToFit enabled={shrinks}>
       {editing ? (
         <CardTextarea
           initial={node.kind === "comment" ? (node.body ?? node.label) : node.label}
@@ -1768,7 +1884,9 @@ function RootNodeTileBody({
           // selecionado) — o duplo-clique fica livre para abrir o destaque.
           onClick={editable && selected ? onStartEdit : onSelect}
           className={cn(
-            "line-clamp-3 shrink-0 text-left text-xs leading-snug font-medium",
+            "shrink-0 text-left text-xs leading-snug font-medium",
+            // v1.8: só "Cortar" limita a 3 linhas; os outros modos mostram tudo.
+            fit.overflow === "cortar" && "line-clamp-3",
             editable && selected && "hover:bg-accent/60 cursor-text rounded",
             done && "text-muted-foreground line-through"
           )}
@@ -1790,7 +1908,7 @@ function RootNodeTileBody({
       )}
       {editing ? null : body ? (
         // v1.2: indicador/plano/ritual trazem o próprio corpo.
-        <div className="min-h-0 flex-1 overflow-hidden">
+        <div className={cn("min-h-0 flex-1", fit.overflow === "cortar" && "overflow-hidden")}>
           {body}
         </div>
       ) : (
@@ -1799,7 +1917,10 @@ function RootNodeTileBody({
               tamanho; inteira no destaque). */}
           {node.kind === "note" && node.body ? (
             <p
-              className="text-muted-foreground min-h-0 flex-1 overflow-hidden text-micro leading-snug whitespace-pre-line"
+              className={cn(
+                "text-muted-foreground min-h-0 flex-1 text-micro leading-snug whitespace-pre-line",
+                fit.overflow === "cortar" && "overflow-hidden"
+              )}
               style={tDesc}
             >
               {node.body}
@@ -1811,6 +1932,7 @@ function RootNodeTileBody({
           </div>
         </>
       )}
+      </ShrinkToFit>
       {/* v1.6: alça de redimensionar (duplo-clique volta ao automático). */}
       {resizable && !editing ? (
         <div

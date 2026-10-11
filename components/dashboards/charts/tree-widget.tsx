@@ -1,3 +1,9 @@
+// Versão: 1.17 | Data: 11/10/2026
+// v1.17 (11/10/2026): cor, ajuste e números dos cartões — o widget lê
+//   `settings.card`/`fit`/`numbers` (padrão; o cartão sobrepõe em `display`) e
+//   os entrega pelo `TreeOpsValue`; na Lista, "Ajustar o cartão" deixa o título
+//   quebrar linha em vez de cortar. MODO APRESENTAR: a Lista não mostra barras
+//   de rolagem — o que não cabe se move segurando e arrastando (`useGrabPan`).
 // Versão: 1.16 | Data: 11/10/2026
 // v1.16 (11/10/2026): TIPOGRAFIA dos cartões — fonte e tamanho por tipo de
 //   texto (título, etiqueta, meses, valores…): padrão do widget
@@ -186,7 +192,10 @@ import {
 } from "@/lib/tree/display";
 import { parseIndicatorPayload } from "@/lib/tree/payload";
 import { parseTreeTypography } from "@/lib/tree/typography";
-import { TreeTextProvider, useTreeBadgeText, useTreeText } from "./tree-typography";
+import { parseCardFit, parseNumberFormat, resolveCardFit } from "@/lib/tree/card-fit";
+import { parseCardColors, resolveCardColors, TREE_TONE_CLASSES } from "@/lib/tree/display";
+import { TreeCardProvider, useTreeBadgeText, useTreeCardFit, useTreeText } from "./tree-typography";
+import { GRAB_PAN_CLASS, useGrabPan } from "./use-grab-pan";
 import { fieldLabel } from "@/lib/widgets/fields";
 import type { RealizedCatalog } from "@/components/indicators/realized-source-editor";
 import { TreeNodeFocusDialog, TreeNoteEditSheet, type NoteEditInput } from "./tree-node-focus";
@@ -286,16 +295,20 @@ function NodeCard({
   // v1.14: o que o cartão mostra ao apresentar (lib/tree/display.ts).
   const ops = useTreeOps();
   const chrome = treeChrome(ops?.presentation, ops?.displayOf?.(node) ?? null, ops?.presenting ?? false);
+  // v1.17: cor do cartão (widget → cartão; cor livre vence o tom).
+  const display = ops?.displayOf?.(node) ?? null;
+  const colors = resolveCardColors(ops?.card, display, node.goal === true);
 
   return (
     <div className="flex flex-col">
       {/* v1.16: fonte/tamanho do widget + do cartão valem só para ESTE cartão
-          (os filhos têm o provider deles). */}
-      <TreeTextProvider widget={ops?.typography} node={ops?.displayOf?.(node)?.typography}>
+          (os filhos têm o provider deles). v1.17: + ajuste e números. */}
+      <TreeCardProvider widget={ops} node={display}>
       <div
         className={`flex flex-wrap items-center gap-2 rounded-md border px-2 py-1.5 ${
-          KIND_TONE[node.kind] ?? "border-muted"
+          colors.tone ? TREE_TONE_CLASSES[colors.tone] : (KIND_TONE[node.kind] ?? "border-muted")
         }`}
+        style={colors.style}
         onDoubleClick={(e) => {
           if ((e.target as HTMLElement).closest("button, input, textarea, [role='checkbox']")) return;
           selection.onOpenFocus?.(node);
@@ -349,11 +362,15 @@ function NodeCard({
 
       {/* v1.11: indicador/plano/ritual trazem o próprio corpo. */}
       {isOperationalNode(node) ? (
-        <div className="ml-6 max-w-md rounded-md border border-dashed px-2 py-1.5">
+        <div
+          className={`ml-6 rounded-md border border-dashed px-2 py-1.5 ${
+            resolveCardFit(ops?.fit, display?.fit).overflow === "cartao" ? "w-fit max-w-full" : "max-w-md"
+          }`}
+        >
           <OperationalBody node={node} />
         </div>
       ) : null}
-      </TreeTextProvider>
+      </TreeCardProvider>
 
       {open && hasChildren ? (
         // A linha de conexão é a borda esquerda: o galho é visual, não SVG.
@@ -368,7 +385,7 @@ function NodeCard({
 }
 
 // v1.16: peças do cartão da Lista que leem a tipografia do cartão (o hook
-// precisa estar DENTRO do `TreeTextProvider`).
+// precisa estar DENTRO do `TreeCardProvider`).
 function ListKindBadge({ children }: { children: ReactNode }) {
   const style = useTreeBadgeText("kind");
   return (
@@ -389,8 +406,14 @@ function ListGoalBadge() {
 
 function ListTitle({ label }: { label: string }) {
   const style = useTreeText("title");
+  // v1.17: "Ajustar o cartão" quebra linha em vez de cortar.
+  const wrap = useTreeCardFit().overflow === "cartao";
   return (
-    <span className="min-w-0 flex-1 truncate text-sm" title={label} style={style}>
+    <span
+      className={`min-w-0 flex-1 text-sm ${wrap ? "break-words" : "truncate"}`}
+      title={label}
+      style={style}
+    >
       {label}
     </span>
   );
@@ -664,6 +687,13 @@ export function TreeWidget({
     () => parseTreeTypography(settings?.typography),
     [settings?.typography]
   );
+  // v1.17: cor, ajuste e números padrão do widget.
+  const cardColors = useMemo(() => parseCardColors(settings?.card), [settings?.card]);
+  const cardFit = useMemo(() => parseCardFit(settings?.fit), [settings?.fit]);
+  const numberFormat = useMemo(() => parseNumberFormat(settings?.numbers), [settings?.numbers]);
+  // v1.17: apresentando, a Lista não mostra barras — pan com a mão.
+  const listRef = useRef<HTMLDivElement>(null);
+  useGrabPan(listRef, presenting);
   const geoByRef = useMemo(
     () => new Map((data?.geometry ?? []).map((g) => [g.nodeRef, g])),
     [data?.geometry]
@@ -696,6 +726,9 @@ export function TreeWidget({
       presenting,
       presentation,
       typography,
+      card: cardColors,
+      fit: cardFit,
+      numbers: numberFormat,
       styled,
       fieldLabelOf,
       displayOf: (node) => geoByRef.get(node.id)?.display ?? null,
@@ -727,7 +760,7 @@ export function TreeWidget({
     };
     // `scope`/`refresh` mudam junto do `data` (mesmo escopo).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data, opMonths, opSeries, currentValues, scheduling, requests.length, presenting, presentation, typography, styled, fieldLabelOf, geoByRef]);
+  }, [data, opMonths, opSeries, currentValues, scheduling, requests.length, presenting, presentation, typography, cardColors, cardFit, numberFormat, styled, fieldLabelOf, geoByRef]);
 
   // v1.14: cartão em destaque e editor da anotação.
   const [focusNode, setFocusNode] = useState<TreeNode | null>(null);
@@ -1556,6 +1589,7 @@ export function TreeWidget({
           }
           presentation={presentation}
           typography={typography}
+          cardDefaults={{ card: cardColors, fit: cardFit, numbers: numberFormat }}
           onResize={(id, size) =>
             patchGeometry(id, { width: size?.w ?? null, height: size?.h ?? null })
           }
@@ -1577,7 +1611,10 @@ export function TreeWidget({
 
   return (
     <TreeOpsProvider value={opsValue}>
-    <div className="flex h-full flex-col gap-2 overflow-auto p-3">
+    <div
+      ref={listRef}
+      className={`flex h-full flex-col gap-2 overflow-auto p-3 ${presenting ? GRAB_PAN_CLASS : ""}`}
+    >
       {header}
       {inboundNote}
       {pausedNote}
