@@ -1,4 +1,7 @@
-/* Versão: 1.8 | Data: 10/10/2026 */
+/* Versão: 1.9 | Data: 11/10/2026 */
+/* v1.9 (11/10/2026): modo Apresentar SEM barras de rolagem (o painel e os
+   widgets seguem roláveis por roda/teclado; o pan é a "mãozinha" do
+   dashboard-grid) e cursor de mão sobre os widgets quando há o que arrastar. */
 /* v1.8 (10/10/2026): paleta "Nova" da interface como OPÇÃO
    (html[data-palette="nova"]); utilitários success/warning/info/border-strong
    com fallback na paleta Atual; --ease-product; lista densa do hub, barra de
@@ -435,6 +438,20 @@ main[data-app-main] {
 [data-slide-enter] .react-grid-item > :not(.react-resizable-handle) {
   animation: ds-enter 420ms cubic-bezier(0.22, 1, 0.36, 1) both;
   animation-delay: var(--ds-enter-delay, 0ms);
+}
+/* v1.9 (11/10/2026): apresentando, nenhuma barra de rolagem — nem a do
+   painel, nem a do grid, nem as internas dos widgets. Se o slide não cabe, o
+   pan é por arraste (mãozinha; [data-pannable] marca que há o que arrastar). */
+[data-presenting],
+[data-presenting] * {
+  scrollbar-width: none;
+}
+[data-presenting]::-webkit-scrollbar,
+[data-presenting] ::-webkit-scrollbar {
+  display: none;
+}
+[data-presenting] [data-pannable] .react-grid-item {
+  cursor: grab;
 }
 @media (prefers-reduced-motion: reduce) {
   .ds-enter,
