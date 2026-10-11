@@ -1,3 +1,8 @@
+// Versão: 2.14 | Data: 11/10/2026
+// v2.14 (11/10/2026): seção "Tree" ganha FONTES E TAMANHOS — fonte e tamanho
+//   padrão de cada tipo de texto dos cartões (título, etiqueta, meses,
+//   valores…), em settings.tree.typography; cada cartão sobrepõe no editor
+//   dele (o cartão vence por propriedade — lib/tree/typography.ts).
 // Versão: 2.13 | Data: 02/10/2026
 // v2.13 (02/10/2026): Tabela Livre — seção "Metas": visual de tabela de slide
 //   (o da antiga Tabela de metas), densidade, atingimento, realizado vazio,
@@ -91,6 +96,8 @@ import {
   TREE_PRESENTATION_LABELS,
   type TreePresentationSettings,
 } from "@/lib/tree/display";
+import { parseTreeTypography, type TreeTypography } from "@/lib/tree/typography";
+import { TreeTypographyEditor } from "./charts/tree-typography";
 import { fieldLabel, type AvailableField } from "@/lib/widgets/fields";
 import type { ComboboxOption } from "@/components/ui/combobox";
 import { ConditionalFormatSection } from "@/components/dashboards/conditional-format-section";
@@ -166,6 +173,10 @@ export function WidgetAppearanceSheet({
   );
   const [tcanvas, setTcanvas] = useState<NonNullable<TreeSettings["canvas"]>>(
     widget.settings?.tree?.canvas ?? {}
+  );
+  // v2.14: fontes e tamanhos padrão dos cartões da Tree.
+  const [ttypo, setTtypo] = useState<TreeTypography | undefined>(
+    () => parseTreeTypography(widget.settings?.tree?.typography) ?? undefined
   );
 
   // v2.13: metas da Tabela Livre (display/goals dentro de settings.quickTable).
@@ -388,6 +399,7 @@ export function WidgetAppearanceSheet({
                 ...widget.settings.tree,
                 presentation: Object.keys(tpres).length > 0 ? tpres : undefined,
                 canvas: Object.keys(tcanvas).length > 0 ? tcanvas : undefined,
+                typography: ttypo && Object.keys(ttypo).length > 0 ? ttypo : undefined,
               },
             }
           : {}),
@@ -742,6 +754,16 @@ export function WidgetAppearanceSheet({
                 onChange={(v) => setTcanvas((prev) => ({ ...prev, bg: v }))}
                 onClear={() => setTcanvas((prev) => ({ ...prev, bg: undefined }))}
               />
+              {/* v2.14: o PADRÃO do widget — cada cartão sobrepõe no editor dele. */}
+              <div className="flex flex-col gap-1 pt-3">
+                <Label className="text-xs">Fontes e tamanhos dos cartões</Label>
+                <p className="text-muted-foreground text-xs">
+                  Padrão para todos os cartões. Cada cartão pode trocar a fonte ou o
+                  tamanho de qualquer texto em “Exibição do cartão” — a escolha do
+                  cartão vence a do widget.
+                </p>
+                <TreeTypographyEditor value={ttypo} onChange={setTtypo} inheritLabel="Padrão" />
+              </div>
             </BuilderSection>
           ) : null}
 

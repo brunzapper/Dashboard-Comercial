@@ -1,4 +1,6 @@
-<!-- Versão: 1.50 | Data: 11/10/2026 -->
+<!-- Versão: 1.51 | Data: 11/10/2026 -->
+<!-- v1.51 (11/10/2026): Tree — **Fontes e tamanhos** por tipo de texto do
+     cartão (padrão do widget + individual do cartão; o cartão vence). -->
 <!-- v1.50 (11/10/2026): "Tem tarefa" aceita VÁRIOS estados de uma vez
      (caixas de marcar) e conta as atividades de todos os negócios. -->
 <!-- v1.49 (10/10/2026): §5.19 estilo **Operacional** (segue o tema do
@@ -1845,6 +1847,18 @@ data, o cartão não mostra data nenhuma). Qualquer cartão pode ser marcado com
 avisos. **Aparência → Tree** liga cada um de volta para o widget inteiro, e o
 editor de cada cartão pode forçar o rótulo de tipo (mostrar/ocultar). A mesma
 seção define o fundo do canvas da Root.
+
+**Fontes e tamanhos** (11/10/2026): quando o texto dos cartões fica pequeno
+(projetor, Root com zoom baixo), **Aparência → Tree → Fontes e tamanhos dos
+cartões** define a fonte e o tamanho (px) de CADA tipo de texto — tipo do
+cartão, título, subtítulo (responsável, frase de apoio, cadência), etiqueta
+(N3, Resultado), descrição, recortes, cabeçalho da tabela (meses), rótulos das
+linhas (Meta, Realizado…), valores e rodapé (data, progresso). É o padrão do
+widget; cada cartão sobrepõe em **Editar → Exibição do cartão → Fontes e
+tamanhos deste cartão**. A escolha do cartão vence a do widget por propriedade
+(trocar só o tamanho do título no cartão mantém a fonte do widget); campo
+vazio herda. Texto maior pode pedir um cartão maior — use a alça de
+redimensionar.
 
 **Pela IA** (02/10/2026): no painel "Editar com IA", os nós do mapa são
 editáveis por pedido — linhas do cartão (ocultar/mostrar/renomear/reordenar),

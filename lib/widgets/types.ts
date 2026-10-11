@@ -1,3 +1,6 @@
+// Versão: 1.25 | Data: 11/10/2026
+// v1.25 (11/10/2026): TreeSettings.typography — fonte e tamanho por tipo de
+//   texto dos cartões da Tree (lib/tree/typography.ts).
 // Versão: 1.24 | Data: 10/10/2026
 // v1.24 (10/10/2026): DashboardSettings.style.key aceita "operacional".
 // v1.23 (02/10/2026): a Tabela Livre absorve a Tabela de metas — colunas
@@ -93,6 +96,7 @@ import type {
   TreeView,
 } from "@/lib/tree/model";
 import type { ManualSpread } from "@/lib/manual-base/types";
+import type { TreeTypography } from "@/lib/tree/typography";
 import type { SourceKey } from "@/lib/sources";
 import type { RoleKey } from "@/lib/auth/roles";
 import type { Formula } from "@/lib/records/formulas";
@@ -628,6 +632,14 @@ export interface TreeSettings {
     doneToggle?: boolean;
     warnings?: boolean;
   };
+  /**
+   * v1.25 (11/10/2026): fonte e tamanho de CADA tipo de texto dos cartões
+   * (título, etiqueta, meses, valores…). É o PADRÃO do widget; cada cartão
+   * sobrepõe em `tree_nodes.display.typography` (o cartão vence por
+   * propriedade). Ausente = os tamanhos de sempre. Resolvido em
+   * lib/tree/typography.ts.
+   */
+  typography?: TreeTypography;
 }
 
 export interface RowActionSettings {

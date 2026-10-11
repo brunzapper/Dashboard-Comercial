@@ -1,3 +1,9 @@
+// Versão: 1.16 | Data: 11/10/2026
+// v1.16 (11/10/2026): TIPOGRAFIA dos cartões — fonte e tamanho por tipo de
+//   texto (título, etiqueta, meses, valores…): padrão do widget
+//   (`settings.typography`) sobreposto pelo cartão (`display.typography`); o
+//   cartão vence por propriedade (lib/tree/typography.ts). Vale na Lista e na
+//   Root (`TreeTextProvider` por cartão, peças leem `useTreeText`).
 // Versão: 1.15 | Data: 09/10/2026
 // v1.15 (09/10/2026): aviso "Carregando atividades do Bitrix…" enquanto a
 //   carga inicial de um Tree recém-ligado roda (`data.inboundLoading`) — faixa
@@ -129,7 +135,7 @@
 // cada minuto e uma árvore que pisca sozinha lê como defeito.
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   ChevronDown,
   ChevronRight,
@@ -179,6 +185,8 @@ import {
   type TreeNodeDisplay,
 } from "@/lib/tree/display";
 import { parseIndicatorPayload } from "@/lib/tree/payload";
+import { parseTreeTypography } from "@/lib/tree/typography";
+import { TreeTextProvider, useTreeBadgeText, useTreeText } from "./tree-typography";
 import { fieldLabel } from "@/lib/widgets/fields";
 import type { RealizedCatalog } from "@/components/indicators/realized-source-editor";
 import { TreeNodeFocusDialog, TreeNoteEditSheet, type NoteEditInput } from "./tree-node-focus";
@@ -281,6 +289,9 @@ function NodeCard({
 
   return (
     <div className="flex flex-col">
+      {/* v1.16: fonte/tamanho do widget + do cartão valem só para ESTE cartão
+          (os filhos têm o provider deles). */}
+      <TreeTextProvider widget={ops?.typography} node={ops?.displayOf?.(node)?.typography}>
       <div
         className={`flex flex-wrap items-center gap-2 rounded-md border px-2 py-1.5 ${
           KIND_TONE[node.kind] ?? "border-muted"
@@ -316,21 +327,11 @@ function NodeCard({
         ) : null}
 
         {chrome.kindBadge ? (
-          <Badge variant="outline" className="shrink-0 text-xs">
-            {TREE_NODE_KIND_LABELS[node.kind]}
-          </Badge>
+          <ListKindBadge>{TREE_NODE_KIND_LABELS[node.kind]}</ListKindBadge>
         ) : null}
-        {node.goal ? (
-          <Badge className="shrink-0 bg-amber-500 text-xs text-white">
-            Resultado
-          </Badge>
-        ) : null}
-        <span className="min-w-0 flex-1 truncate text-sm" title={node.label}>
-          {node.label}
-        </span>
-        {node.status ? (
-          <span className="text-muted-foreground text-xs">{node.status}</span>
-        ) : null}
+        {node.goal ? <ListGoalBadge /> : null}
+        <ListTitle label={node.label} />
+        {node.status ? <ListStatus status={node.status} /> : null}
         <NodeDate node={node} task={task} />
 
         {/* v1.9: o miolo de ações saiu para `NodeActions` (tree-node-parts),
@@ -352,6 +353,7 @@ function NodeCard({
           <OperationalBody node={node} />
         </div>
       ) : null}
+      </TreeTextProvider>
 
       {open && hasChildren ? (
         // A linha de conexão é a borda esquerda: o galho é visual, não SVG.
@@ -362,6 +364,44 @@ function NodeCard({
         </div>
       ) : null}
     </div>
+  );
+}
+
+// v1.16: peças do cartão da Lista que leem a tipografia do cartão (o hook
+// precisa estar DENTRO do `TreeTextProvider`).
+function ListKindBadge({ children }: { children: ReactNode }) {
+  const style = useTreeBadgeText("kind");
+  return (
+    <Badge variant="outline" className="shrink-0 text-xs" style={style}>
+      {children}
+    </Badge>
+  );
+}
+
+function ListGoalBadge() {
+  const style = useTreeBadgeText("tag");
+  return (
+    <Badge className="shrink-0 bg-amber-500 text-xs text-white" style={style}>
+      Resultado
+    </Badge>
+  );
+}
+
+function ListTitle({ label }: { label: string }) {
+  const style = useTreeText("title");
+  return (
+    <span className="min-w-0 flex-1 truncate text-sm" title={label} style={style}>
+      {label}
+    </span>
+  );
+}
+
+function ListStatus({ status }: { status: string }) {
+  const style = useTreeText("footer");
+  return (
+    <span className="text-muted-foreground text-xs" style={style}>
+      {status}
+    </span>
   );
 }
 
@@ -619,6 +659,11 @@ export function TreeWidget({
     () => parsePresentationSettings(settings?.presentation),
     [settings?.presentation]
   );
+  // v1.16: fonte/tamanho padrão dos textos dos cartões (lib/tree/typography.ts).
+  const typography = useMemo(
+    () => parseTreeTypography(settings?.typography),
+    [settings?.typography]
+  );
   const geoByRef = useMemo(
     () => new Map((data?.geometry ?? []).map((g) => [g.nodeRef, g])),
     [data?.geometry]
@@ -650,6 +695,7 @@ export function TreeWidget({
       series: opSeries,
       presenting,
       presentation,
+      typography,
       styled,
       fieldLabelOf,
       displayOf: (node) => geoByRef.get(node.id)?.display ?? null,
@@ -681,7 +727,7 @@ export function TreeWidget({
     };
     // `scope`/`refresh` mudam junto do `data` (mesmo escopo).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data, opMonths, opSeries, currentValues, scheduling, requests.length, presenting, presentation, styled, fieldLabelOf, geoByRef]);
+  }, [data, opMonths, opSeries, currentValues, scheduling, requests.length, presenting, presentation, typography, styled, fieldLabelOf, geoByRef]);
 
   // v1.14: cartão em destaque e editor da anotação.
   const [focusNode, setFocusNode] = useState<TreeNode | null>(null);
@@ -1509,6 +1555,7 @@ export function TreeWidget({
             setOpDraft({ kind, node: null, parentRef, title })
           }
           presentation={presentation}
+          typography={typography}
           onResize={(id, size) =>
             patchGeometry(id, { width: size?.w ?? null, height: size?.h ?? null })
           }

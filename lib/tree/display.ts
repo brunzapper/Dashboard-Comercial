@@ -1,3 +1,6 @@
+// Versão: 1.1 | Data: 11/10/2026
+// v1.1 (11/10/2026): `TreeNodeDisplay.typography` — fonte e tamanho por tipo
+//   de texto DESTE cartão, sobre o padrão do widget (lib/tree/typography.ts).
 // Versão: 1.0 | Data: 02/10/2026
 // v1.0 (02/10/2026): EXIBIÇÃO dos cartões da Tree — módulo PURO e client-safe.
 //
@@ -12,6 +15,8 @@
 //   * a cor do cartão (`display.tone`) é escolha do cartão; ausente = a cor
 //     do tipo.
 // Dono ÚNICO da decisão: `treeChrome`. Nenhum componente decide sozinho.
+
+import { parseTreeTypography, type TreeTypography } from "./typography";
 
 /** O que o widget deixa aparecer AO APRESENTAR (ausente = oculto). */
 export interface TreePresentationSettings {
@@ -71,6 +76,8 @@ export interface TreeNodeDisplay {
   /** Rótulo de tipo ao apresentar: forçar mostrar/ocultar (ausente = widget). */
   kindBadge?: "show" | "hide";
   tone?: TreeTone;
+  /** v1.1: fonte/tamanho por tipo de texto (vence o widget por propriedade). */
+  typography?: TreeTypography;
 }
 
 function isRecord(v: unknown): v is Record<string, unknown> {
@@ -85,6 +92,8 @@ export function parseNodeDisplay(raw: unknown): TreeNodeDisplay | null {
   if (typeof raw.tone === "string" && (TREE_TONES as readonly string[]).includes(raw.tone)) {
     if (raw.tone !== "padrao") out.tone = raw.tone as TreeTone;
   }
+  const typography = parseTreeTypography(raw.typography);
+  if (typography) out.typography = typography;
   return Object.keys(out).length > 0 ? out : null;
 }
 

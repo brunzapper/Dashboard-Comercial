@@ -1,3 +1,6 @@
+// Versão: 1.16 | Data: 11/10/2026
+// v1.16 (11/10/2026): linha `tree.typography` (fonte/tamanho por tipo de texto
+//   dos cartões — enums derivados de lib/tree/typography.ts).
 // Versão: 1.15 | Data: 10/10/2026
 // v1.15 (10/10/2026): linha `style` descreve o estilo operacional.
 // v1.14 (10/10/2026): quickFilters documenta a entry "Tem tarefa" (`task:`).
@@ -89,6 +92,7 @@ import {
   TREE_VIEW_LABELS,
 } from "@/lib/tree/model";
 import { GOAL_TABLE_MODE_LABELS } from "@/lib/widgets/goal-table";
+import { TREE_TEXT_MAX_PX, TREE_TEXT_MIN_PX, TREE_TEXT_ROLES } from "@/lib/tree/typography";
 import {
   DEFAULT_CUSTOM_COLUMNS,
   DEFAULT_TASK_PHASES,
@@ -378,7 +382,8 @@ export const WIDGET_SETTINGS_DOC = {
   "rootDirection": "h",                   // ${enumKeys(TREE_DIRECTION_LABELS)} (só na Root)
   "months": ["2026-10", "2026-11", "2026-12"],   // meses FIXOS dos nós de indicador; ausente = período do dashboard
   "canvas": { "bg": "#ffffff", "pattern": "pontos" },   // fundo da Root: pattern pontos | linhas | nenhum
-  "presentation": { "kindBadge": false, "addBranch": false, "ritualSchedule": false, "doneToggle": false, "warnings": false }  // o que os cartões mostram AO APRESENTAR (true = mostra)
+  "presentation": { "kindBadge": false, "addBranch": false, "ritualSchedule": false, "doneToggle": false, "warnings": false },  // o que os cartões mostram AO APRESENTAR (true = mostra)
+  "typography": { "title": { "font": "inter", "size": 16 }, "value": { "size": 14 } }  // fonte/tamanho PADRÃO dos textos dos cartões, por tipo: ${TREE_TEXT_ROLES.join(" | ")}; font: ${Object.keys(DASHBOARD_FONTS).join(" | ")}; size em px (${TREE_TEXT_MIN_PX}–${TREE_TEXT_MAX_PX}); ausente = tamanhos de sempre. Cada cartão sobrepõe na tela
   // NÃO há aqui chave para as linhas do cartão (Meta/Realizado/Projetado…): elas são de CADA nó — "mapas[].nodes[].payload.rows".
 }`,
   // Widget "Base do Dashboard" (0142): a grade editável dos números digitados.
