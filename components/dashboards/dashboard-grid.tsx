@@ -1,4 +1,10 @@
-// Versão: 2.25 | Data: 02/10/2026
+// Versão: 2.26 | Data: 11/10/2026
+// v2.26 (11/10/2026): apresentando, SEM barras de rolagem (regra
+//   [data-presenting] de globals.css) — o pan ("mãozinha") arma em qualquer
+//   ponto do slide, inclusive sobre os widgets, menos nos controles
+//   (`isPanBlockedTarget`), e o cursor de mão só aparece quando há o que
+//   arrastar (`pannable`: o canvas passa da largura ou o slide da altura).
+//   Fora da apresentação, idêntico.
 // v2.25 (02/10/2026): apresentando, cada item ganha `--ds-enter-delay` pela
 //   ordem de LEITURA (enterOrder): é o que escalona a entrada suave do slide
 //   (a regra [data-slide-enter] de globals.css anima o conteúdo do item, nunca
@@ -221,7 +227,8 @@ import { ConnectorLayer, type ConnectorLayerApi } from "./connector-layer";
 import { LineLayer } from "./line-layer";
 import { FontScaleProvider } from "./font-scale-context";
 import { BoardChromeProvider } from "./board-chrome-context";
-import { enterOrder, fitRowHeight } from "@/lib/dashboards/presentation";
+import { enterOrder, fitRowHeight, isPanBlockedTarget } from "@/lib/dashboards/presentation";
+import { usePresenting } from "./presenting-context";
 import { WidgetCard } from "./widget-card";
 import type { ResponsibleOption } from "./charts/record-list-table";
 
@@ -904,9 +911,14 @@ export function DashboardGrid({
   // lib/use-drag-pan (limiar de ~4px, listeners no window, sem
   // setPointerCapture). Sobre um widget (`.react-grid-item`) ou na UI dos
   // conectores (âncoras/linhas/painel, `[data-conn-ui]`) não pega.
+  // v2.26: apresentando, o slide inteiro é "agarrável" (sem barras, é o único
+  // jeito de ver o que não coube) — só os controles ficam de fora.
+  const presenting = usePresenting();
   const { panning, onPointerDown: panPointerDown } = useDragPan(scrollRef, {
     ignore: (t) =>
-      !!t.closest(".react-grid-item, [data-conn-ui], [data-line-ui]"),
+      presenting
+        ? isPanBlockedTarget(t)
+        : !!t.closest(".react-grid-item, [data-conn-ui], [data-line-ui]"),
   });
 
   // Só o ponteiro DIRETAMENTE sobre o espaço vazio da área de trabalho arma o
@@ -966,6 +978,29 @@ export function DashboardGrid({
     : 1;
   const gridW = (c: number) => c * cellW + MX * (c + 1);
   const gridH = (r: number) => r * ROW_H + MY * (r + 1);
+
+  // v2.26: apresentando, há o que arrastar? Largura: o canvas passa do
+  // contêiner do grid. Altura: o conteúdo passa do contêiner da apresentação
+  // (`[data-presenting]`, nunca o <main> por trás dele). Medido pelo
+  // ResizeObserver (callback assíncrono — nada de setState síncrono no efeito).
+  const [pannable, setPannable] = useState(false);
+  useEffect(() => {
+    if (!presenting) return;
+    const sc = scrollRef.current;
+    const canvas = canvasRef.current;
+    if (!sc) return;
+    const shell = sc.closest<HTMLElement>("[data-presenting]");
+    const measure = () => {
+      const x = sc.scrollWidth > sc.clientWidth + 1;
+      const y = !!shell && shell.scrollHeight > shell.clientHeight + 1;
+      setPannable(x || y);
+    };
+    const ro = new ResizeObserver(measure);
+    ro.observe(sc);
+    if (canvas) ro.observe(canvas);
+    if (shell) ro.observe(shell);
+    return () => ro.disconnect();
+  }, [presenting, baseWidth]);
   // Métricas do ConnectorLayer com referência estável (objeto novo por render
   // re-renderizava a camada de conectores a cada medição/hover).
   const connMetrics = useMemo(
@@ -1505,13 +1540,18 @@ export function DashboardGrid({
             onPointerLeave={() => hoverPan.stop()}
             className={cn(
               "relative",
-              panning ? "cursor-grabbing" : "cursor-grab",
+              panning
+                ? "cursor-grabbing"
+                : presenting
+                  ? pannable && "cursor-grab"
+                  : "cursor-grab",
               editMode &&
                 "rounded-md border border-dashed border-brand/40 bg-brand/[0.02]",
               // Só durante o arraste da alça: a borda desliza entre os degraus
               // de célula (fora dele, resize de janela/menu fica instantâneo).
               dragAxis && "transition-[width,height] duration-150 ease-out"
             )}
+            data-pannable={presenting && pannable ? "" : undefined}
             style={{ width: gridW(cols), height: gridH(rows) }}
           >
             {/* Linhas entre widgets: antes do RGL no DOM = pintam SOB os cards

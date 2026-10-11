@@ -1,4 +1,7 @@
-// Versão: 1.17 | Data: 11/10/2026
+// Versão: 1.18 | Data: 11/10/2026
+// v1.18 (11/10/2026): apresentando, a Lista marca `data-no-pan` — ela já tem
+//   o pan próprio (`useGrabPan`) e o pan do slide (dashboard-grid v2.26) não
+//   pode mover o board junto.
 // v1.17 (11/10/2026): cor, ajuste e números dos cartões — o widget lê
 //   `settings.card`/`fit`/`numbers` (padrão; o cartão sobrepõe em `display`) e
 //   os entrega pelo `TreeOpsValue`; na Lista, "Ajustar o cartão" deixa o título
@@ -1613,6 +1616,7 @@ export function TreeWidget({
     <TreeOpsProvider value={opsValue}>
     <div
       ref={listRef}
+      data-no-pan={presenting ? "" : undefined}
       className={`flex h-full flex-col gap-2 overflow-auto p-3 ${presenting ? GRAB_PAN_CLASS : ""}`}
     >
       {header}

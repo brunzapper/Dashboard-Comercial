@@ -1,4 +1,6 @@
-// Versão: 1.8 | Data: 11/10/2026
+// Versão: 1.9 | Data: 11/10/2026
+// v1.9 (11/10/2026): o canvas marca `data-no-pan` — tem pan PRÓPRIO, e o pan
+//   do slide (dashboard-grid v2.26) não pode arrastar o board junto.
 // v1.8 (11/10/2026): TEXTO QUE NÃO CABE, CORES e APRESENTAR.
 //   (a) "Ajustar o cartão" (padrão): o cartão se desenha com largura
 //       `max-content` (mínimo = tamanho automático ou o da alça, teto =
@@ -1193,6 +1195,8 @@ export function TreeRootView({
 
       <div
         ref={containerRef}
+        // v1.9: pan próprio — fora do pan do slide.
+        data-no-pan=""
         className={cn(
           "relative min-h-0 flex-1 touch-none overflow-hidden select-none",
           pattern === "pontos" &&

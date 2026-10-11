@@ -1,4 +1,6 @@
-<!-- Versão: 3.3 | Data: 11/10/2026 -->
+<!-- Versão: 3.4 | Data: 11/10/2026 -->
+<!-- v3.4 (11/10/2026): §4.27 — Apresentar sem barras de rolagem no painel
+     inteiro (não só na Tree); pan por arraste em qualquer ponto do slide. -->
 <!-- v3.3 (11/10/2026): §4.27 Tree — cores, ajuste ao texto e números
      grandes dos cartões; Apresentar sem barras de rolagem. -->
 <!-- v3.2 (11/10/2026): §4.27 Tree — tipografia dos cartões
@@ -7082,6 +7084,14 @@ Tree; o shell esconde o sino (`AppChrome.presenting`). A entrada suave anima o
 CONTEÚDO de cada item do grid (o item carrega o transform de posição do
 react-grid-layout), escalonada por `--ds-enter-delay` na ordem de leitura
 (`enterOrder`) e desligada por `prefers-reduced-motion`.
+**Sem barras de rolagem (11/10/2026):** apresentando, nenhuma barra aparece
+(regra `[data-presenting]` de `globals.css` — painel, grid e internas dos
+widgets; roda e teclado seguem rolando). Quando o slide não cabe, o pan é a
+mãozinha do `dashboard-grid`: arma em QUALQUER ponto, inclusive sobre os
+widgets, menos nos controles (`isPanBlockedTarget`,
+`lib/dashboards/presentation.ts`) e no que tem pan próprio (`data-no-pan` —
+Lista e Root da Tree). O cursor de mão só aparece com algo a arrastar
+(`data-pannable`).
 
 RPCs de widget INTOCADAS; nenhuma migração (`settings` jsonb e a coluna
 `organizations.ui_prefs`, já existente).

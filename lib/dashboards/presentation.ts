@@ -1,3 +1,8 @@
+// Versão: 1.5 | Data: 11/10/2026
+// v1.5 (11/10/2026): `isPanBlockedTarget` — apresentando, o pan ("mãozinha")
+//   arma em QUALQUER ponto do slide (inclusive sobre os widgets), menos sobre
+//   controles interativos. Sem barras de rolagem no modo, arrastar é o único
+//   jeito visível de ver o que não coube.
 // Versão: 1.4 | Data: 02/10/2026
 // v1.4 (02/10/2026): (a) `slide.date` — data FIXA do topo do slide (a data da
 //   reunião), no lugar de "hoje"; `slideFrameContent` a entrega em `dateIso`.
@@ -90,6 +95,34 @@ export function isTypingTarget(el: EventTarget | null): boolean {
   const h = el as HTMLElement;
   const tag = h.tagName.toLowerCase();
   return tag === "input" || tag === "textarea" || tag === "select" || h.isContentEditable === true;
+}
+
+/**
+ * v1.5 (11/10/2026): alvos que NÃO armam o pan do slide — controles que têm
+ * gesto próprio (clique, digitação, arraste de valor) e a UI de conectores/
+ * linhas. `[data-no-pan]` é a saída explícita para um widget que precise.
+ */
+const PAN_BLOCKED_SELECTOR = [
+  "button",
+  "a[href]",
+  "input",
+  "select",
+  "textarea",
+  "label",
+  "[role=button]",
+  "[role=slider]",
+  "[role=checkbox]",
+  "[role=menuitem]",
+  "[contenteditable=true]",
+  "[contenteditable='']",
+  "[data-no-pan]",
+  "[data-conn-ui]",
+  "[data-line-ui]",
+].join(",");
+
+export function isPanBlockedTarget(el: EventTarget | null): boolean {
+  if (!el || typeof (el as Element).closest !== "function") return false;
+  return (el as Element).closest(PAN_BLOCKED_SELECTOR) != null;
 }
 
 /**
