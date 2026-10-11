@@ -1,4 +1,6 @@
-// Versão: 1.2 | Data: 09/10/2026
+// Versão: 1.3 | Data: 11/10/2026
+// v1.3 (11/10/2026): as regras novas de importação — QUALQUER dono e QUALQUER
+//   tipo de atividade; concluída só dos últimos 90 dias e SOMENTE LEITURA.
 // v1.2 (09/10/2026): atividade desconhecida só entra com Tree ATIVO; concluída
 //   só dentro de 30 dias antes da ativação, com a data de conclusão DE LÁ; e a
 //   carga inicial de um registro (`loadRecordActivitiesNow`) marca 'done'.
@@ -9,8 +11,8 @@
 // APAGAR o que não devia e sobrescrever o que é nosso.
 //
 // Três invariantes que os testes pinam, porque nenhuma é óbvia no código:
-//   - só CRM_TODO vira tarefa (o portal chama de "atividade" também ligação,
-//     e-mail e reunião — importá-las encheria a lista de tarefas);
+//   - (v1.3) toda atividade vira tarefa — ligação, e-mail e reunião também
+//     (decisão do usuário); a concluída entra somente leitura;
 //   - tarefa JÁ espelhada nunca tem o conteúdo sobrescrito (o outbound é o
 //     dono do título/prazo; só o estado de conclusão vem de lá);
 //   - a atividade que sumiu da lista do dono apaga a tarefa — e é por isso que
@@ -20,19 +22,10 @@ import { describe, expect, it, vi } from "vitest";
 import {
   activityCompletedAt,
   deadlineToLocalDay,
-  isTodoActivity,
   loadRecordActivitiesNow,
   shouldImportActivity,
   syncBitrixActivitiesInbound,
 } from "./activity-inbound";
-
-describe("isTodoActivity", () => {
-  it("só o TODO da timeline", () => {
-    expect(isTodoActivity({ ID: 1, PROVIDER_ID: "CRM_TODO" })).toBe(true);
-    expect(isTodoActivity({ ID: 1, PROVIDER_ID: "CRM_EMAIL" })).toBe(false);
-    expect(isTodoActivity({ ID: 1 })).toBe(false);
-  });
-});
 
 describe("deadlineToLocalDay", () => {
   // O portal responde no fuso DELE. 02:00 em Moscou ainda é o dia anterior
@@ -329,58 +322,60 @@ describe("syncBitrixActivitiesInbound", () => {
     });
   });
 
-  // Ligação e e-mail SÃO atividades. Importá-las encheria a lista de tarefas.
-  // v1.2: dono que entra só por ter tarefa espelhada aberta concilia as JÁ
-  // conhecidas, mas não importa o resto da timeline.
-  it("sem Tree ativo, atividade desconhecida NÃO vira tarefa", async () => {
+  // v1.3: a importação deixou de depender do Tree (pedido do usuário).
+  it("sem Tree ativo, atividade desconhecida TAMBÉM vira tarefa", async () => {
     const { db, ops } = fakeDb({ ...OWNER_SEED, tasks: [] });
     const out = await syncBitrixActivitiesInbound(
       db,
       Date.now() + 9999,
       apiWith([TODO])
     );
-    expect(out.created).toBe(0);
-    expect(ops.some((o) => o.table === "tasks" && o.op === "insert")).toBe(false);
+    expect(out.created).toBe(1);
+    const ins = ops.find((o) => o.table === "tasks" && o.op === "insert");
+    expect(ins!.payload).toMatchObject({ read_only: false });
   });
 
-  it("concluída dentro da janela entra com a data de conclusão DE LÁ", async () => {
+  it("concluída dentro da janela entra SOMENTE LEITURA, com a data DE LÁ", async () => {
     const { db, ops } = fakeDb({ ...TREE_SEED, tasks: [] });
+    const doneAt = new Date(Date.now() - 10 * 86_400_000);
     const out = await syncBitrixActivitiesInbound(
       db,
       Date.now() + 9999,
-      apiWith([
-        { ...TODO, COMPLETED: "Y", LAST_UPDATED: "2026-09-20T12:00:00+03:00" },
-      ])
+      apiWith([{ ...TODO, COMPLETED: "Y", LAST_UPDATED: doneAt.toISOString() }])
     );
     expect(out.created).toBe(1);
     const ins = ops.find((o) => o.table === "tasks" && o.op === "insert");
-    expect((ins!.payload as { completed_at: string }).completed_at).toBe(
-      "2026-09-20T09:00:00.000Z"
-    );
+    expect(ins!.payload).toMatchObject({
+      completed_at: doneAt.toISOString(),
+      read_only: true,
+    });
   });
 
-  it("concluída antes da janela de 30 dias fica só lá", async () => {
+  it("concluída antes da janela de 90 dias fica só lá", async () => {
     const { db, ops } = fakeDb({ ...TREE_SEED, tasks: [] });
     const out = await syncBitrixActivitiesInbound(
       db,
       Date.now() + 9999,
       apiWith([
-        { ...TODO, COMPLETED: "Y", LAST_UPDATED: "2026-08-01T12:00:00+03:00" },
+        {
+          ...TODO,
+          COMPLETED: "Y",
+          LAST_UPDATED: new Date(Date.now() - 120 * 86_400_000).toISOString(),
+        },
       ])
     );
     expect(out.created).toBe(0);
     expect(ops.some((o) => o.table === "tasks" && o.op === "insert")).toBe(false);
   });
 
-  it("atividade que não é CRM_TODO é ignorada", async () => {
-    const { db, ops } = fakeDb({ ...TREE_SEED, tasks: [] });
+  it("atividade que não é CRM_TODO também entra (ligação, e-mail…)", async () => {
+    const { db } = fakeDb({ ...TREE_SEED, tasks: [] });
     const out = await syncBitrixActivitiesInbound(
       db,
       Date.now() + 9999,
       apiWith([{ ...TODO, PROVIDER_ID: "CRM_EMAIL" }])
     );
-    expect(out.created).toBe(0);
-    expect(ops.some((o) => o.table === "tasks" && o.op === "insert")).toBe(false);
+    expect(out.created).toBe(1);
   });
 
   // O conteúdo é DAQUI: o outbound o leva. Só o estado vem de lá.
@@ -416,36 +411,31 @@ describe("syncBitrixActivitiesInbound", () => {
 });
 
 describe("shouldImportActivity", () => {
-  const owner = { tree: true, treeActivatedAt: "2026-10-01T12:00:00Z" };
-  const todo = { ID: 1, PROVIDER_ID: "CRM_TODO" };
+  const NOW = Date.parse("2026-10-11T12:00:00Z");
+  const act = { ID: 1, PROVIDER_ID: "VOXIMPLANT_CALL" };
 
-  it("aberta entra sempre (com Tree)", () => {
-    expect(shouldImportActivity(owner, { ...todo, COMPLETED: "N" })).toBe(true);
+  it("aberta entra sempre, de qualquer tipo", () => {
+    expect(shouldImportActivity({ ...act, COMPLETED: "N" }, NOW)).toBe(true);
+    expect(shouldImportActivity({ ID: 2 }, NOW)).toBe(true);
   });
 
-  it("sem Tree nada entra", () => {
-    expect(shouldImportActivity({ tree: false }, { ...todo, COMPLETED: "N" })).toBe(false);
-  });
-
-  it("a borda: exatamente 30 dias antes da ativação entra", () => {
+  it("a borda: concluída há exatamente 90 dias entra; um minuto antes, não", () => {
     expect(
-      shouldImportActivity(owner, {
-        ...todo,
-        COMPLETED: "Y",
-        LAST_UPDATED: "2026-09-01T12:00:00Z",
-      })
+      shouldImportActivity(
+        { ...act, COMPLETED: "Y", LAST_UPDATED: "2026-07-13T12:00:00Z" },
+        NOW
+      )
     ).toBe(true);
     expect(
-      shouldImportActivity(owner, {
-        ...todo,
-        COMPLETED: "Y",
-        LAST_UPDATED: "2026-09-01T11:59:00Z",
-      })
+      shouldImportActivity(
+        { ...act, COMPLETED: "Y", LAST_UPDATED: "2026-07-13T11:59:00Z" },
+        NOW
+      )
     ).toBe(false);
   });
 
   it("concluída sem data não entra (não dá para provar a janela)", () => {
-    expect(shouldImportActivity(owner, { ...todo, COMPLETED: "Y" })).toBe(false);
+    expect(shouldImportActivity({ ...act, COMPLETED: "Y" }, NOW)).toBe(false);
   });
 });
 

@@ -1049,23 +1049,32 @@ This version has breaking changes — APIs, conventions, and file structure may 
   impede o nosso próprio comentário de virar uma segunda anotação;
   `comments` NÃO ganha `organization_id` (é transitiva ao registro desde a 0066
   e a RLS depende disso). **Desde 09/10/2026 (0152)** as atividades de
-  acompanhamento nascem NO Bitrix: a atividade CRM_TODO desconhecida só vira
-  tarefa em registro com Tree ATIVO, a concluída só se a conclusão for de até
-  30 dias antes da ativação (`TREE_IMPORT_LOOKBACK_DAYS`, data de lá em
-  `completed_at`), e ligar o Tree dispara a CARGA INICIAL em segundo plano
+  acompanhamento nascem NO Bitrix, e ligar o Tree dispara a CARGA INICIAL em segundo plano
   (`config.inboundLoad` 'pending'→'done', `after()` + `runPendingInitialLoads`
   no tick; a Tree só AVISA, nunca bloqueia). Série de regra desligada não
-  projeta tronco (`projectableSeries`). Ver `docs/arquitetura.md` §4.24 e
+  projeta tronco (`projectableSeries`). **Desde 11/10/2026 (0154)** a
+  importação vale para QUALQUER registro e QUALQUER tipo de atividade (regra
+  única `shouldImportActivity`): pendente sempre, concluída só dos últimos 90
+  dias (`IMPORT_DONE_LOOKBACK_DAYS`, data de lá em `completed_at`) e SOMENTE
+  LEITURA (`tasks.read_only` + trigger `enforce_tasks_read_only` — usuário não
+  altera nem exclui; service role e cascata passam; a tela só esconde as
+  ações via `useTaskRowActions().readOnly`). A porta de entrada dos registros
+  que ainda não têm nada aqui é a DESCOBERTA (`activity-discovery.ts`, cursor
+  em `sync_config` `bitrix_activity_discovery`: pendentes → concluídas de 90
+  dias → incremental por `LAST_UPDATED`), no tick antes da leitura de volta;
+  o cursor só anda pelo que foi PROCESSADO. Ver `docs/arquitetura.md` §4.24 e
   invariante 38.
 - **Filtro "Tem tarefa" se resolve no ENGINE, nunca no RPC (0153,
-  10/10/2026):** pseudo-campo `task:<pendentes|atrasadas|concluidas|todas>`
-  com `value = "<dias atrás>,<dias à frente>"` (0–180, vazio = sem limite)
-  sobre o PRAZO; régua e predicado ÚNICOS em `lib/tasks/task-filter.ts`
-  (`taskFilterWindow`). Agregado: `resolveTaskFilters` → `id in (...)` (a 0153
+  10/10/2026):** pseudo-campo `task:<estado>[+<estado>]` (pendentes/
+  atrasadas/concluidas — VÁRIOS em OU desde 11/10/2026; legado `todas` =
+  pendentes + concluídas, lido sem migração) com `value = "<dias atrás>,<dias
+  à frente>"` (0–180, vazio = sem limite) sobre o PRAZO; régua e predicado
+  ÚNICOS em `lib/tasks/task-filter.ts` (`taskFilterWindows`; jsonb antigo com
+  `status` solto via `taskFilterSpecFromObject`). Agregado: `resolveTaskFilters` → `id in (...)` (a 0153
   só abriu `id` no ramo de FILTRO dos dois RPCs, espelhado); modo lista/
   kanban//registros: embutido vazio `tasks!inner()` (`applyTaskEmbedFilters`);
   automação: condição `task_filter` (`taskMatchesFilter`); filtro rápido:
-  entry `field = "task:"` + valor `{kind:"tasks"}` (`quickTaskFilters`);
+  entry `field = "task:"` + valor `{kind:"tasks", statuses}` (`quickTaskFilters`);
   snapshot IGNORA (`withoutTaskFilters`). Lista vazia = uuid-zero, nunca sem
   filtro; acima de `MAX_TASK_FILTER_RECORDS` falha alto. RLS de `tasks` vale
   (vendedor vê as dele). Editor único `components/filters/task-filter-editor.tsx`.

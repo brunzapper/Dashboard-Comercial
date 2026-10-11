@@ -1,4 +1,5 @@
-// Versão: 1.3 | Data: 10/10/2026
+// Versão: 1.4 | Data: 11/10/2026
+// v1.4 (11/10/2026): condição `task_filter` com `statuses` (um ou mais estados).
 // v1.3 (10/10/2026): condição `task_filter` ("Tem tarefa") no SPEC — enum e
 //   teto derivados de lib/tasks/task-filter.ts.
 // v1.2 (02/10/2026): "Regras gerais" vira CABEÇALHO — é o que separa as duas seções escolhíveis
@@ -130,8 +131,9 @@ Condições (todas em E; misture as famílias à vontade):
 - { "kind": "related_count", "source": "<Base RAIZ>", "filters": [...], "op": "gte|lte|eq", "value": 3 }
   — quantos registros CONECTADOS daquela Base o card tem.
 - { "kind": "tasks", "metric": "open" | "overdue", "op": "gte|lte|eq", "value": 0 }
-- { "kind": "task_filter", "status": ${TASK_FILTER_STATUSES.map((v) => `"${v}"`).join(" | ")}, "back": 30, "ahead": 60 }
-  — o card TEM ao menos uma tarefa no estado pedido com PRAZO entre hoje − back
+- { "kind": "task_filter", "statuses": [${TASK_FILTER_STATUSES.map((v) => `"${v}"`).join(", ")}], "back": 30, "ahead": 60 }
+  — "statuses" = um ou mais desses estados; o card TEM ao menos uma tarefa em
+  QUALQUER um deles com PRAZO entre hoje − back
   e hoje + ahead dias (0 a ${String(MAX_TASK_FILTER_DAYS)}; null = sem limite daquele lado).
   "atrasadas" = pendente com prazo antes de hoje.
 - { "kind": "time", "basis": {...}, "op": "gte|lte", "days": 7 } — dias corridos.

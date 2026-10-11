@@ -1,4 +1,6 @@
-// Versão: 1.2 | Data: 10/10/2026
+// Versão: 1.3 | Data: 11/10/2026
+// v1.3 (11/10/2026): o valor "Tem tarefa" carrega VÁRIOS estados
+//   (`statuses`); valor gravado com o `status` solto (v1.2) segue lido.
 // v1.2 (10/10/2026): filtro rápido "Tem tarefa" — entry com `field = "task:"`
 //   (TASK_QUICK_FIELD) e valor `{kind:"tasks", status, back, ahead}`; vira o
 //   `WidgetFilter` `task:` por `quickTaskFilters` (page e widget-scope).
@@ -21,10 +23,9 @@
 //   canônica (canonicalBucketKey).
 import type { RecordRow } from "@/lib/records/types";
 import {
-  parseTaskFilterDays,
   serializeTaskFilter,
   TASK_FILTER_PREFIX,
-  TASK_FILTER_STATUS_LABELS,
+  taskFilterSpecFromObject,
   type TaskFilterStatus,
 } from "@/lib/tasks/task-filter";
 import type { AvailableField } from "./fields";
@@ -136,7 +137,8 @@ export type QuickFilterValue =
   // v1.2: "Tem tarefa" — estado + janela de dias sobre o prazo (null = sem limite).
   | {
       kind: "tasks";
-      status: TaskFilterStatus;
+      /** v1.3: um ou mais estados (o legado `status` é lido no parse). */
+      statuses: TaskFilterStatus[];
       back: number | null;
       ahead: number | null;
     };
@@ -156,7 +158,7 @@ export function quickTaskFilters(
   if (!value || value.kind !== "tasks") return [];
   return [
     serializeTaskFilter({
-      status: value.status,
+      statuses: value.statuses,
       back: value.back,
       ahead: value.ahead,
     }),
@@ -208,12 +210,9 @@ export function parseQuickFilterValue(raw: unknown): QuickFilterValue | null {
   }
   if (o.kind === "tasks") {
     // v1.2: mesma régua do filtro do widget (estado no enum, dias 0–180).
-    if (typeof o.status !== "string" || !(o.status in TASK_FILTER_STATUS_LABELS))
-      return null;
-    const back = parseTaskFilterDays(o.back);
-    const ahead = parseTaskFilterDays(o.ahead);
-    if (back === undefined || ahead === undefined) return null;
-    return { kind: "tasks", status: o.status as TaskFilterStatus, back, ahead };
+    // v1.3: `statuses` ou o legado `status`.
+    const spec = taskFilterSpecFromObject(o);
+    return spec ? { kind: "tasks", ...spec } : null;
   }
   if (o.kind === "period") {
     return {

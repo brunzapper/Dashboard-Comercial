@@ -1,4 +1,6 @@
-<!-- Versão: 1.49 | Data: 10/10/2026 -->
+<!-- Versão: 1.50 | Data: 11/10/2026 -->
+<!-- v1.50 (11/10/2026): "Tem tarefa" aceita VÁRIOS estados de uma vez
+     (caixas de marcar) e conta as atividades de todos os negócios. -->
 <!-- v1.49 (10/10/2026): §5.19 estilo **Operacional** (segue o tema do
      sistema; KPI denso, variação colorida, nota com tinta) e "Tentar de novo"
      no erro do widget. -->
@@ -2184,16 +2186,17 @@ Filtros fixos do widget (sempre aplicados, invisíveis ao leitor). Por linha:
 - **"Mostrar barra de busca/filtro na tabela"** (só Tabela): liga/desliga a
   barra do §4.5.
 - **"Tem tarefa (estado e prazo)"** (grupo "Tarefas" no seletor de campo):
-  deixa passar só o registro que tem ao menos uma TAREFA no estado escolhido
-  — **Pendentes**, **Atrasadas** (pendente com prazo antes de hoje),
-  **Concluídas** ou **Pendentes e concluídas** — com o **prazo** dentro da
+  deixa passar só o registro que tem ao menos uma TAREFA em QUALQUER um dos
+  estados marcados — **Pendentes**, **Atrasadas** (pendente com prazo antes de
+  hoje) e/ou **Concluídas** (marque um ou mais) — com o **prazo** dentro da
   janela "**dias atrás**" / "**dias à frente**" a partir de hoje (inteiros de
   0 a 180; campo vazio = sem limite daquele lado). Ex.: 30 atrás e 60 à
   frente; 15 e 15. Com janela definida, tarefa sem prazo não conta. Não tem
   operador nem alvo por Base. Vale em gráficos, KPIs, tabelas e kanban; a
   pessoa só "vê" as tarefas que as permissões dela alcançam (o vendedor, as
   dele). No link público de snapshot o filtro é ignorado (o snapshot não
-  guarda tarefas).
+  guarda tarefas). As tarefas incluem as atividades do Bitrix de todos os
+  negócios (qualquer tipo); as concluídas lá entram dos últimos 90 dias.
 
 ### 6.5 Bloco "Filtros rápidos" (dropdowns no card)
 
