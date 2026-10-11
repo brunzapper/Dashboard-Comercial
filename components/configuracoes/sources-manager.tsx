@@ -1,4 +1,6 @@
-// Versão: 1.5 | Data: 07/08/2026
+// Versão: 1.6 | Data: 11/10/2026
+// v1.6 (11/10/2026): Base de PROCESSO INTELIGENTE (0155) oferece também
+//   "Como atividade do próprio processo" (`dynamic_<id>`) no espelho.
 // v1.5 (07/08/2026): as actions não revalidam mais ("/", "layout") — cada
 //   form/botão dispara o refresh pós-sucesso via useRefreshOnActionOk (o form
 //   libera quando a action retorna; sidebar/lista atualizam ~0,3s depois).
@@ -233,6 +235,14 @@ function SourceForm({
         <Combobox
           options={[
             { value: "", label: "Não espelhar" },
+            ...(source?.bitrixEntityTypeId
+              ? [
+                  {
+                    value: `dynamic_${source.bitrixEntityTypeId}`,
+                    label: "Como atividade do próprio processo",
+                  },
+                ]
+              : []),
             { value: "deal", label: "Como atividade do negócio (deal)" },
             { value: "lead", label: "Como atividade do lead" },
           ]}

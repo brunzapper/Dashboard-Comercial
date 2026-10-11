@@ -1,4 +1,6 @@
-// Versão: 1.0 | Data: 11/07/2026
+// Versão: 1.1 | Data: 11/10/2026
+// v1.1 (11/10/2026): entidade de processo inteligente (0155) — rótulo pelo
+//   dono único `bitrixEntityLabel` e o id nativo (sem o prefixo do tipo).
 // Tabela do Log de write-back (Registros → Log). Filtro por status no client
 // e botão "Reenfileirar" (server action) nos itens com erro.
 "use client";
@@ -8,10 +10,22 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { requeueWriteback } from "@/app/(app)/registros/log/actions";
+import {
+  bitrixEntityLabel,
+  nativeIdOf,
+  parseBitrixEntity,
+} from "@/lib/sync/bitrix/entities";
+
+/** "Negócio #12", "Lead #9", "Processo #1036 #5". */
+function entityText(raw: string, sourceId: string): string {
+  const e = parseBitrixEntity(raw);
+  if (!e) return `${raw} #${sourceId}`;
+  return `${bitrixEntityLabel(e)} #${nativeIdOf(e, sourceId) ?? sourceId}`;
+}
 
 export interface WritebackLogRow {
   id: string;
-  entity: "deal" | "lead";
+  entity: string;
   sourceId: string;
   fieldKey: string;
   label: string | null;
@@ -119,7 +133,7 @@ export function WritebackLog({ rows }: { rows: WritebackLogRow[] }) {
                   <td className="px-3 py-2">
                     <div>{r.recordTitle ?? "(sem título)"}</div>
                     <div className="text-muted-foreground text-xs">
-                      {r.entity === "deal" ? "Negócio" : "Lead"} #{r.sourceId}
+                      {entityText(r.entity, r.sourceId)}
                     </div>
                   </td>
                   <td className="px-3 py-2">{r.label ?? r.fieldKey}</td>

@@ -1,4 +1,7 @@
-// Versão: 2.6 | Data: 07/08/2026
+// Versão: 2.7 | Data: 11/10/2026
+// v2.7 (11/10/2026): espelho de atividades aceita `dynamic_<id>` (0155) — mas
+//   SÓ na Base do próprio processo inteligente (criar Base SPA é da triagem,
+//   Registros → Novas bases de Sync; aqui ela só é editada).
 // v2.6 (07/08/2026): fim do revalidatePath("/", "layout") nos CRUDs — a
 //   resposta da action voltava só depois do re-render RSC do layout raiz +
 //   página (o formulário ficava travado segundos por operação). O form agora
@@ -44,6 +47,11 @@ import { getActiveOrgId } from "@/lib/auth/org";
 import { createClient } from "@/lib/supabase/server";
 import { isCoreDef } from "@/lib/records/core-defs";
 import { slugify } from "@/lib/records/slug";
+import {
+  parseBitrixEntity,
+  spaTypeIdOf,
+  type BitrixEntity,
+} from "@/lib/sync/bitrix/entities";
 import { SOURCE_LABELS_CONFIG_KEY } from "@/lib/config/source-labels";
 import { resequenceAfterMove } from "@/lib/source-folders";
 import type { WidgetFilter } from "@/lib/widgets/types";
@@ -153,8 +161,8 @@ function readSourceForm(formData: FormData): {
   periodField: string;
   manualEntry: boolean;
   timezone: string | null;
-  /** Espelho de tarefas no Bitrix (0136): 'deal' | 'lead' | null (desligado). */
-  activityOwner: "deal" | "lead" | null;
+  /** Espelho de tarefas no Bitrix (0136): entidade do CRM ou null (desligado). */
+  activityOwner: BitrixEntity | null;
   // Pasta (0107): uuid de source_folders; null = "sem pasta".
   folderId: string | null;
   error?: string;
@@ -166,9 +174,8 @@ function readSourceForm(formData: FormData): {
   const timezone = cleanText(formData.get("timezone"), 64) || null;
   // 0136: qualquer valor fora do par é DESLIGADO — o CHECK do banco é a
   // muralha, mas uma Base não pode passar a espelhar por causa de lixo no form.
-  const rawOwner = cleanText(formData.get("bitrix_activity_owner"), 10);
-  const activityOwner =
-    rawOwner === "deal" || rawOwner === "lead" ? rawOwner : null;
+  const rawOwner = cleanText(formData.get("bitrix_activity_owner"), 24);
+  const activityOwner = parseBitrixEntity(rawOwner);
   const folderId = cleanText(formData.get("folder_id"), 40) || null;
   if (label.length < 2) {
     return {
@@ -247,6 +254,10 @@ export async function createSource(
     error,
   } = readSourceForm(formData);
   if (error) return { ok: false, message: error };
+  // v2.7: processo inteligente só nasce pela triagem.
+  if (activityOwner && spaTypeIdOf(activityOwner) != null) {
+    return { ok: false, message: "Base de processo inteligente nasce em Novas bases de Sync." };
+  }
 
   const key = slugify(label).slice(0, 40);
   if (!KEY_RE.test(key) || RESERVED_KEYS.has(key)) {
@@ -331,6 +342,18 @@ export async function updateSource(
   const supabase = await createClient();
   const folderError = await validateFolderId(supabase, folderId);
   if (folderError) return { ok: false, message: folderError };
+  // v2.7: `dynamic_<id>` só na Base daquele processo.
+  const ownerType = activityOwner ? spaTypeIdOf(activityOwner) : null;
+  if (ownerType != null) {
+    const { data: own } = await supabase
+      .from("data_sources")
+      .select("bitrix_entity_type_id")
+      .eq("key", key)
+      .maybeSingle();
+    if (Number(own?.bitrix_entity_type_id) !== ownerType) {
+      return { ok: false, message: "Espelho inválido para esta base." };
+    }
+  }
   // Campo custom (0110): o applies_to é conferido contra o record_type da
   // base (fetch só quando necessário — core não consulta nada).
   let recordType: string | null = null;

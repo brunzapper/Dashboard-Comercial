@@ -1,4 +1,8 @@
-// Versão: 2.4 | Data: 12/09/2026
+// Versão: 2.5 | Data: 11/10/2026
+// v2.5 (11/10/2026): Base de PROCESSO INTELIGENTE do Bitrix (0155) —
+//   `SourceDef.bitrixEntityTypeId` + `bitrixRecordEntityOf` (a entidade dos
+//   REGISTROS da Base, para write-back/link) separado de `bitrixEntityOfSource`
+//   (onde a ATIVIDADE espelhada mora, que pode ser declarada à parte).
 // v2.4 (12/09/2026): bitrixEntityOfSource — qual entidade do CRM corresponde a
 //   uma Base, para montar link do portal. A resolução estava ad hoc em vários
 //   sítios (automações, ações em massa, criação de registro); este é o lugar
@@ -30,6 +34,7 @@
 //   (perna por source-key); NÃO tocam nas RPCs de widget.
 // v2.3 (12/08/2026): manualEntryRootSource — gate único do botão "+" de criação
 //   manual no widget de tabela (builder e card usam o MESMO critério).
+import { dynamicEntity, type BitrixEntity } from "@/lib/sync/bitrix/entities";
 import type { WidgetFilter } from "@/lib/widgets/types";
 
 export type SourceKey = string;
@@ -65,7 +70,10 @@ export interface SourceDef {
   // Base vira uma atividade do CRM (crm.activity) pendurada nesta entidade.
   // null/ausente = não espelha, que é o estado de toda Base existente. É o
   // nível mais geral dos três (Base → automação/série → tarefa manual).
-  bitrixActivityOwner?: "deal" | "lead" | null;
+  bitrixActivityOwner?: BitrixEntity | null;
+  // v2.5 (11/10/2026, 0155): entityTypeId do PROCESSO INTELIGENTE do Bitrix de
+  // onde os registros desta Base vêm (`crm.item.*`). null/ausente = não é SPA.
+  bitrixEntityTypeId?: number | null;
   // PASTA (0107): agrupamento de EXIBIÇÃO das bases raiz (source_folders).
   // null/ausente = "sem pasta" (grupo implícito). Subs não têm (herdam a da
   // pai). Nunca entra em consulta/engine — só navegação/listas/pickers
@@ -242,12 +250,28 @@ export function recordTypeOf(
 export function bitrixEntityOfSource(
   key: string,
   sources: SourceDef[] = BUILTIN_SOURCES
-): "deal" | "lead" | null {
+): BitrixEntity | null {
   const def = sources.find((s) => s.key === key);
   if (def?.bitrixActivityOwner) return def.bitrixActivityOwner;
+  return bitrixRecordEntityOf(key, sources);
+}
+
+/**
+ * v2.5: a entidade do CRM de onde os REGISTROS da Base vêm — é para ela que o
+ * write-back escreve. `lead`/`negocio` (builtins) e as Bases de processo
+ * inteligente (`bitrixEntityTypeId`). Sub-base responde pela pai (mesmo
+ * record_type). null = Base sem par no CRM.
+ */
+export function bitrixRecordEntityOf(
+  key: string,
+  sources: SourceDef[] = BUILTIN_SOURCES
+): BitrixEntity | null {
   const rt = recordTypeOf(key, sources);
   if (rt === "lead") return "lead";
-  return rt === "negocio" ? "deal" : null;
+  if (rt === "negocio") return "deal";
+  const root = sources.find((s) => s.recordType === rt && !s.parentKey);
+  const typeId = root?.bitrixEntityTypeId ?? null;
+  return typeId ? dynamicEntity(typeId) : null;
 }
 
 /** Predicado (WidgetFilter[]) que recorta as linhas da pai; [] p/ fontes raiz. */

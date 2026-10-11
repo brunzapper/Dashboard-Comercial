@@ -1,4 +1,7 @@
-// Versão: 1.0 | Data: 11/07/2026
+// Versão: 1.1 | Data: 11/10/2026
+// v1.1 (11/10/2026): entidade de PROCESSO INTELIGENTE (`dynamic_<id>`, 0155) —
+//   alvo `spa` com os nomes camelCase do `crm.item.*`. O `source_field_id` de
+//   coluna core vai SEM o prefixo do tipo (o drain aceita os dois formatos).
 // Colunas do NÚCLEO de `records` que podem ser editadas manualmente e (quando o
 // registro veio do Bitrix) gravadas de volta. O mapa abaixo diz, por coluna, qual
 // é o campo do Bitrix por entidade (deal/lead) — derivado do mapeamento único de
@@ -15,28 +18,35 @@
 // como a operação, não grava de volta no Bitrix.
 import { DEAL_CORE, LEAD_CORE } from "./bitrix-field-map";
 import type { DataType } from "@/lib/records/types";
+import type { BitrixEntity } from "@/lib/sync/bitrix/entities";
 
 export interface CoreWriteBackTarget {
   deal?: string;
   lead?: string;
+  /** v1.1: processo inteligente (crm.item, camelCase). */
+  spa?: string;
 }
 
 // Coluna do núcleo → campo do Bitrix por entidade.
 export const CORE_WRITEBACK: Record<string, CoreWriteBackTarget> = {
-  title: { deal: DEAL_CORE.title, lead: LEAD_CORE.title },
-  stage: { deal: DEAL_CORE.stageId, lead: LEAD_CORE.stageId },
-  value: { deal: DEAL_CORE.value, lead: LEAD_CORE.value },
+  title: { deal: DEAL_CORE.title, lead: LEAD_CORE.title, spa: "title" },
+  stage: { deal: DEAL_CORE.stageId, lead: LEAD_CORE.stageId, spa: "stageId" },
+  value: { deal: DEAL_CORE.value, lead: LEAD_CORE.value, spa: "opportunity" },
   mrr: { deal: DEAL_CORE.mrr }, // lead não tem MRR
-  currency: { deal: DEAL_CORE.currency, lead: LEAD_CORE.currency },
+  currency: { deal: DEAL_CORE.currency, lead: LEAD_CORE.currency, spa: "currencyId" },
   channel: { deal: DEAL_CORE.channel },
   sale_type: { deal: DEAL_CORE.saleType },
   closed: { deal: DEAL_CORE.closed },
   closed_at: { deal: DEAL_CORE.closedAt },
-  opened_at: { deal: DEAL_CORE.openedAt },
+  opened_at: { deal: DEAL_CORE.openedAt, spa: "begindate" },
   pipeline: { deal: DEAL_CORE.categoryId },
   // Responsável (dono): grava ASSIGNED_BY_ID. O valor enfileirado NÃO é o uuid
   // local de `responsibles`, e sim o `bitrix_user_id` resolvido em actions.ts.
-  responsible_id: { deal: DEAL_CORE.assignedById, lead: LEAD_CORE.assignedById },
+  responsible_id: {
+    deal: DEAL_CORE.assignedById,
+    lead: LEAD_CORE.assignedById,
+    spa: "assignedById",
+  },
 };
 
 // Colunas do núcleo editáveis inline + o tipo p/ coerção/validação (espelha DataType).
@@ -84,7 +94,10 @@ export function isWriteBackRelation(field: string): boolean {
 // source_field_id do Bitrix p/ uma coluna do núcleo, conforme a entidade.
 export function coreWriteBackFieldId(
   field: string,
-  entity: "deal" | "lead"
+  entity: BitrixEntity
 ): string | null {
-  return CORE_WRITEBACK[field]?.[entity] ?? null;
+  const target = CORE_WRITEBACK[field];
+  if (!target) return null;
+  if (entity === "deal" || entity === "lead") return target[entity] ?? null;
+  return target.spa ?? null;
 }

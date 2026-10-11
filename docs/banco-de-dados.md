@@ -1,4 +1,8 @@
-<!-- Versão: 3.33 | Data: 11/10/2026 -->
+<!-- Versão: 3.34 | Data: 11/10/2026 -->
+<!-- v3.34 (11/10/2026): 0155 — Bases de PROCESSO INTELIGENTE do Bitrix
+     (`data_sources.bitrix_entity_type_id`/`bitrix_spa_config`/
+     `bitrix_spa_loaded_at`), triagem `sync_source_requests` e as três colunas
+     de entidade abertas a `dynamic_<id>`. -->
 <!-- v3.33 (11/10/2026): 0154 — `tasks.read_only` + trigger
      `enforce_tasks_read_only` (atividade concluída do Bitrix só leitura). -->
 <!-- v3.32 (10/10/2026): 0153 — ramo de FILTRO dos RPCs de widget aceita `id`
@@ -293,6 +297,20 @@ conversão; seed `Europe/Moscow` em `leads`/`deals`), `folder_id` (0107 — FK �
 ordem manual dentro da pasta; loader ordena `sort_order, builtin desc,
 created_at`). Seed dos 3 builtins:
 `leads/lead`, `deals/negocio` (período `closed_at`), `estudo/venda_site`.
+Desde a 0155: `bitrix_entity_type_id` (entityTypeId do Processo Inteligente
+do Bitrix de onde a Base vem; único por org), `bitrix_spa_config` (jsonb
+APROVADO — campos `{id,key,label}` e funis; parse fail-closed em
+`lib/sync/bitrix/spa-config.ts`) e `bitrix_spa_loaded_at` (NULL = o próximo
+job lê o processo inteiro). Os `source_id` dos registros dessas Bases são
+`"<entityTypeId>:<id>"`. `bitrix_activity_owner` aceita
+`deal|lead|dynamic_<id>` (CHECK por regex).
+
+**`sync_source_requests`** (0155) — TRIAGEM de novas Bases de Sync
+(Registros → Novas bases de Sync): `provider` (`bitrix_spa`),
+`entity_type_id`, `title`, `status` (`pending|approved|rejected`), `config`
+(rascunho ajustável), `note`, `source_key` (FK → `data_sources.key`, set null),
+autor/decisor e datas. Único parcial `(organization_id, provider,
+entity_type_id) where status='pending'`. RLS: admin da própria org.
 
 **`source_folders`** (0107) — PASTAS de bases: agrupamento de EXIBIÇÃO
 (navegação de /registros e /campos, tabelas de Registros → Bases e
@@ -1132,6 +1150,7 @@ contato de um lead alheio.
 | 0152 | tree_inbound_activation | `activity_inbound_owners` derrubada e recriada com a coluna `tree_activated_at` (a data de ativação do Tree: `record_attributes.config.activatedAt`, senão `created_at`). Base do corte da leitura de volta: atividade CRM_TODO concluída só é importada se a conclusão for de até 30 dias antes da ativação. Sem tabela nova: o estado da carga inicial (`inboundLoad`) vive no `config` jsonb do atributo. **Não recria as RPCs de widget** |
 | 0153 | widget_filter_record_id | `run_widget_query` e `run_widget_query_snapshot` recriados byte a byte a partir da 0121 com UMA linha diferente nas duas (invariante 1): o ramo de FILTRO aceita `id` além de `v_allowed_cols`. É o que deixa o engine entregar o filtro "Tem tarefa" como `id in (<registros>)` (lib/tasks/task-filter-resolve.ts). `id` NÃO entra em `v_allowed_cols` — dimensão e métrica por id seguem recusadas. **Nenhuma lógica de tarefa no RPC** |
 | 0154 | tasks_read_only | `tasks.read_only boolean not null default false` + trigger `trg_tasks_read_only` (`enforce_tasks_read_only`, BEFORE UPDATE OR DELETE): usuário autenticado (`auth.uid()` não nulo) não altera nem exclui tarefa com `read_only` — é a atividade CONCLUÍDA que nasceu no Bitrix, importada pela leitura de volta/descoberta. Service role passa; exclusão em CASCATA (purga de registro) passa por `pg_trigger_depth() > 1`. O cursor da descoberta vive em `sync_config` (`bitrix_activity_discovery`), sem tabela nova. **Não recria as RPCs de widget** |
+| 0155 | bitrix_spa_sources | Processos Inteligentes do Bitrix como Bases: `data_sources.bitrix_entity_type_id` (+ único parcial por org), `bitrix_spa_config`, `bitrix_spa_loaded_at`; tabela `sync_source_requests` (triagem: solicitar → ajustar → aprovar; RLS admin da org); `data_sources.bitrix_activity_owner`, `bitrix_task_queue.owner_entity` e `bitrix_writeback_queue.entity` passam a aceitar `dynamic_<id>`. Nenhuma coluna nova em `records` (item SPA usa `source_id` prefixado `<tipo>:<id>`). **Não recria as RPCs de widget** |
 
 
 ### 0145 — Miniaturas persistentes de dashboards

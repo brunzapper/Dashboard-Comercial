@@ -1,4 +1,8 @@
-// Versão: 1.4 | Data: 11/10/2026
+// Versão: 1.5 | Data: 11/10/2026
+// v1.5 (11/10/2026): donos de PROCESSO INTELIGENTE (`dynamic_<id>`, 0155) —
+//   o laço fixo ["deal","lead"] virou as entidades distintas dos donos; o
+//   `@OWNER_ID`/`ENTITY_ID` levam o ID NATIVO (o `source_id` do item SPA tem o
+//   prefixo do tipo) e o OWNER_TYPE_ID sai de `ownerTypeIdOf`.
 // v1.4 (11/10/2026): as atividades de TODOS os negócios entram (pedido do
 //   usuário — o filtro "Tem tarefa" voltava vazio porque só os registros com
 //   Tree ativo eram lidos). Esta conciliação por dono passa a importar a
@@ -87,11 +91,14 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { emitWebhookEvent } from "@/lib/webhooks/emit";
-import {
-  BITRIX_OWNER_TYPE_ID,
-  type MirrorOwnerEntity,
-} from "@/lib/tasks/mirror-config";
+import type { MirrorOwnerEntity } from "@/lib/tasks/mirror-config";
 import { BitrixClient } from "./client";
+import {
+  nativeIdOf,
+  ownerTypeIdOf,
+  parseBitrixEntity,
+  timelineEntityType,
+} from "./entities";
 import type { BitrixCallable } from "./task-mirror";
 
 /** Donos por chamada. O filtro `@OWNER_ID` do Bitrix aceita lista. */
@@ -259,13 +266,20 @@ export async function pendingActivityOwners(
         source_id: string;
         entity: MirrorOwnerEntity;
         tree: boolean;
-      }[]).map((r) => ({
-        recordId: r.record_id,
-        orgId: r.organization_id,
-        entity: r.entity,
-        sourceId: String(r.source_id),
-        tree: Boolean(r.tree),
-      }));
+      }[]).flatMap((r) => {
+        const entity = parseBitrixEntity(r.entity);
+        return entity
+          ? [
+              {
+                recordId: r.record_id,
+                orgId: r.organization_id,
+                entity,
+                sourceId: String(r.source_id),
+                tree: Boolean(r.tree),
+              },
+            ]
+          : [];
+      });
     }
   } catch {
     // cai no caminho de sempre
@@ -283,10 +297,8 @@ async function pendingActivityOwnersLegacy(
     .not("bitrix_activity_owner", "is", null);
   const entityByType = new Map<string, MirrorOwnerEntity>();
   for (const s of sources ?? []) {
-    entityByType.set(
-      s.record_type as string,
-      s.bitrix_activity_owner as MirrorOwnerEntity
-    );
+    const e = parseBitrixEntity(s.bitrix_activity_owner);
+    if (e) entityByType.set(s.record_type as string, e);
   }
   if (entityByType.size === 0) return [];
 
@@ -423,13 +435,19 @@ async function reconcileOwnerBatch(
   mirroredTasks: MirroredTaskRow[]
 ): Promise<InboundResult> {
   const res = { ...EMPTY };
-  const bySourceId = new Map(owners.map((o) => [o.sourceId, o]));
+  // v1.5: chaveado pelo ID NATIVO (o que o Bitrix devolve em OWNER_ID).
+  const bySourceId = new Map<string, OwnerRef>();
+  for (const o of owners) {
+    const native = nativeIdOf(entity, o.sourceId);
+    if (native != null) bySourceId.set(native, o);
+  }
+  if (bySourceId.size === 0) return res;
 
   const { items: activities, truncated } = await listActivities(
     api,
     {
-      OWNER_TYPE_ID: BITRIX_OWNER_TYPE_ID[entity],
-      "@OWNER_ID": owners.map((o) => o.sourceId),
+      OWNER_TYPE_ID: ownerTypeIdOf(entity),
+      "@OWNER_ID": [...bySourceId.keys()],
     },
     deadline
   );
@@ -615,7 +633,10 @@ async function pullComments(
     let comments: BitrixComment[] = [];
     try {
       const res = await api.call<BitrixComment[]>("crm.timeline.comment.list", {
-        filter: { ENTITY_ID: owner.sourceId, ENTITY_TYPE: owner.entity },
+        filter: {
+          ENTITY_ID: nativeIdOf(owner.entity, owner.sourceId) ?? owner.sourceId,
+          ENTITY_TYPE: timelineEntityType(owner.entity),
+        },
         order: { ID: "DESC" },
       });
       comments = res.result ?? [];
@@ -685,7 +706,13 @@ export async function syncBitrixActivitiesInbound(
     owners.map((o) => o.recordId)
   );
 
-  for (const entity of ["deal", "lead"] as MirrorOwnerEntity[]) {
+  // v1.5: as entidades dos donos desta rodada (lead, negócio, processos).
+  // Ordem estável: negócio, lead (a de sempre), depois os processos.
+  const rank = (e: MirrorOwnerEntity) => (e === "deal" ? 0 : e === "lead" ? 1 : 2);
+  const entities = [...new Set(owners.map((o) => o.entity))].sort(
+    (a, b) => rank(a) - rank(b) || a.localeCompare(b)
+  );
+  for (const entity of entities) {
     const ofEntity = owners.filter((o) => o.entity === entity);
     for (let i = 0; i < ofEntity.length; i += OWNER_BATCH) {
       if (Date.now() >= deadline) return total;
@@ -773,7 +800,7 @@ export async function loadRecordActivitiesNow(
           .eq("record_type", rec.record_type as string)
           .maybeSingle()
       : { data: null };
-    const entity = (src?.bitrix_activity_owner ?? null) as MirrorOwnerEntity | null;
+    const entity = parseBitrixEntity(src?.bitrix_activity_owner);
     if (!rec || !rec.source_id || !entity) {
       // Sem par no CRM não há o que carregar — e não é erro.
       await setInboundLoad(db, attr.id as string, config, "done");

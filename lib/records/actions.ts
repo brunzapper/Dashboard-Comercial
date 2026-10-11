@@ -1,4 +1,6 @@
-// Versão: 1.7 | Data: 12/08/2026
+// Versão: 1.8 | Data: 11/10/2026
+// v1.8 (11/10/2026): write-back resolve a entidade por `resolveRecordEntity` (lead, negócio ou
+//   processo inteligente, 0155) — o ternário negocio→deal saiu.
 // Server Actions de edição de registros. Gravação com o client do usuário
 // (RLS: records_update exige edit_record_values E owner/view_all). Toda edição
 // grava field_modified_at[campo]=now (protege do sync) + audit_log origin 'app'.
@@ -31,6 +33,7 @@
 //   a linha sem duplicar (RLS 0065). Falha no Bitrix aborta a criação.
 "use server";
 
+import { resolveRecordEntity } from "@/lib/sync/bitrix/record-entity";
 import { revalidatePath } from "next/cache";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
@@ -442,12 +445,10 @@ export async function updateRecord(
   // best-effort (drenada pelo tick) e nunca falha a edição. Relações e campos
   // sem source_field_id do Bitrix são ignorados (não estão em defByKey/bitrix).
   if (existing.source_system === "bitrix" && existing.source_id) {
-    const entity =
-      existing.record_type === "negocio"
-        ? "deal"
-        : existing.record_type === "lead"
-          ? "lead"
-          : null;
+    const entity = await resolveRecordEntity(
+      supabase,
+      existing.record_type as string
+    );
     if (entity) {
       const sourceId = existing.source_id;
       effects.push(

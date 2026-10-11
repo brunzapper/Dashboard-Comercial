@@ -1,4 +1,6 @@
-// Versão: 1.1 | Data: 05/07/2026
+// Versão: 1.6 | Data: 11/10/2026
+// v1.6 (11/10/2026): `upsertPage` aceita o record_type de Base de processo
+//   inteligente (0155) — o resto do caminho é o mesmo de lead/negócio.
 // Orquestração do sync Bitrix → records: upsert com CONFLITO POR CAMPO
 // (campos editados manualmente após o último sync não são sobrescritos),
 // auditoria (origin 'sync_bitrix'), e resolução de owner (RLS), responsável
@@ -532,7 +534,8 @@ export async function upsertPage(
   relIndex: RelatedLeadIndex,
   formulaDefs: FormulaFieldDef[],
   result: SyncResult,
-  entity: "lead" | "negocio",
+  // v1.6 (11/10/2026): record_type gravado (lead, negocio ou Base SPA).
+  entity: string,
   customDateKeys: string[] = []
 ): Promise<void> {
   if (items.length === 0) return;

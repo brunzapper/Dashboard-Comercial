@@ -1,4 +1,5 @@
-// Versão: 1.0 | Data: 10/10/2026
+// Versão: 1.1 | Data: 11/10/2026
+// v1.1 (11/10/2026): /registros/bases/sync → Registros › Bases › Novas bases de Sync.
 // v1.0 (10/10/2026): migalhas da BARRA DE LOCAL (components/layout/
 //   location-bar.tsx). Módulo PURO: pathname → lista de níveis, do mais amplo
 //   ao atual. O último nível não tem link (é onde se está); os anteriores
@@ -81,6 +82,14 @@ export function breadcrumbsFor(
     case "registros": {
       const root: Crumb = { label: "Registros", href: "/registros" };
       if (!second) return close([root]);
+      // v1.1: triagem de novas Bases de Sync, abaixo de Bases.
+      if (second === "bases" && third === "sync") {
+        return close([
+          root,
+          { label: "Bases", href: "/registros/bases" },
+          { label: "Novas bases de Sync", href: null },
+        ]);
+      }
       return close([
         root,
         { label: REGISTROS_LABELS[second] ?? name ?? "Detalhe", href: null },

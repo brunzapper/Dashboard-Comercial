@@ -1,4 +1,8 @@
-// Versão: 1.4 | Data: 03/10/2026
+// Versão: 1.5 | Data: 11/10/2026
+// v1.5 (11/10/2026): dono pode ser PROCESSO INTELIGENTE (`dynamic_<id>`,
+//   0155). A fila guarda o `records.source_id` (prefixado `<tipo>:<id>` nos
+//   itens SPA); o ID nativo, o OWNER_TYPE_ID e o ENTITY_TYPE da timeline só
+//   existem na fronteira com o Bitrix, pelos helpers de ./entities.
 // v1.4 (03/10/2026): `sweepDueTaskMirrors` devolve também `complete` — o tick
 //   de sync põe a varredura atrás do PORTÃO DE MUDANÇA (0151,
 //   lib/ticks/gate.ts) e só grava "nada mudou desde aqui" após uma varredura
@@ -49,12 +53,17 @@ import {
   type SeriesConfig,
 } from "@/lib/series/types";
 import {
-  BITRIX_OWNER_TYPE_ID,
   resolveMirror,
   type MirrorChoice,
   type MirrorOwnerEntity,
 } from "@/lib/tasks/mirror-config";
 import { BitrixClient } from "./client";
+import {
+  nativeIdOf,
+  ownerTypeIdOf,
+  parseBitrixEntity,
+  timelineEntityType,
+} from "./entities";
 import { WriteBackFatal } from "./writeback";
 
 /** Lote por rodada e teto de tentativas — os mesmos números da 0032. */
@@ -168,16 +177,24 @@ export function activityFields(
   ownerSourceId: string,
   responsibleBitrixId: string | null
 ): Record<string, unknown> {
-  const ownerTypeId = BITRIX_OWNER_TYPE_ID[ownerEntity];
+  const ownerTypeId = ownerTypeIdOf(ownerEntity);
+  // v1.5: o OWNER_ID é o ID NATIVO — no item SPA o source_id leva o prefixo
+  // do tipo, que o Bitrix não conhece.
+  const ownerId = nativeIdOf(ownerEntity, ownerSourceId);
+  if (ownerId == null) {
+    throw new WriteBackFatal(
+      `Vínculo do registro (${ownerSourceId}) não corresponde a ${ownerEntity}.`
+    );
+  }
   const fields: Record<string, unknown> = {
-    OWNER_ID: ownerSourceId,
+    OWNER_ID: ownerId,
     OWNER_TYPE_ID: ownerTypeId,
     TYPE_ID: 6,
     PROVIDER_ID: "CRM_TODO",
     PROVIDER_TYPE_ID: "TODO",
     SUBJECT: task.title,
     COMPLETED: task.completed_at ? "Y" : "N",
-    BINDINGS: [{ OWNER_ID: ownerSourceId, OWNER_TYPE_ID: ownerTypeId }],
+    BINDINGS: [{ OWNER_ID: ownerId, OWNER_TYPE_ID: ownerTypeId }],
   };
   if (task.description) fields.DESCRIPTION = task.description;
   if (responsibleBitrixId) fields.RESPONSIBLE_ID = responsibleBitrixId;
@@ -271,12 +288,16 @@ export async function drainTaskMirrorQueue(
         // Já espelhada: nada a fazer. É a idempotência do lado de cá — sem
         // ela, uma retentativa duplicaria o comentário no feed do negócio.
         if (!cmt.bitrix_comment_id) {
+          const entityId = nativeIdOf(row.owner_entity, row.owner_source_id);
+          if (entityId == null) {
+            throw new WriteBackFatal("Vínculo do registro inválido para a entidade.");
+          }
           const res = await api.call<number | string>(
             "crm.timeline.comment.add",
             {
               fields: {
-                ENTITY_ID: row.owner_source_id,
-                ENTITY_TYPE: row.owner_entity,
+                ENTITY_ID: entityId,
+                ENTITY_TYPE: timelineEntityType(row.owner_entity),
                 COMMENT: String(cmt.body ?? ""),
               },
             }
@@ -533,7 +554,7 @@ export async function mirrorTaskAfterWrite(
 
     const decision = resolveMirror({
       baseOwner:
-        (source?.bitrix_activity_owner as MirrorOwnerEntity | null) ?? null,
+        parseBitrixEntity(source?.bitrix_activity_owner),
       sourceId: (record.source_id as string | null) ?? null,
       ruleChoice: input.ruleChoice,
       taskChoice: input.taskChoice,
@@ -590,10 +611,8 @@ export async function loadMirrorOwners(
     .not("bitrix_activity_owner", "is", null);
   const entityByType = new Map<string, MirrorOwnerEntity>();
   for (const s of sources ?? []) {
-    entityByType.set(
-      s.record_type as string,
-      s.bitrix_activity_owner as MirrorOwnerEntity
-    );
+    const e = parseBitrixEntity(s.bitrix_activity_owner);
+    if (e) entityByType.set(s.record_type as string, e);
   }
   // Nenhuma Base espelha (o estado padrão): nem vale ler os registros.
   if (entityByType.size === 0) return out;
@@ -720,7 +739,7 @@ export async function mirrorCommentAfterWrite(
 
     const decision = resolveMirror({
       baseOwner:
-        (source?.bitrix_activity_owner as MirrorOwnerEntity | null) ?? null,
+        parseBitrixEntity(source?.bitrix_activity_owner),
       sourceId: (record.source_id as string | null) ?? null,
     });
     if (!decision.mirror) return;

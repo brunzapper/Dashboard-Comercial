@@ -1,4 +1,8 @@
-<!-- Versão: 3.0 | Data: 11/10/2026 -->
+<!-- Versão: 3.1 | Data: 11/10/2026 -->
+<!-- v3.1 (11/10/2026): §4.5 "Processos inteligentes do Bitrix como Bases"
+     (0155 — triagem "Novas bases de Sync", `crm.item.*`, source_id prefixado,
+     write-back por `crm.item.update`, atividades `dynamic_<id>`); §4.24 nota
+     da descoberta por tipos de dono; invariante 47. -->
 <!-- v3.0 (11/10/2026): §4.24 "Atividades de TODOS os negócios" (0154 —
      descoberta incremental `activity-discovery.ts`, qualquer tipo, concluídas
      de 90 dias SOMENTE LEITURA) substitui o corte por Tree da 0152; §4.10 +
@@ -1219,6 +1223,66 @@ exceção: sempre recomputados).
   leem no dia de Brasília (bounds ancorados + `_widget_local_ts`, §4.1) — os
   dois regimes (texto custom e instante do núcleo) finalmente concordam no
   mesmo dia.
+- **Processos inteligentes do Bitrix como Bases (0155, 11/10/2026).** Os
+  funis criados como Processo Inteligente (Smart Process Automation) são uma
+  terceira família de entidade, ABERTA — um `entityTypeId` por processo — e
+  usam outra API (`crm.item.*`: camelCase, `entityTypeId` em todo método, lista
+  em `result.items`). Nada vira Base sem passar pela **triagem**
+  (Registros → **Novas bases de Sync**, `/registros/bases/sync`, admin):
+  1. os processos do portal aparecem pelo NOME (`crm.type.list`) com a
+     contagem e a situação (não solicitado / solicitado / aprovado / recusado);
+  2. "Avaliar" monta uma AMOSTRA ao vivo (`buildSpaPreview`,
+     `lib/sync/bitrix/spa-preview.ts`) — os 20 itens mais recentes passados
+     pelo MESMO `mapSpaItem` do sync + as atividades de alguns deles; nada é
+     gravado;
+  3. "Solicitar como Base" grava o rascunho em `sync_source_requests`; os
+     ajustes (nome, chave, campos incluídos e rótulos, período, fuso, espelho
+     de atividades, funis) re-renderizam a amostra SEM nova ida ao Bitrix (a
+     amostra traz todos os campos e a tela escolhe);
+  4. "Aprovar e importar" salva o rascunho, a action RE-VALIDA o que está
+     gravado (`parseSpaRequestConfig`/`requestConfigError`,
+     `lib/sync/bitrix/spa-config.ts` — o MESMO parse da tela) e cria a
+     `data_sources` com `bitrix_entity_type_id` + `bitrix_spa_config`
+     (só a parte aprovável: campos e funis), cataloga os campos escolhidos e
+     dispara um job só daquela Base (`createJob(..., { sourceKeys })`).
+
+  **Identidade.** O ID de item recomeça em 1 em CADA processo, e
+  `uq_records_source (source_system, source_id)` faria o item 5 sobrescrever o
+  lead/negócio 5. O `source_id` de item SPA é PREFIXADO (`"<tipo>:<id>"`) e o
+  ID cru só existe na fronteira com o Bitrix. O vocabulário é ÚNICO em
+  `lib/sync/bitrix/entities.ts` (`BitrixEntity = lead | deal | dynamic_<id>`;
+  `ownerTypeIdOf`, `nativeIdOf`/`sourceIdOf`, `detailsPath`,
+  `timelineEntityType`) — nenhum módulo monta `OWNER_TYPE_ID: 2` ou
+  `crm.deal.update` à mão. Lead/negócio seguem byte-idênticos.
+
+  **Sync.** Cada Base SPA aprovada é uma fase `crm.item.list` do plano
+  (`runner.ts` v1.9): reconcile por `>=updatedTime`; enquanto
+  `bitrix_spa_loaded_at` é nulo a fase lê o processo INTEIRO, e o job que
+  termina carimba. O schema (`crm.item.fields`) e os funis
+  (`crm.category.list`) são lidos no passo "preparar" e serializados no job;
+  falha num processo tira SÓ ele do job. As etapas `DYNAMIC_<tipo>_STAGE_*` do
+  `crm.status.list` (antes descartadas) viram nome + semântica
+  (`stage_semantic`/`closed`) nos lookups. Campos entram com chave prefixada
+  pela Base e `source_field_id = "<tipo>:<campo>"`, pelo MESMO upsert
+  preservador do catálogo (`upsertCatalogRows`, org da Base explícita), com
+  write-back ligado nos campos que o Bitrix deixa escrever.
+
+  **Write-back.** O dono da pergunta "para onde grava este registro?" é
+  `resolveRecordEntity(ies)` (`lib/sync/bitrix/record-entity.ts`) — os
+  ternários `negocio→deal` saíram de `updateRecord`, das ações em massa do
+  kanban e das automações. O dreno grava SPA por
+  `crm.item.update {entityTypeId, id, fields}`; a etapa vira código pela
+  família do PRÓPRIO processo (`spaStageCodes`, rótulos se repetem entre
+  processos). Criar item SPA a partir do app fica fora desta entrega.
+
+  **Atividades (ida e volta).** A Base SPA nasce com
+  `bitrix_activity_owner = dynamic_<tipo>` quando a triagem pede (padrão
+  ligado). Espelho, leitura de volta e descoberta (§4.24) usam os helpers de
+  `entities.ts`; a descoberta lembra os TIPOS de dono que já varreu
+  (`typeIds` no cursor) e recomeça a fase 1 quando entra um novo — é o que faz
+  a Base de LEADS (ligar "Como atividade do lead" em Bases, ou o runbook
+  `supabase/apply/enable-lead-activities.sql`) e um processo recém-aprovado
+  trazerem as pendentes antigas.
 - **Sheets**: o Apps Script (`integrations/apps-script/push_estudo_fechamentos.gs`)
   faz POST horário em `/api/sync/sheets`, protegido por `SYNC_SECRET` — desde
   o v1.1 (03/08/2026) em chunks de ≤500 linhas (o servidor segue aceitando o
@@ -6165,6 +6229,14 @@ CRM_TODO. Os dois cortes da 0152 caíram (`activity-inbound.ts` v1.4):
   relida). Exclusão segue com a conciliação por dono — todo registro com
   pendente importada passa a ser dono dela (`activity_inbound_owners`).
 
+**Leads e processos inteligentes (11/10/2026, 0155).** A descoberta e a
+conciliação por dono iteram as ENTIDADES das Bases que espelham (não mais o par
+fixo deal/lead), com `OWNER_TYPE_ID` e o ID nativo pelos helpers de
+`lib/sync/bitrix/entities.ts`. O cursor da descoberta guarda os tipos de dono
+cobertos; tipo novo (lead ligado, processo aprovado) recomeça a fase 1 — sem
+isso o cursor já estaria no incremental e as pendentes antigas do tipo novo
+nunca entrariam. Reprocessar os tipos antigos é idempotente (§4.5).
+
 **Fora de escopo, dito:** ler o feed inteiro do Bitrix (mudança de etapa já
 chega pelo sync de campo, e reimportá-la duplicaria o `audit_log`) e espelhar
 EDIÇÃO de comentário.
@@ -7833,6 +7905,16 @@ principalmente — para mantenedores humanos.
     alto, nunca é cortado em silêncio. Desde 11/10/2026 o filtro aceita
     VÁRIOS estados (OU), por `taskFilterWindows`; o legado `todas`/`status`
     segue lido sem migração.
+47. **Processo inteligente do Bitrix é BASE por TRIAGEM, e a identidade dele
+    é PREFIXADA (0155, 11/10/2026, §4.5).** Nenhum processo vira
+    `data_sources` sem solicitação aprovada em Registros → Novas bases de Sync;
+    a aprovação re-valida o rascunho GRAVADO pelo mesmo parse da tela. O
+    `records.source_id` de item SPA é `"<entityTypeId>:<id>"` (o ID recomeça em
+    cada processo e o índice `(source_system, source_id)` não distingue
+    `record_type`); o ID cru só existe na fronteira com o Bitrix, e o
+    vocabulário de entidade (`lead | deal | dynamic_<id>`) tem dono ÚNICO em
+    `lib/sync/bitrix/entities.ts`. Write-back resolve a entidade por
+    `resolveRecordEntity`, nunca por ternário de `record_type`.
 
 ## 6. Convenções do projeto
 

@@ -1,4 +1,7 @@
-// Versão: 1.1 | Data: 09/09/2026
+// Versão: 1.2 | Data: 11/10/2026
+// v1.2 (11/10/2026): `bitrixEntityUrl` monta o caminho por `detailsPath`
+//   (lib/sync/bitrix/entities.ts) — processo inteligente mora em
+//   /crm/type/<entityTypeId>/details/<id>/ e o id vem sem o prefixo do tipo.
 // v1.1 (09/09/2026): o passo passa a ALTERAR também (`bitrix.entity.update`) e
 //   a saber ensaiar (`dryRun`). Um executor só para os dois: muda o método
 //   (`crm.<entity>.update`) e o `id` do alvo — o resto (schema vivo dos campos,
@@ -19,6 +22,11 @@
 // converte (somente-leitura, opção inexistente) é PULADO e reportado, nunca
 // derruba o passo: o lead ir para o CRM sem um campo é melhor que não ir.
 import { BitrixClient } from "@/lib/sync/bitrix/client";
+import {
+  detailsPath,
+  nativeIdOf,
+  parseBitrixEntity,
+} from "@/lib/sync/bitrix/entities";
 import type { BitrixFieldMeta } from "@/lib/sync/bitrix/lookups";
 import {
   toBitrixValue,
@@ -230,5 +238,8 @@ export function bitrixEntityUrl(
 ): string {
   const m = webhookUrl.match(/^(https?:\/\/[^/]+)/);
   if (!m || !id) return "";
-  return `${m[1]}/crm/${entity}/details/${id}/`;
+  const known = parseBitrixEntity(entity);
+  if (!known) return `${m[1]}/crm/${entity}/details/${id}/`;
+  const native = nativeIdOf(known, id);
+  return native ? `${m[1]}${detailsPath(known, native)}` : "";
 }

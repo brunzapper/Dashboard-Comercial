@@ -1,4 +1,6 @@
-// Versão: 1.5 | Data: 26/07/2026
+// Versão: 1.6 | Data: 11/10/2026
+// v1.6 (11/10/2026): `bitrix_entity_type_id` (0155, Base de processo
+//   inteligente) entra no SourceDef; sem a coluna o select repete sem ela.
 // v1.5 (26/07/2026): PASTAS (0107) — folder_id/sort_order em data_sources e
 //   sort_order em sub_sources entram no SourceDef (folderId/sortOrder) e a
 //   ordenação vira sort_order asc → builtin desc → created_at asc (defaults 0
@@ -26,6 +28,7 @@ import { cache } from "react";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { BUILTIN_SOURCES, type SourceDef } from "@/lib/sources";
+import { parseBitrixEntity } from "@/lib/sync/bitrix/entities";
 import type { WidgetFilter } from "@/lib/widgets/types";
 
 export const loadSources = cache(async function loadSources(
@@ -33,18 +36,24 @@ export const loadSources = cache(async function loadSources(
   orgId?: string | null
 ): Promise<SourceDef[]> {
   try {
-    let query = supabase
-      .from("data_sources")
-      .select(
-        "key, record_type, label, short_label, default_period_field, builtin, manual_entry, timezone, bitrix_activity_owner, folder_id, sort_order"
-      )
-      .order("sort_order", { ascending: true })
-      .order("builtin", { ascending: false })
-      .order("created_at", { ascending: true });
-    if (orgId) query = query.eq("organization_id", orgId);
-    const { data, error } = await query;
+    const BASE_COLS =
+      "key, record_type, label, short_label, default_period_field, builtin, manual_entry, timezone, bitrix_activity_owner, folder_id, sort_order";
+    const run = (cols: string) => {
+      let query = supabase
+        .from("data_sources")
+        .select(cols)
+        .order("sort_order", { ascending: true })
+        .order("builtin", { ascending: false })
+        .order("created_at", { ascending: true });
+      if (orgId) query = query.eq("organization_id", orgId);
+      return query;
+    };
+    // v1.6 (11/10/2026): `bitrix_entity_type_id` (0155). Banco sem a migração
+    // aplicada recusa a coluna — repete sem ela em vez de cair nos builtins.
+    let { data, error } = await run(`${BASE_COLS}, bitrix_entity_type_id`);
+    if (error) ({ data, error } = await run(BASE_COLS));
     if (error || !data || data.length === 0) return BUILTIN_SOURCES;
-    const roots: SourceDef[] = data.map((r) => {
+    const roots: SourceDef[] = (data as unknown as Record<string, unknown>[]).map((r) => {
       const key = r.key as string;
       const label = (r.label as string) || key;
       return {
@@ -58,8 +67,10 @@ export const loadSources = cache(async function loadSources(
         manualEntry: Boolean(r.manual_entry),
         timezone: (r.timezone as string | null) || null,
         // 0136: espelho de tarefas no Bitrix. null = desligado (o padrão).
-        bitrixActivityOwner:
-          (r.bitrix_activity_owner as "deal" | "lead" | null) || null,
+        bitrixActivityOwner: parseBitrixEntity(r.bitrix_activity_owner),
+        // 0155: Base de processo inteligente do Bitrix (entityTypeId).
+        bitrixEntityTypeId:
+          r.bitrix_entity_type_id != null ? Number(r.bitrix_entity_type_id) : null,
         folderId: (r.folder_id as string | null) ?? null,
         sortOrder: Number(r.sort_order ?? 0),
       };

@@ -1,4 +1,6 @@
-// Versão: 1.3 | Data: 09/09/2026
+// Versão: 1.4 | Data: 11/10/2026
+// v1.4 (11/10/2026): write-back resolve a entidade por `resolveRecordEntities` (lead, negócio ou
+//   processo inteligente, 0155) — o ternário negocio→deal saiu.
 // v1.3 (09/09/2026): `executeFieldWrites` passa a ser EXPORTADO — o passo
 //   `record.update` do Workflow escreve por ele, não por um caminho novo. A
 //   regra continua a mesma: toda escrita de valor por automação (set_field,
@@ -26,6 +28,7 @@
 // v1.1 (31/07/2026): branch "por VALOR" extraído p/ executeFieldWrites e
 // reusado por executeAutomationSets (ação set_field) — carimbos, recalc,
 // audit, write-back e webhook num lugar só.
+import { resolveRecordEntities } from "@/lib/sync/bitrix/record-entity";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type { DataType, FieldDefinition, RecordRow } from "@/lib/records/types";
@@ -252,18 +255,17 @@ export async function executeFieldWrites(
   // de BASE não tem quadro, então chega sempre false: escrita local.
   if (writeBack) {
     const auditByRecord = new Map(audits.map((a) => [a.record_id, a]));
+    const entityByType = await resolveRecordEntities(
+      db,
+      okWrites.map((w) => String(batch.recordById.get(w.recordId)?.record_type ?? ""))
+    );
     for (const w of okWrites) {
       const rec = batch.recordById.get(w.recordId);
       const fresh = freshById.get(w.recordId);
       const audit = auditByRecord.get(w.recordId);
       if (!rec || !fresh?.source_id || !audit) continue;
       if (rec.source_system !== "bitrix") continue;
-      const entity =
-        rec.record_type === "negocio"
-          ? ("deal" as const)
-          : rec.record_type === "lead"
-            ? ("lead" as const)
-            : null;
+      const entity = entityByType.get(String(rec.record_type)) ?? null;
       if (!entity) continue;
       const changes: WriteBackChange[] = [];
       const customDef = customDefOf(w.field);

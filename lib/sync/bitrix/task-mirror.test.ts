@@ -1,4 +1,6 @@
-// Versão: 1.2 | Data: 10/09/2026
+// Versão: 1.3 | Data: 11/10/2026
+// v1.3 (11/10/2026): dono de PROCESSO INTELIGENTE (0155) — OWNER_ID é o ID
+// nativo (sem o prefixo do tipo) e OWNER_TYPE_ID é o entityTypeId.
 // v1.2 (10/09/2026): a resolução de dono EM LOTE e a guarda de que as ações em
 // massa espelham. Sem elas, concluir 20 tarefas de uma vez deixava 20
 // atividades abertas no CRM — e a leitura de volta (0137) reabria as 20 na
@@ -64,6 +66,17 @@ describe("activityFields", () => {
     expect(f.BINDINGS).toEqual([{ OWNER_ID: "123", OWNER_TYPE_ID: 2 }]);
     expect(f.RESPONSIBLE_ID).toBe("89");
     expect(f.COMPLETED).toBe("N");
+  });
+
+  it("processo inteligente: entityTypeId e ID nativo (sem o prefixo)", () => {
+    const f = activityFields(TASK, "dynamic_1036", "1036:77", null);
+    expect(f.OWNER_TYPE_ID).toBe(1036);
+    expect(f.OWNER_ID).toBe("77");
+    expect(f.BINDINGS).toEqual([{ OWNER_ID: "77", OWNER_TYPE_ID: 1036 }]);
+  });
+
+  it("vínculo de outro processo nunca vira OWNER_ID", () => {
+    expect(() => activityFields(TASK, "dynamic_1036", "1040:77", null)).toThrow();
   });
 
   it("lead usa OWNER_TYPE_ID 1", () => {

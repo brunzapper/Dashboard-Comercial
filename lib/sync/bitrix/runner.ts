@@ -1,4 +1,11 @@
-// Versão: 1.8 | Data: 03/10/2026
+// Versão: 1.9 | Data: 11/10/2026
+// v1.9 (11/10/2026): PROCESSOS INTELIGENTES (0155). Cada Base SPA aprovada vira
+//   uma fase `crm.item.list` do plano (reconcile por `>=updatedTime`; a 1ª
+//   vez — `bitrix_spa_loaded_at` nulo — lê o processo INTEIRO e carimba ao
+//   concluir). O schema do processo é lido no passo "preparar" e serializado
+//   no job (`context.spa`), como os lookups. Falha num processo NUNCA derruba o
+//   sync de leads/negócios: o processo sai do plano com log. Job com
+//   `params.sourceKeys` (aprovação na triagem) lê SÓ aquelas Bases.
 // v1.8 (03/10/2026): `loadSyncTickState` — o que o tick de minuto fazia em ~5
 //   requisições ociosas (takeover de job preso, job em andamento, último
 //   reconcile automático, filas pendentes) numa RPC só (`sync_tick_state`,
@@ -48,7 +55,19 @@ import { reconcileAllKanbanAllocationFields } from "@/lib/kanban/allocation-reco
 import { BitrixClient } from "@/lib/sync/bitrix/client";
 import { syncBitrixActivitiesInbound } from "@/lib/sync/bitrix/activity-inbound";
 import { BitrixLookups, type SerializedLookups } from "@/lib/sync/bitrix/lookups";
-import { mapDeal, mapLead, type MappedRecord } from "@/lib/sync/bitrix/mapper";
+import {
+  mapDeal,
+  mapLead,
+  mapSpaItem,
+  type MappedRecord,
+  type SpaMapContext,
+} from "@/lib/sync/bitrix/mapper";
+import {
+  loadSpaSchema,
+  loadSpaSyncSources,
+  spaMapContext,
+  syncSpaFieldCatalog,
+} from "@/lib/sync/bitrix/spa";
 import type { CustomMapEntry } from "@/lib/sync/bitrix/catalog";
 import {
   buildSyncContext,
@@ -101,7 +120,12 @@ async function maybeAutoMatchAfterJob(
   if (job.totals.inserted + job.totals.updated === 0) return;
   try {
     const res = await runAutoMatchIncremental(db, {
-      touchedRecordTypes: ["lead", "negocio"],
+      // v1.9: + record_types das Bases SPA deste job.
+      touchedRecordTypes: [
+        "lead",
+        "negocio",
+        ...(job.context?.spa ?? []).map((s) => s.map.recordType),
+      ],
       since: job.started_at ?? job.created_at ?? undefined,
     });
     if (res.inserted > 0) await recalcFormulaFieldsForRecords(res.recordIds);
@@ -186,12 +210,42 @@ async function maybeSyncActivitiesAfterJob(db: SupabaseClient): Promise<void> {
   }
 }
 
+// v1.9: o job que leu um processo inteiro (carga inicial) carimba
+// `bitrix_spa_loaded_at` — dali em diante a fase dele é incremental. Só no fim
+// do job inteiro: job que morre no meio refaz a carga, nunca a pula.
+async function markSpaInitialLoads(
+  db: SupabaseClient,
+  context: JobContext
+): Promise<void> {
+  const keys = (context.spa ?? []).filter((s) => s.initial).map((s) => s.key);
+  if (keys.length === 0) return;
+  const { error } = await db
+    .from("data_sources")
+    .update({ bitrix_spa_loaded_at: new Date().toISOString() })
+    .in("key", keys);
+  if (error) console.warn("[sync] carimbo da carga SPA falhou:", error.message);
+}
+
 // Uma fase = um método + filtro do Bitrix; percorrida página a página (`start`).
+// v1.9: `entity` é o record_type gravado; fase de processo inteligente leva o
+// `entityTypeId` e usa `crm.item.list`.
 interface PhasePlan {
   label: string;
-  entity: "lead" | "negocio";
-  method: "crm.lead.list" | "crm.deal.list";
+  entity: string;
+  method: "crm.lead.list" | "crm.deal.list" | "crm.item.list";
   filter: Record<string, unknown>;
+  entityTypeId?: number;
+}
+
+/** v1.9: uma Base SPA no contexto do job. */
+interface JobSpaSource {
+  key: string;
+  label: string;
+  timezone: string | null;
+  categoryIds: string[];
+  /** Carga inicial pendente (lê tudo e carimba `bitrix_spa_loaded_at`). */
+  initial: boolean;
+  map: SpaMapContext;
 }
 
 // Contexto do Bitrix persistido na linha do job (evita re-bater em crm.*.fields).
@@ -205,12 +259,14 @@ interface JobContext {
   formulaDefs: FormulaFieldDef[];
   customDateKeys: string[];
   timezones?: { lead: string | null; negocio: string | null };
+  /** v1.9: Bases de processo inteligente (ausente em job antigo). */
+  spa?: JobSpaSource[];
 }
 
 interface JobRow {
   id: string;
   kind: SyncKind;
-  params: { days?: number; since?: string } | null;
+  params: { days?: number; since?: string; sourceKeys?: string[] } | null;
   status: "running" | "done" | "error" | "canceled";
   plan: PhasePlan[] | null;
   phase_index: number;
@@ -262,6 +318,20 @@ function buildReconcilePlan(entId: string | null, since: string): PhasePlan[] {
     });
   }
   return plan;
+}
+
+/** v1.9: fase de um processo inteligente. `full` = sem corte de data. */
+function spaPhase(src: JobSpaSource, since: string, full: boolean): PhasePlan {
+  const filter: Record<string, unknown> = {};
+  if (src.categoryIds.length > 0) filter["@categoryId"] = src.categoryIds.map(Number);
+  if (!full) filter[">=updatedTime"] = since;
+  return {
+    label: `${src.label}${full ? " (carga completa)" : ""}`,
+    entity: src.map.recordType,
+    method: "crm.item.list",
+    filter,
+    entityTypeId: src.map.entityTypeId,
+  };
 }
 
 function buildBackfillPlan(entId: string | null, since: string): PhasePlan[] {
@@ -462,7 +532,9 @@ export async function createJob(
   kind: SyncKind,
   days: number,
   trigger: SyncTrigger,
-  createdBy: string | null
+  createdBy: string | null,
+  /** v1.9: só estas Bases SPA (carga após a aprovação na triagem). */
+  opts: { sourceKeys?: string[] } = {}
 ): Promise<{ jobId: string; reused: boolean }> {
   const running = await findRunningJobId(db);
   if (running) return { jobId: running, reused: true };
@@ -479,7 +551,13 @@ export async function createJob(
     .insert({
       kind,
       trigger,
-      params: { days: d, since: sinceFromDays(d) },
+      params: {
+        days: d,
+        since: sinceFromDays(d),
+        ...(opts.sourceKeys && opts.sourceKeys.length > 0
+          ? { sourceKeys: opts.sourceKeys }
+          : {}),
+      },
       status: "running",
       created_by: createdBy,
       started_at: new Date().toISOString(),
@@ -515,10 +593,41 @@ export async function stepJob(db: SupabaseClient, jobId: string): Promise<StepPr
       const ctx = await buildSyncContext(db, lookups);
       const entId = enterpriseCategoryId(lookups);
       const since = job.params?.since ?? sinceFromDays(job.params?.days ?? 3);
-      const plan =
-        job.kind === "backfill"
+      // v1.9: Bases SPA aprovadas — schema + catálogo por processo; falha
+      // isolada (o processo sai deste job, leads/negócios seguem).
+      const onlyKeys = job.params?.sourceKeys ?? null;
+      const spa: JobSpaSource[] = [];
+      for (const src of await loadSpaSyncSources(db)) {
+        if (onlyKeys && !onlyKeys.includes(src.key)) continue;
+        try {
+          const schema = await loadSpaSchema(client, src.entityTypeId);
+          await syncSpaFieldCatalog(db, src, schema, lookups.sourceNames());
+          spa.push({
+            key: src.key,
+            label: src.label,
+            timezone: src.timezone,
+            categoryIds: src.config.categoryIds,
+            initial: !src.loaded,
+            map: spaMapContext(src, schema),
+          });
+        } catch (e) {
+          console.warn(
+            `[sync] processo inteligente ${src.key} fora deste job:`,
+            (e as Error).message
+          );
+        }
+      }
+      const basePlan = onlyKeys
+        ? []
+        : job.kind === "backfill"
           ? buildBackfillPlan(entId, since)
           : buildReconcilePlan(entId, since);
+      const plan = [
+        ...basePlan,
+        ...spa.map((src) =>
+          spaPhase(src, since, Boolean(onlyKeys) || job.kind === "backfill" || src.initial)
+        ),
+      ];
       const context: JobContext = {
         lookups: lookups.serializeContext(),
         dealMapping: ctx.dealMapping,
@@ -526,6 +635,7 @@ export async function stepJob(db: SupabaseClient, jobId: string): Promise<StepPr
         formulaDefs: ctx.formulaDefs,
         customDateKeys: ctx.customDateKeys,
         timezones: ctx.timezones,
+        spa,
       };
       await db
         .from("sync_jobs")
@@ -568,25 +678,61 @@ export async function stepJob(db: SupabaseClient, jobId: string): Promise<StepPr
     const start = job.bitrix_start;
     const lookups = BitrixLookups.hydrate(client, db, context.lookups);
 
-    const resp = await client.call<Record<string, unknown>[]>(phase.method, {
-      filter: phase.filter,
-      select: ["*", "UF_*"],
-      order: { ID: "ASC" },
-      start,
-    });
-    const items = resp.result ?? [];
-    const phaseTotal = typeof resp.total === "number" ? resp.total : job.phase_total;
+    // v1.9: processo inteligente lê `crm.item.list` (camelCase, lista em
+    // `result.items`); lead/negócio seguem byte-idênticos.
+    const spaSrc =
+      phase.method === "crm.item.list"
+        ? (context.spa ?? []).find((x) => x.map.entityTypeId === phase.entityTypeId)
+        : undefined;
+    if (phase.method === "crm.item.list" && !spaSrc) {
+      throw new Error(`Processo ${phase.entityTypeId} sem contexto no job.`);
+    }
+    let items: Record<string, unknown>[];
+    let phaseTotal: number | null;
+    let next: number | null;
+    if (spaSrc) {
+      const resp = await client.call<{ items?: Record<string, unknown>[] }>(
+        "crm.item.list",
+        {
+          entityTypeId: spaSrc.map.entityTypeId,
+          filter: phase.filter,
+          select: ["*", "uf*"],
+          order: { id: "ASC" },
+          start,
+        }
+      );
+      items = resp.result?.items ?? [];
+      phaseTotal = typeof resp.total === "number" ? resp.total : job.phase_total;
+      next = typeof resp.next === "number" ? resp.next : null;
+    } else {
+      const resp = await client.call<Record<string, unknown>[]>(phase.method, {
+        filter: phase.filter,
+        select: ["*", "UF_*"],
+        order: { ID: "ASC" },
+        start,
+      });
+      items = resp.result ?? [];
+      phaseTotal = typeof resp.total === "number" ? resp.total : job.phase_total;
+      next = typeof resp.next === "number" ? resp.next : null;
+    }
 
     // Mapeia a página.
-    const mapping = phase.entity === "negocio" ? context.dealMapping : context.leadMapping;
-    const tz = context.timezones?.[phase.entity] ?? null;
     const mapped: MappedRecord[] = [];
-    for (const raw of items) {
-      mapped.push(
-        phase.entity === "negocio"
-          ? await mapDeal(raw, lookups, mapping, tz)
-          : await mapLead(raw, lookups, mapping, tz)
-      );
+    if (spaSrc) {
+      for (const raw of items) {
+        mapped.push(await mapSpaItem(raw, spaSrc.map, lookups, spaSrc.timezone));
+      }
+    } else {
+      const isDeal = phase.entity === "negocio";
+      const mapping = isDeal ? context.dealMapping : context.leadMapping;
+      const tz = context.timezones?.[isDeal ? "negocio" : "lead"] ?? null;
+      for (const raw of items) {
+        mapped.push(
+          isDeal
+            ? await mapDeal(raw, lookups, mapping, tz)
+            : await mapLead(raw, lookups, mapping, tz)
+        );
+      }
     }
 
     // Pré-carrega mapas, garante responsáveis e monta o índice de leads.
@@ -605,7 +751,6 @@ export async function stepJob(db: SupabaseClient, jobId: string): Promise<StepPr
 
     // Avança o cursor.
     const processedInPhase = start + items.length;
-    const next = typeof resp.next === "number" ? resp.next : null;
     let newPhaseIndex = phaseIndex;
     let newStart = start;
     let phaseTotalToStore: number | null = phaseTotal;
@@ -633,6 +778,7 @@ export async function stepJob(db: SupabaseClient, jobId: string): Promise<StepPr
       .eq("id", jobId);
 
     if (done) {
+      await markSpaInitialLoads(db, context);
       await maybeAnalyzeAfterJob(db, totals);
       await maybeAutoMatchAfterJob(db, { ...job, totals });
       await maybeRunKanbanAutomationsAfterJob(db, { ...job, totals });

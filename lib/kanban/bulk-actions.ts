@@ -1,4 +1,6 @@
-// Versão: 1.3 | Data: 11/10/2026
+// Versão: 1.4 | Data: 11/10/2026
+// v1.4 (11/10/2026): write-back resolve a entidade por `resolveRecordEntities` (lead, negócio ou
+//   processo inteligente, 0155) — o ternário negocio→deal saiu.
 // v1.3 (11/10/2026): `deleteTasksBulk` pula tarefa SOMENTE LEITURA (0154).
 // v1.2 (10/09/2026): concluir e excluir em massa ESPELHAM no Bitrix
 //   (0136/0137). Antes não espelhavam — era assimetria; com a leitura de
@@ -22,6 +24,7 @@
 // Mocks são pulados por item (congelados no produto).
 "use server";
 
+import { resolveRecordEntities } from "@/lib/sync/bitrix/record-entity";
 import { getSessionInfo } from "@/lib/auth/session";
 import { getActiveOrgId } from "@/lib/auth/org";
 import { createClient } from "@/lib/supabase/server";
@@ -326,17 +329,16 @@ export async function moveRecordCardsBulk(
   // Write-back opcional (settings.kanban.writeBack — mesma marca do
   // moveRecordCard): campo custom de Sync ou coluna core mapeada.
   if (input.writeBack) {
+    const entityByType = await resolveRecordEntities(
+      supabase,
+      okIds.map((id) => String(freshById.get(id)?.record_type ?? ""))
+    );
     for (const id of okIds) {
       const rec = freshById.get(id);
       const audit = auditByRecord.get(id);
       if (!rec || !audit || rec.source_system !== "bitrix" || !rec.source_id)
         continue;
-      const entity =
-        rec.record_type === "negocio"
-          ? ("deal" as const)
-          : rec.record_type === "lead"
-            ? ("lead" as const)
-            : null;
+      const entity = entityByType.get(String(rec.record_type)) ?? null;
       if (!entity) continue;
       const changes: WriteBackChange[] = [];
       if (customDef) {
