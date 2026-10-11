@@ -2,7 +2,7 @@
 // Exibição dos cartões da Tree (lib/tree/display.ts).
 import { describe, expect, it } from "vitest";
 
-import { parseNodeDisplay, parsePresentationSettings, treeChrome } from "./display";
+import { parseNodeDisplay, parsePresentationSettings, resolveCardColors, treeChrome } from "./display";
 
 describe("treeChrome", () => {
   it("fora da apresentação mostra tudo", () => {
@@ -46,5 +46,31 @@ describe("parse", () => {
     expect(parsePresentationSettings({ kindBadge: true, addBranch: "sim", warnings: false })).toEqual({
       kindBadge: true,
     });
+  });
+});
+
+// v1.2 (11/10/2026): paleta ampliada, cores livres e camadas widget → cartão.
+describe("cores do cartão", () => {
+  it("parse: tons novos, hex válido, fit e numbers", () => {
+    expect(
+      parseNodeDisplay({
+        tone: "rosa",
+        borderColor: "#AA00CC",
+        bgColor: "azul",
+        fit: { overflow: "texto" },
+        numbers: { style: "mil" },
+      })
+    ).toEqual({ tone: "rosa", borderColor: "#aa00cc", fit: { overflow: "texto" }, numbers: { style: "mil" } });
+  });
+  it("cartão vence o widget; cor livre vira style", () => {
+    expect(resolveCardColors({ tone: "azul", bgColor: "#ffffff" }, { tone: "verde" })).toEqual({
+      tone: "verde",
+      style: { backgroundColor: "#ffffff" },
+    });
+    expect(resolveCardColors(null, null)).toEqual({ tone: null, style: undefined });
+  });
+  it("Resultado ignora o padrão do widget, não o do cartão", () => {
+    expect(resolveCardColors({ tone: "azul" }, null, true).tone).toBeNull();
+    expect(resolveCardColors({ tone: "azul" }, { tone: "rosa" }, true).tone).toBe("rosa");
   });
 });

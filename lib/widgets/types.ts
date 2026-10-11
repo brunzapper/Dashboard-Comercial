@@ -1,4 +1,7 @@
-// Versão: 1.25 | Data: 11/10/2026
+// Versão: 1.26 | Data: 11/10/2026
+// v1.26 (11/10/2026): TreeSettings.card (cor padrão dos cartões), .fit (texto
+//   que não cabe) e .numbers (abreviação de números grandes) — cada cartão
+//   sobrepõe (lib/tree/display.ts, lib/tree/card-fit.ts).
 // v1.25 (11/10/2026): TreeSettings.typography — fonte e tamanho por tipo de
 //   texto dos cartões da Tree (lib/tree/typography.ts).
 // Versão: 1.24 | Data: 10/10/2026
@@ -97,6 +100,8 @@ import type {
 } from "@/lib/tree/model";
 import type { ManualSpread } from "@/lib/manual-base/types";
 import type { TreeTypography } from "@/lib/tree/typography";
+import type { TreeCardFit, TreeNumberFormat } from "@/lib/tree/card-fit";
+import type { TreeCardColors } from "@/lib/tree/display";
 import type { SourceKey } from "@/lib/sources";
 import type { RoleKey } from "@/lib/auth/roles";
 import type { Formula } from "@/lib/records/formulas";
@@ -640,6 +645,19 @@ export interface TreeSettings {
    * lib/tree/typography.ts.
    */
   typography?: TreeTypography;
+  /**
+   * v1.26 (11/10/2026): cor PADRÃO dos cartões (tom da paleta e/ou borda e
+   * fundo #RRGGBB). Cada cartão sobrepõe (`tree_nodes.display`). Ausente = a
+   * cor do tipo.
+   */
+  card?: TreeCardColors;
+  /**
+   * v1.26: quando o texto não cabe — o cartão cresce (padrão, com `padding`
+   * px de respiro e teto `maxWidth`), o texto encolhe ou corta.
+   */
+  fit?: TreeCardFit;
+  /** v1.26: abreviação de números grandes (padrão: só quando não couber, "125,4k"). */
+  numbers?: TreeNumberFormat;
 }
 
 export interface RowActionSettings {

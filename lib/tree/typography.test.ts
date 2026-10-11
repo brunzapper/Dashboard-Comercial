@@ -61,3 +61,15 @@ describe("resolveTreeTypography", () => {
     expect(String(st?.fontFamily)).toContain("Inter");
   });
 });
+
+// v1.1 (11/10/2026): cor do texto por tipo.
+describe("cor do texto", () => {
+  it("parse aceita só #RRGGBB e o cartão vence", () => {
+    expect(parseTreeTypography({ title: { color: "#FF0000" }, value: { color: "red" } })).toEqual({
+      title: { color: "#ff0000" },
+    });
+    const r = resolveTreeTypography({ title: { color: "#111111", size: 14 } }, { title: { color: "#222222" } });
+    expect(r.title).toEqual({ size: 14, color: "#222222" });
+    expect(treeTextStyle(r, "title")?.color).toBe("#222222");
+  });
+});

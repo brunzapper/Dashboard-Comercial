@@ -1,4 +1,6 @@
-// Versão: 1.16 | Data: 11/10/2026
+// Versão: 1.17 | Data: 11/10/2026
+// v1.17 (11/10/2026): `tree.card`/`tree.fit`/`tree.numbers` e a cor em
+//   `tree.typography` (enums derivados de lib/tree/display.ts e card-fit.ts).
 // v1.16 (11/10/2026): linha `tree.typography` (fonte/tamanho por tipo de texto
 //   dos cartões — enums derivados de lib/tree/typography.ts).
 // Versão: 1.15 | Data: 10/10/2026
@@ -93,6 +95,16 @@ import {
 } from "@/lib/tree/model";
 import { GOAL_TABLE_MODE_LABELS } from "@/lib/widgets/goal-table";
 import { TREE_TEXT_MAX_PX, TREE_TEXT_MIN_PX, TREE_TEXT_ROLES } from "@/lib/tree/typography";
+import { TREE_TONES } from "@/lib/tree/display";
+import {
+  TREE_ABBREVIATE_MODES,
+  TREE_FIT_MAX_WIDTH_MAX,
+  TREE_FIT_MAX_WIDTH_MIN,
+  TREE_FIT_MODES,
+  TREE_FIT_PADDING_MAX,
+  TREE_NUMBER_DECIMALS_MAX,
+  TREE_NUMBER_STYLES,
+} from "@/lib/tree/card-fit";
 import {
   DEFAULT_CUSTOM_COLUMNS,
   DEFAULT_TASK_PHASES,
@@ -383,7 +395,10 @@ export const WIDGET_SETTINGS_DOC = {
   "months": ["2026-10", "2026-11", "2026-12"],   // meses FIXOS dos nós de indicador; ausente = período do dashboard
   "canvas": { "bg": "#ffffff", "pattern": "pontos" },   // fundo da Root: pattern pontos | linhas | nenhum
   "presentation": { "kindBadge": false, "addBranch": false, "ritualSchedule": false, "doneToggle": false, "warnings": false },  // o que os cartões mostram AO APRESENTAR (true = mostra)
-  "typography": { "title": { "font": "inter", "size": 16 }, "value": { "size": 14 } }  // fonte/tamanho PADRÃO dos textos dos cartões, por tipo: ${TREE_TEXT_ROLES.join(" | ")}; font: ${Object.keys(DASHBOARD_FONTS).join(" | ")}; size em px (${TREE_TEXT_MIN_PX}–${TREE_TEXT_MAX_PX}); ausente = tamanhos de sempre. Cada cartão sobrepõe na tela
+  "typography": { "title": { "font": "inter", "size": 16, "color": "#1f2937" }, "value": { "size": 14 } },  // fonte/tamanho/cor PADRÃO dos textos dos cartões, por tipo: ${TREE_TEXT_ROLES.join(" | ")}; font: ${Object.keys(DASHBOARD_FONTS).join(" | ")}; size em px (${TREE_TEXT_MIN_PX}–${TREE_TEXT_MAX_PX}); color #RRGGBB; ausente = o de sempre. Cada cartão sobrepõe na tela
+  "card": { "tone": "azul", "borderColor": "#2563eb", "bgColor": "#eff6ff" },   // cor PADRÃO dos cartões: tone ${TREE_TONES.filter((t) => t !== "padrao").join(" | ")}; borderColor/bgColor #RRGGBB vencem o tom; ausente = cor do tipo
+  "fit": { "overflow": "cartao", "padding": 4, "maxWidth": 560 },   // texto que não cabe: overflow ${TREE_FIT_MODES.join(" | ")} (cartao = cresce até caber, padrão; texto = encolhe; cortar); padding 0–${TREE_FIT_PADDING_MAX} px; maxWidth ${TREE_FIT_MAX_WIDTH_MIN}–${TREE_FIT_MAX_WIDTH_MAX} px
+  "numbers": { "abbreviate": "auto", "style": "k", "decimals": 1 }   // números grandes: abbreviate ${TREE_ABBREVIATE_MODES.join(" | ")} (auto = só quando não couber, padrão); style ${TREE_NUMBER_STYLES.join(" | ")} (k = 125,4k; mil = 125,4 mil; custom = "suffixes": { "mil", "mi", "bi" } + "space"); decimals 0–${TREE_NUMBER_DECIMALS_MAX}
   // NÃO há aqui chave para as linhas do cartão (Meta/Realizado/Projetado…): elas são de CADA nó — "mapas[].nodes[].payload.rows".
 }`,
   // Widget "Base do Dashboard" (0142): a grade editável dos números digitados.
