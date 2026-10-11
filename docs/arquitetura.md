@@ -1,4 +1,8 @@
-<!-- Versão: 2.9 | Data: 10/10/2026 -->
+<!-- Versão: 3.0 | Data: 11/10/2026 -->
+<!-- v3.0 (11/10/2026): §4.24 "Atividades de TODOS os negócios" (0154 —
+     descoberta incremental `activity-discovery.ts`, qualquer tipo, concluídas
+     de 90 dias SOMENTE LEITURA) substitui o corte por Tree da 0152; §4.10 +
+     invariantes 38/46 — filtro "Tem tarefa" com VÁRIOS estados. -->
 <!-- v2.9 (10/10/2026): NOVA APARÊNCIA do shell (§4.7 — barra de local,
      barra lateral com Painéis/Operação, lista densa, Operação com número
      vivo, Configurações com menu vertical, EmptyState/PageSkeleton), paleta
@@ -2414,6 +2418,17 @@ widget-scope). Automação: condição `task_filter`, avaliada em memória por
 usa. Snapshot: `withoutTaskFilters` remove o filtro (o dataset congelado não
 guarda tarefas e o adapter é fail-closed para `tasks`). Editor único:
 `components/filters/task-filter-editor.tsx`.
+
+**Vários estados (11/10/2026).** O spec é `statuses` (subconjunto de
+pendentes/atrasadas/concluídas) e o campo `task:<estado>+<estado>`; o registro
+casa se tiver tarefa em QUALQUER um deles (OU), na mesma janela de dias.
+`taskFilterWindows` simplifica antes de consultar (pendentes absorve
+atrasadas; pendentes + concluídas = uma janela "qualquer estado"); no agregado
+os ids das janelas se UNEM antes da interseção entre filtros, e no modo lista o
+embutido ganha um `or(...)` com `referencedTable` (uma janela só = consulta
+byte-idêntica à anterior). O legado continua lido sem migração: `task:todas` =
+pendentes + concluídas, e o `status` solto do valor do filtro rápido e da
+condição de automação (`taskFilterSpecFromObject`). Editor: caixas de marcar.
 
 O dashboard tem DOIS transportes de filtro com gatilhos de recompute
 diferentes:
@@ -6124,6 +6139,32 @@ Junto: série de regra DESLIGADA não projeta tronco na Tree
 aquelas ocorrências, e desenhá-las seria uma fila de ocorrências que nunca vão
 existir.
 
+**Atividades de TODOS os negócios (11/10/2026, 0154).** O filtro "Tem tarefa"
+voltava vazio: só existiam tarefas dos registros com Tree ativo, e só do tipo
+CRM_TODO. Os dois cortes da 0152 caíram (`activity-inbound.ts` v1.4):
+- a regra de importação é ÚNICA (`shouldImportActivity`): QUALQUER dono,
+  QUALQUER tipo (ligação, e-mail, reunião…); pendente entra sempre; concluída
+  só se a conclusão for dos últimos `IMPORT_DONE_LOOKBACK_DAYS` (90) — sem data
+  de conclusão não entra;
+- concluída que nasceu lá entra **SOMENTE LEITURA** (`tasks.read_only`, 0154):
+  o trigger `enforce_tasks_read_only` recusa UPDATE/DELETE de usuário
+  autenticado (service role passa; a cascata da purga de registro também, por
+  `pg_trigger_depth() > 1`). Reaberta lá, volta ao normal — `syncKnownTaskState`
+  mexe na coluna só em tarefa com `created_by` nulo (a que nasceu lá). A tela
+  troca concluir/editar/excluir pelo selo "Bitrix · somente leitura"
+  (`useTaskRowActions().readOnly`), e a exclusão em massa pula a linha;
+- **descoberta** (`lib/sync/bitrix/activity-discovery.ts`): a conciliação por
+  dono só lê quem JÁ tem algo aqui, então a atividade nascida lá em negócio sem
+  nada aqui não tinha porta de entrada. A descoberta varre
+  `crm.activity.list` por ENTIDADE (as Bases com `bitrix_activity_owner`), sem
+  lista de donos, em três fases com cursor em `sync_config`
+  (`bitrix_activity_discovery`, por org): todas as pendentes (por ID), as
+  concluídas de 90 dias, e daí em diante só o que mudou (`>=LAST_UPDATED`).
+  Roda no tick de sync antes da leitura de volta, até 10 páginas por rodada; o
+  cursor só anda pelo que foi PROCESSADO (página cortada pelo orçamento é
+  relida). Exclusão segue com a conciliação por dono — todo registro com
+  pendente importada passa a ser dono dela (`activity_inbound_owners`).
+
 **Fora de escopo, dito:** ler o feed inteiro do Bitrix (mudança de etapa já
 chega pelo sync de campo, e reimportá-la duplicaria o `audit_log`) e espelhar
 EDIÇÃO de comentário.
@@ -7648,9 +7689,11 @@ principalmente — para mantenedores humanos.
     de enfileirar `update` (senão a leitura re-fecha a tarefa reaberta, para
     sempre) e `deleteTask` enfileira `delete` ANTES de apagar a linha (a FK da
     fila é `on delete set null` justamente para a ordem sobreviver). Desde
-    09/10/2026 (0152): atividade desconhecida só é importada em registro com
-    Tree ATIVO e, se concluída, só de até 30 dias antes da ativação; ligar o
-    Tree dispara a carga inicial em segundo plano (`after()` + tick).
+    09/10/2026 (0152): ligar o Tree dispara a carga inicial em segundo plano
+    (`after()` + tick). Desde 11/10/2026 (0154) a importação vale para
+    QUALQUER registro e QUALQUER tipo de atividade (descoberta incremental em
+    `activity-discovery.ts`); concluída só de 90 dias e SOMENTE LEITURA
+    (`tasks.read_only`, travada por trigger).
 39. **Vocabulário de domínio é DADO, nunca literal no fonte (10/09/2026,
     §4.25).** O substantivo de cada ocorrência vive em `SeriesConfig.noun` e
     `tasks.occurrence_noun`, com padrão `DEFAULT_SERIES_NOUN` e um dono único da
@@ -7787,7 +7830,9 @@ principalmente — para mantenedores humanos.
     (`taskMatchesFilter`). Nunca ensine o RPC sobre tarefas: a 0153 abriu SÓ
     `id` no ramo de filtro (espelhado nas duas funções — invariante 1). Lista
     vazia vira o uuid-zero, nunca "sem filtro"; recorte grande demais falha
-    alto, nunca é cortado em silêncio.
+    alto, nunca é cortado em silêncio. Desde 11/10/2026 o filtro aceita
+    VÁRIOS estados (OU), por `taskFilterWindows`; o legado `todas`/`status`
+    segue lido sem migração.
 
 ## 6. Convenções do projeto
 

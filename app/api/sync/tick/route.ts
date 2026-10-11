@@ -1,4 +1,9 @@
-// Versão: 1.4 | Data: 09/10/2026
+// Versão: 1.5 | Data: 11/10/2026
+// v1.5 (11/10/2026): DESCOBERTA das atividades de TODOS os registros
+//   (`discoverBitrixActivities`, varredura incremental com cursor) antes da
+//   leitura de volta — a atividade que nasceu no Bitrix em negócio sem nada
+//   aqui não tinha outro caminho de entrada. Best-effort: falha não derruba o
+//   tick.
 // v1.4 (09/10/2026): CARGA INICIAL pendente de Tree recém-ligado
 //   (`runPendingInitialLoads`) antes da leitura de volta — rede de segurança
 //   do `after()` da action que liga o atributo.
@@ -53,6 +58,7 @@ import {
   runPendingInitialLoads,
   syncBitrixActivitiesInbound,
 } from "@/lib/sync/bitrix/activity-inbound";
+import { discoverBitrixActivities } from "@/lib/sync/bitrix/activity-discovery";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -125,6 +131,18 @@ export async function POST(request: Request) {
       db,
       Math.min(deadline, Date.now() + ACTIVITY_INBOUND_TICK_MS)
     );
+    // v1.5 (11/10/2026): descobre as atividades dos registros que ainda não
+    // têm nada aqui (pendentes de qualquer idade, concluídas de 90 dias, depois
+    // só o que mudou). Mesma fatia de orçamento da leitura de volta.
+    let activityDiscovery: Awaited<ReturnType<typeof discoverBitrixActivities>> = null;
+    try {
+      activityDiscovery = await discoverBitrixActivities(
+        db,
+        Math.min(deadline, Date.now() + ACTIVITY_INBOUND_TICK_MS)
+      );
+    } catch {
+      // best-effort: o cursor não andou; o próximo tick tenta de novo.
+    }
     const activityInbound = await syncBitrixActivitiesInbound(
       db,
       Math.min(deadline, Date.now() + ACTIVITY_INBOUND_TICK_MS),
@@ -159,6 +177,7 @@ export async function POST(request: Request) {
       mirrorsQueued,
       taskMirror,
       activityInbound,
+      activityDiscovery,
       initialLoads,
       drove,
       createdAuto,

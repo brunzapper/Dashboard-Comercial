@@ -1,4 +1,5 @@
-// Versão: 1.0 | Data: 10/10/2026
+// Versão: 1.1 | Data: 11/10/2026
+// v1.1 (11/10/2026): vários estados — união no agregado, `or` no embutido.
 // v1.0 (10/10/2026): o filtro "Tem tarefa" chegando às consultas — ids p/ o
 //   RPC (agregado) e embutido p/ o modo lista, com o MESMO predicado.
 import { describe, expect, it } from "vitest";
@@ -109,11 +110,46 @@ describe("resolveTaskFilters", () => {
   });
 });
 
+describe("vários estados", () => {
+  it("agregado: os ids das janelas se UNEM (OU)", async () => {
+    const { db } = fakeDb([[{ record_id: "r1" }], [{ record_id: "r2" }]]);
+    const out = await resolveTaskFilters(
+      db,
+      [{ field: "task:atrasadas+concluidas", op: "eq", value: "" }],
+      TODAY
+    );
+    expect(out).toEqual([{ field: "id", op: "in", value: ["r1", "r2"] }]);
+  });
+
+  it("modo lista: `or` no alias do embutido", () => {
+    const calls: unknown[][] = [];
+    const q: Record<string, unknown> = {};
+    for (const m of ["is", "not", "gte", "lte", "or"]) {
+      q[m] = (...a: unknown[]) => {
+        calls.push([m, ...a]);
+        return q;
+      };
+    }
+    applyTaskEmbedFilters(
+      q,
+      [{ statuses: ["atrasadas", "concluidas"], back: 10, ahead: null }],
+      TODAY
+    );
+    expect(calls).toEqual([
+      [
+        "or",
+        "and(completed_at.is.null,due_date.gte.2026-09-30,due_date.lte.2026-10-09),and(completed_at.not.is.null,due_date.gte.2026-09-30)",
+        { referencedTable: "tf0" },
+      ],
+    ]);
+  });
+});
+
 describe("modo lista: embutido", () => {
   it("um embutido vazio por filtro e o mesmo predicado no alias", () => {
     const specs = [
-      { status: "atrasadas" as const, back: 15, ahead: null },
-      { status: "concluidas" as const, back: null, ahead: null },
+      { statuses: ["atrasadas" as const], back: 15, ahead: null },
+      { statuses: ["concluidas" as const], back: null, ahead: null },
     ];
     expect(taskEmbedSelect(specs)).toBe(", tf0:tasks!inner(), tf1:tasks!inner()");
     const calls: unknown[][] = [];

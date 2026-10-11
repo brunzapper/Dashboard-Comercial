@@ -1,4 +1,6 @@
-// Versão: 1.4 | Data: 10/09/2026
+// Versão: 1.5 | Data: 11/10/2026
+// v1.5 (11/10/2026): `read_only` (0154) — atividade CONCLUÍDA que nasceu no
+//   Bitrix entra só para leitura; o banco recusa edição e exclusão do usuário.
 // v1.4 (10/09/2026): `automation_rule_id` — qual regra abriu a tarefa (0129).
 // A coluna existe desde a 0129 e nunca subia ao cliente; a Tree precisa dela
 // para saber de QUAL série a ocorrência é (um registro pode seguir mais de
@@ -47,6 +49,12 @@ export interface TaskRow {
   series_occurrence: number | null;
   /** v1.3: substantivo desta ocorrência na Tree. null = herda a série. */
   occurrence_noun: string | null;
+  /**
+   * v1.5 (0154): veio concluída do Bitrix — só leitura aqui (a trava é o
+   * trigger do banco; a tela só esconde as ações). Opcional: as linhas
+   * montadas à mão (testes, prévias) não precisam declará-la.
+   */
+  read_only?: boolean;
   created_at: string;
   updated_at: string;
   // Join records(title) — null quando sem vínculo ou registro invisível (RLS).
@@ -54,7 +62,7 @@ export interface TaskRow {
 }
 
 export const TASK_COLS =
-  "id, title, description, record_id, board_id, phase, due_date, due_time, due_time_end, completed_at, completed_by, responsible_id, created_by, position, locked, parent_task_id, pinned, feed_position, is_global, assigned_at, automation_rule_id, series_key, series_occurrence, occurrence_noun, created_at, updated_at";
+  "id, title, description, record_id, board_id, phase, due_date, due_time, due_time_end, completed_at, completed_by, responsible_id, created_by, position, locked, parent_task_id, pinned, feed_position, is_global, assigned_at, automation_rule_id, series_key, series_occurrence, occurrence_noun, read_only, created_at, updated_at";
 
 // Mesmo select com o título do registro vinculado (join FK record_id).
 export const TASK_COLS_WITH_RECORD = `${TASK_COLS}, record:records(title)`;

@@ -1,4 +1,5 @@
-// Versão: 1.3 | Data: 10/10/2026
+// Versão: 1.4 | Data: 11/10/2026
+// v1.4 (11/10/2026): `task_filter` com vários estados (`statuses`) e o legado `status`.
 // v1.3 (10/10/2026): condição `task_filter` ("Tem tarefa") — casa pela janela
 //   do prazo; valor fora da faixa derruba a regra (fail-closed).
 // v1.2 (12/09/2026): condição de campo sobre DATA compara por DIA de Brasília.
@@ -408,7 +409,7 @@ describe("evaluateCondition", () => {
   it("task_filter: estado + janela sobre o prazo", () => {
     const cond = {
       kind: "task_filter" as const,
-      status: "pendentes" as const,
+      statuses: ["pendentes" as const],
       back: 15,
       ahead: 15,
     };
@@ -434,6 +435,28 @@ describe("evaluateCondition", () => {
         action: { type: "move_to_column", targetKey: "quente" },
       })
     ).toBeNull();
+    // v1.4 (11/10/2026): regra gravada com o `status` solto (v1.7) segue
+    // parseando — vira lista de um; vários estados casam em OU.
+    expect(
+      parseAutomationRule({
+        v: 1,
+        conditions: [{ kind: "task_filter", status: "atrasadas", back: null, ahead: null }],
+        action: { type: "move_to_column", targetKey: "quente" },
+      })?.conditions[0]
+    ).toEqual({ kind: "task_filter", statuses: ["atrasadas"], back: null, ahead: null });
+    const multi = {
+      kind: "task_filter" as const,
+      statuses: ["atrasadas" as const, "concluidas" as const],
+      back: null,
+      ahead: null,
+    };
+    expect(
+      evaluateCondition(
+        multi,
+        facts({ taskRows: [{ due_date: "2026-08-01", completed_at: "2026-08-02T10:00:00Z" }] }),
+        CTX
+      )
+    ).toBe(true);
   });
 
   it("time: base ausente não casa; gte/lte por dia de calendário", () => {

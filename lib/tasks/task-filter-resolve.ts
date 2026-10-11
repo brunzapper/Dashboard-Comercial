@@ -1,7 +1,11 @@
-// Versão: 1.0 | Data: 10/10/2026
+// Versão: 1.1 | Data: 11/10/2026
+// v1.1 (11/10/2026): VÁRIOS estados num filtro (`taskFilterWindows`): no
+//   agregado, os ids de cada janela se UNEM (OU) antes da interseção entre
+//   filtros (E); no modo lista, o embutido recebe um `or` no alias quando há
+//   mais de uma janela. Uma janela só = a consulta de antes, byte-idêntica.
 // v1.0 (10/10/2026): o filtro "Tem tarefa" chegando às consultas.
 //
-// Dois caminhos, UM predicado (`taskFilterWindow`, ./task-filter.ts):
+// Dois caminhos, UM predicado (`taskFilterWindows`, ./task-filter.ts):
 //
 // 1. AGREGADO (RPC `run_widget_query`): o RPC não conhece tarefas, e a regra do
 //    projeto é resolver no ENGINE. `resolveTaskFilters` troca cada filtro
@@ -24,7 +28,7 @@ import type { WidgetFilter } from "@/lib/widgets/types";
 import {
   isTaskFilterField,
   parseTaskFilter,
-  taskFilterWindow,
+  taskFilterWindows,
   type TaskFilterSpec,
   type TaskFilterWindow,
 } from "./task-filter";
@@ -87,14 +91,39 @@ function applyWindow(q: Q, w: TaskFilterWindow, prefix: string): Q {
   return q;
 }
 
+/**
+ * v1.1: uma janela em sintaxe de `or` do PostgREST (`and(...)`), ou null quando
+ * ela não restringe nada (qualquer estado, sem prazo) — aí o OR inteiro é
+ * trivialmente verdadeiro.
+ */
+function windowOrClause(w: TaskFilterWindow): string | null {
+  const parts: string[] = [];
+  if (w.completed === "open") parts.push("completed_at.is.null");
+  else if (w.completed === "done") parts.push("completed_at.not.is.null");
+  if (w.dueFrom) parts.push(`due_date.gte.${w.dueFrom}`);
+  if (w.dueTo) parts.push(`due_date.lte.${w.dueTo}`);
+  return parts.length > 0 ? `and(${parts.join(",")})` : null;
+}
+
 /** Ids distintos dos registros com ao menos uma tarefa que casa com o spec. */
 export async function taskFilterRecordIds(
   db: SupabaseClient,
   spec: TaskFilterSpec,
   todayIso: string = todayBrasiliaIso()
 ): Promise<Set<string>> {
-  const w = taskFilterWindow(spec, todayIso);
+  // v1.1: uma leitura por janela, ids unidos (OU entre os estados).
   const ids = new Set<string>();
+  for (const w of taskFilterWindows(spec, todayIso)) {
+    await collectWindowIds(db, w, ids);
+  }
+  return ids;
+}
+
+async function collectWindowIds(
+  db: SupabaseClient,
+  w: TaskFilterWindow,
+  ids: Set<string>
+): Promise<void> {
   for (let from = 0; ; from += PAGE) {
     let q: Q = db.from("tasks").select("record_id").not("record_id", "is", null);
     q = applyWindow(q, w, "");
@@ -107,7 +136,6 @@ export async function taskFilterRecordIds(
     }
     if (rows.length < PAGE) break;
   }
-  return ids;
 }
 
 /**
@@ -151,7 +179,16 @@ export function applyTaskEmbedFilters<T>(
 ): T {
   let out: Q = q;
   specs.forEach((spec, i) => {
-    out = applyWindow(out, taskFilterWindow(spec, todayIso), `tf${i}`);
+    const windows = taskFilterWindows(spec, todayIso);
+    if (windows.length === 1) {
+      out = applyWindow(out, windows[0], `tf${i}`);
+      return;
+    }
+    // v1.1: mais de um estado ⇒ OU dentro do embutido. Com `!inner`, o pai só
+    // passa se alguma tarefa do alias casar com alguma das janelas.
+    const clauses = windows.map(windowOrClause);
+    if (clauses.some((c) => c === null)) return; // uma janela já casa tudo
+    out = out.or(clauses.join(","), { referencedTable: `tf${i}` });
   });
   return out as T;
 }

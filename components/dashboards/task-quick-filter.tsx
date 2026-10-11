@@ -1,4 +1,5 @@
-// Versão: 1.0 | Data: 10/10/2026
+// Versão: 1.1 | Data: 11/10/2026
+// v1.1 (11/10/2026): vários estados — nenhum marcado = sem filtro.
 // v1.0 (10/10/2026): chip do filtro rápido "Tem tarefa" no card.
 //
 // Mesmo editor das outras superfícies (components/filters/task-filter-editor):
@@ -37,7 +38,7 @@ export function TaskQuickFilter({
 }) {
   const spec =
     value?.kind === "tasks"
-      ? { status: value.status, back: value.back, ahead: value.ahead }
+      ? { statuses: value.statuses, back: value.back, ahead: value.ahead }
       : null;
   const [draft, setDraft] = useState<TaskFilterDraft>(() => draftFromSpec(spec));
   // Re-semeia ao abrir: o valor pode ter mudado por outro usuário/refresh.
@@ -74,7 +75,7 @@ export function TaskQuickFilter({
           value={draft}
           onChange={(next) => {
             setDraft(next);
-            if (!next.status) {
+            if (next.statuses.length === 0) {
               onChange(null);
               return;
             }

@@ -1,4 +1,6 @@
-// Versão: 1.4 | Data: 02/10/2026
+// Versão: 1.5 | Data: 11/10/2026
+// v1.5 (11/10/2026): tarefa SOMENTE LEITURA (0154) mostra o selo no lugar de
+//   concluir/excluir — a regra vem do hook (`readOnly`).
 // v1.4 (02/10/2026): `NodeDate` — nó DESENHADO na árvore (anotação,
 //   indicador, Multi-fatores, ritual) mostra a data PRÓPRIA (prazo, 0150), e
 //   nada quando não tem; antes mostrava a data de CRIAÇÃO como se fosse prazo
@@ -72,6 +74,7 @@ import {
 import {
   TaskCompleteButton,
   TaskDeleteButton,
+  TaskReadOnlyBadge,
   TaskSeriesPrompt,
   useTaskRowActions,
 } from "@/components/tarefas/task-list";
@@ -191,8 +194,9 @@ export function TaskNodeActions({
   task: TaskRow;
   onChanged: () => void;
 }) {
-  const { done, pending, error, toggle, remove, seriesPrompt } =
+  const { done, readOnly, pending, error, toggle, remove, seriesPrompt } =
     useTaskRowActions(task, onChanged);
+  if (readOnly) return <TaskReadOnlyBadge />;
   return (
     <>
       {/* A pergunta "e as demais da sequência?" mora no hook, que é o dono

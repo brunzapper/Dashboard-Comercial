@@ -1,4 +1,5 @@
-// Versão: 1.2 | Data: 10/09/2026
+// Versão: 1.3 | Data: 11/10/2026
+// v1.3 (11/10/2026): `deleteTasksBulk` pula tarefa SOMENTE LEITURA (0154).
 // v1.2 (10/09/2026): concluir e excluir em massa ESPELHAM no Bitrix
 //   (0136/0137). Antes não espelhavam — era assimetria; com a leitura de
 //   volta virou regressão: concluir em lote deixava a atividade ABERTA lá e
@@ -680,6 +681,10 @@ export async function deleteTasksBulk(
       .from("tasks")
       .delete()
       .in("id", slice)
+      // v1.3 (11/10/2026): a SOMENTE LEITURA (0154) fica de fora do delete —
+      // o trigger do banco a recusaria e derrubaria a fatia INTEIRA; assim ela
+      // só volta como item não excluído.
+      .eq("read_only", false)
       .select("id, title, record_id");
     if (error) {
       results.push(...fanOut(slice, false, error.message));
@@ -695,7 +700,7 @@ export async function deleteTasksBulk(
       ...resultsFromReturned(
         slice,
         rows.map((r) => r.id),
-        "Sem permissão — a tarefa está travada ou pertence a outro usuário."
+        "Sem permissão — a tarefa está travada, é somente leitura (veio concluída do Bitrix) ou pertence a outro usuário."
       )
     );
   }

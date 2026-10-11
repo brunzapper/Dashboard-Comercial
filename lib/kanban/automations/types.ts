@@ -1,4 +1,6 @@
-// Versão: 1.7 | Data: 10/10/2026
+// Versão: 1.8 | Data: 11/10/2026
+// v1.8 (11/10/2026): `task_filter` com VÁRIOS estados (`statuses`); regra
+//   gravada com o `status` solto (v1.7) segue parseando.
 // v1.7 (10/10/2026): condição `task_filter` — o registro tem tarefa no estado
 //   e na janela de prazo pedidos (mesma régua do filtro "Tem tarefa",
 //   lib/tasks/task-filter.ts). A condição `tasks` (contagem) segue intacta.
@@ -49,8 +51,7 @@
 // desenho: valor atual igual ao alvo consome o card SEM escrever (decidido no
 // avaliador — zero churn de audit/webhook no tick por minuto).
 import {
-  parseTaskFilter,
-  TASK_FILTER_PREFIX,
+  taskFilterSpecFromObject,
   type TaskFilterStatus,
 } from "@/lib/tasks/task-filter";
 import { parseSeriesConfig, type SeriesConfig } from "@/lib/series/types";
@@ -96,7 +97,8 @@ export type AutomationCondition =
   // filtro de widget (lib/tasks/task-filter.ts).
   | {
       kind: "task_filter";
-      status: TaskFilterStatus;
+      /** v1.8: um ou mais estados (o legado `status` é lido no parse). */
+      statuses: TaskFilterStatus[];
       back: number | null;
       ahead: number | null;
     };
@@ -243,11 +245,8 @@ function parseCondition(raw: unknown): AutomationCondition | null {
     }
     case "task_filter": {
       // v1.7: fail-closed pela MESMA régua do filtro (estado no enum, 0–180).
-      const spec = parseTaskFilter({
-        field: `${TASK_FILTER_PREFIX}${String(raw.status ?? "")}`,
-        op: "eq",
-        value: `${raw.back ?? ""},${raw.ahead ?? ""}`,
-      });
+      // v1.8: `statuses` ou o legado `status`.
+      const spec = taskFilterSpecFromObject(raw);
       return spec ? { kind: "task_filter", ...spec } : null;
     }
     case "time": {

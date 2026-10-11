@@ -1,4 +1,5 @@
-// Versão: 1.5 | Data: 10/10/2026
+// Versão: 1.6 | Data: 11/10/2026
+// v1.6 (11/10/2026): "Tem tarefa" com vários estados passa e é canonicalizado.
 // v1.5 (10/10/2026): filtro "Tem tarefa" (task:) — válido passa, inválido é erro.
 // v1.4 (02/10/2026): "metas" + goalTable vira Tabela Livre com colunas de
 //   meta (a Tabela de metas foi absorvida) — aviso, nunca erro.
@@ -902,6 +903,17 @@ describe('filtro "Tem tarefa" (task:)', () => {
   it("estado + janela válidos passam", () => {
     const res = validateDashboardImport(
       docWith({ filters: [{ field: "task:pendentes", op: "eq", value: "30,60" }] }),
+      ctx
+    );
+    expect(res.errors).toEqual([]);
+    expect(res.ok).toBe(true);
+  });
+
+  it("vários estados passam (v1.6)", () => {
+    const res = validateDashboardImport(
+      docWith({
+        filters: [{ field: "task:concluidas+atrasadas", op: "eq", value: ",30" }],
+      }),
       ctx
     );
     expect(res.errors).toEqual([]);

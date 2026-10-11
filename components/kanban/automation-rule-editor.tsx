@@ -1,4 +1,5 @@
-// Versão: 1.5 | Data: 10/10/2026
+// Versão: 1.6 | Data: 11/10/2026
+// v1.6 (11/10/2026): "Tem tarefa" com vários estados — o rascunho padrão é `statuses: ["pendentes"]`.
 // v1.5 (10/10/2026): condição "Tem tarefa (estado e prazo)" (`task_filter`) —
 //   mesmo editor do filtro de widget (components/filters/task-filter-editor).
 // v1.4 (10/09/2026): `emptyRuleDraft()` — o rascunho em branco virou função
@@ -213,7 +214,7 @@ export function emptyCond(): CondDraft {
     timeField: "",
     timeOp: "gte",
     timeDays: "7",
-    taskFilter: { status: "pendentes", back: "", ahead: "" },
+    taskFilter: { statuses: ["pendentes"], back: "", ahead: "" },
   };
 }
 

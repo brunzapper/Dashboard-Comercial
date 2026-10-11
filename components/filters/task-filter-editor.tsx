@@ -1,4 +1,7 @@
-// Versão: 1.0 | Data: 10/10/2026
+// Versão: 1.1 | Data: 11/10/2026
+// v1.1 (11/10/2026): VÁRIOS estados de uma vez — o seletor virou caixas de
+//   marcar (Pendentes / Atrasadas / Concluídas). Nenhuma marcada = sem filtro
+//   (onde `allowNone`) ou rascunho incompleto (nas outras superfícies).
 // v1.0 (10/10/2026): editor do filtro "Tem tarefa" — estado + janela de dias.
 //
 // UM editor para as quatro superfícies (filtros do widget, filtro rápido do
@@ -8,10 +11,11 @@
 // componente só a exibe; nunca valida por conta própria.
 "use client";
 
-import { Combobox } from "@/components/ui/combobox";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import {
   MAX_TASK_FILTER_DAYS,
+  normalizeTaskStatuses,
   parseTaskFilterDays,
   TASK_FILTER_STATUS_LABELS,
   TASK_FILTER_STATUSES,
@@ -22,14 +26,15 @@ import { cn } from "@/lib/utils";
 
 /** Rascunho do editor: dias como TEXTO (o campo pode estar no meio da digitação). */
 export interface TaskFilterDraft {
-  status: TaskFilterStatus | "";
+  /** v1.1: estados marcados (vazio = nenhum). */
+  statuses: TaskFilterStatus[];
   back: string;
   ahead: string;
 }
 
 export function draftFromSpec(spec: TaskFilterSpec | null): TaskFilterDraft {
   return {
-    status: spec?.status ?? "",
+    statuses: spec?.statuses ?? [],
     back: spec?.back != null ? String(spec.back) : "",
     ahead: spec?.ahead != null ? String(spec.ahead) : "",
   };
@@ -37,11 +42,13 @@ export function draftFromSpec(spec: TaskFilterSpec | null): TaskFilterDraft {
 
 /** Rascunho → spec; null = sem estado escolhido ou dia inválido. */
 export function specFromDraft(d: TaskFilterDraft): TaskFilterSpec | null {
-  if (!d.status) return null;
+  // A ordem canônica sai do módulo puro (o rascunho guarda a ordem do clique).
+  const statuses = normalizeTaskStatuses(d.statuses);
+  if (!statuses) return null;
   const back = parseTaskFilterDays(d.back);
   const ahead = parseTaskFilterDays(d.ahead);
   if (back === undefined || ahead === undefined) return null;
-  return { status: d.status, back, ahead };
+  return { statuses, back, ahead };
 }
 
 export function TaskFilterEditor({
@@ -54,7 +61,10 @@ export function TaskFilterEditor({
 }: {
   value: TaskFilterDraft;
   onChange: (next: TaskFilterDraft) => void;
-  /** Oferece a opção "sem filtro" no estado (/registros). */
+  /**
+   * Nenhum estado marcado é um valor válido ("sem filtro") — /registros e o
+   * filtro rápido. `noneLabel` vira a dica exibida nesse caso.
+   */
   allowNone?: boolean;
   noneLabel?: string;
   className?: string;
@@ -63,16 +73,20 @@ export function TaskFilterEditor({
 }) {
   const backInvalid = parseTaskFilterDays(value.back) === undefined;
   const aheadInvalid = parseTaskFilterDays(value.ahead) === undefined;
-  const disabledDays = !value.status;
-  // Atrasada é prazo ANTES de hoje: "à frente" não tem efeito nela.
-  const aheadDisabled = disabledDays || value.status === "atrasadas";
-  const options = [
-    ...(allowNone ? [{ value: "", label: noneLabel }] : []),
-    ...TASK_FILTER_STATUSES.map((s) => ({
-      value: s,
-      label: TASK_FILTER_STATUS_LABELS[s],
-    })),
-  ];
+  const none = value.statuses.length === 0;
+  const disabledDays = none;
+  // Atrasada é prazo ANTES de hoje: "à frente" só não tem efeito quando ela é
+  // o ÚNICO estado marcado.
+  const aheadDisabled =
+    disabledDays ||
+    (value.statuses.length === 1 && value.statuses[0] === "atrasadas");
+  const toggle = (s: TaskFilterStatus, on: boolean) =>
+    onChange({
+      ...value,
+      statuses: on
+        ? [...value.statuses.filter((x) => x !== s), s]
+        : value.statuses.filter((x) => x !== s),
+    });
   const dayInput = (
     key: "back" | "ahead",
     label: string,
@@ -105,17 +119,22 @@ export function TaskFilterEditor({
         className
       )}
     >
-      <Combobox
-        options={options}
-        value={value.status}
-        onValueChange={(s) =>
-          onChange({ ...value, status: s as TaskFilterStatus | "" })
-        }
-        searchable={false}
-        placeholder="Estado da tarefa"
+      <div
+        role="group"
         aria-label="Estado da tarefa"
-        className={compact ? "w-44" : "w-full"}
-      />
+        className="flex flex-wrap items-center gap-3"
+      >
+        {TASK_FILTER_STATUSES.map((s) => (
+          <label key={s} className="flex items-center gap-1.5 text-xs">
+            <Checkbox
+              checked={value.statuses.includes(s)}
+              onCheckedChange={(v) => toggle(s, v === true)}
+              aria-label={TASK_FILTER_STATUS_LABELS[s]}
+            />
+            {TASK_FILTER_STATUS_LABELS[s]}
+          </label>
+        ))}
+      </div>
       <div className="flex flex-wrap items-center gap-3">
         {dayInput("back", "dias atrás", backInvalid, disabledDays)}
         {dayInput("ahead", "dias à frente", aheadInvalid, aheadDisabled)}
@@ -124,7 +143,11 @@ export function TaskFilterEditor({
         <p className="text-destructive text-xs">
           Use um número inteiro de 0 a {MAX_TASK_FILTER_DAYS}, ou deixe vazio.
         </p>
-      ) : !compact && value.status ? (
+      ) : none ? (
+        <p className="text-muted-foreground text-xs">
+          {allowNone ? noneLabel : "Marque ao menos um estado."}
+        </p>
+      ) : !compact ? (
         <p className="text-muted-foreground text-xs">
           Janela sobre o prazo da tarefa, contada a partir de hoje. Vazio = sem
           limite daquele lado.

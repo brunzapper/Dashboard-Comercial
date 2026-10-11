@@ -1,4 +1,12 @@
-// Versão: 1.0 | Data: 10/10/2026
+// Versão: 1.1 | Data: 11/10/2026
+// v1.1 (11/10/2026): VÁRIOS estados de uma vez (pedido do usuário: "puxar
+//   pendentes, concluídas e atrasadas de uma vez só"). O spec passou de
+//   `status` a `statuses` (subconjunto de pendentes/atrasadas/concluídas) e o
+//   campo a `task:<estado>+<estado>`; o registro casa se tiver tarefa em
+//   QUALQUER um dos estados (OU), na mesma janela de dias. O legado segue
+//   lido: `task:todas` = pendentes + concluídas, e `status` solto (valor do
+//   filtro rápido e condição de automação gravados antes) vira lista de um.
+//   Nada gravado precisa ser migrado.
 // v1.0 (10/10/2026): o filtro "Tem tarefa" — dono ÚNICO da representação e do
 // predicado.
 //
@@ -7,9 +15,9 @@
 // a hoje (N dias atrás, M dias à frente, até 180 cada). Ele aparece em quatro
 // superfícies — filtros do widget, filtro rápido do card, /registros e
 // condição de automação — e todas leem daqui:
-//   - a REPRESENTAÇÃO como `WidgetFilter`: `field = "task:<estado>"`,
+//   - a REPRESENTAÇÃO como `WidgetFilter`: `field = "task:<estado>[+<estado>]"`,
 //     `op = "eq"`, `value = "<atrás>,<à frente>"` (lado vazio = sem limite);
-//   - a JANELA (`taskFilterWindow`): o predicado sobre `tasks` que a consulta
+//   - as JANELAS (`taskFilterWindows`, v1.1): o predicado sobre `tasks` que a consulta
 //     do servidor (ids p/ o RPC, embutido p/ o modo lista) e o casamento em
 //     memória das automações (`taskMatchesFilter`) aplicam IGUAL.
 //
@@ -26,22 +34,30 @@ export const TASK_FILTER_PREFIX = "task:";
 /** Teto de cada lado da janela, em dias (pedido do usuário). */
 export const MAX_TASK_FILTER_DAYS = 180;
 
-export type TaskFilterStatus = "pendentes" | "atrasadas" | "concluidas" | "todas";
+/** v1.1: um ESTADO; o filtro escolhe um ou mais (`statuses`). */
+export type TaskFilterStatus = "pendentes" | "atrasadas" | "concluidas";
 
 /** Rótulos dos estados — os MESMOS que a UI e o SPEC da IA exibem. */
 export const TASK_FILTER_STATUS_LABELS = {
   pendentes: "Pendentes",
   atrasadas: "Atrasadas",
   concluidas: "Concluídas",
-  todas: "Pendentes e concluídas",
 } satisfies Record<TaskFilterStatus, string>;
 
+/** Ordem canônica (é a da UI e a da serialização). */
 export const TASK_FILTER_STATUSES = Object.keys(
   TASK_FILTER_STATUS_LABELS
 ) as TaskFilterStatus[];
 
+/** v1.1: grafia LEGADA aceita na leitura (= pendentes + concluídas). */
+export const TASK_FILTER_LEGACY_ALL = "todas";
+
+/** Separador dos estados no campo (`task:pendentes+concluidas`). */
+const STATUS_SEP = "+";
+
 export interface TaskFilterSpec {
-  status: TaskFilterStatus;
+  /** v1.1: um ou mais estados, sem repetição, na ordem canônica. */
+  statuses: TaskFilterStatus[];
   /** Dias para trás (0–180); null = sem limite inferior. */
   back: number | null;
   /** Dias para frente (0–180); null = sem limite superior. */
@@ -66,6 +82,30 @@ function isStatus(v: unknown): v is TaskFilterStatus {
 }
 
 /**
+ * v1.1: estados em qualquer grafia aceita → lista canônica (sem repetição, na
+ * ordem de `TASK_FILTER_STATUSES`). Aceita string com `+` ou vírgula, array e
+ * o legado `todas`. Qualquer peça desconhecida, ou lista vazia, é INVÁLIDA
+ * (null) — nunca descartada em silêncio, que mudaria o que foi pedido.
+ */
+export function normalizeTaskStatuses(raw: unknown): TaskFilterStatus[] | null {
+  const parts: unknown[] = Array.isArray(raw)
+    ? raw
+    : typeof raw === "string"
+      ? raw.split(/[+,]/).map((p) => p.trim())
+      : [];
+  const set = new Set<TaskFilterStatus>();
+  for (const p of parts) {
+    if (p === TASK_FILTER_LEGACY_ALL) {
+      set.add("pendentes");
+      set.add("concluidas");
+    } else if (isStatus(p)) set.add(p);
+    else return null;
+  }
+  if (set.size === 0) return null;
+  return TASK_FILTER_STATUSES.filter((s) => set.has(s));
+}
+
+/**
  * Um lado da janela: inteiro de 0 a 180, ou null (vazio). Valor fora da faixa
  * é INVÁLIDO (undefined) — nunca é cortado em silêncio para 180, que mudaria o
  * que a pessoa pediu sem ela saber.
@@ -87,15 +127,33 @@ export function parseTaskFilter(f: {
   value?: unknown;
 }): TaskFilterSpec | null {
   if (!isTaskFilterField(f.field)) return null;
-  const status = f.field.slice(TASK_FILTER_PREFIX.length);
-  if (!isStatus(status)) return null;
+  const statuses = normalizeTaskStatuses(f.field.slice(TASK_FILTER_PREFIX.length));
+  if (!statuses) return null;
   if (f.op !== undefined && f.op !== "eq") return null;
   const raw = f.value == null ? "" : String(f.value);
   const [b = "", a = ""] = raw.split(",");
   const back = parseTaskFilterDays(b);
   const ahead = parseTaskFilterDays(a);
   if (back === undefined || ahead === undefined) return null;
-  return { status, back, ahead };
+  return { statuses, back, ahead };
+}
+
+/**
+ * v1.1: spec vindo de jsonb (valor do filtro rápido, condição de automação):
+ * `statuses` OU o legado `status`, mais os dois lados da janela.
+ */
+export function taskFilterSpecFromObject(o: {
+  statuses?: unknown;
+  status?: unknown;
+  back?: unknown;
+  ahead?: unknown;
+}): TaskFilterSpec | null {
+  const statuses = normalizeTaskStatuses(o.statuses ?? o.status);
+  if (!statuses) return null;
+  const back = parseTaskFilterDays(o.back);
+  const ahead = parseTaskFilterDays(o.ahead);
+  if (back === undefined || ahead === undefined) return null;
+  return { statuses, back, ahead };
 }
 
 /** Spec → `WidgetFilter` (o formato gravado em `config.filters`). */
@@ -105,34 +163,51 @@ export function serializeTaskFilter(spec: TaskFilterSpec): {
   value: string;
 } {
   return {
-    field: `${TASK_FILTER_PREFIX}${spec.status}`,
+    field: `${TASK_FILTER_PREFIX}${spec.statuses.join(STATUS_SEP)}`,
     op: "eq",
     value: `${spec.back ?? ""},${spec.ahead ?? ""}`,
   };
 }
 
-/** A janela concreta de um spec para o dia `todayIso` (Brasília). */
-export function taskFilterWindow(
+/** A janela de UM estado para o dia `todayIso` (Brasília). */
+function windowFor(
+  status: TaskFilterStatus | "any",
   spec: TaskFilterSpec,
   todayIso: string
 ): TaskFilterWindow {
   const w: TaskFilterWindow = {
     completed:
-      spec.status === "concluidas"
-        ? "done"
-        : spec.status === "todas"
-          ? "any"
-          : "open",
+      status === "concluidas" ? "done" : status === "any" ? "any" : "open",
   };
   if (spec.back != null) w.dueFrom = addDaysIso(todayIso, -spec.back);
   if (spec.ahead != null) w.dueTo = addDaysIso(todayIso, spec.ahead);
-  if (spec.status === "atrasadas") {
+  if (status === "atrasadas") {
     // Atrasada é prazo ANTES de hoje: o teto da janela vira ontem (a parte
     // "à frente" não tem como conter uma tarefa atrasada).
     const yesterday = addDaysIso(todayIso, -1);
     w.dueTo = w.dueTo && w.dueTo < yesterday ? w.dueTo : yesterday;
   }
   return w;
+}
+
+/**
+ * v1.1: as janelas do spec — o registro casa se tiver tarefa em QUALQUER uma
+ * (OU). Simplificadas antes de virar consulta: atrasada é um recorte de
+ * pendente (com pendentes marcado ela não acrescenta nada), e pendentes +
+ * concluídas é "qualquer estado" — uma janela só, a mesma do legado `todas`.
+ */
+export function taskFilterWindows(
+  spec: TaskFilterSpec,
+  todayIso: string
+): TaskFilterWindow[] {
+  const has = new Set(spec.statuses);
+  if (has.has("pendentes")) has.delete("atrasadas");
+  if (has.has("pendentes") && has.has("concluidas")) {
+    return [windowFor("any", spec, todayIso)];
+  }
+  return TASK_FILTER_STATUSES.filter((s) => has.has(s)).map((s) =>
+    windowFor(s, spec, todayIso)
+  );
 }
 
 /** A janela exige prazo? (com prazo mínimo ou máximo, tarefa sem prazo sai). */
@@ -156,22 +231,24 @@ export function taskMatchesWindow(
   return true;
 }
 
-/** O registro tem ALGUMA tarefa que casa com o spec? */
+/** O registro tem ALGUMA tarefa que casa com o spec (em qualquer estado dele)? */
 export function taskMatchesFilter(
   tasks: { due_date?: string | null; completed_at?: string | null }[],
   spec: TaskFilterSpec,
   todayIso: string
 ): boolean {
-  const w = taskFilterWindow(spec, todayIso);
-  return tasks.some((t) => taskMatchesWindow(t, w));
+  const windows = taskFilterWindows(spec, todayIso);
+  return tasks.some((t) => windows.some((w) => taskMatchesWindow(t, w)));
 }
 
-/** Frase curta para chip/resumo: "Tem tarefa: Pendentes · 30d atrás · 60d à frente". */
+/** Frase curta: "Tem tarefa: Pendentes ou Concluídas · 30d atrás · 60d à frente". */
 export function taskFilterSummary(spec: TaskFilterSpec): string {
-  const parts: string[] = [TASK_FILTER_STATUS_LABELS[spec.status]];
+  const parts: string[] = [
+    spec.statuses.map((s) => TASK_FILTER_STATUS_LABELS[s]).join(" ou "),
+  ];
+  const onlyOverdue = spec.statuses.length === 1 && spec.statuses[0] === "atrasadas";
   if (spec.back != null) parts.push(`${spec.back}d atrás`);
-  if (spec.ahead != null && spec.status !== "atrasadas")
-    parts.push(`${spec.ahead}d à frente`);
+  if (spec.ahead != null && !onlyOverdue) parts.push(`${spec.ahead}d à frente`);
   if (spec.back == null && spec.ahead == null) parts.push("qualquer prazo");
   return `Tem tarefa: ${parts.join(" · ")}`;
 }

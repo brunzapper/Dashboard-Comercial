@@ -1,4 +1,5 @@
-// Versão: 1.15 | Data: 10/10/2026
+// Versão: 1.16 | Data: 11/10/2026
+// v1.16 (11/10/2026): filtro "Tem tarefa" com vários estados (`task:a+b`) — a régua segue sendo `parseTaskFilter`.
 // v1.15 (10/10/2026): filtro "Tem tarefa" (`task:<estado>`, value
 //   "<atrás>,<à frente>") — ramo próprio antes do checkRef, com a MESMA régua
 //   do runtime (parseTaskFilter, lib/tasks/task-filter.ts).
@@ -1340,7 +1341,7 @@ export function validateDashboardImport(
         const spec = parseTaskFilter({ field, op, value: f.value });
         if (!spec) {
           errors.push(
-            `${fw}: filtro "Tem tarefa" inválido. Use field "task:<${TASK_FILTER_STATUSES.join("|")}>", op "eq" e value "<dias atrás>,<dias à frente>" (inteiros de 0 a ${MAX_TASK_FILTER_DAYS}; lado vazio = sem limite).`
+            `${fw}: filtro "Tem tarefa" inválido. Use field "task:<estado>[+<estado>]" (estados: ${TASK_FILTER_STATUSES.join(", ")}), op "eq" e value "<dias atrás>,<dias à frente>" (inteiros de 0 a ${MAX_TASK_FILTER_DAYS}; lado vazio = sem limite).`
           );
           return;
         }

@@ -1,4 +1,8 @@
-// Versão: 1.3 | Data: 10/09/2026
+// Versão: 1.4 | Data: 11/10/2026
+// v1.4 (11/10/2026): tarefa SOMENTE LEITURA (0154 — veio concluída do
+//   Bitrix). O hook é o dono da regra: `readOnly` desliga concluir/excluir
+//   (no-op) e os consumidores trocam os botões pelo selo
+//   `TaskReadOnlyBadge`. A trava de verdade é o trigger do banco.
 // v1.3 (10/09/2026): duas mudanças, ambas sobre CONCLUIR.
 //   (a) A caixa de concluir virou o BOTÃO "Concluir"/"Reabrir". A v1.2 apostou
 //       que duas caixas de formas diferentes lado a lado bastariam para não
@@ -90,6 +94,8 @@ export function useTaskRowActions(task: TaskRow, onChanged?: () => void) {
   // pergunta em curso, que é o estado de toda tarefa que não é de série.
   const [asking, setAsking] = useState<"concluir" | "excluir" | null>(null);
   const done = Boolean(task.completed_at);
+  // v1.4: veio concluída do Bitrix — nada se altera aqui.
+  const readOnly = Boolean(task.read_only);
   // Só ocorrência de série tem "as demais". Tarefa avulsa segue direto.
   const isOccurrence = task.series_occurrence != null && Boolean(task.series_key);
 
@@ -116,12 +122,14 @@ export function useTaskRowActions(task: TaskRow, onChanged?: () => void) {
   }
 
   function toggle() {
+    if (readOnly) return;
     // Reabrir nunca pergunta: ele não tira nada de ninguém.
     if (!done && isOccurrence) return setAsking("concluir");
     run(() => (done ? reopenTask(task.id) : completeTask(task.id)));
   }
 
   function remove() {
+    if (readOnly) return;
     if (isOccurrence) return setAsking("excluir");
     run(() => deleteTask(task.id));
   }
@@ -152,6 +160,7 @@ export function useTaskRowActions(task: TaskRow, onChanged?: () => void) {
 
   return {
     done,
+    readOnly,
     pending,
     error,
     toggle,
@@ -228,6 +237,18 @@ export function TaskCompleteButton({
   );
 }
 
+/** v1.4: o selo no lugar de concluir/editar/excluir da tarefa só leitura. */
+export function TaskReadOnlyBadge() {
+  return (
+    <span
+      className="text-muted-foreground shrink-0 rounded border px-1.5 py-0.5 text-xs"
+      title="Atividade concluída no Bitrix: só leitura aqui."
+    >
+      Bitrix · somente leitura
+    </span>
+  );
+}
+
 export function TaskDeleteButton({
   pending,
   onRemove,
@@ -271,7 +292,7 @@ export function TaskListItem({
   responsibleLabel?: string | null;
   selection?: TaskListSelection;
 }) {
-  const { done, pending, error, toggle, remove, seriesPrompt } =
+  const { done, readOnly, pending, error, toggle, remove, seriesPrompt } =
     useTaskRowActions(task);
 
   return (
@@ -285,7 +306,9 @@ export function TaskListItem({
             aria-label="Selecionar tarefa"
           />
         ) : null}
-        <TaskCompleteButton done={done} pending={pending} onToggle={toggle} />
+        {readOnly ? null : (
+          <TaskCompleteButton done={done} pending={pending} onToggle={toggle} />
+        )}
         <span
           className={cn(
             "flex min-w-0 flex-1 items-center gap-1 truncate text-sm",
@@ -307,8 +330,14 @@ export function TaskListItem({
             {responsibleLabel}
           </span>
         ) : null}
-        <TaskSheet task={task} ctx={ctx} editTrigger />
-        <TaskDeleteButton pending={pending} onRemove={remove} />
+        {readOnly ? (
+          <TaskReadOnlyBadge />
+        ) : (
+          <>
+            <TaskSheet task={task} ctx={ctx} editTrigger />
+            <TaskDeleteButton pending={pending} onRemove={remove} />
+          </>
+        )}
       </div>
       {showRecord && task.record?.title ? (
         <p className="text-muted-foreground pl-6 text-xs">

@@ -1,4 +1,6 @@
-// Versão: 1.3 | Data: 10/10/2026
+// Versão: 1.4 | Data: 11/10/2026
+// v1.4 (11/10/2026): "Tem tarefa" com vários estados — `tarefa` na URL vira a
+//   lista separada por vírgula (`tarefa=pendentes,atrasadas`).
 // v1.3 (10/10/2026): filtro "Tem tarefa" (estado + dias atrás/à frente) —
 //   parâmetros `tarefa`/`t_atras`/`t_frente`, editor compartilhado
 //   (components/filters/task-filter-editor.tsx).
@@ -22,6 +24,7 @@ import {
   TaskFilterEditor,
   type TaskFilterDraft,
 } from "@/components/filters/task-filter-editor";
+import { normalizeTaskStatuses } from "@/lib/tasks/task-filter";
 import type { OptionItem } from "@/lib/records/types";
 
 export function FiltersBar({ responsibles }: { responsibles: OptionItem[] }) {
@@ -36,7 +39,7 @@ export function FiltersBar({ responsibles }: { responsibles: OptionItem[] }) {
   const [busca, setBusca] = useState(sp.get("busca") ?? "");
   // v1.3: filtro "Tem tarefa" (a página valida os valores no servidor).
   const [tarefa, setTarefa] = useState<TaskFilterDraft>({
-    status: (sp.get("tarefa") ?? "") as TaskFilterDraft["status"],
+    statuses: normalizeTaskStatuses(sp.get("tarefa") ?? "") ?? [],
     back: sp.get("t_atras") ?? "",
     ahead: sp.get("t_frente") ?? "",
   });
@@ -50,8 +53,8 @@ export function FiltersBar({ responsibles }: { responsibles: OptionItem[] }) {
     if (de) params.set("de", de);
     if (ate) params.set("ate", ate);
     if (busca) params.set("busca", busca);
-    if (tarefa.status) {
-      params.set("tarefa", tarefa.status);
+    if (tarefa.statuses.length > 0) {
+      params.set("tarefa", tarefa.statuses.join(","));
       if (tarefa.back.trim()) params.set("t_atras", tarefa.back.trim());
       if (tarefa.ahead.trim()) params.set("t_frente", tarefa.ahead.trim());
     }
@@ -69,7 +72,7 @@ export function FiltersBar({ responsibles }: { responsibles: OptionItem[] }) {
     setDe("");
     setAte("");
     setBusca("");
-    setTarefa({ status: "", back: "", ahead: "" });
+    setTarefa({ statuses: [], back: "", ahead: "" });
     router.push(fonte ? `/registros?fonte=${fonte}` : "/registros");
   }
 

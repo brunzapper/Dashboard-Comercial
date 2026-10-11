@@ -1,4 +1,16 @@
-// Versão: 1.3 | Data: 09/10/2026
+// Versão: 1.4 | Data: 11/10/2026
+// v1.4 (11/10/2026): as atividades de TODOS os negócios entram (pedido do
+//   usuário — o filtro "Tem tarefa" voltava vazio porque só os registros com
+//   Tree ativo eram lidos). Esta conciliação por dono passa a importar a
+//   atividade desconhecida em QUALQUER dono e de QUALQUER tipo (ligação,
+//   reunião, e-mail…, não só CRM_TODO); a regra é única em
+//   `shouldImportActivity`: pendente entra sempre, concluída só se a conclusão
+//   for dos últimos `IMPORT_DONE_LOOKBACK_DAYS` (90) — substitui o corte de 30
+//   dias antes da ativação do Tree da v1.3. Atividade NASCIDA LÁ e concluída
+//   vira tarefa SOMENTE LEITURA (`tasks.read_only`, 0154); reabrir lá a
+//   devolve ao normal. A DESCOBERTA dos donos que ainda não têm nada aqui é do
+//   módulo irmão `activity-discovery.ts` (varredura incremental por
+//   LAST_UPDATED), que reusa `createTaskFromActivity`/`syncKnownTaskState`.
 // v1.3 (09/10/2026): as atividades da automação passaram a nascer NO Bitrix, e
 //   o sistema deixou de criá-las. Três mudanças, todas nesta leitura:
 //   (a) atividade CRM_TODO DESCONHECIDA só vira tarefa em registro com o
@@ -6,7 +18,7 @@
 //   aberta seguem conciliando conclusão/exclusão das tarefas JÁ conhecidas,
 //   mas não importam o resto da timeline (decisão do usuário);
 //   (b) concluída lá só é importada se a conclusão cair a partir de 30 dias
-//   ANTES da ativação do Tree (`TREE_IMPORT_LOOKBACK_DAYS`) — e entra com a
+//   ANTES da ativação do Tree (corte substituído na v1.4) — e entra com a
 //   data de conclusão DE LÁ (`LAST_UPDATED`/`END_TIME`), não com `now()`;
 //   (c) CARGA INICIAL ao ligar o Tree (`loadRecordActivitiesNow` +
 //   `runPendingInitialLoads`): `record_attributes.config.inboundLoad` =
@@ -129,27 +141,22 @@ interface OwnerRef {
   entity: MirrorOwnerEntity;
   sourceId: string;
   /**
-   * Tem o atributo `tree` ativo — só esses puxam comentários e (v1.3) só esses
-   * importam atividade desconhecida.
+   * Tem o atributo `tree` ativo — só esses puxam comentários. (v1.4: a
+   * importação de atividade desconhecida deixou de depender dele.)
    */
   tree: boolean;
-  /**
-   * v1.3: quando o Tree foi ligado (`config.activatedAt`, senão `created_at`
-   * do atributo). Base do corte das concluídas. Null = sem Tree.
-   */
-  treeActivatedAt?: string | null;
 }
 
 /**
- * v1.3 (09/10/2026): concluídas de até N dias ANTES de ligar o Tree entram na
- * carga; as mais antigas ficam só lá (decisão do usuário: 30 dias).
+ * v1.4 (11/10/2026): concluídas dos últimos N dias entram (somente leitura); as
+ * mais antigas ficam só lá (decisão do usuário: 90 dias).
  */
-export const TREE_IMPORT_LOOKBACK_DAYS = 30;
+export const IMPORT_DONE_LOOKBACK_DAYS = 90;
 
 /** v1.3: estados da carga inicial, em `record_attributes.config.inboundLoad`. */
 export type TreeInboundLoadState = "pending" | "done" | "error";
 
-interface BitrixActivity {
+export interface BitrixActivity {
   ID: string | number;
   OWNER_ID?: string | number;
   OWNER_TYPE_ID?: string | number;
@@ -164,7 +171,7 @@ interface BitrixActivity {
   END_TIME?: string;
 }
 
-const ACTIVITY_SELECT = [
+export const ACTIVITY_SELECT = [
   "ID",
   "OWNER_ID",
   "OWNER_TYPE_ID",
@@ -177,11 +184,6 @@ const ACTIVITY_SELECT = [
   "LAST_UPDATED",
   "END_TIME",
 ];
-
-/** O TODO da timeline — o único tipo que vira tarefa aqui. */
-export function isTodoActivity(a: BitrixActivity): boolean {
-  return String(a.PROVIDER_ID ?? "") === "CRM_TODO";
-}
 
 /**
  * O dia civil de um DEADLINE do Bitrix.
@@ -219,39 +221,22 @@ export function activityCompletedAt(a: {
 }
 
 /**
- * v1.3: a atividade DESCONHECIDA deste dono deve virar tarefa aqui?
+ * v1.4 (11/10/2026): a atividade DESCONHECIDA deve virar tarefa aqui?
  *
- * Só em registro com Tree ativo. Aberta entra sempre; concluída só se a
- * conclusão for a partir de `TREE_IMPORT_LOOKBACK_DAYS` antes da ativação — e
- * sem data de conclusão não entra (não dá para provar que está na janela).
+ * Qualquer dono, qualquer tipo. Pendente entra sempre; concluída só se a
+ * conclusão for dos últimos `IMPORT_DONE_LOOKBACK_DAYS` — e sem data de
+ * conclusão não entra (não dá para provar que está na janela).
  */
 export function shouldImportActivity(
-  owner: Pick<OwnerRef, "tree" | "treeActivatedAt">,
-  activity: BitrixActivity
+  activity: BitrixActivity,
+  nowMs: number = Date.now()
 ): boolean {
-  if (!owner.tree) return false;
-  if (!isTodoActivity(activity)) return false;
   if (String(activity.COMPLETED ?? "") !== "Y") return true;
   const doneAt = activityCompletedAt(activity);
   if (!doneAt) return false;
-  const activated = Date.parse(owner.treeActivatedAt ?? "");
-  // Sem data de ativação (linha antiga): a janela conta de agora.
-  const base = Number.isFinite(activated) ? activated : Date.now();
-  const cutoff = base - TREE_IMPORT_LOOKBACK_DAYS * 86_400_000;
-  return Date.parse(doneAt) >= cutoff;
+  return Date.parse(doneAt) >= nowMs - IMPORT_DONE_LOOKBACK_DAYS * 86_400_000;
 }
 
-/** v1.3: a data de ativação do Tree numa linha de `record_attributes`. */
-function treeActivatedAtOf(row: {
-  config?: unknown;
-  created_at?: unknown;
-}): string | null {
-  const cfg = (row.config ?? {}) as Record<string, unknown>;
-  if (typeof cfg.activatedAt === "string" && cfg.activatedAt) {
-    return cfg.activatedAt;
-  }
-  return typeof row.created_at === "string" ? row.created_at : null;
-}
 
 /**
  * Quais registros conferir FORA do período: os que têm tarefa aberta já
@@ -274,16 +259,12 @@ export async function pendingActivityOwners(
         source_id: string;
         entity: MirrorOwnerEntity;
         tree: boolean;
-        tree_activated_at?: string | null;
       }[]).map((r) => ({
         recordId: r.record_id,
         orgId: r.organization_id,
         entity: r.entity,
         sourceId: String(r.source_id),
         tree: Boolean(r.tree),
-        // v1.3: RPC anterior à 0152 não devolve a coluna — o corte conta de
-        // agora (ver `shouldImportActivity`).
-        treeActivatedAt: r.tree_activated_at ?? null,
       }));
     }
   } catch {
@@ -320,16 +301,15 @@ async function pendingActivityOwnersLegacy(
     if (t.record_id) ids.add(t.record_id as string);
   }
 
-  // v1.3: id → data de ativação do Tree.
-  const treeIds = new Map<string, string | null>();
+  const treeIds = new Set<string>();
   const { data: attrs } = await db
     .from("record_attributes")
-    .select("record_id, config, created_at")
+    .select("record_id")
     .eq("attribute_key", "tree")
     .eq("status", "ativo")
     .limit(MAX_OWNERS * 4);
   for (const a of attrs ?? []) {
-    treeIds.set(a.record_id as string, treeActivatedAtOf(a));
+    treeIds.add(a.record_id as string);
     ids.add(a.record_id as string);
   }
   if (ids.size === 0) return [];
@@ -351,7 +331,6 @@ async function pendingActivityOwnersLegacy(
         entity,
         sourceId: String(r.source_id),
         tree: treeIds.has(r.id as string),
-        treeActivatedAt: treeIds.get(r.id as string) ?? null,
       });
     }
   }
@@ -407,6 +386,8 @@ interface MirroredTaskRow {
   title: unknown;
   completed_at: unknown;
   bitrix_activity_id: unknown;
+  /** v1.4: null = nasceu LÁ (o inbound a criou) — é a que vira somente leitura. */
+  created_by?: unknown;
 }
 
 /** v1.2: as tarefas espelhadas dos donos da rodada, numa leitura só. */
@@ -418,7 +399,7 @@ async function loadMirroredTasks(
   for (let i = 0; i < recordIds.length; i += 200) {
     const { data } = await db
       .from("tasks")
-      .select("id, record_id, title, completed_at, bitrix_activity_id")
+      .select("id, record_id, title, completed_at, bitrix_activity_id, created_by")
       .in("record_id", recordIds.slice(i, i + 200))
       .not("bitrix_activity_id", "is", null);
     out.push(...((data ?? []) as MirroredTaskRow[]));
@@ -463,8 +444,6 @@ async function reconcileOwnerBatch(
     tasks.map((t) => String(t.bitrix_activity_id))
   );
 
-  const nowIso = new Date().toISOString();
-
   for (const task of tasks) {
     if (Date.now() >= deadline) return res;
     const activityId = String(task.bitrix_activity_id);
@@ -495,37 +474,20 @@ async function reconcileOwnerBatch(
       continue;
     }
 
-    const doneThere = String(activity.COMPLETED ?? "") === "Y";
-    const doneHere = Boolean(task.completed_at);
-    if (doneThere === doneHere) continue;
-
-    // O ESTADO de conclusão é de lá; o CONTEÚDO segue sendo daqui.
-    await db
-      .from("tasks")
-      .update(
-        doneThere
-          ? { completed_at: nowIso, completed_by: null }
-          : { completed_at: null, completed_by: null }
-      )
-      .eq("id", task.id as string);
-    await emitWebhookEvent(
-      doneThere ? "task.completed" : "task.updated",
-      { taskId: task.id as string, origin: "bitrix" },
-      orgId
-    );
-    if (doneThere) res.completed += 1;
-    else res.reopened += 1;
+    // v1.4: o estado vem de lá pelo MESMO helper da descoberta.
+    const moved = await syncKnownTaskState(db, task, activity, orgId);
+    if (moved === "completed") res.completed += 1;
+    else if (moved === "reopened") res.reopened += 1;
   }
 
-  // Atividade CRM_TODO que não conhecemos: nasceu lá, vira tarefa aqui.
-  // v1.3: só em registro com Tree ativo, e concluída só dentro da janela.
+  // Atividade que não conhecemos: nasceu lá, vira tarefa aqui.
+  // v1.4: qualquer dono, qualquer tipo; concluída só dentro da janela.
   for (const activity of activities) {
     if (Date.now() >= deadline) return res;
-    if (!isTodoActivity(activity)) continue;
     if (knownActivityIds.has(String(activity.ID))) continue;
     const owner = bySourceId.get(String(activity.OWNER_ID ?? ""));
     if (!owner) continue;
-    if (!shouldImportActivity(owner, activity)) continue;
+    if (!shouldImportActivity(activity)) continue;
     res.created += (await createTaskFromActivity(db, owner, activity)) ? 1 : 0;
   }
 
@@ -547,9 +509,43 @@ async function localResponsible(
   return (data?.id as string | null) ?? null;
 }
 
-async function createTaskFromActivity(
+/**
+ * v1.4 (11/10/2026): leva o ESTADO de conclusão de lá para uma tarefa já
+ * conhecida. O conteúdo segue sendo daqui (só `completed_at` muda). Tarefa que
+ * NASCEU lá (`created_by` nulo) acompanha a conclusão com `read_only`: concluída
+ * é somente leitura; reaberta lá, volta a ser editável.
+ */
+export async function syncKnownTaskState(
   db: SupabaseClient,
-  owner: OwnerRef,
+  task: { id: unknown; completed_at: unknown; created_by?: unknown },
+  activity: BitrixActivity,
+  orgId: string | null
+): Promise<"completed" | "reopened" | null> {
+  const doneThere = String(activity.COMPLETED ?? "") === "Y";
+  const doneHere = Boolean(task.completed_at);
+  if (doneThere === doneHere) return null;
+  const fromThere = task.created_by == null;
+  await db
+    .from("tasks")
+    .update({
+      completed_at: doneThere
+        ? activityCompletedAt(activity) ?? new Date().toISOString()
+        : null,
+      completed_by: null,
+      ...(fromThere ? { read_only: doneThere } : {}),
+    })
+    .eq("id", task.id as string);
+  await emitWebhookEvent(
+    doneThere ? "task.completed" : "task.updated",
+    { taskId: task.id as string, origin: "bitrix" },
+    orgId
+  );
+  return doneThere ? "completed" : "reopened";
+}
+
+export async function createTaskFromActivity(
+  db: SupabaseClient,
+  owner: { recordId: string; orgId: string },
   activity: BitrixActivity
 ): Promise<boolean> {
   const title = String(activity.SUBJECT ?? "").trim() || "Atividade do Bitrix";
@@ -566,6 +562,8 @@ async function createTaskFromActivity(
         String(activity.COMPLETED ?? "") === "Y"
           ? activityCompletedAt(activity) ?? new Date().toISOString()
           : null,
+      // v1.4: concluída que nasceu lá entra SOMENTE LEITURA (0154).
+      read_only: String(activity.COMPLETED ?? "") === "Y",
       responsible_id: await localResponsible(db, activity.RESPONSIBLE_ID),
       // Autoria de SISTEMA: ninguém daqui a criou.
       created_by: null,
@@ -755,7 +753,7 @@ export async function loadRecordActivitiesNow(
   const deadline = opts.deadline ?? Date.now() + 45_000;
   const { data: attr } = await db
     .from("record_attributes")
-    .select("id, status, config, created_at")
+    .select("id, status, config")
     .eq("record_id", recordId)
     .eq("attribute_key", "tree")
     .maybeSingle();
@@ -788,7 +786,6 @@ export async function loadRecordActivitiesNow(
       entity,
       sourceId: String(rec.source_id),
       tree: true,
-      treeActivatedAt: treeActivatedAtOf(attr),
     };
     const api: BitrixCallable = opts.client ?? new BitrixClient();
     const mirrored = await loadMirroredTasks(db, [recordId]);

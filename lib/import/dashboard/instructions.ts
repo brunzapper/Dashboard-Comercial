@@ -1,4 +1,5 @@
-// Versão: 1.15 | Data: 10/10/2026
+// Versão: 1.16 | Data: 11/10/2026
+// v1.16 (11/10/2026): SPEC do "Tem tarefa" com vários estados (`task:<estado>+<estado>`).
 // v1.15 (10/10/2026): filtro "Tem tarefa" (`task:`) na seção Filtros — estados
 //   e teto derivados de lib/tasks/task-filter.ts.
 // v1.14 (02/10/2026): (a) seção "mapas" — os NÓS da Tree (indicador,
@@ -532,9 +533,10 @@ promovida a tipo próprio).
   (as outras passam livres).
 - responsible_id/operation_id aceitam o NOME exato do cadastro como "value"
   ("in" = lista de nomes) — NUNCA invente UUID; nome inexistente é erro.
-- "Tem tarefa": { "field": "task:<estado>", "op": "eq", "value": "<dias atrás>,<dias à frente>" }
-  — só passa o registro com ao menos uma TAREFA no estado pedido e PRAZO entre
-  hoje − atrás e hoje + à frente. Estados: ${TASK_FILTER_STATUSES.map(
+- "Tem tarefa": { "field": "task:<estado>[+<estado>…]", "op": "eq", "value": "<dias atrás>,<dias à frente>" }
+  — só passa o registro com ao menos uma TAREFA em QUALQUER um dos estados
+  pedidos (ex.: "task:pendentes+concluidas") e PRAZO entre hoje − atrás e
+  hoje + à frente. Estados: ${TASK_FILTER_STATUSES.map(
     (st) => `"${st}" (${TASK_FILTER_STATUS_LABELS[st]})`
   ).join(", ")}; "atrasadas" = pendente com prazo antes de hoje. Dias: inteiros
   de 0 a ${String(MAX_TASK_FILTER_DAYS)}; lado vazio = sem limite (ex.: "30,60",
