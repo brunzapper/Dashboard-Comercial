@@ -1,3 +1,8 @@
+// Versão: 1.7 | Data: 11/10/2026
+// v1.7 (11/10/2026): TIPOGRAFIA dos cartões — cada cartão resolve o padrão do
+//   widget (`typography`) + o próprio (`display.typography`) num
+//   `TreeTextProvider`; tipo, título, selo de Resultado, descrição e
+//   progresso leem o papel deles (lib/tree/typography.ts).
 // Versão: 1.6 | Data: 02/10/2026
 // v1.6 (02/10/2026): o cartão deixa de ser fixo.
 //   (a) REDIMENSIONAR: alça no canto inferior direito; o tamanho vira
@@ -161,6 +166,8 @@ import {
   type TreeChrome,
   type TreePresentationSettings,
 } from "@/lib/tree/display";
+import type { TreeTypography } from "@/lib/tree/typography";
+import { TreeTextProvider, useTreeBadgeText, useTreeText } from "./tree-typography";
 
 /** Arrasto abaixo disto é clique. */
 const DRAG_THRESHOLD_PX = 4;
@@ -335,6 +342,8 @@ export interface TreeRootViewProps {
   }) => void;
   /** v1.6: o que o widget deixa aparecer ao apresentar. */
   presentation?: TreePresentationSettings;
+  /** v1.7: fonte/tamanho padrão dos textos dos cartões (o cartão vence). */
+  typography?: TreeTypography | null;
   /** v1.6: redimensionar (null = voltar ao automático). */
   onResize?: (nodeId: string, size: { w: number; h: number } | null) => void;
   /** v1.6: duplo-clique — o cartão em destaque. */
@@ -375,6 +384,7 @@ export function TreeRootView({
   onCreateOperational,
   canvas,
   presentation,
+  typography,
   onResize,
   onOpenFocus,
   onEditNoteDetails,
@@ -1267,6 +1277,8 @@ export function TreeRootView({
                 onNewBranch={() => startDraft(node.id)}
                 body={renderBody?.(node) ?? null}
                 chrome={treeChrome(presentation, geoById.get(node.id)?.display ?? null, presenting)}
+                widgetTypography={typography ?? null}
+                nodeTypography={geoById.get(node.id)?.display?.typography ?? null}
                 tone={(() => {
                   const t = geoById.get(node.id)?.display?.tone;
                   return t && t !== "padrao" ? t : null;
@@ -1549,6 +1561,8 @@ function DraftTile({
   );
 }
 function ProgressBar({ progress }: { progress: TreeProgress }) {
+  // v1.7: o "0/1" segue o rodapé do cartão.
+  const tFoot = useTreeText("footer");
   if (progress.total === 0) return null;
   const pct = Math.round((progress.done / progress.total) * 100);
   return (
@@ -1565,14 +1579,26 @@ function ProgressBar({ progress }: { progress: TreeProgress }) {
           style={{ width: `${pct}%` }}
         />
       </span>
-      <span className="text-muted-foreground shrink-0 text-2xs tabular-nums">
+      <span className="text-muted-foreground shrink-0 text-2xs tabular-nums" style={tFoot}>
         {progress.done}/{progress.total}
       </span>
     </span>
   );
 }
 
-function RootNodeTile({
+/**
+ * v1.7: o cartão da Root dentro do provider de tipografia DELE — as peças
+ * (título, selos, descrição, progresso, corpo operacional) leem o papel delas.
+ */
+function RootNodeTile(props: Parameters<typeof RootNodeTileBody>[0]) {
+  return (
+    <TreeTextProvider widget={props.widgetTypography} node={props.nodeTypography}>
+      <RootNodeTileBody {...props} />
+    </TreeTextProvider>
+  );
+}
+
+function RootNodeTileBody({
   node,
   box,
   actx,
@@ -1621,6 +1647,9 @@ function RootNodeTile({
   chrome: TreeChrome;
   /** v1.6: cor escolhida do cartão (null = a do tipo). */
   tone: keyof typeof TREE_TONE_CLASSES | null;
+  /** v1.7: tipografia do widget e do cartão (o cartão vence). */
+  widgetTypography: TreeTypography | null;
+  nodeTypography: TreeTypography | null;
   resizable: boolean;
   resized: boolean;
   onResetSize: () => void;
@@ -1630,6 +1659,11 @@ function RootNodeTile({
   const done = isCheckable(node) && isDone(node);
   const editable = isTextEditable(node);
   const synthetic = isSynthetic(node.id);
+  // v1.7: tipografia do cartão (provider em RootNodeTile).
+  const tKind = useTreeBadgeText("kind");
+  const tTag = useTreeBadgeText("tag");
+  const tTitle = useTreeText("title");
+  const tDesc = useTreeText("description");
   return (
     <div
       data-tree-node={node.id}
@@ -1676,12 +1710,12 @@ function RootNodeTile({
       <div className="flex items-center gap-1">
         {/* v1.6: some ao apresentar (o widget/cartão pode ligar de volta). */}
         {chrome.kindBadge ? (
-          <Badge variant="outline" className="h-4 shrink-0 px-1 text-2xs">
+          <Badge variant="outline" className="h-4 shrink-0 px-1 text-2xs" style={tKind}>
             {TREE_NODE_KIND_LABELS[node.kind]}
           </Badge>
         ) : null}
         {node.goal ? (
-          <Badge className="h-4 shrink-0 gap-0.5 bg-amber-500 px-1 text-2xs text-white">
+          <Badge className="h-4 shrink-0 gap-0.5 bg-amber-500 px-1 text-2xs text-white" style={tTag}>
             <Star className="size-2.5" /> Resultado
           </Badge>
         ) : null}
@@ -1738,6 +1772,7 @@ function RootNodeTile({
             editable && selected && "hover:bg-accent/60 cursor-text rounded",
             done && "text-muted-foreground line-through"
           )}
+          style={tTitle}
           title={
             editable
               ? selected
@@ -1763,7 +1798,10 @@ function RootNodeTile({
           {/* v1.6: a DESCRIÇÃO da anotação aparece no cartão (recortada pelo
               tamanho; inteira no destaque). */}
           {node.kind === "note" && node.body ? (
-            <p className="text-muted-foreground min-h-0 flex-1 overflow-hidden text-micro leading-snug whitespace-pre-line">
+            <p
+              className="text-muted-foreground min-h-0 flex-1 overflow-hidden text-micro leading-snug whitespace-pre-line"
+              style={tDesc}
+            >
               {node.body}
             </p>
           ) : null}

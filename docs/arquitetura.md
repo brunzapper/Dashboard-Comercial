@@ -1,4 +1,6 @@
-<!-- Versão: 3.1 | Data: 11/10/2026 -->
+<!-- Versão: 3.2 | Data: 11/10/2026 -->
+<!-- v3.2 (11/10/2026): §4.27 Tree — tipografia dos cartões
+     (`settings.tree.typography` + `tree_nodes.display.typography`). -->
 <!-- v3.1 (11/10/2026): §4.5 "Processos inteligentes do Bitrix como Bases"
      (0155 — triagem "Novas bases de Sync", `crm.item.*`, source_id prefixado,
      write-back por `crm.item.update`, atividades `dynamic_<id>`); §4.24 nota
@@ -6987,6 +6989,17 @@ CONSUMIDOR de peças que a UI monta.
   galho em lista (`listTreeMaps`/`loadTreeMapOutline`) e preserva
   `canvas`/`presentation` no save. Loaders com fallback de colunas enquanto a
   0150 não foi aplicada.
+  **Tipografia (11/10/2026):** fonte e tamanho por TIPO de texto do cartão
+  (`TREE_TEXT_ROLES`: tipo, título, subtítulo, etiqueta, descrição, recortes,
+  cabeçalho, rótulos das linhas, valores, rodapé) em duas camadas — o widget
+  (`settings.tree.typography`) e o cartão (`tree_nodes.display.typography`,
+  jsonb da 0150, sem migração); o cartão vence POR PROPRIEDADE. Dono único
+  `resolveTreeTypography`/`treeTextStyle` (`lib/tree/typography.ts`, puro);
+  fonte só por chave de `DASHBOARD_FONTS`, tamanho só em 6–72 px. No cliente
+  cada cartão (Lista e Root) abre um `TreeTextProvider` e as peças leem o
+  papel delas por `useTreeText` — ausente = nenhum `style`, render
+  byte-idêntico. O editor é UM (`TreeTypographyEditor`), na Aparência e na
+  "Exibição do cartão"; o import da IA saneia pelo MESMO parse.
 - **Preset v5.** Tabelas = Tabelas Livres pelo conversor, nós com `tag` e
   `rows` explícitas, planos com `factors`. Os títulos-conclusão seguem texto:
   o `meta:` não resolve trimestre e a barra deste deck é "todo o período".

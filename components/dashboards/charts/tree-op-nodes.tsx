@@ -1,3 +1,9 @@
+// Versão: 1.3 | Data: 11/10/2026
+// v1.3 (11/10/2026): TIPOGRAFIA — cada texto do corpo (etiqueta, subtítulo,
+//   recortes, meses, rótulos das linhas, valores, descrição, rodapé) lê a
+//   fonte/tamanho do cartão por `useTreeText` (tree-typography.tsx); o
+//   `TreeOpsValue` carrega o padrão do widget e a "Exibição do cartão" ganha
+//   o editor individual (o cartão vence o widget por propriedade).
 // Versão: 1.2 | Data: 02/10/2026
 // v1.2 (02/10/2026): nada fixo pelo preset Metas 4T26.
 //   * INDICADOR: linhas do cartão configuráveis (meta, realizado, projetado,
@@ -101,6 +107,8 @@ import {
   type TreePresentationSettings,
   type TreeTone,
 } from "@/lib/tree/display";
+import type { TreeTypography } from "@/lib/tree/typography";
+import { TreeTypographyEditor, useTreeBadgeText, useTreeText } from "./tree-typography";
 import type { TreeIndicatorSeries } from "@/app/(app)/dashboards/goal-table-actions";
 import {
   RealizedSourceEditor,
@@ -125,6 +133,8 @@ export interface TreeOpsValue {
   fieldLabelOf?: (ref: string) => string;
   /** v1.2: board com estilo (tons de status pelos tokens). */
   styled?: boolean;
+  /** v1.3: fonte/tamanho padrão dos textos (settings.tree.typography). */
+  typography?: TreeTypography | null;
 }
 
 const TreeOpsContext = createContext<TreeOpsValue | null>(null);
@@ -210,6 +220,13 @@ function IndicatorBody({ node, full }: { node: TreeNode; full: boolean }) {
   const p = parseIndicatorPayload(node.payload);
   const rd = p?.realized?.breakdown;
   const [openBreakdown, setOpenBreakdown] = useState<boolean | null>(null);
+  // v1.3: tipografia do cartão (hooks ANTES de qualquer retorno).
+  const tTag = useTreeBadgeText("tag");
+  const tSub = useTreeText("subtitle");
+  const tChips = useTreeText("chips");
+  const tHead = useTreeText("header");
+  const tRow = useTreeText("rowLabel");
+  const tVal = useTreeText("value");
   if (!p) return chrome.warnings ? <MissingConfig text="Escolha o indicador (Editar)." /> : null;
   const s = nodeSeries(ops, node);
   const months = ops?.months ?? [];
@@ -250,9 +267,9 @@ function IndicatorBody({ node, full }: { node: TreeNode; full: boolean }) {
       case "meta":
         return (
           <tr key="meta" className="font-semibold">
-            <td className="text-muted-foreground font-normal">{rowText(r)}</td>
+            <td className="text-muted-foreground font-normal" style={tRow}>{rowText(r)}</td>
             {s.cells.map((c) => (
-              <td key={c.month} className="truncate text-right">
+              <td key={c.month} className="truncate text-right" style={tVal}>
                 {fmt(c.target)}
               </td>
             ))}
@@ -264,7 +281,7 @@ function IndicatorBody({ node, full }: { node: TreeNode; full: boolean }) {
         return (
           <FragmentRows key="realizado">
             <tr>
-              <td className="text-muted-foreground">
+              <td className="text-muted-foreground" style={tRow}>
                 {bd.length > 0 && rd ? (
                   <button
                     type="button"
@@ -285,7 +302,7 @@ function IndicatorBody({ node, full }: { node: TreeNode; full: boolean }) {
                 )}
               </td>
               {s.cells.map((c) => (
-                <td key={c.month} className="truncate text-right">
+                <td key={c.month} className="truncate text-right" style={tVal}>
                   {c.elapsed > 0 ? (
                     <span
                       className={cn("rounded px-0.5", tone(c.status))}
@@ -302,11 +319,11 @@ function IndicatorBody({ node, full }: { node: TreeNode; full: boolean }) {
             {breakdownOpen
               ? bd.map((b) => (
                   <tr key={`bd:${b.label}`} className="text-muted-foreground">
-                    <td className="truncate pl-2" title={b.label}>
+                    <td className="truncate pl-2" title={b.label} style={tRow}>
                       {b.label}
                     </td>
                     {b.realized.map((v, mi) => (
-                      <td key={mi} className="truncate text-right">
+                      <td key={mi} className="truncate text-right" style={tVal}>
                         {v == null ? "—" : fmt(v)}
                       </td>
                     ))}
@@ -320,6 +337,7 @@ function IndicatorBody({ node, full }: { node: TreeNode; full: boolean }) {
         return projected ? (
           <tr key="projetado" className="text-muted-foreground">
             <td
+              style={tRow}
               title={
                 p.projectFrom === "realizado"
                   ? "Combinação dos realizados dos filhos"
@@ -329,7 +347,7 @@ function IndicatorBody({ node, full }: { node: TreeNode; full: boolean }) {
               {rowText(r)}
             </td>
             {projected.map((v, mi) => (
-              <td key={mi} className="truncate text-right" title={CHILDREN_OP_LABELS[p.childrenOp!]}>
+              <td key={mi} className="truncate text-right" title={CHILDREN_OP_LABELS[p.childrenOp!]} style={tVal}>
                 {fmt(v)}
               </td>
             ))}
@@ -338,9 +356,9 @@ function IndicatorBody({ node, full }: { node: TreeNode; full: boolean }) {
       case "atingimento":
         return s.hasRealized ? (
           <tr key="atingimento">
-            <td className="text-muted-foreground">{rowText(r)}</td>
+            <td className="text-muted-foreground" style={tRow}>{rowText(r)}</td>
             {s.cells.map((c) => (
-              <td key={c.month} className="truncate text-right">
+              <td key={c.month} className="truncate text-right" style={tVal}>
                 {c.elapsed > 0 && c.attainment != null ? (
                   <span className={cn("rounded px-0.5", tone(c.status))}>
                     {formatAttainment(c.attainment)}
@@ -363,13 +381,17 @@ function IndicatorBody({ node, full }: { node: TreeNode; full: boolean }) {
       {p.tag || p.responsible || (compRow && p.childrenOp) ? (
         <div className="flex items-center gap-1">
           {p.tag ? (
-            <Badge variant="secondary" className="h-4 px-1 text-2xs">
+            <Badge variant="secondary" className="h-4 px-1 text-2xs" style={tTag}>
               {p.tag}
             </Badge>
           ) : null}
-          {p.responsible ? <span className="text-muted-foreground truncate">{p.responsible}</span> : null}
+          {p.responsible ? (
+            <span className="text-muted-foreground truncate" style={tSub}>
+              {p.responsible}
+            </span>
+          ) : null}
           {compRow && p.childrenOp ? (
-            <span className="text-muted-foreground ml-auto" title={CHILDREN_OP_LABELS[p.childrenOp]}>
+            <span className="text-muted-foreground ml-auto" title={CHILDREN_OP_LABELS[p.childrenOp]} style={tSub}>
               {rowText(compRow)}: {p.childrenOp}
             </span>
           ) : null}
@@ -378,13 +400,17 @@ function IndicatorBody({ node, full }: { node: TreeNode; full: boolean }) {
       {chips.length > 0 ? (
         <div className="flex flex-wrap gap-1">
           {chips.map((f, i) => (
-            <span key={i} className="bg-muted rounded px-1 text-2xs">
+            <span key={i} className="bg-muted rounded px-1 text-2xs" style={tChips}>
               {filterChipText(f, labelOf)}
             </span>
           ))}
         </div>
       ) : null}
-      {p.hint ? <p className={cn("text-muted-foreground", !full && "line-clamp-1")}>{p.hint}</p> : null}
+      {p.hint ? (
+        <p className={cn("text-muted-foreground", !full && "line-clamp-1")} style={tSub}>
+          {p.hint}
+        </p>
+      ) : null}
       {!s ? (
         ops?.loading ? (
           <span className="text-muted-foreground flex items-center gap-1">
@@ -401,7 +427,7 @@ function IndicatorBody({ node, full }: { node: TreeNode; full: boolean }) {
             <tr className="text-muted-foreground">
               <th className="w-12 text-left font-normal" />
               {months.map((m) => (
-                <th key={m} className="text-right font-normal">
+                <th key={m} className="text-right font-normal" style={tHead}>
                   {full ? monthLabel(m, true) : monthLabel(m).slice(0, 3)}
                 </th>
               ))}
@@ -424,6 +450,11 @@ function PlanBody({ node, full }: { node: TreeNode; full: boolean }) {
   const chrome = useChrome(node);
   const p = parsePlanPayload(node.payload) ?? { factors: [] };
   const progress = progressOf(node);
+  // v1.3: tipografia do cartão.
+  const tSub = useTreeText("subtitle");
+  const tDesc = useTreeText("description");
+  const tChips = useTreeText("chips");
+  const tFoot = useTreeText("footer");
   const lastElapsed = (key: string) => {
     const s = ops?.series.get(seriesKey(key, null));
     if (!s) return null;
@@ -433,14 +464,16 @@ function PlanBody({ node, full }: { node: TreeNode; full: boolean }) {
   return (
     <div className={cn("flex flex-col gap-1 text-micro", !full && "h-full overflow-hidden")}>
       {p.responsible ? (
-        <span className="text-muted-foreground">Responsável: {p.responsible}</span>
+        <span className="text-muted-foreground" style={tSub}>
+          Responsável: {p.responsible}
+        </span>
       ) : null}
       {p.factors.length === 0 ? (
         chrome.warnings ? <MissingConfig text="Adicione os fatores (Editar)." /> : null
       ) : (
         <div className={cn("flex flex-col gap-1", !full && "min-h-0 flex-1 overflow-hidden")}>
           {p.factors.map((f) => (
-            <p key={f.id} className={cn("leading-snug", full ? "text-sm" : "")}>
+            <p key={f.id} className={cn("leading-snug", full ? "text-sm" : "")} style={tDesc}>
               {f.title ? <span className="font-semibold">{f.title}: </span> : null}
               <span className="whitespace-pre-line">{f.text}</span>
             </p>
@@ -458,6 +491,7 @@ function PlanBody({ node, full }: { node: TreeNode; full: boolean }) {
                   "rounded px-1",
                   hit?.cell ? STATUS_TONE[hit.cell.status] : "bg-muted text-muted-foreground"
                 )}
+                style={tChips}
                 title={hit?.cell ? INDICATOR_STATUS_LABELS[hit.cell.status] : "Sem dado"}
               >
                 {hit?.s.label ?? k}
@@ -468,7 +502,7 @@ function PlanBody({ node, full }: { node: TreeNode; full: boolean }) {
         </div>
       ) : null}
       {progress.total > 0 && !p.hideSteps ? (
-        <span className="text-muted-foreground mt-auto">
+        <span className="text-muted-foreground mt-auto" style={tFoot}>
           Etapas: {progress.done}/{progress.total}
         </span>
       ) : null}
@@ -484,6 +518,11 @@ function RitualBody({ node, full }: { node: TreeNode; full: boolean }) {
     () => new Set((ops?.ritualOccurrences[node.id] ?? []).map((o) => o.n)),
     [ops?.ritualOccurrences, node.id]
   );
+  // v1.3: tipografia do cartão (hooks ANTES de qualquer retorno).
+  const tTag = useTreeBadgeText("tag");
+  const tSub = useTreeText("subtitle");
+  const tDesc = useTreeText("description");
+  const tFoot = useTreeText("footer");
   if (!p) return chrome.warnings ? <MissingConfig text="Configure a cadência (Editar)." /> : null;
   const next = nextOpenOccurrence(p.schedule, todayBrasiliaIso(), existing);
   const open = (ops?.ritualOccurrences[node.id] ?? []).filter((o) => !o.done).length;
@@ -491,21 +530,27 @@ function RitualBody({ node, full }: { node: TreeNode; full: boolean }) {
   return (
     <div className="flex h-full flex-col gap-1 text-micro">
       <div className="flex items-center gap-1">
-        <span className="font-medium">{describeSchedule(p.schedule)}</span>
+        <span className="font-medium" style={tSub}>
+          {describeSchedule(p.schedule)}
+        </span>
         {p.auto ? (
-          <Badge variant="secondary" className="h-4 px-1 text-2xs">
+          <Badge variant="secondary" className="h-4 px-1 text-2xs" style={tTag}>
             automático
           </Badge>
         ) : null}
       </div>
-      {p.responsible ? <span className="text-muted-foreground">{p.responsible}</span> : null}
+      {p.responsible ? (
+        <span className="text-muted-foreground" style={tSub}>
+          {p.responsible}
+        </span>
+      ) : null}
       {p.reading ? (
-        <p className={cn("text-muted-foreground whitespace-pre-line", !full && "line-clamp-2")}>
+        <p className={cn("text-muted-foreground whitespace-pre-line", !full && "line-clamp-2")} style={tDesc}>
           {p.reading}
         </p>
       ) : null}
       <div className="mt-auto flex items-center gap-1">
-        <span className="text-muted-foreground">
+        <span className="text-muted-foreground" style={tFoot}>
           {next ? `Próxima: ${next.date.slice(8, 10)}/${next.date.slice(5, 7)}` : "Sem próximas"}
           {open > 0 ? ` · ${open} aberta(s)` : ""}
         </span>
@@ -804,6 +849,20 @@ export function DisplaySection({
             ))}
           </select>
         </div>
+      </div>
+      {/* v1.3: fonte e tamanho DESTE cartão — vencem o padrão do widget. */}
+      <div className="flex flex-col gap-1.5 pt-2">
+        <Label className="text-xs">Fontes e tamanhos deste cartão</Label>
+        <TreeTypographyEditor
+          value={display.typography}
+          inheritLabel="Padrão do widget"
+          onChange={(typography) => {
+            const next = { ...display };
+            if (typography) next.typography = typography;
+            else delete next.typography;
+            setDisplay(next);
+          }}
+        />
       </div>
     </Section>
   );

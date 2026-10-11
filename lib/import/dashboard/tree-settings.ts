@@ -1,3 +1,7 @@
+// Versão: 1.1 | Data: 11/10/2026
+// v1.1 (11/10/2026): `typography` (fonte/tamanho por tipo de texto dos
+//   cartões) — saneada pelo MESMO parse do runtime (lib/tree/typography.ts);
+//   papel/fonte/tamanho inválido vira aviso + descarte.
 // Versão: 1.0 | Data: 02/10/2026
 // v1.0 (02/10/2026): `settings.tree` deixa de ser PASSTHROUGH no import.
 //
@@ -18,6 +22,13 @@ import {
 } from "@/lib/tree/model";
 import { TREE_PRESENTATION_LABELS } from "@/lib/tree/display";
 import { normalizeHexColor } from "@/lib/theme";
+import { DASHBOARD_FONTS } from "@/lib/dashboards/style";
+import {
+  parseTreeTypography,
+  TREE_TEXT_MAX_PX,
+  TREE_TEXT_MIN_PX,
+  TREE_TEXT_ROLES,
+} from "@/lib/tree/typography";
 import type { TreeSettings } from "@/lib/widgets/types";
 
 export const TREE_CANVAS_PATTERNS = ["pontos", "linhas", "nenhum"] as const;
@@ -35,6 +46,7 @@ const TREE_SETTINGS_KEYS = {
   months: true,
   canvas: true,
   presentation: true,
+  typography: true,
 } satisfies Record<keyof TreeSettings, true>;
 
 function isRecord(v: unknown): v is Record<string, unknown> {
@@ -141,6 +153,30 @@ export function sanitizeTreeSettings(
       }
       if (Object.keys(pres).length > 0) out.presentation = pres;
     } else drop("presentation", "precisa ser um objeto");
+  }
+  if (raw.typography !== undefined) {
+    if (isRecord(raw.typography)) {
+      const typo = parseTreeTypography(raw.typography) ?? {};
+      for (const [k, v] of Object.entries(raw.typography)) {
+        const kept = typo[k as keyof typeof typo];
+        if (!kept) {
+          drop(
+            `typography.${k}`,
+            (TREE_TEXT_ROLES as readonly string[]).includes(k)
+              ? `precisa de "font" (${Object.keys(DASHBOARD_FONTS).join(" | ")}) e/ou "size" (${TREE_TEXT_MIN_PX}–${TREE_TEXT_MAX_PX})`
+              : `não existe (aceita ${TREE_TEXT_ROLES.join(", ")})`
+          );
+          continue;
+        }
+        if (isRecord(v)) {
+          if (v.font !== undefined && kept.font === undefined)
+            drop(`typography.${k}.font`, `deve ser ${Object.keys(DASHBOARD_FONTS).join(" | ")}`);
+          if (v.size !== undefined && kept.size === undefined)
+            drop(`typography.${k}.size`, `deve ser um número entre ${TREE_TEXT_MIN_PX} e ${TREE_TEXT_MAX_PX}`);
+        }
+      }
+      if (Object.keys(typo).length > 0) out.typography = typo;
+    } else drop("typography", "precisa ser um objeto");
   }
   return out;
 }

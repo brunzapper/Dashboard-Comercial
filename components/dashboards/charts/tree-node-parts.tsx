@@ -1,3 +1,6 @@
+// Versão: 1.6 | Data: 11/10/2026
+// v1.6 (11/10/2026): `NodeDate` segue o RODAPÉ da tipografia do cartão
+//   (`useTreeText("footer")` — tree-typography.tsx; fora do cartão, nada muda).
 // Versão: 1.5 | Data: 11/10/2026
 // v1.5 (11/10/2026): tarefa SOMENTE LEITURA (0154) mostra o selo no lugar de
 //   concluir/excluir — a regra vem do hook (`readOnly`).
@@ -102,6 +105,7 @@ import {
   type TreeScope,
 } from "@/lib/tree/model";
 import { TreeSeriesSheet } from "./tree-series-sheet";
+import { useTreeText } from "./tree-typography";
 
 /** Tom da borda por tipo de nó — o mesmo nas duas visualizações. */
 export const KIND_TONE: Record<string, string> = {
@@ -131,6 +135,7 @@ export function NodeDate({
   node: TreeNode;
   task: TaskRow | null;
 }) {
+  const tFoot = useTreeText("footer");
   if (task?.due_date) {
     const status = classifyDue(task);
     const text = `${formatDateValue(task.due_date, DEFAULT_DATE_FORMAT)}${
@@ -147,6 +152,7 @@ export function NodeDate({
           !status && "text-muted-foreground bg-muted"
         )}
         title={status ? DUE_STATUS_LABELS[status] : undefined}
+        style={tFoot}
       >
         {text}
       </span>
@@ -163,6 +169,7 @@ export function NodeDate({
     return (
       <span
         className="text-muted-foreground shrink-0 text-xs"
+        style={tFoot}
         title={node.at ? `Criada em ${formatDateValue(node.at, DEFAULT_DATE_FORMAT)}` : undefined}
       >
         {formatDateValue(node.dueDate, DEFAULT_DATE_FORMAT)}
@@ -171,10 +178,14 @@ export function NodeDate({
   }
   if (!node.at) {
     // "sem prazo" é informação; a string vazia parecia defeito.
-    return <span className="text-muted-foreground shrink-0 text-xs">sem prazo</span>;
+    return (
+      <span className="text-muted-foreground shrink-0 text-xs" style={tFoot}>
+        sem prazo
+      </span>
+    );
   }
   return (
-    <span className="text-muted-foreground shrink-0 text-xs">
+    <span className="text-muted-foreground shrink-0 text-xs" style={tFoot}>
       {formatDateValue(node.at, DEFAULT_DATE_FORMAT)}
     </span>
   );
