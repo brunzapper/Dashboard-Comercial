@@ -65,6 +65,7 @@ import {
   coreProfileOf,
   fieldBelongsToRecordType,
   loadBaseSchemaForRecordType,
+  withBaseCoreLabels,
 } from "@/lib/records/base-schema";
 import { attributeLabel, type RecordAttribute } from "@/lib/attributes/registry";
 import { loadRecordAttributes } from "@/lib/attributes/load";
@@ -203,7 +204,7 @@ export async function loadRowPanel(recordId: string): Promise<RowPanelData> {
   //    Rótulo e ordem saem das linhas core do /campos (0086) quando existem.
   for (const { ref, label } of coreDetailRows(
     row,
-    defs.filter(isCoreDef),
+    withBaseCoreLabels(defs.filter(isCoreDef), baseSchema),
     DETAIL_HEADER_REFS,
     coreProfileOf(baseSchema)
   )) {

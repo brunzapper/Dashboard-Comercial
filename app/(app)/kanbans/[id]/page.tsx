@@ -40,6 +40,7 @@ import {
   coreProfileOf,
   fieldBelongsToBase,
   loadBaseSchema,
+  withBaseCoreLabels,
 } from "@/lib/records/base-schema";
 import { resolvePeriodSelection } from "@/lib/widgets/period";
 import type { DashboardSettings } from "@/lib/widgets/types";
@@ -307,7 +308,7 @@ export default async function KanbanPage({
           fields,
           detailFields,
           offBaseDefs,
-          coreDefs: [...coreDefs.values()],
+          coreDefs: withBaseCoreLabels([...coreDefs.values()], baseSchema),
           knownFieldKeys,
           coreProfile: coreProfileOf(baseSchema),
           responsibles,

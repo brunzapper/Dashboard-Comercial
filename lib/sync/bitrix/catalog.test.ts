@@ -58,6 +58,8 @@ describe("syncFieldCatalog", () => {
   it("sanitiza \\u0000 de label e options no payload do upsert", async () => {
     const { db, queries } = fakeSupabase({
       tables: {
+        // Esquema por Base (0156): sem Base resolvida, nada a reconciliar.
+        data_sources: () => ({ data: null, error: null }),
         field_definitions: (q) => {
           // SELECT dos toggles existentes → nenhum campo pré-existente.
           if (q.steps.some((s) => s.method === "select")) return { data: [] };
@@ -99,6 +101,8 @@ describe("syncFieldCatalog", () => {
     const badKey = "bitrix_uf_crm_ruim";
     const { db, queries } = fakeSupabase({
       tables: {
+        // Esquema por Base (0156): sem Base resolvida, nada a reconciliar.
+        data_sources: () => ({ data: null, error: null }),
         field_definitions: (q) => {
           if (q.steps.some((s) => s.method === "select")) return { data: [] };
           const up = q.steps.find((s) => s.method === "upsert");
@@ -144,6 +148,8 @@ describe("syncFieldCatalog", () => {
   it("lote OK → nenhum upsert por linha", async () => {
     const { db, queries } = fakeSupabase({
       tables: {
+        // Esquema por Base (0156): sem Base resolvida, nada a reconciliar.
+        data_sources: () => ({ data: null, error: null }),
         field_definitions: (q) => {
           if (q.steps.some((s) => s.method === "select")) return { data: [] };
           return { data: null, error: null };

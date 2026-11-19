@@ -47,6 +47,9 @@ export type BaseFieldOrigin =
 export interface BaseSchemaRow {
   field_ref: string;
   label: string | null;
+  /** Opções declaradas na origem (fase 3; hoje só `core:stage`). */
+  options?: { value: string; group?: string | null }[] | null;
+  first_seen_at?: string | null;
   sort_order: number | null;
   visible: boolean;
   origin: BaseFieldOrigin | string;
@@ -66,7 +69,46 @@ export interface BaseSchema {
 }
 
 export const SOURCE_FIELDS_SELECT =
-  "field_ref, label, sort_order, visible, origin, origin_ref, removed_at";
+  "field_ref, label, sort_order, visible, origin, origin_ref, removed_at, options, first_seen_at";
+
+/** Rótulo DESTA Base para um ref (`stage`, `custom:x`) — null = o global. */
+export function baseFieldLabel(
+  schema: BaseSchema | null,
+  ref: string
+): string | null {
+  if (!schema) return null;
+  const key = ref.startsWith("custom:") ? ref : `core:${ref}`;
+  const label = schema.rows.get(key)?.label;
+  return label && label.trim() ? label.trim() : null;
+}
+
+/**
+ * Linhas core (0086) com o rótulo DESTA Base por cima (ex.: `stage` vira
+ * "Fase do negócio" em Negócios e "Etapa do lead" em Leads). Sem esquema,
+ * devolve as linhas intactas.
+ */
+export function withBaseCoreLabels<T extends { field_key: string; label: string }>(
+  coreDefs: readonly T[],
+  schema: BaseSchema | null
+): T[] {
+  if (!schema) return [...coreDefs];
+  return coreDefs.map((d) => {
+    const label = baseFieldLabel(schema, d.field_key);
+    return label ? { ...d, label } : d;
+  });
+}
+
+/** "Novo" na página da Base: visto pela 1ª vez há menos de `days` dias. */
+export function isRecentlyAdded(
+  row: Pick<BaseSchemaRow, "first_seen_at" | "origin">,
+  now: Date = new Date(),
+  days = 7
+): boolean {
+  if (!row.first_seen_at || row.origin === "core") return false;
+  const t = Date.parse(row.first_seen_at);
+  if (!Number.isFinite(t)) return false;
+  return now.getTime() - t < days * 86_400_000;
+}
 
 /** Monta o esquema a partir das linhas cruas (puro). */
 export function buildBaseSchema(

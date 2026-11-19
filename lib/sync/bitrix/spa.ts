@@ -1,4 +1,5 @@
-// Versão: 1.0 | Data: 11/10/2026
+// Versão: 1.1 | Data: 19/11/2026
+// v1.1 (19/11/2026): título do campo pelo rótulo de UI (`bitrixUiLabel`).
 // PROCESSOS INTELIGENTES do Bitrix (Smart Process Automation, 0155) — o lado
 // servidor: descobrir os processos do portal, ler o schema de um processo,
 // buscar uma AMOSTRA sem gravar nada, carregar as Bases SPA aprovadas para o
@@ -15,6 +16,8 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { BitrixFieldMeta } from "./lookups";
 import { spaFieldType, type SpaMapContext, type SpaMapEntry } from "./mapper";
 import { upsertCatalogRows, type CatalogRow } from "./catalog";
+import { bitrixUiLabel } from "./field-label";
+import { reconcileOriginFields } from "@/lib/records/base-schema-sync";
 import {
   parseSpaConfig,
   spaSourceFieldId,
@@ -40,6 +43,9 @@ export interface SpaSchema {
 interface RawItemField {
   type?: string;
   title?: string;
+  listLabel?: string;
+  formLabel?: string;
+  filterLabel?: string;
   isReadOnly?: boolean;
   isMultiple?: boolean;
   items?: { ID: string | number; VALUE: string }[];
@@ -83,7 +89,7 @@ export async function loadSpaSchema(
     if (!def || typeof def !== "object") continue;
     fields.push({
       fieldId,
-      title: String(def.title || fieldId),
+      title: bitrixUiLabel(fieldId, def),
       type: String(def.type ?? "string"),
       isMultiple: Boolean(def.isMultiple),
       isReadOnly: Boolean(def.isReadOnly),
@@ -271,6 +277,16 @@ export async function syncSpaFieldCatalog(
     });
   }
   await upsertCatalogRows(db, rows, source.orgId);
+  // v1.1: ciclo de vida do esquema da Base (campo que sumiu do processo =>
+  // removed_at). Schema vazio (falha de leitura) não reconcilia.
+  if (schema.fields.length > 0) {
+    await reconcileOriginFields(db, {
+      sourceKey: source.key,
+      origin: "spa",
+      presentRefs: rows.map((r) => `custom:${r.field_key}`),
+      orgId: source.orgId,
+    });
+  }
 }
 
 /** Contexto do mapper (serializável no job) de uma Base SPA. */

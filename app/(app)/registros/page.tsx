@@ -68,6 +68,7 @@ import {
   coreProfileOf,
   fieldBelongsToBase,
   loadBaseSchema,
+  withBaseCoreLabels,
 } from "@/lib/records/base-schema";
 import {
   isKnownSource,
@@ -219,7 +220,8 @@ export default async function RegistrosPage({
 
   const allFields = (fieldsData ?? []) as FieldDefinition[];
   const { custom: customDefs, core } = splitCoreDefs(allFields);
-  const coreDefs = [...core.values()];
+  // 0156: rótulo do núcleo POR Base ("Fase do negócio" × "Etapa do lead").
+  const coreDefs = withBaseCoreLabels([...core.values()], baseSchema);
   // RPC indisponível/erro ⇒ null: a tabela cai no conjunto legado de colunas.
   const populated = populatedRes.error
     ? null
