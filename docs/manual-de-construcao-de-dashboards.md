@@ -1,4 +1,8 @@
-<!-- Versão: 1.52 | Data: 11/10/2026 -->
+<!-- Versão: 1.53 | Data: 19/11/2026 -->
+<!-- v1.53 (19/11/2026): esquema por Base — cada Base tem os PRÓPRIOS campos
+     (página da Base, Fase do negócio × Etapa do lead, nomes de tela do
+     Bitrix), seletor de campos por Base e tipo com busca por código, e
+     "Calculado (totais do recorte)" renomeado para "Métrica salva". -->
 <!-- v1.52 (11/10/2026): Tree — cor do texto por tipo, cores dos cartões
      (paleta ampliada + livre), texto que não cabe, números grandes e o
      Apresentar sem barras de rolagem (pan com a mão). -->
@@ -296,6 +300,13 @@ lead, negócio ou fechamento. Todo registro tem:
   antigos, "fonte" também era usada para Base — este manual usa a terminologia
   atual da UI.)
 
+- **Cada Base tem os PRÓPRIOS campos** (o *esquema* da Base, desde
+  19/11/2026). Um registro mostra os campos da Base dele — um campo de Negócios
+  não aparece em Meetime, e Pipeline/MRR/"Fechado?" só aparecem numa Base que
+  os usa (ou num registro que tenha valor neles). A mesma coluna pode ter nome
+  diferente por Base: **Etapa** se chama **"Fase do negócio"** em Negócios e
+  **"Etapa do lead"** em Leads.
+
 Cada Base tem um **campo de data padrão** para o filtro de período:
 Leads → data de criação na origem; Deals → data de fechamento;
 Estudo de Fechamentos → data de criação na origem. Isso importa muito no
@@ -376,7 +387,7 @@ Núcleo/Bitrix/Local/App), Exibir (toggle do "olho"), Visível, Ações.
 | "Moeda" | valor monetário; moeda **herdada do registro** (padrão) ou **fixa** | métrica monetária (com todas as opções de conversão do §6.3) |
 | "Booleano" | verdadeiro/falso | dimensão, filtro |
 | "Calculado (por registro)" | fórmula avaliada registro a registro e materializada (recalculada no sync/edição); formato número, percentual ou moeda (auto/fixa); pode permitir/bloquear negativo | vira um campo numérico normal: métrica, dimensão, operando |
-| "Calculado (totais do recorte)" | fórmula sobre agregados (Σ/Média/Contagem) avaliada **no widget**, por grupo, subtotal e total | vira uma métrica reutilizável ("Calculado (totais)" no dropdown de métricas) |
+| "Métrica salva (totais do recorte)" | fórmula sobre agregados (Σ/Média/Contagem) avaliada **no widget**, por grupo, subtotal e total | vira uma métrica reutilizável (seção **"Métricas salvas ƒ"** no seletor de métrica). Não é campo de registro — não aparece no registro nem na página da Base |
 
 Notas importantes:
 
@@ -440,6 +451,23 @@ o botão de auto-match serve para a primeira carga ou para conferência.
     Filtros de data configurados no próprio widget continuam valendo. A
     Sub-base ganha a marca "ignora período" na lista.
 - **Rótulos curtos** por Base (usados em espaços apertados da UI).
+- **Página da Base** (clique no nome da Base): tudo de UMA Base num lugar.
+  - **Visão geral**: registros, campos, campos novos e pontos de atenção.
+  - **Campos**: os campos DESTA Base, com nome e olho que valem só aqui, tipo,
+    origem (com o código do Bitrix, ex.: `UF_CRM_…`, em cinza) e % preenchido.
+    Selos: **Novo** (chegou nos últimos 7 dias), **Removido na origem** (o
+    Bitrix parou de mandar — os valores antigos seguem guardados) e **Nome
+    interno** (o nome ainda é o código). Clique no nome para renomear nesta
+    Base; o olho tira o campo dos registros desta Base sem apagar nada.
+  - **Qualidade**: valores gravados fora do esquema (Adotar), colunas do
+    sistema com valor fora do perfil, campos nunca preenchidos (Ocultar todos).
+  - **Atualizar do Bitrix**: busca os campos e os nomes de tela agora, sem
+    esperar a sincronização. Campos novos do Bitrix entram sozinhos a cada
+    sincronização, já com o nome que aparece na tela do Bitrix.
+- **Importar CSV numa Base existente**: se uma coluna tem o nome de um campo
+  de OUTRA Base, o assistente pergunta **"É o mesmo dado?"** — *Sim* usa o
+  mesmo campo (ele passa a valer também nesta Base); *Não* cria um campo
+  próprio desta Base.
 
 ### 2.3 Configurações → Operações e Responsáveis
 
@@ -2009,6 +2037,22 @@ para qualquer tipo: **"Título"**, **"Aba"** (quando o dashboard tem abas) e
 DADOS (Tabela, Barra, Barra horizontal, Linha, Pizza, Funil, Card, Métrica
 calculada), em acordeões recolhíveis com badge de resumo.
 
+
+> **Seletor de campos (19/11/2026).** Ao escolher o campo de uma dimensão,
+> métrica ou filtro, a lista vem organizada em seções:
+> **★ Recentes** (os últimos que você usou neste navegador),
+> **Métricas salvas ƒ** (só no seletor de métrica), **↔ Campos comuns**
+> (correspondências entre Bases) e, para cada Base do widget,
+> **Principais · Datas · Números · Listas e textos · Calculados ƒ · De outra
+> Base ↪**. Com UMA Base no widget, as colunas do sistema aparecem dentro dela
+> e com o nome dela — por isso, num widget de Negócios, procure **"Fase do
+> negócio"**. Campos de uma Base que o widget não consulta ficam no fim, em
+> **"Fora do widget"**, com a explicação no tooltip (nos registros das Bases
+> do widget eles vêm vazios). A busca aceita também o código do Bitrix
+> (`UF_CRM_…`). No filtro de **Etapa**, os valores vêm agrupados por Base e
+> pipeline, e incluem as fases cadastradas no Bitrix mesmo sem registro
+> nelas; o que só existe nos registros aparece em **"Só nos registros"**.
+
 ### 6.1 Seção "Bases de dados"
 
 Checklist das Bases do catálogo.
@@ -2137,7 +2181,7 @@ Cada métrica vira uma coluna (tabela) ou série (gráficos). Por linha:
 
 - **Campo da métrica** — opções: **"Contagem de registros"** (conta linhas;
   chave `*`), qualquer campo numérico/moeda/calculado-por-registro, um campo
-  salvo "Calculado (totais)", um **número digitado da Base manual** (grupo
+  salvo "Métrica salva", um **número digitado da Base manual** (grupo
   "Base manual" no dropdown — §2.7) ou **"ƒ Métrica calculada (fórmula
   própria)…"** (escreve uma fórmula só deste widget — capítulo 8).
 - **Agregação** — lista completa: "Soma" (`sum`), "Contagem" (`count`),
@@ -3486,7 +3530,7 @@ referência.
   CONT.SES, MÉDIASE; SOMA, MÉDIA, MÍN, MÁX, CONT.NÚM, CONT.VALORES, ARRED,
   ABS, CONCATENAR; ANTERIOR, VARPCT, VARABS.
 - **Tipos de campo (8)**: Texto, Número, Data, Seleção, Moeda, Booleano,
-  Calculado (por registro), Calculado (totais do recorte).
+  Calculado (por registro), Métrica salva (totais do recorte).
 - **Moedas (5)**: BRL, USD, EUR, GBP, ARS (taxas por ano/trimestre; PTAX).
 - **Paletas (7)**: Design system, Vibrante, Oceano, Pôr do sol, Floresta,
   Tons de cinza, Inbound (roxo & verde).

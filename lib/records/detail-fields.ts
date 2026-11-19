@@ -1,4 +1,7 @@
-// Versão: 1.0 | Data: 07/08/2026
+// Versão: 1.1 | Data: 19/11/2026
+// v1.1 (19/11/2026): coreDetailRows aceita o PERFIL do núcleo da Base (0156,
+//   lib/records/base-schema.ts) — coluna fora do perfil só aparece no registro
+//   que tem valor nela. Sem perfil (null/ausente) = comportamento anterior.
 // Helpers puros (client-safe) do "100% dos campos" da área Registros:
 // - parse do resultado de registros_populated_refs (0120) — fail-safe: shape
 //   inesperado vira null e a page cai no conjunto de colunas legado;
@@ -14,6 +17,7 @@
 import type { FieldDefinition, RecordRow } from "@/lib/records/types";
 import { CORE_FIELDS } from "@/lib/widgets/fields";
 import { recordCellValue, type RecordLabels } from "@/lib/export/record-cells";
+import { coreRefInProfile } from "@/lib/records/base-schema";
 
 // ---------------------------------------------------------------------------
 // Resultado de registros_populated_refs (0120)
@@ -176,15 +180,19 @@ export interface CoreDetailRow {
 
 // Linhas da grade núcleo do detalhe: todas as refs de exibição presentes no
 // objeto (selects parciais pulam a linha), fora as de `skip`, ordenadas/
-// rotuladas pelo /campos.
+// rotuladas pelo /campos. `coreProfile` (0156) recorta pelo perfil da Base.
 export function coreDetailRows(
   record: RecordRow,
   coreDefs: CoreDefLite[] | undefined,
-  skip: ReadonlySet<string>
+  skip: ReadonlySet<string>,
+  coreProfile?: readonly string[] | null
 ): CoreDetailRow[] {
   const rec = record as unknown as Record<string, unknown>;
   const refs = CORE_DISPLAY_REFS.filter(
-    (ref) => !skip.has(ref) && ref in rec
+    (ref) =>
+      !skip.has(ref) &&
+      ref in rec &&
+      coreRefInProfile(coreProfile, ref, record)
   );
   return orderCoreRefs(refs, coreDefs).map((ref) => ({
     ref,

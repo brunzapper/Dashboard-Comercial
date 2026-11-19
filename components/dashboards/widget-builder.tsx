@@ -1,4 +1,6 @@
-// Versão: 1.33 | Data: 10/10/2026
+// Versão: 1.34 | Data: 19/11/2026
+// v1.34 (19/11/2026): seletor de campo (dimensão/métrica/filtro) organizado
+//   por Base e tipo (organizeFieldOptions + FieldPicker — esquema por Base).
 // v1.33 (10/10/2026): filtros do widget oferecem "Tem tarefa" (estado + janela
 //   de dias) — opção de task-filter-options; a lógica fica fora deste arquivo.
 // v1.32 (02/10/2026) — também: (f) widget "Base do Dashboard" ganha seção
@@ -324,6 +326,7 @@ import {
   sourceChips,
   toFieldOptions,
 } from "@/lib/widgets/filter-ops";
+import { organizeFieldOptions } from "@/lib/widgets/field-picker";
 import { splitCoreDefs } from "@/lib/records/core-defs";
 import { useSourceLabels } from "@/components/source-labels-context";
 import { filterTargetSources } from "@/lib/widgets/filter-sources";
@@ -1363,6 +1366,11 @@ export function WidgetBuilder({
   ];
   // Modos do Card (settings.card): campos ranqueáveis (números e datas) e
   // métricas simples do ranking (sem ƒ ad-hoc — fórmula tem modo próprio).
+  // Esquema por Base (fase 5): seções por Base do widget e tipo, núcleo com o
+  // rótulo da Base ("Fase do negócio"), métricas salvas e campos comuns no
+  // topo, campo de Base fora do widget explicado no fim. Só reordena/rotula.
+  const organizeFields = (opts: ComboboxOption[]) =>
+    organizeFieldOptions(opts, { available, catalog, widgetSources: sources });
   const cardRankOptions = toFieldOptions(
     available.filter((f) => (f.isNumeric || f.isDate) && !f.aggCalc),
     sourceLabels
@@ -3772,11 +3780,11 @@ export function WidgetBuilder({
                   // No modo lista as dimensões são colunas do cliente → permite
                   // campos sintéticos (ex.: "Data atual"). Na tabela/gráfico
                   // agregado a dimensão vai ao RPC → só campos reais.
-                  fieldOptions={
+                  fieldOptions={organizeFields(
                     isRecordList
                       ? availableOptions
                       : [...rpcFieldOptions, ...manualAxisFieldOptions(manualAxes)]
-                  }
+                  )}
                   fieldChips={isRecordList ? fieldSourceChips : axisChips}
                   transformOptions={transformOptions}
                   dateAggOptions={dateAggOptions}
@@ -3870,7 +3878,7 @@ export function WidgetBuilder({
               <MetricRow
                 key={i}
                 metric={m}
-                metricOptions={metricOptions}
+                metricOptions={organizeFields(metricOptions)}
                 fieldChips={metricChips}
                 aggOptions={aggOptions}
                 isMoney={isMoneyField(m.field)}
@@ -4001,12 +4009,12 @@ export function WidgetBuilder({
               <FilterRow
                 key={i}
                 filter={f}
-                fieldOptions={[
+                fieldOptions={organizeFields([
                   ...rpcFieldOptions,
                   ...manualAxisFieldOptions(manualAxes),
                   // v1.33 (10/10/2026): filtro "Tem tarefa" (task-filter-options).
                   ...TASK_FILTER_FIELD_OPTIONS,
-                ]}
+                ])}
                 fieldChips={axisChips}
                 // 0143: num eixo de família só `=`/`≠`/`em (lista)` fazem
                 // sentido. `é vazio` fica FORA de propósito: ele confundiria

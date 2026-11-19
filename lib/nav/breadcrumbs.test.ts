@@ -52,8 +52,13 @@ describe("breadcrumbsFor", () => {
   });
 
   it("Registros e sub-rotas", () => {
-    expect(labels("/registros")).toEqual(["Registros"]);
-    expect(labels("/registros/bases")).toEqual(["Registros", "Bases"]);
+    expect(labels("/registros")).toEqual(["Dados"]);
+    expect(labels("/registros/bases")).toEqual(["Dados", "Bases"]);
+    expect(labels("/registros/bases/deals", "Negócios")).toEqual([
+      "Dados",
+      "Bases",
+      "Negócios",
+    ]);
   });
 
   it("rota desconhecida sem nome ⇒ sem migalha", () => {
@@ -62,7 +67,7 @@ describe("breadcrumbsFor", () => {
 
   it("triagem de novas Bases de Sync fica sob Registros › Bases", () => {
     expect(breadcrumbsFor("/registros/bases/sync")).toEqual([
-      { label: "Registros", href: "/registros" },
+      { label: "Dados", href: "/registros" },
       { label: "Bases", href: "/registros/bases" },
       { label: "Novas bases de Sync", href: null },
     ]);

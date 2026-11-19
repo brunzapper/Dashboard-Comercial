@@ -1,4 +1,6 @@
-// Versão: 1.20 | Data: 10/10/2026
+// Versão: 1.21 | Data: 19/11/2026
+// v1.21 (19/11/2026): opções de ETAPA do picker por Base e pipeline
+//   (fases declaradas no esquema 0156 + valores dos registros).
 // v1.20 (10/10/2026): UserAppSettings.palette (paleta da interface,
 //   lib/theme.ts).
 // v1.19 (02/10/2026): IA de dashboards alcança os NÓS da Tree.
@@ -142,6 +144,8 @@ import {
   type ScopeWidgetLike,
 } from "@/lib/config/source-scope";
 import { recordTypeOf } from "@/lib/sources";
+import { schemaOwnerKey } from "@/lib/records/base-schema";
+import { mergeStageOptions } from "@/lib/records/stage-options";
 import { isCoreDef } from "@/lib/records/core-defs";
 import type { FieldDefinition } from "@/lib/records/types";
 import { recalcAllFormulaFields } from "@/lib/records/recalc";
@@ -1485,7 +1489,7 @@ export async function saveQuickFilterValue(
 export async function listFilterOptionCandidates(
   kind: "responsible" | "operation" | "stage",
   sources?: SourceKey[]
-): Promise<{ value: string; label: string }[]> {
+): Promise<{ value: string; label: string; group?: string }[]> {
   const session = await getSessionInfo();
   if (!session) return [];
   const supabase = await createClient();
@@ -1528,11 +1532,29 @@ export async function listFilterOptionCandidates(
     }),
     loadSources(supabase),
   ]);
-  const wanted =
+  // v1.21 (19/11/2026): Bases RAIZ em jogo (sub → pai; sem fontes = todas) e
+  // as fases DECLARADAS de cada uma no esquema (0156) — agrupadas por
+  // pipeline/Base por mergeStageOptions. Sem a tabela, só os dados.
+  const roots = catalog.filter((s) => !s.parentKey);
+  const wantedKeys =
     sources && sources.length > 0
-      ? new Set(sources.map((s) => recordTypeOf(s, catalog)))
+      ? new Set(sources.map((s) => schemaOwnerKey(s, catalog)))
       : null;
-  const set = new Set<string>();
+  const bases = roots.filter((s) => !wantedKeys || wantedKeys.has(s.key));
+  const { data: declaredRows } = await supabase
+    .from("source_fields")
+    .select("source_key, options")
+    .eq("field_ref", "core:stage")
+    .in(
+      "source_key",
+      bases.map((b) => b.key)
+    );
+  const declaredByKey = new Map(
+    ((declaredRows ?? []) as { source_key: string; options: unknown }[]).map(
+      (r) => [r.source_key, Array.isArray(r.options) ? r.options : null] as const
+    )
+  );
+  const dataValues = new Map<string, Set<string>>();
   for (const row of (Array.isArray(data) ? data : []) as Record<
     string,
     unknown
@@ -1540,12 +1562,26 @@ export async function listFilterOptionCandidates(
     const rt = String(row.dim_1 ?? "");
     const st = row.dim_2 == null ? "" : String(row.dim_2);
     if (!rt || !st) continue;
-    if (wanted && !wanted.has(rt)) continue;
-    set.add(st);
+    if (!dataValues.has(rt)) dataValues.set(rt, new Set());
+    dataValues.get(rt)!.add(st);
   }
-  return [...set]
-    .sort((a, b) => a.localeCompare(b, "pt-BR"))
-    .map((s) => ({ value: s, label: s }));
+  return mergeStageOptions(
+    bases
+      .filter(
+        (b) => declaredByKey.get(b.key)?.length || dataValues.has(b.recordType)
+      )
+      .map((b) => ({
+        key: b.key,
+        label: b.shortLabel || b.label,
+        recordType: b.recordType,
+        declared:
+          (declaredByKey.get(b.key) as
+            | { value: string; group?: string | null }[]
+            | null
+            | undefined) ?? null,
+      })),
+    dataValues
+  );
 }
 
 // Grava a seleção da JANELA DE PERÍODOS do widget (settings.periodWindow —

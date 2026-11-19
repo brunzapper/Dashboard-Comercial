@@ -95,7 +95,8 @@ const NAV: (NavItem & { permission?: string; role?: string; roles?: string[] })[
   { href: "/operacao", label: "Operação", icon: "operacao" },
   {
     href: "/registros",
-    label: "Registros",
+    // 19/11/2026: "Dados" — Bases, registros, importação e esquema.
+    label: "Dados",
     icon: "registros",
     roles: ["admin", "gestor"],
   },

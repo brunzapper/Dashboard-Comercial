@@ -111,6 +111,31 @@ export const loadSources = cache(async function loadSources(
       })
       .filter((s): s is SourceDef => s != null);
 
+    // 0156: rótulos POR Base do esquema (ex.: `stage` = "Fase do negócio" em
+    // Negócios). Tabela ausente / erro = sem rótulos (nada muda).
+    try {
+      let labelQuery = supabase
+        .from("source_fields")
+        .select("source_key, field_ref, label")
+        .not("label", "is", null);
+      if (orgId) labelQuery = labelQuery.eq("organization_id", orgId);
+      const { data: labelRows, error: labelErr } = await labelQuery;
+      if (!labelErr && labelRows) {
+        const byKey = new Map(roots.map((s) => [s.key, s]));
+        for (const r of labelRows as {
+          source_key: string;
+          field_ref: string;
+          label: string | null;
+        }[]) {
+          const src = byKey.get(r.source_key);
+          if (!src || !r.label?.trim()) continue;
+          (src.fieldLabels ??= {})[r.field_ref] = r.label.trim();
+        }
+      }
+    } catch {
+      // best-effort
+    }
+
     return [...roots, ...subs];
   } catch {
     return BUILTIN_SOURCES;

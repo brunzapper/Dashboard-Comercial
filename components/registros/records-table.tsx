@@ -1,4 +1,6 @@
-// Versão: 2.3 | Data: 10/09/2026
+// Versão: 2.4 | Data: 19/11/2026
+// v2.4 (19/11/2026): `coreProfile` (perfil do núcleo da Base, 0156) repassado
+//   ao painel de edição — opcional; ausente = legado.
 // v2.3 (10/09/2026): o Set/toggle/poda/Esc da seleção saiu para
 //   `useBulkSelection` — era daqui que o kanban copiou, e a seleção de
 //   tarefas ia criar mais quatro cópias da mesma regra.
@@ -190,7 +192,10 @@ export function RecordsTable({
   canManageFields,
   canDeleteRecords,
   ai,
+  coreProfile = null,
 }: {
+  /** Perfil do núcleo da Base (0156); null = sem esquema (legado). */
+  coreProfile?: string[] | null;
   source: SourceKey;
   /** Rótulo da base (cabeçalhos dos sheets de ação em massa). */
   sourceLabel: string;
@@ -506,6 +511,7 @@ export function RecordsTable({
           showAllFieldsLocked={showAllFieldsLocked}
           offBaseDefs={offBaseDefs}
           coreDefs={coreDefs}
+          coreProfile={coreProfile}
           knownFieldKeys={knownFieldKeys}
           responsibles={responsibles}
           operations={operations}

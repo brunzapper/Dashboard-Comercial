@@ -1,4 +1,6 @@
-// Versão: 1.4 | Data: 11/10/2026
+// Versão: 1.5 | Data: 19/11/2026
+// v1.5 (19/11/2026): rótulo de UI dos campos (`bitrixUiLabel`) — o `title` de
+//   campo UF_CRM_… é o próprio código; formLabel/listLabel/filterLabel vencem.
 // v1.4 (11/10/2026): etapas dos PROCESSOS INTELIGENTES (0155) — o
 //   crm.status.list já devolvia `DYNAMIC_<tipo>_STAGE_<funil>` e o preload as
 //   DESCARTAVA. Passam a ser guardadas (`spaStages`, código → nome; o código
@@ -22,6 +24,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { BitrixClient } from "./client";
+import { bitrixUiLabel } from "./field-label";
 
 interface StatusRow {
   STATUS_ID: string;
@@ -38,6 +41,7 @@ interface FieldDef {
   title?: string;
   listLabel?: string;
   formLabel?: string;
+  filterLabel?: string;
   isMultiple?: boolean;
   isReadOnly?: boolean;
   items?: { ID: string; VALUE: string }[];
@@ -109,7 +113,7 @@ function toFieldMetas(fields: Record<string, FieldDef>): BitrixFieldMeta[] {
     if (!def || typeof def !== "object") continue;
     out.push({
       fieldId,
-      title: def.title || def.listLabel || def.formLabel || fieldId,
+      title: bitrixUiLabel(fieldId, def),
       type: def.type,
       isMultiple: Boolean(def.isMultiple),
       isReadOnly: Boolean(def.isReadOnly),
@@ -319,6 +323,27 @@ export class BitrixLookups {
   statusNames(entity: "deal" | "lead"): string[] {
     const map = entity === "deal" ? this.dealStages : this.leadStatuses;
     return [...new Set(map.values())];
+  }
+
+  /**
+   * v1.5 (19/11/2026): fases de NEGÓCIO agrupadas pelo pipeline, na ordem do
+   * Bitrix. O código de fase de um funil que não é o padrão vem prefixado
+   * ("C3:NEW"); sem prefixo é o funil 0. Mesmo nome em funis diferentes
+   * aparece nos dois grupos — o valor gravado no registro é o nome.
+   */
+  dealStageOptions(): { value: string; group: string }[] {
+    const out: { value: string; group: string }[] = [];
+    const seen = new Set<string>();
+    for (const [code, name] of this.dealStages) {
+      const m = /^C(\d+):/.exec(code);
+      const cat = m ? m[1] : "0";
+      const group = this.categories.get(cat) ?? cat;
+      const k = `${group}\u0000${name}`;
+      if (seen.has(k)) continue;
+      seen.add(k);
+      out.push({ value: name, group });
+    }
+    return out;
   }
 
   /**

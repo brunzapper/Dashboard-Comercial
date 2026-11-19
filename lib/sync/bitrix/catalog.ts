@@ -1,4 +1,8 @@
-// Versão: 1.8 | Data: 11/10/2026
+// Versão: 1.9 | Data: 19/11/2026
+// v1.9 (19/11/2026): esquema por Base (0156) — depois do upsert, reconcilia o
+//   ciclo de vida das linhas de `source_fields` de Negócios/Leads (visto agora
+//   => last_seen_at; sumiu do Bitrix => removed_at). A CRIAÇÃO da linha é do
+//   trigger da 0156. O rótulo de UI vem de `bitrixUiLabel` (lookups v1.5).
 // v1.8 (11/10/2026): o upsert preservador de toggles foi EXTRAÍDO para
 //   `upsertCatalogRows` (mesmo comportamento) — os campos dos PROCESSOS
 //   INTELIGENTES (0155, lib/sync/bitrix/spa.ts) gravam pelo MESMO caminho, com
@@ -58,6 +62,11 @@ import {
   type CustomFieldMap,
 } from "@/lib/config/bitrix-field-map";
 import { refreshResponsibleOptionFields } from "@/lib/config/responsible-options";
+import {
+  reconcileOriginFields,
+  sourceKeyForRecordType,
+  upsertCoreStageOptions,
+} from "@/lib/records/base-schema-sync";
 
 /**
  * Chave de sync_config com o mapa RÓTULO → CÓDIGO das famílias de crm_status
@@ -260,7 +269,33 @@ export async function syncFieldCatalog(
   const rows = Array.from(byKey.values());
   if (rows.length === 0) return;
   await upsertCatalogRows(db, rows);
+  // Best-effort: o esquema nunca derruba o sync do catálogo.
+  await reconcileBitrixSchema(db, lookups).catch((e: unknown) =>
+    console.error(`syncFieldCatalog: esquema por Base: ${(e as Error).message}`)
+  );
   await refreshCatalogExtras(db, lookups);
+}
+
+/**
+ * Ciclo de vida do esquema de Negócios e Leads (fase 2). Só reconcilia a
+ * entidade cujo schema veio no preload — lookups hidratados de um job não o
+ * carregam, e lista vazia seria lida como "tudo foi apagado no Bitrix".
+ */
+async function reconcileBitrixSchema(
+  db: SupabaseClient,
+  lookups: BitrixLookups
+): Promise<void> {
+  for (const entity of ["deal", "lead"] as const) {
+    const metas = entity === "deal" ? lookups.dealFieldMetas() : lookups.leadFieldMetas();
+    if (metas.length === 0) continue;
+    const recordType = entity === "deal" ? "negocio" : "lead";
+    const sourceKey = await sourceKeyForRecordType(db, recordType);
+    if (!sourceKey) continue;
+    const presentRefs = catalogRowsFor(lookups, entity).map(
+      (r) => `custom:${r.field_key}`
+    );
+    await reconcileOriginFields(db, { sourceKey, origin: "bitrix", presentRefs });
+  }
 }
 
 /**
@@ -411,6 +446,23 @@ async function refreshCatalogExtras(
         `syncFieldCatalog: refresh das options de stage falhou: ${stageErr.message}`
       );
     }
+  }
+
+  // v1.9 (19/11/2026): fases DECLARADAS por Base no esquema (0156) — Negócios
+  // com as fases de negócio por pipeline, Leads com as etapas de lead. É o
+  // que deixa o filtro de "Fase do negócio" listar as fases do Bitrix mesmo
+  // sem registro nelas, e separadas das etapas do lead.
+  for (const [recordType, label, options] of [
+    ["negocio", "Fase do negócio", lookups.dealStageOptions()],
+    [
+      "lead",
+      "Etapa do lead",
+      lookups.statusNames("lead").map((value) => ({ value })),
+    ],
+  ] as const) {
+    if (options.length === 0) continue;
+    const sourceKey = await sourceKeyForRecordType(db, recordType).catch(() => null);
+    if (sourceKey) await upsertCoreStageOptions(db, sourceKey, label, [...options]);
   }
 
   // v1.7 (08/09/2026): cache rótulo→código das famílias de crm_status, para o

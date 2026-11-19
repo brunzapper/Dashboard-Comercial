@@ -1,4 +1,6 @@
-// Versão: 1.0 | Data: 31/07/2026
+// Versão: 1.1 | Data: 19/11/2026
+// v1.1 (19/11/2026): opções com GRUPO (fases por Base/pipeline — esquema por
+//   Base, fase 3) exibidas sob cabeçalho, e busca quando a lista é longa.
 // Picker de VALOR de filtro (campos de relação/etapa/seleção): substitui o
 // input de texto cru nos editores de filtro — o usuário escolhe o RÓTULO,
 // nunca digita id interno. Padrão do VisibleOptionsPicker: opções carregadas
@@ -28,6 +30,8 @@ import {
 export interface FilterValueOption {
   value: string;
   label: string;
+  /** v1.1: cabeçalho sob o qual a opção aparece (ex.: "Negócios · Vendas"). */
+  group?: string;
 }
 
 export interface FilterValueSource {
@@ -65,6 +69,7 @@ export function FilterValuePicker({
 }) {
   const [options, setOptions] = useState<FilterValueOption[] | null>(null);
   const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
   const items = selectedItems(value, multi);
 
   const ensureLoaded = () => {
@@ -100,6 +105,15 @@ export function FilterValuePicker({
     setOpen(false);
   };
 
+  const q = query.trim().toLowerCase();
+  const visible = (options ?? []).filter(
+    (o) =>
+      !q ||
+      o.label.toLowerCase().includes(q) ||
+      (o.group ?? "").toLowerCase().includes(q)
+  );
+  const showSearch = (options?.length ?? 0) > 12;
+
   const buttonText =
     items.length === 0
       ? "— valor —"
@@ -121,8 +135,17 @@ export function FilterValuePicker({
           <ChevronDown className="size-3.5 shrink-0 opacity-60" />
         </Button>
       </PopoverTrigger>
-      <PopoverContent align="start" className="flex w-64 flex-col gap-2 p-2">
-        <div className="flex max-h-56 flex-col gap-1 overflow-auto">
+      <PopoverContent align="start" className="flex w-72 flex-col gap-2 p-2">
+        {showSearch ? (
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Buscar…"
+            aria-label="Buscar opção"
+            className="border-input h-8 rounded-md border bg-transparent px-2 text-sm"
+          />
+        ) : null}
+        <div className="flex max-h-64 flex-col gap-1 overflow-auto">
           {options == null ? (
             <p className="text-muted-foreground p-1 text-xs">Carregando…</p>
           ) : options.length === 0 && stale.length === 0 ? (
@@ -131,10 +154,20 @@ export function FilterValuePicker({
             </p>
           ) : (
             <>
-              {options.map((o) =>
-                multi ? (
+              {visible.map((o, i) => {
+                const header =
+                  o.group && o.group !== visible[i - 1]?.group ? (
+                    <p
+                      key={`h:${o.group}`}
+                      className="text-muted-foreground px-1.5 pt-1.5 text-xs font-medium"
+                    >
+                      {o.group}
+                    </p>
+                  ) : null;
+                const key = `${o.group ?? ""}|${o.value}`;
+                const row = multi ? (
                   <label
-                    key={o.value}
+                    key={key}
                     className="hover:bg-accent flex cursor-pointer items-center gap-2 rounded px-1.5 py-1 text-sm"
                   >
                     <Checkbox
@@ -145,7 +178,7 @@ export function FilterValuePicker({
                   </label>
                 ) : (
                   <button
-                    key={o.value}
+                    key={key}
                     type="button"
                     className={`hover:bg-accent flex items-center gap-2 rounded px-1.5 py-1 text-left text-sm ${
                       isChecked(o) ? "bg-accent/60 font-medium" : ""
@@ -154,8 +187,9 @@ export function FilterValuePicker({
                   >
                     <span className="truncate">{o.label}</span>
                   </button>
-                )
-              )}
+                );
+                return header ? [header, row] : row;
+              })}
               {stale.map((item) => (
                 <div
                   key={item}

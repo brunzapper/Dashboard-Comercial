@@ -1,4 +1,6 @@
-// Versão: 2.7 | Data: 10/10/2026
+// Versão: 2.8 | Data: 19/11/2026
+// v2.8 (19/11/2026): campo de dimensão/métrica/filtro pelo FieldPicker
+//   (seções por Base e tipo, Recentes, busca por código — esquema por Base).
 // v2.7 (10/10/2026): FilterRow reconhece o filtro "Tem tarefa" (`task:`) — sem
 //   operador; estado e janela de dias no editor próprio
 //   (components/dashboards/task-filter-options.tsx).
@@ -96,6 +98,7 @@ import {
   type FilterValueSource,
 } from "@/components/filters/filter-value-picker";
 import { FormulaEditor } from "@/components/formula/formula-editor";
+import { FieldPicker } from "@/components/fields/field-picker";
 import type { FormulaPreviewAdapter } from "@/components/formula/formula-preview";
 import { RecipeStrip } from "@/components/formula/recipe-strip";
 import { SourceConceptsHint } from "@/components/formula/source-concepts-hint";
@@ -251,7 +254,8 @@ export function DimensionRow({
   return (
     <div className="bg-card flex flex-col gap-2 rounded-md border p-2.5">
       <div className="flex items-center gap-2">
-        <Combobox
+        <FieldPicker
+          context="dimension"
           className="flex-1"
           options={fieldOptions}
           chips={fieldChips}
@@ -620,7 +624,8 @@ export function MetricRow({
   return (
     <div className="bg-card flex flex-col gap-2 rounded-md border p-2.5">
       <div className="flex items-center gap-2">
-        <Combobox
+        <FieldPicker
+          context="metric"
           className="flex-1"
           options={metricOptions}
           chips={fieldChips}
@@ -932,7 +937,8 @@ export function FilterRow({
   return (
     <div className="bg-card flex flex-col gap-2 rounded-md border p-2.5">
       <div className="flex items-center gap-2">
-        <Combobox
+        <FieldPicker
+          context="filter"
           className="flex-1"
           options={fieldOptions}
           chips={fieldChips}

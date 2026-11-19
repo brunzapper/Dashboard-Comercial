@@ -2437,6 +2437,33 @@ This version has breaking changes — APIs, conventions, and file structure may 
   `lib/records/trash.test.ts` + `records-table.selection.test.tsx` + blocos
   de seleção em `update-validate.test.ts`/`update-instructions.test.ts`.
   Ver `docs/arquitetura.md` §4.21 e invariante 30.
+- **"Que campos este registro tem" sai do ESQUEMA da Base (0156,
+  19/11/2026):** `source_fields` guarda, por Base RAIZ, `core:<coluna>` (perfil
+  do núcleo) e `custom:<key>` (campos), com rótulo/ordem/visibilidade/origem por
+  Base. O resolvedor ÚNICO é `lib/records/base-schema.ts` — superfície que
+  mostra/edita registro usa `fieldBelongsToBase`/`fieldBelongsToRecordType` e
+  o perfil (`coreProfileOf`/`coreRefInProfile`), NUNCA `fieldAppliesToSource`
+  cru: com esquema, `applies_to` VAZIO não é mais "todas as Bases" (só a linha
+  inclui; `applies_to` DECLARADO segue valendo como declaração).
+  Coluna do núcleo fora do perfil só aparece com valor no registro (`closed`
+  só se TRUE — `registros_populated_refs` recriada na 0156). Sub-base usa o
+  esquema da pai. Loader `null` (tabela ausente) = legado, nunca erro.
+  O lado custom é escrito SÓ pelo trigger `_source_fields_from_def` a partir
+  de `field_definitions` (escritor novo DECLARA `applies_to`; vazio na criação
+  = "todas as Bases", escolha explícita) e Base nova nasce só com os campos
+  declarados para ela; `removed_at` é do sync (`reconcileOriginFields`), nunca
+  exclusão. Rótulo de campo do Bitrix SÓ por `bitrixUiLabel` (o `title` de
+  UF_CRM_… é o código). Rótulo/opções do núcleo POR Base ("Fase do negócio" ×
+  "Etapa do lead") vêm de `source_fields.label/options` —
+  `withBaseCoreLabels`, `SourceDef.fieldLabels`, `mergeStageOptions`.
+  `visible=false` tira o campo do registro DAQUELA Base. Página da Base em
+  `/registros/bases/<key>`; colisão de nome no CSV pergunta "é o mesmo dado?"
+  (`csvCollision`/`distinctFieldKey`). O seletor de campo do construtor é
+  `FieldPicker` sobre `organizeFieldOptions` (só reordena/rotula — os VALORES
+  são os de `toFieldOptions`; campo de Base fora do widget fica visível e
+  explicado, nunca escondido). `calculado_agg` = "Métrica salva".
+  `field_definitions`/refs `custom:<key>`/`custom_fields` intocados ⇒ RPCs de
+  widget INTOCADAS. Ver `docs/arquitetura.md` §4.29 e invariante 48.
 - **Indicadores, metas na Tabela Livre, Tree operacional e rituais (0149,
   01/10/2026; 0150, 02/10/2026):** `indicators` é o catálogo que EXPLICA uma chave de meta
   (`key` = `goals.metric`; unidade, rollup, direção, tolerância, dono, fórmula

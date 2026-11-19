@@ -137,6 +137,7 @@ export function KanbanList({
                       detailFields={recordCtx.detailFields}
                       offBaseDefs={recordCtx.offBaseDefs}
                       coreDefs={recordCtx.coreDefs}
+                      coreProfile={recordCtx.coreProfile}
                       knownFieldKeys={recordCtx.knownFieldKeys}
                       responsibles={recordCtx.responsibles}
                       operations={recordCtx.operations}

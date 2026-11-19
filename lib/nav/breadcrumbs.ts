@@ -1,4 +1,6 @@
-// Versão: 1.1 | Data: 11/10/2026
+// Versão: 1.2 | Data: 19/11/2026
+// v1.2 (19/11/2026): topo "Dados" (era Registros) e a PÁGINA DA BASE
+//   (/registros/bases/<key>) — Dados › Bases › <nome da Base>.
 // v1.1 (11/10/2026): /registros/bases/sync → Registros › Bases › Novas bases de Sync.
 // v1.0 (10/10/2026): migalhas da BARRA DE LOCAL (components/layout/
 //   location-bar.tsx). Módulo PURO: pathname → lista de níveis, do mais amplo
@@ -80,7 +82,7 @@ export function breadcrumbsFor(
       ]);
     }
     case "registros": {
-      const root: Crumb = { label: "Registros", href: "/registros" };
+      const root: Crumb = { label: "Dados", href: "/registros" };
       if (!second) return close([root]);
       // v1.1: triagem de novas Bases de Sync, abaixo de Bases.
       if (second === "bases" && third === "sync") {
@@ -88,6 +90,13 @@ export function breadcrumbsFor(
           root,
           { label: "Bases", href: "/registros/bases" },
           { label: "Novas bases de Sync", href: null },
+        ]);
+      }
+      if (second === "bases" && third) {
+        return close([
+          root,
+          { label: "Bases", href: "/registros/bases" },
+          { label: name ?? "Base", href: null },
         ]);
       }
       return close([
