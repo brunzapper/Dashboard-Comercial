@@ -1,4 +1,7 @@
-// Versão: 1.3 | Data: 30/07/2026
+// Versão: 1.4 | Data: 19/11/2026
+// v1.4 (19/11/2026): "É o mesmo dado?" — destino que colide com campo de
+//   OUTRA Base (lib/import/csv-collision.ts) exige resposta antes de seguir:
+//   sim reusa a chave, não cria um campo PRÓPRIO desta Base (esquema por Base).
 // v1.3 (30/07/2026): botão "Sugerir com IA" no passo 3 (org com IA configurada)
 //   — a IA propõe o destino de cada coluna (resolvendo nomes diferentes e
 //   propondo campo novo p/ colunas sem correspondência); o resultado só
@@ -52,6 +55,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { slugify } from "@/lib/records/slug";
+import { collisionPending, csvCollision } from "@/lib/import/csv-collision";
 import { type SourceDef } from "@/lib/sources";
 import {
   CORE_IMPORT_TARGETS,
@@ -90,6 +94,9 @@ interface ColumnPlan {
   target: string; // "ignore" | "responsible" | "core:*" | "custom:*" | "new"
   newLabel: string;
   newType: string;
+  /** v1.4: respostas do "É o mesmo dado?". */
+  distinct?: boolean;
+  same?: boolean;
 }
 
 interface Report {
@@ -347,9 +354,21 @@ export function ImportWizard({
     return [...seen.entries()].filter(([, n]) => n > 1).map(([k]) => k);
   })();
 
+  const collisionOf = (p: ColumnPlan) =>
+    source ? csvCollision(p, fields, source.recordType, source.key) : null;
+  const baseNamesOf = (appliesTo: string[]) =>
+    sources
+      .filter((s) => !s.parentKey && appliesTo.includes(s.recordType))
+      .map((s) => s.shortLabel || s.label)
+      .join(", ") || "outra Base";
+  const pendingCollisions = mappedPlans.filter((p) =>
+    collisionPending(p, collisionOf(p))
+  ).length;
+
   const mappingValid =
     mappedPlans.length > 0 &&
     duplicateTargets.length === 0 &&
+    pendingCollisions === 0 &&
     mappedPlans.every(
       (p) => p.target !== "new" || slugify(p.newLabel).length > 0
     );
@@ -433,7 +452,11 @@ export function ImportWizard({
         if (p.target === "new") {
           specs.push({
             csvColumn: p.csvColumn,
-            create: { label: p.newLabel, dataType: p.newType },
+            create: {
+              label: p.newLabel,
+              dataType: p.newType,
+              ...(p.distinct && collisionOf(p) ? { distinct: true } : {}),
+            },
           });
         } else if (p.target.startsWith("custom:")) {
           specs.push({
@@ -740,9 +763,38 @@ export function ImportWizard({
                       <Combobox
                         options={targetOptions(p)}
                         value={p.target}
-                        onValueChange={(v) => updatePlan(p.csvColumn, { target: v })}
+                        onValueChange={(v) =>
+                          updatePlan(p.csvColumn, {
+                            target: v,
+                            distinct: false,
+                            same: false,
+                          })
+                        }
                         aria-label={`Destino de ${p.csvColumn}`}
                         className="w-56"
+                      />
+                      <CollisionPrompt
+                        plan={p}
+                        collision={collisionOf(p)}
+                        baseNames={baseNamesOf}
+                        onSame={(key) =>
+                          updatePlan(p.csvColumn, {
+                            target: `custom:${key}`,
+                            same: true,
+                            distinct: false,
+                          })
+                        }
+                        onDistinct={() =>
+                          updatePlan(p.csvColumn, {
+                            target: "new",
+                            newLabel:
+                              p.target === "new"
+                                ? p.newLabel
+                                : (collisionOf(p)?.field.label ?? p.newLabel),
+                            distinct: true,
+                            same: false,
+                          })
+                        }
                       />
                     </TableCell>
                     <TableCell>
@@ -751,7 +803,11 @@ export function ImportWizard({
                           <Input
                             value={p.newLabel}
                             onChange={(e) =>
-                              updatePlan(p.csvColumn, { newLabel: e.target.value })
+                              updatePlan(p.csvColumn, {
+                                newLabel: e.target.value,
+                                distinct: false,
+                                same: false,
+                              })
                             }
                             maxLength={60}
                             aria-label={`Nome do campo novo de ${p.csvColumn}`}
@@ -780,6 +836,13 @@ export function ImportWizard({
           {duplicateTargets.length > 0 ? (
             <p className="text-destructive text-sm" role="status">
               Duas colunas apontam para o mesmo destino: revise o mapeamento.
+            </p>
+          ) : null}
+          {pendingCollisions > 0 ? (
+            <p className="text-sm text-amber-700 dark:text-amber-400" role="status">
+              {pendingCollisions === 1
+                ? "Uma coluna tem o nome de um campo de outra Base: responda se é o mesmo dado."
+                : `${pendingCollisions} colunas têm o nome de um campo de outra Base: responda se é o mesmo dado.`}
             </p>
           ) : null}
           <div className="flex gap-2">
@@ -1121,6 +1184,75 @@ export function ImportWizard({
           </div>
         </div>
       ) : null}
+    </div>
+  );
+}
+
+// v1.4 (19/11/2026): pergunta "É o mesmo dado?" sob o destino da coluna.
+function CollisionPrompt({
+  plan,
+  collision,
+  baseNames,
+  onSame,
+  onDistinct,
+}: {
+  plan: ColumnPlan;
+  collision: ReturnType<typeof csvCollision>;
+  baseNames: (appliesTo: string[]) => string;
+  onSame: (key: string) => void;
+  onDistinct: () => void;
+}) {
+  if (!collision) return null;
+  const where = baseNames(collision.field.appliesTo);
+  if (plan.distinct && plan.target === "new") {
+    return (
+      <p className="text-muted-foreground mt-1 max-w-56 text-xs">
+        Campo próprio desta Base ({collision.distinctKey}).{" "}
+        <button
+          type="button"
+          className="underline"
+          onClick={() => onSame(collision.field.key)}
+        >
+          É o mesmo de {where}
+        </button>
+      </p>
+    );
+  }
+  if (plan.same) {
+    return (
+      <p className="text-muted-foreground mt-1 max-w-56 text-xs">
+        Mesmo dado de {where}: o campo passa a valer também aqui.{" "}
+        <button type="button" className="underline" onClick={onDistinct}>
+          Não é
+        </button>
+      </p>
+    );
+  }
+  return (
+    <div className="mt-1 flex max-w-56 flex-col gap-1 rounded-md border border-amber-300 bg-amber-50 p-1.5 text-xs dark:border-amber-800 dark:bg-amber-950/40">
+      <span>
+        Já existe “{collision.field.label}” em {where}. É o mesmo dado?
+      </span>
+      <span className="flex gap-1">
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          className="h-6 px-2 text-xs"
+          onClick={() => onSame(collision.field.key)}
+        >
+          Sim, é o mesmo
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          className="h-6 px-2 text-xs"
+          onClick={onDistinct}
+        >
+          Não, campo próprio
+        </Button>
+      </span>
     </div>
   );
 }

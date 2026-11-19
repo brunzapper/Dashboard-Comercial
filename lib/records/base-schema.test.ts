@@ -1,4 +1,4 @@
-// Versão: 1.0 | Data: 19/11/2026
+// Versão: 1.1 | Data: 19/11/2026
 // Guarda do ESQUEMA POR BASE (0156): pertencimento de campo custom (linha do
 // esquema ∪ applies_to declarado — vazio deixa de ser "todas"), sub-base usa o
 // esquema da pai, perfil do núcleo (coluna fora do perfil só com valor no
@@ -9,6 +9,7 @@ import { describe, expect, it } from "vitest";
 import type { RecordRow } from "./types";
 import type { SourceDef } from "@/lib/sources";
 import {
+  baseFieldLabel,
   buildBaseSchema,
   coreHasValue,
   coreProfileOf,
@@ -16,8 +17,10 @@ import {
   coreRefShown,
   fieldBelongsToBase,
   fieldBelongsToRecordType,
+  isRecentlyAdded,
   loadBaseSchema,
   schemaOwnerKey,
+  withBaseCoreLabels,
   type BaseSchemaRow,
 } from "./base-schema";
 import { coreDetailRows, DETAIL_HEADER_REFS } from "./detail-fields";
@@ -131,6 +134,40 @@ describe("fieldBelongsToBase", () => {
     expect(fieldBelongsToBase(deals, f, "deals_enterprise", SOURCES)).toBe(true);
     expect(schemaOwnerKey("deals_enterprise", SOURCES)).toBe("deals");
     expect(schemaOwnerKey("deals", SOURCES)).toBe("deals");
+  });
+});
+
+describe("visível por Base (v1.1)", () => {
+  it("olho fechado tira o campo da Base, mesmo declarado", () => {
+    const s = buildBaseSchema("meetime", "meetime", [
+      row("custom:cadencia", { visible: false }),
+      row("core:pipeline", { visible: false }),
+    ]);
+    const f = { field_key: "cadencia", applies_to: ["meetime"] };
+    expect(fieldBelongsToBase(s, f, "meetime", SOURCES)).toBe(false);
+    expect(coreRefShown(s, "pipeline", record())).toBe(false);
+    expect(coreRefShown(s, "pipeline", record({ pipeline: "X" }))).toBe(true);
+  });
+
+  it("rótulo da Base vence o global; sem esquema, nada muda", () => {
+    const s = buildBaseSchema("deals", "negocio", [
+      row("core:stage", { label: "Fase do negócio" }),
+    ]);
+    expect(baseFieldLabel(s, "stage")).toBe("Fase do negócio");
+    expect(baseFieldLabel(s, "pipeline")).toBeNull();
+    expect(
+      withBaseCoreLabels([{ field_key: "stage", label: "Etapa" }], s)[0].label
+    ).toBe("Fase do negócio");
+    expect(withBaseCoreLabels([{ field_key: "stage", label: "Etapa" }], null)[0].label).toBe(
+      "Etapa"
+    );
+  });
+
+  it("selo Novo: 7 dias, nunca para o núcleo", () => {
+    const now = new Date("2026-11-19T12:00:00Z");
+    expect(isRecentlyAdded({ first_seen_at: "2026-11-15T00:00:00Z", origin: "bitrix" }, now)).toBe(true);
+    expect(isRecentlyAdded({ first_seen_at: "2026-10-01T00:00:00Z", origin: "bitrix" }, now)).toBe(false);
+    expect(isRecentlyAdded({ first_seen_at: "2026-11-18T00:00:00Z", origin: "core" }, now)).toBe(false);
   });
 });
 

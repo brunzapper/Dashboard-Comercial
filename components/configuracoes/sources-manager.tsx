@@ -1,4 +1,6 @@
-// Versão: 1.6 | Data: 11/10/2026
+// Versão: 1.7 | Data: 19/11/2026
+// v1.7 (19/11/2026): nome da base leva à PÁGINA DA BASE (/registros/bases/<key>
+//   — campos, qualidade e origem da Base num lugar; esquema por Base, fase 4).
 // v1.6 (11/10/2026): Base de PROCESSO INTELIGENTE (0155) oferece também
 //   "Como atividade do próprio processo" (`dynamic_<id>`) no espelho.
 // v1.5 (07/08/2026): as actions não revalidam mais ("/", "layout") — cada
@@ -25,6 +27,7 @@
 //   lib/source-date-fields.ts.
 "use client";
 
+import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useActionState } from "react";
 import { ArrowDown, ArrowUp, Pencil, Plus, Trash2 } from "lucide-react";
@@ -513,7 +516,11 @@ function FragmentGroup({
       ) : null}
       {group.roots.map((s) => (
         <TableRow key={s.key}>
-          <TableCell className="font-medium">{s.label}</TableCell>
+          <TableCell className="font-medium">
+            <Link className="hover:underline" href={`/registros/bases/${s.key}`}>
+              {s.label}
+            </Link>
+          </TableCell>
           <TableCell>
             <code className="text-xs">{s.key}</code>
           </TableCell>

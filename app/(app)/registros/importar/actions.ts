@@ -1,4 +1,7 @@
-// Versão: 1.0 | Data: 16/07/2026
+// Versão: 1.1 | Data: 19/11/2026
+// v1.1 (19/11/2026): esquema por Base (0156) — campo novo com `distinct`
+//   ("não é o mesmo dado" no wizard) ganha chave PRÓPRIA da Base em vez de
+//   reusar em silêncio o homônimo de outra Base (32 colisões em produção).
 // Server Actions do wizard de import de CSV (Registros → Importar CSV).
 // Fluxo: prepareImportFields (cria/reusa field_definitions com o client do
 // USUÁRIO — RLS manage_field_definitions) → N× importCsvChunk (service role,
@@ -15,7 +18,7 @@ import { getSessionInfo } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
 import { loadSources } from "@/lib/config/sources";
-import { slugify } from "@/lib/records/slug";
+import { distinctFieldKey, slugify } from "@/lib/records/slug";
 import { isCoreDef } from "@/lib/records/core-defs";
 import { ingestRows } from "@/lib/import/ingest";
 import {
@@ -54,7 +57,7 @@ export interface PrepareFieldSpec {
   // Reusar um campo existente (field_key)…
   fieldKey?: string;
   // …ou criar um novo (label -> field_key slugificado).
-  create?: { label: string; dataType: string };
+  create?: { label: string; dataType: string; distinct?: boolean };
 }
 
 export interface PrepareImportResult {
@@ -91,6 +94,8 @@ export async function prepareImportFields(
       if (!key) {
         return { ok: false, message: `Nome inválido para o campo de "${spec.csvColumn}".` };
       }
+      // v1.1: "não é o mesmo dado" ⇒ chave própria desta Base.
+      if (spec.create.distinct) key = distinctFieldKey(key, sourceKey);
     }
     if (key) keyed.push({ spec, key });
   }

@@ -1,4 +1,5 @@
 // Versão: 2.4 | Data: 19/11/2026
+// v2.5 (19/11/2026): botão "Campos desta Base" → página da Base (fase 4).
 // v2.4 (19/11/2026): colunas e painel pelo ESQUEMA da Base (0156,
 //   lib/records/base-schema.ts) — campo "global" sem dado na Base deixa de
 //   virar coluna vazia e linha "—" no painel; o painel recebe o perfil do
@@ -533,6 +534,12 @@ export default async function RegistrosPage({
           {canSeeBases ? (
             <Button asChild variant="outline">
               <Link href="/registros/bases">Bases</Link>
+            </Button>
+          ) : null}
+          {/* 0156: esquema da Base em tela (campos, qualidade, origem). */}
+          {canSeeBases && fonte ? (
+            <Button asChild variant="outline">
+              <Link href={`/registros/bases/${fonte}`}>Campos desta Base</Link>
             </Button>
           ) : null}
           {canSeeBases && isAdmin ? (

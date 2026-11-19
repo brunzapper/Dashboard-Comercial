@@ -1,4 +1,7 @@
-// Versão: 1.0 | Data: 19/11/2026
+// Versão: 1.1 | Data: 19/11/2026
+// v1.1 (19/11/2026): `visible=false` (olho da página da Base) tira o campo do
+//   registro DAQUELA Base — vence até o applies_to declarado; coluna do núcleo
+//   oculta só aparece com valor. Rótulo por Base (`baseFieldLabel`).
 // ESQUEMA POR BASE (0156) — resolvedor ÚNICO de "que campos ESTE registro,
 // DESTA Base, tem?".
 //
@@ -63,8 +66,10 @@ export interface BaseSchema {
   recordType: string;
   /** Colunas do núcleo no perfil da Base (sem o prefixo `core:`). */
   coreRefs: ReadonlySet<string>;
-  /** Chaves custom no esquema (sem o prefixo `custom:`). */
+  /** Chaves custom no esquema e visíveis (sem o prefixo `custom:`). */
   customKeys: ReadonlySet<string>;
+  /** v1.1: chaves custom OCULTAS nesta Base (olho da página da Base). */
+  hiddenKeys: ReadonlySet<string>;
   rows: ReadonlyMap<string, BaseSchemaRow>;
 }
 
@@ -118,15 +123,19 @@ export function buildBaseSchema(
 ): BaseSchema {
   const coreRefs = new Set<string>();
   const customKeys = new Set<string>();
+  const hiddenKeys = new Set<string>();
   const byRef = new Map<string, BaseSchemaRow>();
   for (const row of rows) {
     if (!row || typeof row.field_ref !== "string") continue;
     byRef.set(row.field_ref, row);
-    if (row.field_ref.startsWith("core:")) coreRefs.add(row.field_ref.slice(5));
-    else if (row.field_ref.startsWith("custom:"))
-      customKeys.add(row.field_ref.slice(7));
+    const hidden = row.visible === false;
+    if (row.field_ref.startsWith("core:")) {
+      if (!hidden) coreRefs.add(row.field_ref.slice(5));
+    } else if (row.field_ref.startsWith("custom:")) {
+      (hidden ? hiddenKeys : customKeys).add(row.field_ref.slice(7));
+    }
   }
-  return { sourceKey, recordType, coreRefs, customKeys, rows: byRef };
+  return { sourceKey, recordType, coreRefs, customKeys, hiddenKeys, rows: byRef };
 }
 
 /** Key da Base raiz que guarda o esquema (sub-base → pai). */
@@ -148,6 +157,7 @@ export function fieldBelongsToBase(
   sources: SourceDef[] = BUILTIN_SOURCES
 ): boolean {
   if (!schema) return fieldAppliesToSource(def.applies_to, sourceKey, sources);
+  if (schema.hiddenKeys.has(def.field_key)) return false;
   if (schema.customKeys.has(def.field_key)) return true;
   const declared = def.applies_to ?? [];
   return (
@@ -166,6 +176,7 @@ export function fieldBelongsToRecordType(
     const at = def.applies_to ?? [];
     return at.length === 0 || at.includes(recordType);
   }
+  if (schema.hiddenKeys.has(def.field_key)) return false;
   if (schema.customKeys.has(def.field_key)) return true;
   const declared = def.applies_to ?? [];
   return declared.length > 0 && declared.includes(recordType);
