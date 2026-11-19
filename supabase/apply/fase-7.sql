@@ -5,7 +5,7 @@
 -- Idempotente.
 -- ============================================================================
 
--- >>>>>>>>>>>>>>>>>>>> migrations/0017_widget_filter_type.sql <<<<<<<<<<<<<<<<<<<<
+-- >>>>>>>>>>>>>>>>>>>> migrations/00171_widget_filter_type.sql <<<<<<<<<<<<<<<<<<<<
 -- Versão: 1.0 | Data: 09/07/2026
 -- Fase 7: filtro de período interativo nos dashboards.
 --  1) widgets.visual_type passa a aceitar 'filtro' (widget de filtro de período

@@ -1,4 +1,5 @@
-<!-- Versão: 3.34 | Data: 11/10/2026 -->
+<!-- Versão: 3.35 | Data: 19/11/2026 -->
+<!-- v3.35 (19/11/2026): prefixos duplicados 0017/0049 renumerados p/ 00170/00171 e 00490/00491 (Supabase Preview). -->
 <!-- v3.34 (11/10/2026): 0155 — Bases de PROCESSO INTELIGENTE do Bitrix
      (`data_sources.bitrix_entity_type_id`/`bitrix_spa_config`/
      `bitrix_spa_loaded_at`), triagem `sync_source_requests` e as três colunas
@@ -210,13 +211,15 @@ e a visão de fluxos em [`arquitetura.md`](./arquitetura.md).
 - Migrações em `supabase/migrations/`, todas **idempotentes**. Blocos consolidados
   por fase em `supabase/apply/fase-*.sql` (também idempotentes) + scripts de
   agendamento `pg-cron-*.sql` e o `undo-mock-reuniao.sql`.
-- **Anomalias de numeração** (não "corrija" — a ordem de aplicação real é a dos
-  blocos `apply/fase-*.sql` e do runbook, não estritamente o número):
+- **Anomalias de numeração** (a ordem de aplicação real é a dos blocos
+  `apply/fase-*.sql` e do runbook, não estritamente o número):
   - `0014` **não existe** (número pulado);
-  - `0017` tem **dois arquivos** (`0017_dynamic_columns_and_formulas.sql` e
-    `0017_widget_filter_type.sql`);
-  - `0049` tem **dois arquivos** (`0049_field_percent.sql` e
-    `0049_widget_rpc_count_nonempty.sql`).
+  - `00170`/`00171` e `00490`/`00491` (19/11/2026): eram dois arquivos `0017_*`
+    e dois `0049_*`. O Supabase Preview usa o prefixo como
+    `schema_migrations.version` (chave única) e falhava com `duplicate key`.
+    Os números de 5 dígitos mantêm a ordem LEXICAL antiga (a que o
+    `scripts/db-start.sh` e o `tests/rpc-parity.test.ts` usam) — não os
+    "normalize" para 4 dígitos, nem crie prefixo repetido.
 - Extensões usadas: `pg_cron` e `pg_net` (agendamento), além das padrões do Supabase.
 
 ## 2. Visão geral do modelo

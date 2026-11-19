@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
-# Versão: 1.0 | Data: 24/07/2026
+# Versão: 1.1 | Data: 19/11/2026
+# v1.1: os prefixos duplicados 0017_*/0049_* viraram 00170/00171 e
+#       00490/00491 (mesma ordem lexical). O desvio abaixo segue de propósito:
+#       espelha o fluxo manual de produção (SQL Editor, ordem por NOME).
 # Sobe o stack Supabase LOCAL para testes SEM deixar o CLI aplicar as
-# migrações: o CLI as registra por VERSÃO numérica e o repo tem prefixos
-# duplicados (0017_*, 0049_*) — legado válido do fluxo manual de produção
-# (SQL Editor, ordem por NOME de arquivo). Então o start roda com
+# migrações: o CLI as registra por VERSÃO numérica, e o fluxo manual de
+# produção aplica por NOME de arquivo. Então o start roda com
 # supabase/migrations vazio e este script aplica os arquivos via psql, em
 # ordem lexical de nome — espelho exato do fluxo de produção.
 # Requisitos: supabase CLI + docker + psql no PATH.
