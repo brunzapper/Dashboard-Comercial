@@ -1,4 +1,11 @@
-// Versão: 2.2 | Data: 12/09/2026
+// Versão: 2.3 | Data: 19/11/2026
+// v2.3 (19/11/2026): PERFIL do núcleo da Base (`coreProfile`, 0156 —
+//   lib/records/base-schema.ts). Coluna do núcleo fora do perfil (pipeline,
+//   MRR, "Fechado?" num registro de Meetime/Eventos) não aparece — nem na
+//   grade nem como input —, a não ser que o registro TENHA valor nela.
+//   Responsável e Operação seguem sempre editáveis (dono do registro vale para
+//   toda Base: RLS, remuneração, operações). Input omitido não apaga nada: o
+//   updateRecord só grava chaves presentes no FormData. Sem a prop = legado.
 // v2.2 (12/09/2026): interruptor "mostrar campos vazios" (0141) — a ficha
 //   completa continua sendo o padrão de quem quer conferir, mas quem só quer
 //   LER o registro passa a poder enxugar as linhas sem valor. Vale só para as
@@ -61,11 +68,13 @@ import { updateRecord, type EditActionState } from "@/lib/records/actions";
 import {
   coreCellValue,
   coreDetailRows,
+  coreRefLabel,
   DETAIL_EDITABLE_CORE_REFS,
   DETAIL_HEADER_REFS,
   orphanCustomKeys,
   type CoreDetailRow,
 } from "@/lib/records/detail-fields";
+import { coreRefInProfile } from "@/lib/records/base-schema";
 import type { RecordLabels } from "@/lib/export/record-cells";
 import { emitDataChanged } from "@/lib/tasks/events";
 import {
@@ -174,6 +183,11 @@ export interface RecordEditFormProps {
   showAllFields?: boolean;
   /** A organização travou a personalização dessa escolha. */
   showAllFieldsLocked?: boolean;
+  /**
+   * Perfil do núcleo da Base (0156): colunas que a Base usa. null/ausente =
+   * sem esquema (legado: mostra todas).
+   */
+  coreProfile?: string[] | null;
 }
 
 // Grade read-only de colunas do núcleo (rótulo → valor formatado).
@@ -236,8 +250,14 @@ export function RecordEditForm({
   canManageFields,
   showAllFields = true,
   showAllFieldsLocked = false,
+  coreProfile = null,
   onSaved,
 }: RecordEditFormProps & { onSaved?: () => void }) {
+  // Coluna do núcleo pertence a esta Base (perfil) ou tem valor no registro.
+  const showCore = (ref: string) => coreRefInProfile(coreProfile, ref, record);
+  const coreInputs = ["stage", "channel", "value", "mrr", "currency"].filter(
+    showCore
+  );
   // Padrão desta tela é a ficha COMPLETA: /registros é onde se confere o
   // registro. A preferência do usuário pode enxugá-la, e vale também no painel
   // do dashboard.
@@ -322,7 +342,7 @@ export function RecordEditForm({
         : DETAIL_HEADER_REFS,
     [canEditValues]
   );
-  const coreRows = coreDetailRows(record, coreDefs, coreSkip);
+  const coreRows = coreDetailRows(record, coreDefs, coreSkip, coreProfile);
   // Quantos campos de LEITURA estão sem valor — é o que o interruptor esconde
   // (as seções editáveis nunca somem: esconder um input é perder a edição).
   const emptyCount =
@@ -342,46 +362,59 @@ export function RecordEditForm({
 
           {/* Núcleo (campos de Sync): editáveis p/ quem tem permissão — as
               alterações gravam sempre de volta no Bitrix (force_sync_write_back). */}
-          {canEditValues ? (
+          {canEditValues && coreInputs.length > 0 ? (
             <div className="grid grid-cols-2 gap-3 rounded-md border p-3">
-              <div className="flex flex-col gap-1.5">
-                <Label>Etapa</Label>
-                <Input name="core__stage" defaultValue={record.stage ?? ""} />
-              </div>
-              <div className="flex flex-col gap-1.5">
-                <Label>Canal</Label>
-                <Input name="core__channel" defaultValue={record.channel ?? ""} />
-              </div>
-              <div className="flex flex-col gap-1.5">
-                <Label>Valor</Label>
-                <Input
-                  type="number"
-                  step="0.01"
-                  name="core__value"
-                  defaultValue={record.value ?? ""}
-                />
-              </div>
-              <div className="flex flex-col gap-1.5">
-                <Label>MRR</Label>
-                <Input
-                  type="number"
-                  step="0.01"
-                  name="core__mrr"
-                  defaultValue={record.mrr ?? ""}
-                />
-              </div>
-              <div className="flex flex-col gap-1.5">
-                <Label>Moeda</Label>
-                <Combobox
-                  name="core__currency"
-                  options={[{ value: "", label: "—" }, ...CURRENCY_OPTIONS]}
-                  value={currencyCode}
-                  onValueChange={setCurrencyCode}
-                  placeholder="—"
-                  className="w-full"
-                  aria-label="Moeda"
-                />
-              </div>
+              {showCore("stage") ? (
+                <div className="flex flex-col gap-1.5">
+                  <Label>{coreRefLabel("stage", coreDefs)}</Label>
+                  <Input name="core__stage" defaultValue={record.stage ?? ""} />
+                </div>
+              ) : null}
+              {showCore("channel") ? (
+                <div className="flex flex-col gap-1.5">
+                  <Label>{coreRefLabel("channel", coreDefs)}</Label>
+                  <Input
+                    name="core__channel"
+                    defaultValue={record.channel ?? ""}
+                  />
+                </div>
+              ) : null}
+              {showCore("value") ? (
+                <div className="flex flex-col gap-1.5">
+                  <Label>{coreRefLabel("value", coreDefs)}</Label>
+                  <Input
+                    type="number"
+                    step="0.01"
+                    name="core__value"
+                    defaultValue={record.value ?? ""}
+                  />
+                </div>
+              ) : null}
+              {showCore("mrr") ? (
+                <div className="flex flex-col gap-1.5">
+                  <Label>MRR</Label>
+                  <Input
+                    type="number"
+                    step="0.01"
+                    name="core__mrr"
+                    defaultValue={record.mrr ?? ""}
+                  />
+                </div>
+              ) : null}
+              {showCore("currency") ? (
+                <div className="flex flex-col gap-1.5">
+                  <Label>{coreRefLabel("currency", coreDefs)}</Label>
+                  <Combobox
+                    name="core__currency"
+                    options={[{ value: "", label: "—" }, ...CURRENCY_OPTIONS]}
+                    value={currencyCode}
+                    onValueChange={setCurrencyCode}
+                    placeholder="—"
+                    className="w-full"
+                    aria-label="Moeda"
+                  />
+                </div>
+              ) : null}
             </div>
           ) : null}
 
@@ -446,14 +479,16 @@ export function RecordEditForm({
                 />
               </div>
 
-              <div className="flex flex-col gap-1.5">
-                <Label>Lead relacionado</Label>
-                <LeadCombobox
-                  name="related_lead_id"
-                  defaultId={record.related_lead_id}
-                  defaultLabel={relatedLeadLabel}
-                />
-              </div>
+              {showCore("related_lead_id") ? (
+                <div className="flex flex-col gap-1.5">
+                  <Label>Lead relacionado</Label>
+                  <LeadCombobox
+                    name="related_lead_id"
+                    defaultId={record.related_lead_id}
+                    defaultLabel={relatedLeadLabel}
+                  />
+                </div>
+              ) : null}
             </div>
           ) : null}
 

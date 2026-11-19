@@ -1,4 +1,7 @@
-// Versão: 1.4 | Data: 12/09/2026
+// Versão: 1.5 | Data: 19/11/2026
+// v1.5 (19/11/2026): ESQUEMA da Base (0156, lib/records/base-schema.ts) — campo
+//   "global" sem valor deixa de virar linha "—" de base e o núcleo segue o
+//   perfil da Base (pipeline/MRR/"Fechado?" só onde a Base usa ou há valor).
 // v1.4 (12/09/2026): o DETALHE passou a ser o registro inteiro, e não meia
 //   dúzia de campos. Ele filtrava `!isCoreDef(f)` e lia só `custom_fields` —
 //   ou seja, derrubava as 18 colunas do NÚCLEO (pipeline, etapa, valor, MRR,
@@ -58,7 +61,11 @@ import { loadUserSettings } from "@/lib/config/user-settings";
 import { resolveUiPrefs, userUiPrefs } from "@/lib/config/ui-prefs";
 import { TASK_COLS_WITH_RECORD, type TaskRow } from "@/lib/tasks/types";
 import type { OptionItem } from "@/lib/records/types";
-import { fieldAppliesToSource } from "@/lib/sources";
+import {
+  coreProfileOf,
+  fieldBelongsToRecordType,
+  loadBaseSchemaForRecordType,
+} from "@/lib/records/base-schema";
 import { attributeLabel, type RecordAttribute } from "@/lib/attributes/registry";
 import { loadRecordAttributes } from "@/lib/attributes/load";
 
@@ -180,6 +187,8 @@ export async function loadRowPanel(recordId: string): Promise<RowPanelData> {
   };
 
   const source = (row.record_type as string) ?? "";
+  // 0156: esquema da Base do registro — null = legado (applies_to vazio = todas).
+  const baseSchema = await loadBaseSchemaForRecordType(supabase, source);
   const visible = (f: FieldDefinition) =>
     isAdmin || hasAnyRole(roles, f.visible_to_roles as RoleKey[]);
   const customDefs = defs.filter(
@@ -195,7 +204,8 @@ export async function loadRowPanel(recordId: string): Promise<RowPanelData> {
   for (const { ref, label } of coreDetailRows(
     row,
     defs.filter(isCoreDef),
-    DETAIL_HEADER_REFS
+    DETAIL_HEADER_REFS,
+    coreProfileOf(baseSchema)
   )) {
     const value = recordCellValue(row, ref, defs, labels);
     fields.push({ key: ref, label, value, empty: value === "—", group: "core" });
@@ -209,7 +219,7 @@ export async function loadRowPanel(recordId: string): Promise<RowPanelData> {
     const ref = `custom:${f.field_key}`;
     const value = recordCellValue(row, ref, defs, labels);
     const isEmpty = value === "—";
-    const applies = fieldAppliesToSource(f.applies_to, source);
+    const applies = fieldBelongsToRecordType(baseSchema, f, source);
     if (!applies && isEmpty) continue;
     fields.push({
       key: ref,

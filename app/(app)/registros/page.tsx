@@ -1,4 +1,8 @@
-// Versão: 2.3 | Data: 11/10/2026
+// Versão: 2.4 | Data: 19/11/2026
+// v2.4 (19/11/2026): colunas e painel pelo ESQUEMA da Base (0156,
+//   lib/records/base-schema.ts) — campo "global" sem dado na Base deixa de
+//   virar coluna vazia e linha "—" no painel; o painel recebe o perfil do
+//   núcleo (pipeline/MRR/"Fechado?" só onde a Base os usa).
 // v2.3 (11/10/2026): botão "Novas bases de Sync" (admin com a área Bases) —
 //   triagem dos processos inteligentes do Bitrix antes de virarem Base (0155).
 // v2.2 (10/10/2026): sem o pr-8 do cabeçalho: o sino saiu do canto fixo para a
@@ -61,7 +65,11 @@ import {
 } from "@/lib/records/detail-fields";
 import { parseRecordListSort, sortColumnExpr } from "@/lib/records/list-sort";
 import {
-  fieldAppliesToSource,
+  coreProfileOf,
+  fieldBelongsToBase,
+  loadBaseSchema,
+} from "@/lib/records/base-schema";
+import {
   isKnownSource,
   isSubSource,
   parentKeyOf,
@@ -184,6 +192,7 @@ export default async function RegistrosPage({
     { data: respData },
     { data: opsData },
     populatedRes,
+    baseSchema,
   ] = await Promise.all([
     supabase
       .from("field_definitions")
@@ -205,6 +214,7 @@ export default async function RegistrosPage({
       .eq("active", true)
       .order("name"),
     supabase.rpc("registros_populated_refs", { p_record_type: recordType }),
+    loadBaseSchema(supabase, fonte, sources),
   ]);
 
   const allFields = (fieldsData ?? []) as FieldDefinition[];
@@ -225,8 +235,12 @@ export default async function RegistrosPage({
   // andam juntas.
   const visibleTo = (f: FieldDefinition) =>
     isAdmin || hasAnyRole(userRoles, f.visible_to_roles as RoleKey[]);
+  // 0156: pertencimento pelo ESQUEMA da Base (lib/records/base-schema.ts) —
+  // campo "global" (applies_to vazio) só entra se a Base o tem. Sem a tabela
+  // (migração não aplicada) baseSchema é null e vale a regra legada.
   const appliesTo = (f: FieldDefinition) =>
-    fieldAppliesToSource(f.applies_to, fonte, sources);
+    fieldBelongsToBase(baseSchema, f, fonte, sources);
+  const coreProfile = coreProfileOf(baseSchema);
 
   // Colunas custom da tabela: aplica-se à base OU populada nela
   // ('calculado_agg' não tem valor por registro — nunca vira coluna).
@@ -654,6 +668,7 @@ export default async function RegistrosPage({
         canManageFields={canManageFields}
         canDeleteRecords={isAdmin}
         ai={ai}
+        coreProfile={coreProfile}
       />
 
       {totalPages > 1 ? (

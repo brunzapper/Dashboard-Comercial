@@ -1,4 +1,8 @@
-// Versão: 1.5 | Data: 07/09/2026
+// Versão: 1.6 | Data: 19/11/2026
+// v1.6 (19/11/2026): catálogo do card pelo ESQUEMA da Base (0156,
+//   lib/records/base-schema.ts) + perfil do núcleo no recordCtx. De quebra, o
+//   pertencimento passa o catálogo de Bases (antes sem ele: sub-base virava
+//   record_type inexistente e perdia os campos restritos à pai).
 // v1.5 (07/09/2026): carrega os metadados públicos de IA da org e os
 //   passa ao shell (botão "Configurar com IA"); `maxDuration = 300`
 //   porque as actions do assistente rodam sob o segment config desta rota.
@@ -32,7 +36,11 @@ import {
   collectBoardSourceKeys,
 } from "@/lib/config/source-scope";
 import { SourcesProvider } from "@/components/sources-context";
-import { fieldAppliesToSource } from "@/lib/sources";
+import {
+  coreProfileOf,
+  fieldBelongsToBase,
+  loadBaseSchema,
+} from "@/lib/records/base-schema";
 import { resolvePeriodSelection } from "@/lib/widgets/period";
 import type { DashboardSettings } from "@/lib/widgets/types";
 import type { FieldDefinition, OptionItem } from "@/lib/records/types";
@@ -122,6 +130,10 @@ export default async function KanbanPage({
   // detalhe mostra 100% dos campos; as COLUNAS do card mantêm a regra antiga
   // via `show_in_builder === true` no filtro JS abaixo (paridade byte a byte
   // com o antigo `.or("show_in_builder.eq.true,source_system.eq.core")`).
+  // Esquema da Base do quadro (0156); null = legado (sem fonte ou sem tabela).
+  const baseSchema = kanban.source
+    ? await loadBaseSchema(supabase, kanban.source, sources)
+    : null;
   const { data: fieldsData } = await supabase
     .from("field_definitions")
     .select(
@@ -137,7 +149,8 @@ export default async function KanbanPage({
       !isCoreDef(f) &&
       f.data_type !== "calculado_agg" &&
       f.show_in_builder === true &&
-      (!kanban.source || fieldAppliesToSource(f.applies_to, kanban.source)) &&
+      (!kanban.source ||
+        fieldBelongsToBase(baseSchema, f, kanban.source, sources)) &&
       (isAdmin || hasAnyRole(userRoles, f.visible_to_roles as RoleKey[]))
   );
 
@@ -148,7 +161,8 @@ export default async function KanbanPage({
   const detailVisible = (f: FieldDefinition) =>
     isAdmin || hasAnyRole(userRoles, f.visible_to_roles as RoleKey[]);
   const detailApplies = (f: FieldDefinition) =>
-    !kanban.source || fieldAppliesToSource(f.applies_to, kanban.source);
+    !kanban.source ||
+    fieldBelongsToBase(baseSchema, f, kanban.source, sources);
   const detailFields = customDefs.filter(
     (f) =>
       f.data_type !== "calculado_agg" && detailVisible(f) && detailApplies(f)
@@ -295,6 +309,7 @@ export default async function KanbanPage({
           offBaseDefs,
           coreDefs: [...coreDefs.values()],
           knownFieldKeys,
+          coreProfile: coreProfileOf(baseSchema),
           responsibles,
           operations,
           userRoles,

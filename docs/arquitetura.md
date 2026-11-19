@@ -1,4 +1,5 @@
-<!-- Versão: 3.4 | Data: 11/10/2026 -->
+<!-- Versão: 3.5 | Data: 19/11/2026 -->
+<!-- v3.5 (19/11/2026): §4.29 Esquema por Base (0156) + invariante 48. -->
 <!-- v3.4 (11/10/2026): §4.27 — Apresentar sem barras de rolagem no painel
      inteiro (não só na Tree); pan por arraste em qualquer ponto do slide. -->
 <!-- v3.3 (11/10/2026): §4.27 Tree — cores, ajuste ao texto e números
@@ -7159,6 +7160,49 @@ silêncio); o bloco redesenhado (ícone + hierarquia) é só do Operacional.
 Fora do escopo (recursos de dado, não de estilo): sparkline no KPI, badge de
 etapa e avatar em tabela, faixa de cor no card do kanban.
 
+### 4.29 Esquema por Base: que campos ESTE registro tem (0156, 19/11/2026)
+
+**Por quê.** O sistema deixou de ser "dashboards sobre o Bitrix" e virou um
+núcleo comum a dezenas de Bases heterogêneas (Bitrix, Processos
+Inteligentes, Meetime, eventos, parceiros, planilha, CSV, API). Cinco papéis
+— unificar, medir, operar, pagar e ser modelado por não-programadores/IA —
+fazem a MESMA pergunta: "que campos ESTE registro, DESTA Base, tem?". Até a
+0155 a resposta era `field_definitions.applies_to`, em que VAZIO significa
+"todas as Bases": em 19/11/2026, 18 campos "globais" apareciam em toda Base
+(inclusive numa recém-criada), e as colunas do núcleo de negócio do Bitrix
+(pipeline, MRR, "Fechado?") apareciam em registros de Meetime/Eventos.
+
+**Modelo.** `source_fields` é o ESQUEMA de cada Base raiz: `core:<coluna>`
+(o PERFIL do núcleo — quais colunas de `records` a Base usa) e
+`custom:<key>` (campos), com rótulo/ordem/visibilidade por Base, origem e
+ciclo de vida. A definição do valor (`field_definitions`: tipo, opções,
+fórmula, ACL) e os refs `custom:<key>` NÃO mudam — as RPCs de widget ficam
+intocadas.
+
+**Resolvedor único — `lib/records/base-schema.ts`.**
+- `fieldBelongsToBase` / `fieldBelongsToRecordType`: campo custom pertence
+  se o esquema tem a linha OU se `applies_to` o DECLARA para o record_type.
+  `applies_to` vazio deixa de incluir — campo "global" só entra pela linha.
+- `coreRefShown` / `coreRefInProfile`: coluna do núcleo fora do perfil só
+  aparece no registro que TEM valor nela (`closed` só conta se TRUE) — dado
+  nunca some da tela.
+- Sub-base usa o esquema da pai (`schemaOwnerKey`).
+- Sem a tabela (migração não aplicada) ou com erro, o loader devolve `null`
+  e todo consumidor cai na regra legada — deploy antes da migração é seguro.
+
+**Consumidores (fase 1).** `/registros` (colunas + painel), o painel do card
+do kanban e o painel do registro no dashboard (`loadRowPanel`). O
+`RecordEditForm` recebe `coreProfile`: Etapa/Canal/Valor/MRR/Moeda e Lead
+relacionado só aparecem como input quando estão no perfil ou têm valor;
+Responsável e Operação ficam sempre (dono do registro vale para toda Base).
+Input omitido não apaga nada — `updateRecord` só grava chaves presentes no
+FormData.
+
+**Próximas fases.** Os escritores (sync do Bitrix/SPA, CSV, ingestão, /campos)
+passam a manter `source_fields` (fase 2); perfil do núcleo com rótulo e
+opções por Base — "Fase do negócio" × "Etapa do lead" (fase 3); página da
+Base e seletor de campos do construtor pelo esquema (fases 4–5).
+
 ## 5. Invariantes críticas (NÃO QUEBRAR)
 
 Estas regras já causaram ou causariam bugs graves e silenciosos. Elas também estão
@@ -7951,6 +7995,16 @@ principalmente — para mantenedores humanos.
     vocabulário de entidade (`lead | deal | dynamic_<id>`) tem dono ÚNICO em
     `lib/sync/bitrix/entities.ts`. Write-back resolve a entidade por
     `resolveRecordEntity`, nunca por ternário de `record_type`.
+48. **"Que campos este registro tem" sai do ESQUEMA da Base (0156, §4.29).**
+    Superfície que mostra ou edita registro decide pertencimento por
+    `lib/records/base-schema.ts` (`fieldBelongsToBase`/
+    `fieldBelongsToRecordType` + perfil do núcleo), nunca por
+    `fieldAppliesToSource` cru: `applies_to` vazio NÃO significa mais "todas
+    as Bases" quando há esquema. Coluna do núcleo fora do perfil só aparece
+    com valor no registro. Loader `null` (sem tabela) = legado — nunca erro.
+    O esquema mora em `source_fields`, não em `field_definitions`: o campo
+    continua da ORG (refs `custom:<key>` estáveis, RPCs intocadas) e a Base
+    declara quais usa.
 
 ## 6. Convenções do projeto
 

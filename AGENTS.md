@@ -2437,6 +2437,19 @@ This version has breaking changes — APIs, conventions, and file structure may 
   `lib/records/trash.test.ts` + `records-table.selection.test.tsx` + blocos
   de seleção em `update-validate.test.ts`/`update-instructions.test.ts`.
   Ver `docs/arquitetura.md` §4.21 e invariante 30.
+- **"Que campos este registro tem" sai do ESQUEMA da Base (0156,
+  19/11/2026):** `source_fields` guarda, por Base RAIZ, `core:<coluna>` (perfil
+  do núcleo) e `custom:<key>` (campos), com rótulo/ordem/visibilidade/origem por
+  Base. O resolvedor ÚNICO é `lib/records/base-schema.ts` — superfície que
+  mostra/edita registro usa `fieldBelongsToBase`/`fieldBelongsToRecordType` e
+  o perfil (`coreProfileOf`/`coreRefInProfile`), NUNCA `fieldAppliesToSource`
+  cru: com esquema, `applies_to` VAZIO não é mais "todas as Bases" (só a linha
+  inclui; `applies_to` DECLARADO segue valendo até os escritores migrarem).
+  Coluna do núcleo fora do perfil só aparece com valor no registro (`closed`
+  só se TRUE — `registros_populated_refs` recriada na 0156). Sub-base usa o
+  esquema da pai. Loader `null` (tabela ausente) = legado, nunca erro.
+  `field_definitions`/refs `custom:<key>`/`custom_fields` intocados ⇒ RPCs de
+  widget INTOCADAS. Ver `docs/arquitetura.md` §4.29 e invariante 48.
 - **Indicadores, metas na Tabela Livre, Tree operacional e rituais (0149,
   01/10/2026; 0150, 02/10/2026):** `indicators` é o catálogo que EXPLICA uma chave de meta
   (`key` = `goals.metric`; unidade, rollup, direção, tolerância, dono, fórmula

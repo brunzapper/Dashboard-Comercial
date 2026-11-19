@@ -1,4 +1,6 @@
-// Versão: 1.8 | Data: 07/08/2026
+// Versão: 1.9 | Data: 19/11/2026
+// v1.9 (19/11/2026): KanbanRecordContext.coreProfile (perfil do núcleo da Base,
+//   0156) — opcional; ausente = legado.
 // v1.8 (07/08/2026): KanbanRecordContext ganha o catálogo COMPLETO do detalhe
 //   (detailFields/offBaseDefs/coreDefs/knownFieldKeys, opcionais) — 100% dos
 //   campos no painel do card; superfícies sem eles degradam para `fields`.
@@ -101,6 +103,8 @@ export interface KanbanRecordContext {
   offBaseDefs?: FieldDefinition[];
   coreDefs?: FieldDefinition[];
   knownFieldKeys?: string[];
+  /** Perfil do núcleo da Base (0156); null/ausente = legado. */
+  coreProfile?: string[] | null;
   responsibles: OptionItem[];
   operations: OptionItem[];
   userRoles: string[];
