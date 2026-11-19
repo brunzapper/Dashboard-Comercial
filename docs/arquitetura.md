@@ -1,4 +1,5 @@
 <!-- Versão: 3.5 | Data: 19/11/2026 -->
+<!-- v3.6 (19/11/2026): §4.29 completo — fases 2–6 do esquema por Base (trigger, rótulo de UI do Bitrix, fases por pipeline, página da Base, CSV "é o mesmo dado?", FieldPicker, Métricas salvas). -->
 <!-- v3.5 (19/11/2026): §4.29 Esquema por Base (0156) + invariante 48. -->
 <!-- v3.4 (11/10/2026): §4.27 — Apresentar sem barras de rolagem no painel
      inteiro (não só na Tree); pan por arraste em qualquer ponto do slide. -->
@@ -7198,10 +7199,64 @@ Responsável e Operação ficam sempre (dono do registro vale para toda Base).
 Input omitido não apaga nada — `updateRecord` só grava chaves presentes no
 FormData.
 
-**Próximas fases.** Os escritores (sync do Bitrix/SPA, CSV, ingestão, /campos)
-passam a manter `source_fields` (fase 2); perfil do núcleo com rótulo e
-opções por Base — "Fase do negócio" × "Etapa do lead" (fase 3); página da
-Base e seletor de campos do construtor pelo esquema (fases 4–5).
+**Escritores (fase 2).** O lado custom do esquema é mantido por TRIGGER
+(`_source_fields_from_def`, 0156) a partir de `field_definitions`: todo
+escritor (sync do Bitrix/SPA, CSV, /campos, presets, alocação do kanban,
+de-para, espelho da remuneração) passa por ele sem lembrar do esquema.
+INSERT com `applies_to` declarado entra nas Bases desses record_types; VAZIO
+é a escolha explícita "todas as Bases" e entra em todas; UPDATE que muda
+`applies_to` entra nas novas e sai das removidas; DELETE some de todo esquema.
+Base nova nasce só com os campos DECLARADOS para o record_type dela
+(`_source_fields_for_new_source`) — nunca herda os "globais". O que só o sync
+sabe — o que a origem deixou de mandar — é de `reconcileOriginFields`
+(`lib/records/base-schema-sync.ts`): visto agora ⇒ `last_seen_at`; sumiu do
+Bitrix ⇒ `removed_at` (selo "Removido na origem"), NUNCA exclusão. Lista
+vazia de presentes não reconcilia (lookups hidratados sem o schema). O nome
+do campo vem de `bitrixUiLabel` (`lib/sync/bitrix/field-label.ts`): o
+`title` de campo UF_CRM_… é o próprio código, então formLabel → listLabel →
+filterLabel → title, e o código só como último recurso. `FIELD_LABELS`
+curado segue vencendo.
+
+**Núcleo por Base (fase 3).** A coluna `stage` é UMA para lead e negócio.
+`source_fields.label` dá o rótulo POR Base ("Fase do negócio" em Negócios,
+"Etapa do lead" em Leads — `withBaseCoreLabels` nos painéis e em
+`/registros`; `SourceDef.fieldLabels` no construtor) e
+`source_fields.options` guarda as fases DECLARADAS no Bitrix — de negócio
+agrupadas por pipeline (`dealStageOptions`, o prefixo `C<id>:` do código diz
+o funil), gravadas pelo sync do catálogo (`upsertCoreStageOptions`). O
+seletor de valor de Etapa (`listFilterOptionCandidates` →
+`mergeStageOptions`, `lib/records/stage-options.ts`) agrupa por Base e
+pipeline e junta os valores que só existem nos registros num grupo à parte.
+O VALOR gravado no filtro segue sendo o nome da fase.
+
+**Página da Base (fase 4).** `/registros/bases/<key>` reúne o que vivia em
+quatro telas: Visão geral, Campos (rótulo e olho POR Base, tipo, origem e
+código, % preenchido de `source_field_fill`, selos Novo/Removido/Nome
+interno), Qualidade (chaves fora do esquema ⇒ adotar; colunas do núcleo com
+valor fora do perfil; campos nunca preenchidos ⇒ ocultar), Sub-bases e
+Origem, com "Atualizar do Bitrix" (re-cataloga na hora). Modelo puro em
+`lib/records/base-page.ts`. Olho fechado (`visible=false`) tira o campo do
+registro DAQUELA Base, vencendo até o `applies_to` declarado. Sub-base
+redireciona para a pai. No import de CSV, destino que colide com campo de
+OUTRA Base exige resposta ("É o mesmo dado?", `lib/import/csv-collision.ts`):
+sim reusa a chave; não cria campo próprio com `distinctFieldKey`
+(`status` ⇒ `status_<base>`). Navegação: "Registros" virou "Dados".
+
+**Seletor de campos (fases 5–6).** `organizeFieldOptions`
+(`lib/widgets/field-picker.ts`, puro) reorganiza as MESMAS opções de
+`toFieldOptions` em seções: Métricas salvas ƒ, ↔ Campos comuns, `<Base> ·
+Principais/Datas/Números/Listas e textos/Calculados ƒ/De outra Base ↪`,
+Todas as Bases, Gerais e Fora do widget (campo de Base que o widget não
+consulta: visível e explicado no tooltip, nunca escondido — a métrica com
+fonte própria continua podendo usá-lo). Com UMA Base no widget, o núcleo
+entra nas seções dela com o rótulo dela. `FieldPicker`
+(`components/fields/field-picker.tsx`) substitui o Combobox em dimensão,
+métrica e filtro: grupos sempre visíveis, Recentes por contexto
+(localStorage — conveniência) e busca também pelo código da origem
+(`AvailableField.code`). `calculado_agg` passou a se chamar "Métrica salva
+(totais do recorte)" (key intacta) — é métrica, não campo de registro, e já
+ficava fora do esquema. A fusão com Indicadores (meta como propriedade da
+métrica) fica para depois: exigiria o engine resolver indicador como métrica.
 
 ## 5. Invariantes críticas (NÃO QUEBRAR)
 
@@ -7996,6 +8051,10 @@ principalmente — para mantenedores humanos.
     `lib/sync/bitrix/entities.ts`. Write-back resolve a entidade por
     `resolveRecordEntity`, nunca por ternário de `record_type`.
 48. **"Que campos este registro tem" sai do ESQUEMA da Base (0156, §4.29).**
+    O lado custom é mantido SÓ pelo trigger de `field_definitions` (não
+    escreva `source_fields` custom à mão num escritor novo — declare o
+    `applies_to`); `removed_at` é do sync e nunca vira exclusão; rótulo de
+    Bitrix sai de `bitrixUiLabel`.
     Superfície que mostra ou edita registro decide pertencimento por
     `lib/records/base-schema.ts` (`fieldBelongsToBase`/
     `fieldBelongsToRecordType` + perfil do núcleo), nunca por

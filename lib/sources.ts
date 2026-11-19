@@ -81,6 +81,9 @@ export interface SourceDef {
   folderId?: string | null;
   // Ordem manual (0107) dentro da pasta (raiz) ou da pai (sub). Ausente = 0.
   sortOrder?: number;
+  // Esquema por Base (0156): rótulos PRÓPRIOS desta Base por ref
+  // (`core:stage` → "Fase do negócio"). Só Bases raiz; ausente = nenhum.
+  fieldLabels?: Record<string, string>;
 }
 
 // Fallback/default: as 3 fontes históricas do produto.

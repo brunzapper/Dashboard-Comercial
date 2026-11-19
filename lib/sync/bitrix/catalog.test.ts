@@ -37,6 +37,7 @@ function fakeLookups(overrides?: {
     categoryNames: () => [],
     // v1.1 (08/09/2026)
     statusNames: () => [],
+    dealStageOptions: () => [],
     statusCodes: () => ({ sources: {}, leadStatuses: {}, dealStages: {} }),
   } as unknown as BitrixLookups;
 }

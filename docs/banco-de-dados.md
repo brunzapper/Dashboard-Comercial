@@ -1,4 +1,7 @@
-<!-- Versão: 3.35 | Data: 19/11/2026 -->
+<!-- Versão: 3.36 | Data: 19/11/2026 -->
+<!-- v3.36 (19/11/2026): 0156 completa — `source_fields.options`, triggers de
+     manutenção a partir de `field_definitions`/`data_sources` e
+     `source_field_fill`. -->
 <!-- v3.35 (19/11/2026): 0156 — ESQUEMA POR BASE (`source_fields`) + backfill;
      `registros_populated_refs` passa a contar `closed` só quando TRUE. -->
 <!-- v3.34 (11/10/2026): 0155 — Bases de PROCESSO INTELIGENTE do Bitrix
@@ -373,12 +376,24 @@ PK `(organization_id, source_key, field_ref)`; `source_key` → `data_sources.ke
 cabeçalho do CSV), `first_seen_at`/`last_seen_at`/`removed_at` (a origem parou
 de mandar; a linha NUNCA é apagada). Sub-base usa o esquema da pai. RLS: leitura
 da org; escrita `manage_field_definitions` (mesma de `field_definitions`).
-Backfill da 0156: `applies_to ∋ record_type` ∪ chaves PREENCHIDAS nos registros
-vivos da Base ∪ colunas do núcleo preenchidas (`closed` só se TRUE);
-`calculado_agg` fica fora. Resolvedor ÚNICO: `lib/records/base-schema.ts` — com
-esquema, `applies_to` VAZIO deixa de significar "todas as Bases" (só a linha
-inclui); sem a tabela, o app cai na regra legada. `applies_to` segue valendo como
-DECLARAÇÃO enquanto os escritores (sync/CSV/ingest) não migram (fase 2).
+`options` (jsonb array de `{value, group?}`) = opções DECLARADAS na origem
+para esta Base — hoje as fases do `core:stage` (de negócio por pipeline, de
+lead sem grupo), gravadas pelo sync do catálogo. Backfill da 0156:
+`applies_to ∋ record_type` ∪ campos "globais" (applies_to vazio) PREENCHIDOS
+nos registros vivos da Base ∪ colunas do núcleo preenchidas (`closed` só se
+TRUE); `calculado_agg` fora; `first_seen_at` = `field_definitions.created_at`
+(senão tudo sairia "Novo"); `core:stage` ganha o rótulo "Fase do negócio" /
+"Etapa do lead". MANUTENÇÃO por trigger: `_source_fields_from_def` (after
+insert/update de `applies_to`/`field_key`/delete em `field_definitions`,
+SECURITY DEFINER, escopo pela org da linha — vazio na criação = todas as
+Bases) e `_source_fields_for_new_source` (Base nova recebe só os campos
+declarados para o record_type dela). `removed_at`/`last_seen_at` de campos
+do Bitrix são do sync (`reconcileOriginFields`). `source_field_fill(text)`
+(SECURITY INVOKER) devolve o preenchimento por ref da Base (página da Base).
+Resolvedor ÚNICO: `lib/records/base-schema.ts` — com esquema, `applies_to`
+VAZIO deixa de significar "todas as Bases" (só a linha inclui) e
+`visible=false` tira o campo daquela Base; sem a tabela, o app cai na regra
+legada.
 
 **`field_correspondences`** + **`field_correspondence_members`** (0019) — campos
 unificados globais: uma correspondência (`key` unique, `label`, `data_type`) liga no
@@ -1168,7 +1183,7 @@ contato de um lead alheio.
 | 0153 | widget_filter_record_id | `run_widget_query` e `run_widget_query_snapshot` recriados byte a byte a partir da 0121 com UMA linha diferente nas duas (invariante 1): o ramo de FILTRO aceita `id` além de `v_allowed_cols`. É o que deixa o engine entregar o filtro "Tem tarefa" como `id in (<registros>)` (lib/tasks/task-filter-resolve.ts). `id` NÃO entra em `v_allowed_cols` — dimensão e métrica por id seguem recusadas. **Nenhuma lógica de tarefa no RPC** |
 | 0154 | tasks_read_only | `tasks.read_only boolean not null default false` + trigger `trg_tasks_read_only` (`enforce_tasks_read_only`, BEFORE UPDATE OR DELETE): usuário autenticado (`auth.uid()` não nulo) não altera nem exclui tarefa com `read_only` — é a atividade CONCLUÍDA que nasceu no Bitrix, importada pela leitura de volta/descoberta. Service role passa; exclusão em CASCATA (purga de registro) passa por `pg_trigger_depth() > 1`. O cursor da descoberta vive em `sync_config` (`bitrix_activity_discovery`), sem tabela nova. **Não recria as RPCs de widget** |
 | 0155 | bitrix_spa_sources | Processos Inteligentes do Bitrix como Bases: `data_sources.bitrix_entity_type_id` (+ único parcial por org), `bitrix_spa_config`, `bitrix_spa_loaded_at`; tabela `sync_source_requests` (triagem: solicitar → ajustar → aprovar; RLS admin da org); `data_sources.bitrix_activity_owner`, `bitrix_task_queue.owner_entity` e `bitrix_writeback_queue.entity` passam a aceitar `dynamic_<id>`. Nenhuma coluna nova em `records` (item SPA usa `source_id` prefixado `<tipo>:<id>`). **Não recria as RPCs de widget** |
-| 0156 | source_fields | ESQUEMA POR BASE: tabela `source_fields` (`core:<coluna>` = perfil do núcleo; `custom:<key>`; rótulo/ordem/visibilidade por Base; origem e ciclo de vida) com RLS da org (escrita `manage_field_definitions`) e BACKFILL idempotente (`applies_to` declarado ∪ chaves preenchidas ∪ núcleo preenchido; `calculado_agg` fora; campo "global" sem dado na Base NÃO entra). `registros_populated_refs` recriada (corpo da 0121) contando `closed` só quando TRUE. Resolvedor `lib/records/base-schema.ts`; sem a tabela o app cai no legado. **Não recria as RPCs de widget** |
+| 0156 | source_fields | ESQUEMA POR BASE: tabela `source_fields` (`core:<coluna>` = perfil do núcleo; `custom:<key>`; rótulo/ordem/visibilidade por Base; origem e ciclo de vida) com RLS da org (escrita `manage_field_definitions`) e BACKFILL idempotente (`applies_to` declarado ∪ chaves preenchidas ∪ núcleo preenchido; `calculado_agg` fora; campo "global" sem dado na Base NÃO entra). Triggers `_source_fields_from_def`/`_source_fields_for_new_source` mantêm o lado custom; `options` guarda as fases declaradas; `source_field_fill` dá o % preenchido. `registros_populated_refs` recriada (corpo da 0121) contando `closed` só quando TRUE. Resolvedor `lib/records/base-schema.ts`; sem a tabela o app cai no legado. **Não recria as RPCs de widget** |
 
 
 ### 0145 — Miniaturas persistentes de dashboards

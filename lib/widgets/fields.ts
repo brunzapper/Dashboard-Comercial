@@ -93,6 +93,9 @@ export interface AvailableField {
   // Fórmula legível (rótulos client-side, nunca refs internos) p/ o tooltip das
   // opções de dropdown. Só campos calculados com fórmula.
   formulaText?: string;
+  // Esquema por Base (fase 5): código do campo NA ORIGEM (UF_CRM_…, cabeçalho
+  // do CSV) — o seletor de campos também busca por ele.
+  code?: string;
   // Só match:<fonte>:*: rótulo do campo interno (sem o prefixo '↪ <Fonte>: ' do
   // `label`), p/ os dropdowns comporem o prefixo curto sem duplicar a fonte.
   baseLabel?: string;
@@ -142,6 +145,13 @@ function appliesSources(appliesTo: string[] | null | undefined): SourceKey[] {
     if (src) out.add(src);
   }
   return [...out];
+}
+
+// "<tipo>:UF_CRM_X" (SPA) / "<base>:<chave>" (CSV) → o código da origem.
+function originCode(id: string | null | undefined): string | undefined {
+  if (!id) return undefined;
+  const i = id.lastIndexOf(":");
+  return i === -1 ? id : id.slice(i + 1);
 }
 
 function isCalcType(dataType: FieldDefinition["data_type"]): boolean {
@@ -341,6 +351,7 @@ export function buildAvailableFields(
           writable: f.source_system === "bitrix" && Boolean(f.source_field_id),
           calc: f.data_type === "calculado" || undefined,
           source: singleFieldSource(f, byKey),
+          code: originCode(f.source_field_id),
         }
   );
   // SUB-FONTES (0078): pai e sub compartilham o record_type, então o mapa por

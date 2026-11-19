@@ -1,4 +1,6 @@
-// Versão: 1.6 | Data: 07/08/2026
+// Versão: 1.7 | Data: 19/11/2026
+// v1.7 (19/11/2026): calculado_agg vira "Métrica salva (totais do recorte)" —
+//   é métrica, não campo de registro (esquema por Base, fase 6; key intacta).
 // v1.6 (07/08/2026): RecordRow.stage_semantic? (situação derivada do sync) —
 //   presente nos selects de /registros e do modo lista p/ a grade núcleo do
 //   painel de detalhe.
@@ -36,7 +38,7 @@ export const DATA_TYPE_LABELS: Record<DataType, string> = {
   moeda: "Moeda",
   booleano: "Booleano",
   calculado: "Calculado (por registro)",
-  calculado_agg: "Calculado (totais do recorte)",
+  calculado_agg: "Métrica salva (totais do recorte)",
 };
 
 // Tipos numéricos: podem ser métrica (soma/média) e operando de fórmula.
