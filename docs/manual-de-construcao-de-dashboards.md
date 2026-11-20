@@ -1,4 +1,5 @@
-<!-- Versão: 1.53 | Data: 19/11/2026 -->
+<!-- Versão: 1.54 | Data: 19/11/2026 -->
+<!-- v1.54 (19/11/2026): tabela de registros com o nome da coluna da Base e edição da Fase do negócio pelas fases do pipeline. -->
 <!-- v1.53 (19/11/2026): esquema por Base — cada Base tem os PRÓPRIOS campos
      (página da Base, Fase do negócio × Etapa do lead, nomes de tela do
      Bitrix), seletor de campos por Base e tipo com busca por código, e
@@ -2052,6 +2053,10 @@ calculada), em acordeões recolhíveis com badge de resumo.
 > (`UF_CRM_…`). No filtro de **Etapa**, os valores vêm agrupados por Base e
 > pipeline, e incluem as fases cadastradas no Bitrix mesmo sem registro
 > nelas; o que só existe nos registros aparece em **"Só nos registros"**.
+> Na **tabela de registros**, a coluna também ganha o nome da Base quando todas
+> as linhas são dela (ex.: **"Fase do negócio"**). Marcada como **Editável**, a
+> célula oferece as fases do **pipeline daquele negócio**, e o valor atual
+> continua aparecendo mesmo que não esteja na lista.
 
 ### 6.1 Seção "Bases de dados"
 

@@ -1,4 +1,7 @@
-// Versão: 1.1 | Data: 18/07/2026
+// Versão: 1.2 | Data: 19/11/2026
+// v1.2 (19/11/2026): `choices` — opções da BASE do registro (0156; ex.: fases
+//   do pipeline do negócio) vencem a lista única da org; o valor atual vem
+//   sempre incluído, então a célula nunca mostra "—" por valor fora da lista.
 // v1.1 (18/07/2026): commit otimista extraído p/ useCellCommit; erro expõe a
 //   mensagem da action no title.
 // Célula editável inline para COLUNAS DO NÚCLEO de records (title, stage, value,
@@ -29,6 +32,7 @@ export function CoreEditableCell({
   field,
   dataType,
   options,
+  choices,
   value: serverValue,
   currency,
   writeBack = false,
@@ -41,6 +45,9 @@ export function CoreEditableCell({
   // Options de uma coluna núcleo virada 'selecao' no /campos (0086 — ex.:
   // pipeline). Presentes + dataType 'selecao' → dropdown em vez de texto livre.
   options?: string[];
+  // Opções da Base do registro (lib/records/base-core.ts → coreEditChoices),
+  // já com o valor atual. Presentes = dropdown, qualquer que seja o tipo.
+  choices?: { value: string; label: string }[] | null;
   value: string; // valor atual (string)
   currency?: string | null; // moeda do registro (formata value/mrr)
   writeBack?: boolean;
@@ -153,6 +160,26 @@ export function CoreEditableCell({
     );
   }
 
+  // Opções da Base do registro (ex.: fases do pipeline do negócio).
+  if (choices && choices.length > 0) {
+    const list = choices.some((c) => c.value === value)
+      ? choices
+      : value
+        ? [{ value, label: value }, ...choices]
+        : choices;
+    return (
+      <Combobox
+        options={[{ value: "", label: "—" }, ...list]}
+        value={value}
+        onValueChange={commit}
+        placeholder="—"
+        disabled={pending}
+        className={cn("w-full", error && "border-destructive")}
+        aria-label={field}
+      />
+    );
+  }
+
   // Coluna núcleo 'selecao' (0086): dropdown com as options do /campos —
   // mesma receita da EditableCell dos campos personalizados.
   if (dataType === "selecao" && options && options.length > 0) {
@@ -160,6 +187,11 @@ export function CoreEditableCell({
       <Combobox
         options={[
           { value: "", label: "—" },
+          // Valor atual fora da lista (ex.: fase de negócio numa lista de
+          // etapas de lead) entra primeiro — sem isso o Combobox mostra "—".
+          ...(value && !options.includes(value)
+            ? [{ value, label: value }]
+            : []),
           ...options.map((o) => ({ value: o, label: o })),
         ]}
         value={value}
