@@ -1,4 +1,9 @@
-// Versão: 3.8 | Data: 26/07/2026
+// Versão: 3.9 | Data: 19/11/2026
+// v3.9 (19/11/2026): esquema por Base (0156) — cabeçalho de coluna do núcleo
+//   com o rótulo da Base quando todos os registros são dela ("Fase do negócio"
+//   em vez de "Etapa"), e a edição inline de coluna do núcleo oferece as opções
+//   da Base DO REGISTRO (fases do pipeline dele) em vez da lista única da org,
+//   que não tinha a fase do negócio e fazia a célula virar "—".
 // v3.8 (26/07/2026): janela incremental do full fetch — prop windowState
 //   (rodapé "Exibindo X de Y — Carregar mais"; grupos/totais/busca local são
 //   PARCIAIS até cobrir o total; ver record-list v2.0).
@@ -92,6 +97,11 @@ import {
   metricTargetSources,
 } from "@/lib/widgets/metric-sources";
 import { recordTypeOf, toRecordType } from "@/lib/sources";
+import {
+  coreEditChoices,
+  rootSourceOf,
+  sharedBaseFieldLabel,
+} from "@/lib/records/base-core";
 import { useSources } from "@/components/sources-context";
 import { recordSearchMatcher } from "@/lib/widgets/record-search";
 import {
@@ -584,8 +594,18 @@ export const RecordListTable = memo(function RecordListTable({
     (x) => x.key
   );
   // Rótulo (estético) do cabeçalho de uma coluna: nome exibido > rótulo do campo.
+  // Coluna do núcleo com rótulo PRÓPRIO da Base (0156): só quando todos os
+  // registros exibidos são dela — com Bases misturadas fica o rótulo geral.
+  const recordTypesShown = useMemo(
+    () => new Set(records.map((r) => r.record_type)),
+    [records]
+  );
   const colLabel = (c: RecordListColumn) =>
-    c.label?.trim() || fieldLabel(c.field, available);
+    c.label?.trim() ||
+    (!c.field.includes(":")
+      ? sharedBaseFieldLabel(sourcesCatalog, recordTypesShown, c.field)
+      : null) ||
+    fieldLabel(c.field, available);
   // Métrica monetária (value/mrr ou campo moeda/calc-moeda).
   const metricIsMoney = (field: string): boolean =>
     available.find((a) => a.field === field)?.isMoney ?? false;
@@ -1666,6 +1686,14 @@ export const RecordListTable = memo(function RecordListTable({
                       ? coreDefByField.get(c.field)?.options
                       : undefined
                   }
+                  // Opções da Base do registro (ex.: fases do pipeline dele).
+                  choices={coreEditChoices(
+                    rootSourceOf(sourcesCatalog, r.record_type)?.fieldOptions?.[
+                      `core:${c.field}`
+                    ],
+                    c.field === "stage" ? r.pipeline : null,
+                    coreString(c.field, r)
+                  )}
                   value={coreString(c.field, r)}
                   currency={r.currency}
                   writeBack={c.writeBack}

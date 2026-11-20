@@ -1,4 +1,5 @@
-<!-- Versão: 3.5 | Data: 19/11/2026 -->
+<!-- Versão: 3.7 | Data: 19/11/2026 -->
+<!-- v3.7 (19/11/2026): §4.29 — tabela de registros usa rótulo e opções da Base (edição inline da Fase do negócio). -->
 <!-- v3.6 (19/11/2026): §4.29 completo — fases 2–6 do esquema por Base (trigger, rótulo de UI do Bitrix, fases por pipeline, página da Base, CSV "é o mesmo dado?", FieldPicker, Métricas salvas). -->
 <!-- v3.5 (19/11/2026): §4.29 Esquema por Base (0156) + invariante 48. -->
 <!-- v3.4 (11/10/2026): §4.27 — Apresentar sem barras de rolagem no painel
@@ -7228,6 +7229,18 @@ seletor de valor de Etapa (`listFilterOptionCandidates` →
 `mergeStageOptions`, `lib/records/stage-options.ts`) agrupa por Base e
 pipeline e junta os valores que só existem nos registros num grupo à parte.
 O VALOR gravado no filtro segue sendo o nome da fase.
+
+A TABELA de registros do dashboard aplica o mesmo esquema
+(`lib/records/base-core.ts`): o cabeçalho de uma coluna do núcleo usa o
+rótulo da Base quando todos os registros exibidos são dela
+(`sharedBaseFieldLabel` — Bases misturadas ficam com o rótulo geral), e a
+edição inline oferece as opções DECLARADAS na Base do registro
+(`SourceDef.fieldOptions`, de `source_fields.options`), recortadas ao
+pipeline dele (`coreEditChoices`). A linha core de `field_definitions` tem
+UMA lista para a org — as etapas de LEAD — e, usada como dropdown num
+negócio, não continha o valor: a célula mostrava "—" e a fase parecia sumir
+ao marcar a coluna como editável. O valor atual SEMPRE entra na lista
+(também no ramo legado `selecao`), então valor fora da lista nunca vira "—".
 
 **Página da Base (fase 4).** `/registros/bases/<key>` reúne o que vivia em
 quatro telas: Visão geral, Campos (rótulo e olho POR Base, tipo, origem e

@@ -1,4 +1,6 @@
-// Versão: 2.5 | Data: 11/10/2026
+// Versão: 2.6 | Data: 19/11/2026
+// v2.6 (19/11/2026): `SourceDef.fieldOptions` — opções declaradas por Base
+//   (0156), usadas na edição inline de colunas do núcleo (lib/records/base-core.ts).
 // v2.5 (11/10/2026): Base de PROCESSO INTELIGENTE do Bitrix (0155) —
 //   `SourceDef.bitrixEntityTypeId` + `bitrixRecordEntityOf` (a entidade dos
 //   REGISTROS da Base, para write-back/link) separado de `bitrixEntityOfSource`
@@ -84,6 +86,10 @@ export interface SourceDef {
   // Esquema por Base (0156): rótulos PRÓPRIOS desta Base por ref
   // (`core:stage` → "Fase do negócio"). Só Bases raiz; ausente = nenhum.
   fieldLabels?: Record<string, string>;
+  // Opções DECLARADAS por ref nesta Base (`core:stage` → fases do Bitrix, as
+  // de negócio com o pipeline em `group`). Usadas na edição inline
+  // (lib/records/base-core.ts). Só Bases raiz; ausente = nenhuma.
+  fieldOptions?: Record<string, { value: string; group?: string | null }[]>;
 }
 
 // Fallback/default: as 3 fontes históricas do produto.

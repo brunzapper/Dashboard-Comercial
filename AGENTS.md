@@ -2455,7 +2455,9 @@ This version has breaking changes — APIs, conventions, and file structure may 
   exclusão. Rótulo de campo do Bitrix SÓ por `bitrixUiLabel` (o `title` de
   UF_CRM_… é o código). Rótulo/opções do núcleo POR Base ("Fase do negócio" ×
   "Etapa do lead") vêm de `source_fields.label/options` —
-  `withBaseCoreLabels`, `SourceDef.fieldLabels`, `mergeStageOptions`.
+  `withBaseCoreLabels`, `SourceDef.fieldLabels`, `mergeStageOptions`; na
+  tabela de registros, `sharedBaseFieldLabel` (cabeçalho) e `coreEditChoices`
+  sobre `SourceDef.fieldOptions` (edição inline — nunca a lista única da org).
   `visible=false` tira o campo do registro DAQUELA Base. Página da Base em
   `/registros/bases/<key>`; colisão de nome no CSV pergunta "é o mesmo dado?"
   (`csvCollision`/`distinctFieldKey`). O seletor de campo do construtor é

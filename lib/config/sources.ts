@@ -1,4 +1,6 @@
-// Versão: 1.6 | Data: 11/10/2026
+// Versão: 1.7 | Data: 19/11/2026
+// v1.7 (19/11/2026): opções por Base do esquema (`source_fields.options`)
+//   entram em `SourceDef.fieldOptions` junto com os rótulos.
 // v1.6 (11/10/2026): `bitrix_entity_type_id` (0155, Base de processo
 //   inteligente) entra no SourceDef; sem a coluna o select repete sem ela.
 // v1.5 (26/07/2026): PASTAS (0107) — folder_id/sort_order em data_sources e
@@ -116,8 +118,8 @@ export const loadSources = cache(async function loadSources(
     try {
       let labelQuery = supabase
         .from("source_fields")
-        .select("source_key, field_ref, label")
-        .not("label", "is", null);
+        .select("source_key, field_ref, label, options")
+        .or("label.not.is.null,options.not.is.null");
       if (orgId) labelQuery = labelQuery.eq("organization_id", orgId);
       const { data: labelRows, error: labelErr } = await labelQuery;
       if (!labelErr && labelRows) {
@@ -126,10 +128,14 @@ export const loadSources = cache(async function loadSources(
           source_key: string;
           field_ref: string;
           label: string | null;
+          options: unknown;
         }[]) {
           const src = byKey.get(r.source_key);
-          if (!src || !r.label?.trim()) continue;
-          (src.fieldLabels ??= {})[r.field_ref] = r.label.trim();
+          if (!src) continue;
+          if (r.label?.trim())
+            (src.fieldLabels ??= {})[r.field_ref] = r.label.trim();
+          const opts = parseDeclaredOptions(r.options);
+          if (opts.length > 0) (src.fieldOptions ??= {})[r.field_ref] = opts;
         }
       }
     } catch {
@@ -141,3 +147,26 @@ export const loadSources = cache(async function loadSources(
     return BUILTIN_SOURCES;
   }
 });
+
+// `source_fields.options` (jsonb): `[{value, group?}]` ou `["valor"]`. Item
+// fora do formato é descartado — opção é conveniência de edição, nunca regra.
+function parseDeclaredOptions(
+  raw: unknown
+): { value: string; group?: string | null }[] {
+  if (!Array.isArray(raw)) return [];
+  const out: { value: string; group?: string | null }[] = [];
+  for (const o of raw) {
+    if (typeof o === "string" && o.trim()) out.push({ value: o.trim() });
+    else if (o && typeof o === "object") {
+      const v = (o as { value?: unknown }).value;
+      const g = (o as { group?: unknown }).group;
+      if (typeof v === "string" && v.trim())
+        out.push(
+          typeof g === "string" && g.trim()
+            ? { value: v.trim(), group: g.trim() }
+            : { value: v.trim() }
+        );
+    }
+  }
+  return out;
+}
