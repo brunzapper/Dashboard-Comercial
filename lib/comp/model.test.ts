@@ -1166,6 +1166,42 @@ describe("alvo padrão e moeda do alvo", () => {
     expect(semNada.byFactor.f_a.targetSource).toBeNull();
   });
 
+  it("memberTargets: meta do membro fica entre a linha de goals e o padrão do plano", () => {
+    const cfg = makeConfig();
+    cfg.factors[0].defaultTarget = 35000;
+    cfg.factors[0].memberTargets = { ana: 20000 };
+    const real = { f_a: 10000, f_b: 10 };
+    // Membro com meta própria ⇒ usa a dele.
+    let bd = computeEntry(cfg, 1000, emptyInputs(), real, { f_b: 10 }, "ana");
+    expect(bd.byFactor.f_a.target).toBe(20000);
+    expect(bd.byFactor.f_a.targetSource).toBe("member");
+    expect(bd.byFactor.f_a.attainmentPct).toBe(50);
+    // Membro sem meta própria ⇒ padrão do plano.
+    bd = computeEntry(cfg, 1000, emptyInputs(), real, { f_b: 10 }, "bia");
+    expect(bd.byFactor.f_a.target).toBe(35000);
+    expect(bd.byFactor.f_a.targetSource).toBe("default");
+    // Sem memberId ⇒ padrão do plano.
+    bd = computeEntry(cfg, 1000, emptyInputs(), real, { f_b: 10 });
+    expect(bd.byFactor.f_a.targetSource).toBe("default");
+    // Meta do mês (goals) vence a do membro.
+    bd = computeEntry(cfg, 1000, emptyInputs(), real, { f_a: 5000, f_b: 10 }, "ana");
+    expect(bd.byFactor.f_a.target).toBe(5000);
+    expect(bd.byFactor.f_a.targetSource).toBe("goal");
+  });
+
+  it("memberTargets: sobrevive ao round-trip; vazio some; sujeira derruba o config", () => {
+    const cfg = makeConfig();
+    cfg.factors[0].memberTargets = { ana: 20000, bia: 0 };
+    expect(reparse(cfg)!.factors[0].memberTargets).toEqual({ ana: 20000, bia: 0 });
+    cfg.factors[0].memberTargets = {};
+    expect(reparse(cfg)!.factors[0].memberTargets).toBeUndefined();
+    const bad = JSON.parse(JSON.stringify(makeConfig()));
+    bad.factors[0].memberTargets = { ana: -1 };
+    expect(parseCompPlanConfig(bad)).toBeNull();
+    bad.factors[0].memberTargets = { ana: "x" };
+    expect(parseCompPlanConfig(bad)).toBeNull();
+  });
+
   it("targetCurrency: converte o alvo pela taxa do caller; taxa ausente ⇒ atingimento null (nunca 1:1)", () => {
     const cfg = makeConfig();
     cfg.factors[0].defaultTarget = 10000;

@@ -144,7 +144,8 @@ export function validateCompEdit(
   }
 
   // Começa da config ATUAL: tudo que a IA não mencionar sobrevive — inclusive
-  // `presetKey`, `detailGrouping`, `memberTeams`, `memberCredit` (v1.1) e os
+  // `presetKey`, `detailGrouping`, `memberTeams`, `memberCredit` (v1.1),
+  // `memberTargets` (meta padrão por membro) e os
   // `filters` do recorte,
   // que o save do plan-editor também re-emite (sem isso o round-trip os
   // destruiria no primeiro apply).

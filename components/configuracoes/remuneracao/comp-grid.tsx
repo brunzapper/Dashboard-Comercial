@@ -688,7 +688,7 @@ function FactorCells(props: {
   targetCurrency: string | null;
   target: number | null;
   targetBRL: number | null;
-  targetSource: "goal" | "default" | null;
+  targetSource: "goal" | "member" | "default" | null;
   targetRateMissing: boolean;
   realized: number | null;
   attainmentPct: number | null;
@@ -723,6 +723,10 @@ function FactorCells(props: {
     targetTip.push(
       "Meta padrão do plano — digite para fixar a meta do mês; limpar volta ao padrão."
     );
+  else if (props.targetSource === "member")
+    targetTip.push(
+      "Meta padrão deste membro (definida no plano) — digite para fixar a meta do mês; limpar volta ao padrão."
+    );
   return (
     <>
       <EditableCell
@@ -756,7 +760,9 @@ function FactorCells(props: {
             targetText
           )
         }
-        muted={props.targetSource === "default"}
+        muted={
+          props.targetSource === "default" || props.targetSource === "member"
+        }
         onSave={props.onTarget}
         current={props.targetSource === "goal" ? props.target : null}
       />
