@@ -4344,8 +4344,22 @@ total opcional por plano.
   (`derivedFactorCatalog` — catálogo ÚNICO do editor e do savePlan; sem
   cadeia nem ciclo); o parse descarta fontes/condições/membro do derivado e
   NÃO rejeita refs (a régua com mensagem é o `validateCompPlanSave`; ref fora
-  do catálogo só fica sem valor ⇒ null). O detalhamento não lista registros
-  dele (`factorOperands` = [], aviso `detailDerivedNote`). A IA de
+  do catálogo só fica sem valor ⇒ null). No detalhamento, derivado LINEAR
+  (só ± origens — `linearOriginCoefficients`) lista os registros das origens
+  com o valor LÍQUIDO por registro (Σ coeficiente × valor; quem se anula — a
+  venda Outbound em Totais − Outbound — sai); conta não linear (razão,
+  constante) não tem registros e mostra `detailDerivedNote`. **Desmarcar vale
+  para o LANÇAMENTO (28/11/2026):** desmarcar a venda Outbound só no
+  Outbound fazia ela reaparecer no derivado (Totais − Outbound) e ser paga
+  pela tabela. Hoje `inputs.excluded` grava sob a chave única
+  `EXCLUDED_ALL_KEY` e o engine aplica a UNIÃO (`excludedRecordIds`) a todo
+  indicador do membro no mês; chaves por fator antigas seguem lidas. **Grade
+  de Lançamentos objetiva (28/11/2026):** as colunas de cada indicador saem
+  de `factorGridColumns` (`lib/comp/grid-columns.ts`, puro, por PLANO):
+  Meta/Ating. só se ele tem peso, dispara faixa por atingimento ou a fórmula
+  do total lê alvo/atingimento; Valor só com peso (ou a fórmula do total lê o
+  valor); Remun. (faixa aplicada) + Recebe (o que os blocos pagam,
+  `factorCommissionCell`) quando ele é BASE de comissão. A IA de
   remuneração recusa `formulaTexto` para derivado (o catálogo dela é o
   agregado). **Duplicar:** "Duplicar indicador" copia o rascunho com id novo e
   métrica AUTO; `duplicatePlan` copia o plano GRAVADO DESLIGADO (dois planos

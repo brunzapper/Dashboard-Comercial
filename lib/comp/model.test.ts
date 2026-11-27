@@ -45,7 +45,10 @@ import {
   computeEntry,
   derivedFactorCatalog,
   derivedSourceFactorIds,
+  EXCLUDED_ALL_KEY,
   excludedRecordFilters,
+  excludedRecordIds,
+  linearOriginCoefficients,
   isDerivedFactor,
   explicitMemberIds,
   factorTargetCurrencies,
@@ -1206,19 +1209,25 @@ describe("alvo padrão e moeda do alvo", () => {
     expect(parseCompPlanConfig(bad)).toBeNull();
   });
 
-  it("inputs.excluded: parse leniente (só UUID, sem duplicata) e filtros `id neq` por fator", () => {
+  it("inputs.excluded: parse leniente (só UUID, sem duplicata) e filtros `id neq` do LANÇAMENTO inteiro", () => {
     const A = "11111111-2222-4333-8444-555555555555";
     const B = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
+    const C = "cccccccc-bbbb-4ccc-8ddd-eeeeeeeeeeee";
     const inputs = parseCompEntryInputs({
-      excluded: { f_a: [A, A, "lixo", 3, B], f_b: [], f_c: "x" },
+      excluded: { f_a: [A, A, "lixo", 3, B], f_b: [], f_c: "x", "*": [B, C] },
     });
-    expect(inputs.excluded).toEqual({ f_a: [A, B] });
-    expect(excludedRecordFilters(inputs, "f_a")).toEqual([
+    expect(inputs.excluded).toEqual({ f_a: [A, B], "*": [B, C] });
+    // União das chaves (legado por fator + chave única), sem duplicata: o
+    // desmarcado sai de TODO indicador do membro no mês.
+    expect(excludedRecordIds(inputs)).toEqual([A, B, C]);
+    expect(excludedRecordFilters(inputs)).toEqual([
       { field: "id", op: "neq", value: A },
       { field: "id", op: "neq", value: B },
+      { field: "id", op: "neq", value: C },
     ]);
-    expect(excludedRecordFilters(inputs, "f_b")).toEqual([]);
+    expect(excludedRecordFilters(parseCompEntryInputs({}))).toEqual([]);
     expect(parseCompEntryInputs({}).excluded).toBeUndefined();
+    expect(EXCLUDED_ALL_KEY).toBe("*");
   });
 
   it("targetCurrency: converte o alvo pela taxa do caller; taxa ausente ⇒ atingimento null (nunca 1:1)", () => {
@@ -1496,6 +1505,24 @@ describe("indicador DERIVADO (realizedFrom: indicators)", () => {
     const bd = computeEntry(cfg, 0, emptyInputs(), { f_tot: 8000, f_out: null }, { f_tot: 10000 });
     expect(bd.byFactor.f_rest.realized).toBeNull();
     expect(bd.commissionBlocks.find((b) => b.blockId === "tabela")!.value).toBe(0);
+  });
+
+  it("linearOriginCoefficients: só soma/subtração de origens", () => {
+    const cfg = derivedConfig();
+    expect([...linearOriginCoefficients(cfg.factors[2])!]).toEqual([
+      ["f_tot", 1],
+      ["f_out", -1],
+    ]);
+    const d = cfg.factors[2];
+    // Razão / constante ⇒ não linear (não há "registros do derivado").
+    expect(
+      linearOriginCoefficients({
+        ...d,
+        formula: f(ref(compFactorRef("f_tot", "realizado")), op("/"), ref(compFactorRef("f_out", "realizado"))),
+      })
+    ).toBeNull();
+    expect(linearOriginCoefficients({ ...d, formula: f(ref(compFactorRef("f_tot", "realizado")), op("-"), num(10)) })).toBeNull();
+    expect(linearOriginCoefficients(cfg.factors[0])).toBeNull();
   });
 
   it("derivedFactorCatalog: só o realizado de indicadores de registros, sem o próprio", () => {

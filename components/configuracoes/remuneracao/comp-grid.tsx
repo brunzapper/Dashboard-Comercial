@@ -1,3 +1,8 @@
+// Versão: 1.9 | Data: 28/11/2026 (v1.9: colunas RELEVANTES por indicador —
+// factorGridColumns (lib/comp/grid-columns.ts): Meta/Ating. só onde o
+// atingimento entra em conta, Valor só com peso, e Remun. (faixa aplicada) +
+// Recebe (o que a comissão paga) no indicador que é BASE de um bloco. O peso
+// só aparece no cabeçalho quando é > 0)
 // Versão: 1.8 | Data: 16/08/2026 (v1.8: CONFERÊNCIA por registro — ícone
 // próprio na célula Realizado (aparece no hover) abre o CompDetailPanel com os
 // registros por trás do número; o duplo-clique da célula segue sendo o
@@ -88,6 +93,12 @@ import {
   type CompEntryInputs,
   type CompPlanConfig,
 } from "@/lib/comp/model";
+import {
+  FACTOR_GRID_COLUMN_LABELS,
+  factorCommissionCell,
+  factorGridColumns,
+  type FactorGridColumn,
+} from "@/lib/comp/grid-columns";
 import {
   publishMonth,
   recomputeMonth,
@@ -304,9 +315,12 @@ export function CompGrid(props: CompGridProps) {
 
   // Nº de colunas físicas da tabela (fonte: header abaixo) — a linha de
   // detalhe da memória usa este valor como colSpan.
+  const columnsByFactor = new Map(
+    props.config.factors.map((f) => [f.id, factorGridColumns(props.config, f)])
+  );
   const colCount =
     4 +
-    4 * props.config.factors.length +
+    [...columnsByFactor.values()].reduce((a, c) => a + c.length, 0) +
     ((props.config.commissions?.length ?? 0) > 0 ? 1 : 0);
 
   return (
@@ -356,7 +370,7 @@ export function CompGrid(props: CompGridProps) {
               {props.config.factors.map((f) => (
                 <TableHead
                   key={f.id}
-                  colSpan={4}
+                  colSpan={columnsByFactor.get(f.id)?.length ?? 1}
                   className="border-l text-center"
                   title={
                     props.config.apuracao === "mes_anterior"
@@ -364,10 +378,13 @@ export function CompGrid(props: CompGridProps) {
                       : "As metas também são editáveis em Configurações → Metas"
                   }
                 >
-                  {f.label}{" "}
-                  <span className="text-muted-foreground font-normal">
-                    ({f.weightPct.toLocaleString("pt-BR")}%)
-                  </span>
+                  {f.label}
+                  {f.weightPct > 0 ? (
+                    <span className="text-muted-foreground font-normal">
+                      {" "}
+                      ({f.weightPct.toLocaleString("pt-BR")}%)
+                    </span>
+                  ) : null}
                 </TableHead>
               ))}
               {(props.config.commissions?.length ?? 0) > 0 ? (
@@ -385,7 +402,10 @@ export function CompGrid(props: CompGridProps) {
               <TableHead className="bg-background sticky left-0 z-10" />
               <TableHead />
               {props.config.factors.map((f) => (
-                <FactorSubHeader key={f.id} />
+                <FactorSubHeader
+                  key={f.id}
+                  columns={columnsByFactor.get(f.id) ?? ["realized"]}
+                />
               ))}
               {(props.config.commissions?.length ?? 0) > 0 ? (
                 <TableHead className="border-l" />
@@ -402,6 +422,7 @@ export function CompGrid(props: CompGridProps) {
                 config={props.config}
                 plan={props.plan}
                 colCount={colCount}
+                columnsByFactor={columnsByFactor}
                 targetRates={props.targetRates}
                 entry={entryByMember.get(member.id) ?? null}
                 row={rows.get(member.id) ?? null}
@@ -449,13 +470,23 @@ export function CompGrid(props: CompGridProps) {
   );
 }
 
-function FactorSubHeader() {
+const COLUMN_TITLES: Partial<Record<FactorGridColumn, string>> = {
+  rate: "Faixa aplicada: quanto deste indicador vira remuneração",
+  commission: "Quanto o colaborador recebe por este indicador (comissão)",
+};
+
+function FactorSubHeader(props: { columns: FactorGridColumn[] }) {
   return (
     <>
-      <TableHead className="border-l text-right text-xs">Meta</TableHead>
-      <TableHead className="text-right text-xs">Real.</TableHead>
-      <TableHead className="text-right text-xs">Ating.</TableHead>
-      <TableHead className="text-right text-xs">Valor</TableHead>
+      {props.columns.map((c, i) => (
+        <TableHead
+          key={c}
+          className={`${i === 0 ? "border-l " : ""}text-right text-xs`}
+          title={COLUMN_TITLES[c]}
+        >
+          {FACTOR_GRID_COLUMN_LABELS[c]}
+        </TableHead>
+      ))}
     </>
   );
 }
@@ -489,6 +520,7 @@ function GridRow(props: {
   config: CompPlanConfig;
   plan: CompPlanClientRow;
   colCount: number;
+  columnsByFactor: Map<string, FactorGridColumn[]>;
   targetRates: Record<string, number | null>;
   entry: CompEntryClientRow | null;
   row: { baseAmount: number | null; inputs: CompEntryInputs; targets: Record<string, number | null> } | null;
@@ -570,6 +602,8 @@ function GridRow(props: {
         return (
           <FactorCells
             key={f.id}
+            columns={props.columnsByFactor.get(f.id) ?? ["realized"]}
+            commissionCell={factorCommissionCell(config, breakdown, f.id)}
             money={f.money}
             weightPct={f.weightPct}
             targetCurrency={f.targetCurrency ?? null}
@@ -681,8 +715,10 @@ function GridRow(props: {
   );
 }
 
-// Grupo de 4 células de um fator.
+// Células de um fator — só as colunas relevantes (factorGridColumns).
 function FactorCells(props: {
+  columns: FactorGridColumn[];
+  commissionCell: { rate: string; value: number } | null;
   money: boolean;
   weightPct: number;
   targetCurrency: string | null;
@@ -727,10 +763,14 @@ function FactorCells(props: {
     targetTip.push(
       "Meta padrão deste membro (definida no plano) — digite para fixar a meta do mês; limpar volta ao padrão."
     );
+  const has = (c: FactorGridColumn) => props.columns.includes(c);
+  // A borda que separa os indicadores vai na PRIMEIRA coluna visível do grupo.
+  const edge = (c: FactorGridColumn) => (props.columns[0] === c ? "border-l" : "");
   return (
     <>
+      {has("target") ? (
       <EditableCell
-        className="border-l"
+        className={edge("target")}
         display={
           targetTip.length > 0 ? (
             <Tooltip>
@@ -766,8 +806,9 @@ function FactorCells(props: {
         onSave={props.onTarget}
         current={props.targetSource === "goal" ? props.target : null}
       />
+      ) : null}
       <EditableCell
-        className="group"
+        className={`group ${edge("realized")}`}
         display={
           <span className="inline-flex items-center gap-1">
             {/* Conferência dos registros: BOTÃO próprio (o duplo-clique da
@@ -804,6 +845,7 @@ function FactorCells(props: {
         onSave={(v) => props.onOverride("realized", v)}
         current={props.realized}
       />
+      {has("attainment") ? (
       <EditableCell
         display={
           props.attainmentPct != null ? `${fmtNum(props.attainmentPct)}%` : "—"
@@ -812,8 +854,10 @@ function FactorCells(props: {
         onSave={(v) => props.onOverride("attainmentPct", v)}
         current={props.attainmentPct}
       />
+      ) : null}
       {/* Valor: com peso 0 sem override, "—" (o fator não compõe a parcela
           por atingimento) — display-only, o override por dblclick segue. */}
+      {has("payout") ? (
       <EditableCell
         display={
           props.weightPct === 0 && !props.overridden.payout ? (
@@ -833,6 +877,19 @@ function FactorCells(props: {
         onSave={(v) => props.onOverride("payout", v)}
         current={props.payout}
       />
+      ) : null}
+      {/* Remun./Recebe: a faixa aplicada e o que a comissão paga sobre este
+          indicador — só leitura (o ajuste manual fica na coluna Comissão). */}
+      {has("rate") ? (
+        <TableCell className="text-right tabular-nums">
+          {props.commissionCell?.rate ?? "—"}
+        </TableCell>
+      ) : null}
+      {has("commission") ? (
+        <TableCell className="text-right font-medium tabular-nums">
+          {props.commissionCell ? fmtMoney(props.commissionCell.value) : "—"}
+        </TableCell>
+      ) : null}
     </>
   );
 }

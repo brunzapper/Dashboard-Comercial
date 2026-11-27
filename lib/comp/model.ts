@@ -1,3 +1,12 @@
+// Versão: 2.3 | Data: 28/11/2026
+// v2.3 (28/11/2026): DESMARCAR vale para o LANÇAMENTO inteiro. O registro
+// desmarcado sai de TODOS os indicadores do membro no mês (excludedRecordIds =
+// união de inputs.excluded) — desmarcar só no indicador onde se clicou fazia a
+// venda Outbound sumir do Outbound e reaparecer no derivado "Totais − Outbound"
+// (paga pela tabela). Gravação nova usa a chave única EXCLUDED_ALL_KEY ("*");
+// chaves por fator antigas seguem lidas (entram na união). Também:
+// linearOriginCoefficients — coeficientes de um derivado linear (±origens),
+// que o detalhamento usa para listar os registros do derivado.
 // Versão: 2.2 | Data: 27/11/2026
 // v2.2 (27/11/2026): INDICADOR DERIVADO (factor.realizedFrom = "indicators").
 // O realizado não vem de registros: é uma fórmula sobre o REALIZADO EFETIVO de
@@ -321,27 +330,40 @@ export interface CompEntryInputs {
   bonuses: CompBonus[];
   note?: string;
   /**
-   * Registros DESMARCADOS por fator (factorId → ids de `records`): ficam fora
-   * do realizado daquele fator neste lançamento — e, por consequência, da
-   * comissão que o fator dispara ou embasa. Ausente = todos contam.
+   * Registros DESMARCADOS no lançamento (chave → ids de `records`). Desde a
+   * v2.3 valem para TODOS os indicadores do membro no mês (a união das
+   * chaves); a gravação usa só EXCLUDED_ALL_KEY. Chave por fator é legado
+   * (lida, entra na união). Ausente = todos contam.
    */
   excluded?: Record<string, string[]>;
 }
 
-/** Teto de registros desmarcados por fator num lançamento. */
+/** Teto de registros desmarcados num lançamento. */
 export const MAX_EXCLUDED_PER_FACTOR = 500;
 
+/** Chave única de inputs.excluded (v2.3): o desmarcado vale para o lançamento todo. */
+export const EXCLUDED_ALL_KEY = "*";
+
+/** Todos os registros desmarcados do lançamento (união das chaves, dedup). */
+export function excludedRecordIds(
+  inputs: Pick<CompEntryInputs, "excluded"> | null | undefined
+): string[] {
+  const out = new Set<string>();
+  for (const ids of Object.values(inputs?.excluded ?? {}))
+    for (const id of ids) out.add(id);
+  return [...out];
+}
+
 /**
- * Filtros que tiram os registros desmarcados do realizado de um fator: um
- * `id neq` por registro, combinados em E pelo RPC (que aceita `id` desde a
- * 0153 e não tem "not in"). Dono ÚNICO — o engine (recompute) e o
- * detalhamento derivam daqui, nunca de uma lista montada à mão.
+ * Filtros que tiram os registros desmarcados do realizado: um `id neq` por
+ * registro, combinados em E pelo RPC (que aceita `id` desde a 0153 e não tem
+ * "not in"). Valem para TODO indicador do lançamento (v2.3). Dono ÚNICO — o
+ * engine (recompute) deriva daqui, nunca de uma lista montada à mão.
  */
 export function excludedRecordFilters(
-  inputs: Pick<CompEntryInputs, "excluded"> | null | undefined,
-  factorId: string
+  inputs: Pick<CompEntryInputs, "excluded"> | null | undefined
 ): WidgetFilter[] {
-  return (inputs?.excluded?.[factorId] ?? []).map((id) => ({
+  return excludedRecordIds(inputs).map((id) => ({
     field: "id",
     op: "neq",
     value: id,
@@ -995,6 +1017,38 @@ export function derivedFactorCatalog(
       label: `${f.label} — Realizado`,
       group: "Indicadores",
     }));
+}
+
+/**
+ * Coeficiente de cada origem quando o derivado é LINEAR — só refs somadas ou
+ * subtraídas, sem parênteses/constantes/funções (ex.: A − B ⇒ {A: 1, B: −1}).
+ * null quando a conta não é uma soma com sinais: aí não existe "os registros
+ * do derivado" (um registro não vale "metade" numa razão).
+ */
+export function linearOriginCoefficients(f: CompFactor): Map<string, number> | null {
+  if (!isDerivedFactor(f)) return null;
+  const out = new Map<string, number>();
+  let sign = 1;
+  let expectRef = true;
+  for (const t of f.formula.tokens) {
+    if (expectRef) {
+      if (t.kind === "op" && (t.op === "-" || t.op === "+")) {
+        if (t.op === "-") sign = -sign;
+        continue;
+      }
+      if (t.kind !== "field") return null;
+      const m = /^comp:f:(.+):realizado$/.exec(t.ref);
+      if (!m) return null;
+      out.set(m[1], (out.get(m[1]) ?? 0) + sign);
+      sign = 1;
+      expectRef = false;
+    } else {
+      if (t.kind !== "op" || (t.op !== "+" && t.op !== "-")) return null;
+      sign = t.op === "-" ? -1 : 1;
+      expectRef = true;
+    }
+  }
+  return out.size > 0 && !expectRef ? out : null;
 }
 
 /** Ids dos indicadores de origem de um derivado (ordem da fórmula, dedup). */
