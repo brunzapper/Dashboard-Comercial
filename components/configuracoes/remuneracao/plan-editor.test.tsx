@@ -17,8 +17,10 @@ import type { CompPlanConfig } from "@/lib/comp/model";
 import { PlanEditor } from "./plan-editor";
 
 const savePlan = vi.fn();
+const duplicatePlan = vi.fn();
 vi.mock("@/app/(app)/operacao/remuneracao/actions", () => ({
   savePlan: (...args: unknown[]) => savePlan(...args),
+  duplicatePlan: (...args: unknown[]) => duplicatePlan(...args),
   deletePlan: vi.fn(),
 }));
 vi.mock("@/app/(app)/dashboards/formula-preview-actions", () => ({
@@ -235,5 +237,82 @@ describe("PlanEditor — validação amigável por fator no save", () => {
       )
     );
     expect(savePlan).not.toHaveBeenCalled();
+  });
+});
+
+describe("PlanEditor — indicador derivado, duplicar indicador e plano", () => {
+  const derivedConfig = (): CompPlanConfig => {
+    const cfg = makeConfig();
+    cfg.factors.push({
+      id: "f_d",
+      label: "Sem Outbound",
+      weightPct: 0,
+      metricKey: "comp_d",
+      money: true,
+      realizedFrom: "indicators",
+      formula: { tokens: [{ kind: "field", ref: "comp:f:f_r:realizado" }] },
+      sources: [],
+    });
+    return cfg;
+  };
+
+  it("save RE-EMITE realizedFrom e o derivado sai sem recorte próprio", async () => {
+    renderEditor(derivedConfig());
+    // O derivado não mostra condições nem campo de crédito: só o de registros.
+    expect(screen.getAllByText("Condições do recorte")).toHaveLength(1);
+    fireEvent.click(screen.getByRole("button", { name: "Salvar plano" }));
+    await waitFor(() => expect(savePlan).toHaveBeenCalledTimes(1));
+    const payload = savePlan.mock.calls[0][0] as { config: CompPlanConfig };
+    const d = payload.config.factors[1];
+    expect(d.realizedFrom).toBe("indicators");
+    expect(d.sources).toEqual([]);
+    expect(d.filters).toBeUndefined();
+    expect(payload.config.factors[0].realizedFrom).toBeUndefined();
+  });
+
+  it("Duplicar indicador cria cópia com id novo e métrica automática", async () => {
+    renderEditor(makeConfig());
+    fireEvent.click(screen.getByRole("button", { name: /Duplicar indicador 1/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Salvar plano" }));
+    await waitFor(() => expect(savePlan).toHaveBeenCalledTimes(1));
+    const payload = savePlan.mock.calls[0][0] as { config: CompPlanConfig };
+    expect(payload.config.factors).toHaveLength(2);
+    const [orig, copy] = payload.config.factors;
+    expect(copy.label).toBe("Reuniões (cópia)");
+    expect(copy.id).not.toBe(orig.id);
+    expect(copy.metricKey).toBe("__auto__");
+    expect(copy.filters).toEqual(orig.filters);
+  });
+
+  it("Duplicar plano chama a action e abre a cópia", async () => {
+    duplicatePlan.mockResolvedValue({ ok: true, planId: "p2" });
+    const onSaved = vi.fn();
+    const cfg = makeConfig();
+    render(
+      <PlanEditor
+        plan={{
+          id: "p1",
+          name: "Plano SDR",
+          active: true,
+          base_amount_default: 1000,
+          config: cfg,
+          updated_at: "2026-08-01",
+        }}
+        config={cfg}
+        metrics={[]}
+        responsibles={[]}
+        available={[]}
+        allFields={[]}
+        sources={[]}
+        operations={[]}
+        operationMembersById={{}}
+        currencies={[]}
+        onSaved={onSaved}
+        onDeleted={vi.fn()}
+      />
+    );
+    fireEvent.click(screen.getByRole("button", { name: /Duplicar plano/ }));
+    await waitFor(() => expect(onSaved).toHaveBeenCalledWith("p2"));
+    expect(duplicatePlan).toHaveBeenCalledWith("p1");
   });
 });

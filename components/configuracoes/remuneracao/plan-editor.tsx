@@ -1,3 +1,12 @@
+// Versão: 2.0 | Data: 27/11/2026
+// v2.0 (27/11/2026): "O realizado vem de" por indicador — registros (a fórmula
+// agregada de sempre) ou OUTROS INDICADORES do plano (factor.realizedFrom
+// "indicators": fórmula de contexto "record" sobre o realizado dos indicadores
+// de registros — catálogo derivedFactorCatalog, o mesmo do savePlan). No modo
+// derivado, fontes/condições/crédito somem (o recorte já está nas origens).
+// Botão "Duplicar indicador": cópia do rascunho com id novo e métrica de meta
+// automática (a cópia não divide a meta da origem). "Duplicar plano" copia o
+// plano GRAVADO (duplicatePlan), desligado, e abre a cópia.
 // Versão: 1.9 | Data: 26/11/2026
 // v1.9 (26/11/2026): "Meta por membro" por indicador (factor.memberTargets) —
 // meta padrão de cada pessoa, que vale todo mês até a grade fixar outra; vazio
@@ -57,7 +66,7 @@
 
 import { EMPTY_MANUAL_AXIS_CATALOG } from "@/lib/manual-base/families";
 import { useMemo, useState, useTransition } from "react";
-import { Plus, Trash2 } from "lucide-react";
+import { Copy, Plus, Trash2 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -99,6 +108,7 @@ import type { WidgetFilter } from "@/lib/widgets/types";
 import {
   COMP_COMMISSION_REF,
   compOperandCatalog,
+  derivedFactorCatalog,
   explicitMemberIds,
   MAX_COMMISSION_BLOCKS,
   MAX_COMMISSION_TIERS,
@@ -115,6 +125,7 @@ import {
 } from "@/lib/comp/model";
 import {
   deletePlan,
+  duplicatePlan,
   savePlan,
 } from "@/app/(app)/operacao/remuneracao/actions";
 import { listFilterOptionCandidates } from "@/app/(app)/dashboards/actions";
@@ -141,6 +152,9 @@ interface FactorDraft {
   metricKey: string;
   money: boolean;
   formula: Formula;
+  // De onde vem o realizado (v2.0): registros (fórmula agregada) ou outros
+  // indicadores do plano (fórmula sobre o realizado deles).
+  realizedFrom: "records" | "indicators";
   sources: string[];
   capPct: string;
   floorPct: string;
@@ -171,6 +185,7 @@ function emptyFactor(): FactorDraft {
     metricKey: AUTO_METRIC,
     money: true,
     formula: { tokens: [] },
+    realizedFrom: "records",
     sources: [],
     capPct: "",
     floorPct: "",
@@ -193,6 +208,7 @@ function draftsFromConfig(config: CompPlanConfig | null): FactorDraft[] {
     metricKey: f.metricKey,
     money: f.money,
     formula: f.formula,
+    realizedFrom: f.realizedFrom ?? "records",
     sources: f.sources,
     capPct: f.capPct != null ? String(f.capPct) : "",
     floorPct: f.floorPct != null ? String(f.floorPct) : "",
@@ -215,10 +231,37 @@ function draftsFromConfig(config: CompPlanConfig | null): FactorDraft[] {
   }));
 }
 
+/**
+ * Cópia de um indicador do rascunho: id NOVO (nunca dividir overrides/metas com
+ * a origem) e métrica de meta automática — a cópia ganha metas próprias.
+ */
+export function duplicateFactorDraft(f: FactorDraft): FactorDraft {
+  return {
+    ...f,
+    id: newFactorId(),
+    label: `${f.label.trim() || "Indicador"} (cópia)`,
+    metricKey: AUTO_METRIC,
+    formula: { ...f.formula, tokens: [...f.formula.tokens] },
+    sources: [...f.sources],
+    memberTeams: Object.fromEntries(
+      Object.entries(f.memberTeams).map(([k, v]) => [k, [...v]])
+    ),
+    memberCredit: { ...f.memberCredit },
+    memberTargets: { ...f.memberTargets },
+    filters: f.filters.map((x) => ({ ...x })),
+  };
+}
+
 const numOrNull = (s: string): number | null => {
   const v = s.trim() === "" ? NaN : Number(s.replace(",", "."));
   return Number.isFinite(v) ? v : null;
 };
+
+// "O realizado vem de" (v2.0).
+const REALIZED_FROM_OPTIONS: ComboboxOption[] = [
+  { value: "records", label: "Registros (fórmula sobre as bases)" },
+  { value: "indicators", label: "Outros indicadores do plano" },
+];
 
 // Sentinela da base da comissão: % incide sobre a base variável da linha.
 const BASIS_BASE = "__base__";
@@ -392,8 +435,8 @@ export function PlanEditor(props: PlanEditorProps) {
   // Catálogo comp:* da fórmula do total — derivado do RASCUNHO (sincronia:
   // renomear/excluir fator ou ligar/desligar a comissão atualiza os operandos
   // na hora; o bloco dummy só sinaliza a presença p/ o comp:comissao).
-  const compCatalog: RefOption[] = useMemo(() => {
-    const draftConfig: CompPlanConfig = {
+  const draftConfig: CompPlanConfig = useMemo(
+    () => ({
       v: 1,
       factors: factors
         .filter((f) => f.label.trim() !== "")
@@ -405,6 +448,9 @@ export function PlanEditor(props: PlanEditorProps) {
           money: f.money,
           formula: f.formula,
           sources: f.sources,
+          ...(f.realizedFrom === "indicators"
+            ? { realizedFrom: "indicators" as const }
+            : {}),
         })),
       ...(commBlocks.length > 0
         ? {
@@ -418,9 +464,13 @@ export function PlanEditor(props: PlanEditorProps) {
             ],
           }
         : {}),
-    };
-    return compOperandCatalog(draftConfig);
-  }, [factors, commBlocks.length]);
+    }),
+    [factors, commBlocks.length]
+  );
+  const compCatalog: RefOption[] = useMemo(
+    () => compOperandCatalog(draftConfig),
+    [draftConfig]
+  );
 
   const weightSum = factors.reduce(
     (acc, f) => acc + (numOrNull(f.weightPct) ?? 0),
@@ -668,7 +718,9 @@ export function PlanEditor(props: PlanEditorProps) {
         if (f.formula.tokens.length === 0) {
           notifyActionError(
             "Salvar plano",
-            `Monte a fórmula do realizado do indicador "${who}".`
+            f.realizedFrom === "indicators"
+              ? `Monte a conta do indicador "${who}" com os outros indicadores do plano.`
+              : `Monte a fórmula do realizado do indicador "${who}".`
           );
           return;
         }
@@ -714,12 +766,18 @@ export function PlanEditor(props: PlanEditorProps) {
           metricKey: f.metricKey || AUTO_METRIC,
           money: f.money,
           formula: f.formula,
-          sources: f.sources,
+          // Derivado não tem recorte próprio (o parse também descarta).
+          sources: f.realizedFrom === "indicators" ? [] : f.sources,
+          ...(f.realizedFrom === "indicators"
+            ? { realizedFrom: "indicators" as const }
+            : {}),
           ...(numOrNull(f.capPct) != null ? { capPct: numOrNull(f.capPct) } : {}),
           ...(numOrNull(f.floorPct) != null
             ? { floorPct: numOrNull(f.floorPct) }
             : {}),
-          ...(f.memberField !== "" ? { memberField: f.memberField } : {}),
+          ...(f.memberField !== "" && f.realizedFrom !== "indicators"
+            ? { memberField: f.memberField }
+            : {}),
           // RE-EMITIR a equipe (mesma regra dos filtros logo abaixo): sem isto
           // o primeiro save apagaria o crédito de equipe em silêncio.
           // Entradas vazias saem aqui — o parse do servidor também as descarta.
@@ -751,7 +809,8 @@ export function PlanEditor(props: PlanEditorProps) {
           ...(f.targetCurrency !== "" ? { targetCurrency: f.targetCurrency } : {}),
           // RE-EMITIR as condições do recorte (regra do presetKey/apuracao):
           // sem isso o round-trip do save as destruiria em silêncio.
-          ...((factorFilters.get(f.id) ?? []).length > 0
+          ...(f.realizedFrom !== "indicators" &&
+          (factorFilters.get(f.id) ?? []).length > 0
             ? { filters: factorFilters.get(f.id) }
             : {}),
         })),
@@ -928,14 +987,16 @@ export function PlanEditor(props: PlanEditorProps) {
                   placeholder="Ex.: 60"
                 />
               </div>
-              <div className="flex flex-col gap-1.5">
-                <Label>Fontes</Label>
-                <SourcePicker
-                  sources={props.sources}
-                  value={f.sources}
-                  onChange={(v) => patchFactor(f.id, { sources: v })}
-                />
-              </div>
+              {f.realizedFrom === "records" ? (
+                <div className="flex flex-col gap-1.5">
+                  <Label>Fontes</Label>
+                  <SourcePicker
+                    sources={props.sources}
+                    value={f.sources}
+                    onChange={(v) => patchFactor(f.id, { sources: v })}
+                  />
+                </div>
+              ) : null}
               <div className="flex flex-col gap-1.5">
                 <Label>Teto ating. (%)</Label>
                 <Input
@@ -978,9 +1039,41 @@ export function PlanEditor(props: PlanEditorProps) {
                 Valores em R$ (realizado/alvo monetários)
               </label>
             </div>
+            <div className="flex flex-col gap-1.5 sm:max-w-sm">
+              <Label>O realizado vem de</Label>
+              <Combobox
+                options={REALIZED_FROM_OPTIONS}
+                value={f.realizedFrom}
+                onValueChange={(v) => {
+                  const next = v === "indicators" ? "indicators" : "records";
+                  if (next === f.realizedFrom) return;
+                  // A fórmula de um modo não vale no outro: recomeça vazia.
+                  patchFactor(f.id, { realizedFrom: next, formula: { tokens: [] } });
+                }}
+              />
+            </div>
+            {f.realizedFrom === "indicators" ? (
+              <div className="flex flex-col gap-1.5">
+                <Label>Conta do realizado</Label>
+                <FormulaEditor
+                  key={`${f.id}:indicators`}
+                  context="record"
+                  catalog={derivedFactorCatalog(draftConfig, f.id)}
+                  initial={f.formula}
+                  onChange={(formula) => patchFactor(f.id, { formula })}
+                />
+                <p className="text-muted-foreground text-xs">
+                  Use o realizado de outros indicadores do plano — ex.: Vendas
+                  totais − Vendas de uma fonte, para pagar o restante por outra
+                  regra sem contar a mesma venda duas vezes. Só entram
+                  indicadores que vêm de registros.
+                </p>
+              </div>
+            ) : (
             <div className="flex flex-col gap-1.5">
               <Label>Fórmula do realizado</Label>
               <FormulaEditor
+                key={`${f.id}:records`}
                 context="aggregate"
                 catalog={aggCatalog}
                 sources={props.sources}
@@ -1001,8 +1094,10 @@ export function PlanEditor(props: PlanEditorProps) {
                 }}
               />
             </div>
+            )}
             {/* Condições do recorte (factor.filters): em E, aplicadas ao
                 realizado ANTES do filtro de membro (mesma consulta). */}
+            {f.realizedFrom === "records" ? (
             <div className="flex flex-col gap-1.5">
               <Label>Condições do recorte</Label>
               {f.filters.length > 0 ? (
@@ -1055,8 +1150,10 @@ export function PlanEditor(props: PlanEditorProps) {
                 gatilho de comissão — ele define a faixa sem gerar valor próprio.
               </p>
             </div>
+            ) : null}
             {/* Avançado: campo de membro / alvo padrão / moeda do alvo */}
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {f.realizedFrom === "records" ? (
               <div className="flex flex-col gap-1.5">
                 <Label>Crédito do membro (campo)</Label>
                 <Combobox
@@ -1074,6 +1171,7 @@ export function PlanEditor(props: PlanEditorProps) {
                   dele (ex.: SDR da Reunião).
                 </p>
               </div>
+              ) : null}
               <div className="flex flex-col gap-1.5">
                 <Label>Meta padrão do plano</Label>
                 <Input
@@ -1112,7 +1210,7 @@ export function PlanEditor(props: PlanEditorProps) {
                 líder, cujas oportunidades ficam em nome do time). Só aparece
                 com membros efetivos resolvidos — sem eles não há a quem
                 atribuir. */}
-            {commissionMembers.length > 0 ? (
+            {commissionMembers.length > 0 && f.realizedFrom === "records" ? (
               <div className="flex flex-col gap-1.5">
                 <Label>Crédito por membro</Label>
                 <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -1205,7 +1303,22 @@ export function PlanEditor(props: PlanEditorProps) {
                 </p>
               </div>
             ) : null}
-            <div className="flex justify-end">
+            <div className="flex justify-end gap-2">
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                disabled={factors.length >= MAX_FACTORS}
+                onClick={() =>
+                  setFactors((cur) => {
+                    const at = cur.findIndex((x) => x.id === f.id);
+                    const copy = duplicateFactorDraft(f);
+                    return [...cur.slice(0, at + 1), copy, ...cur.slice(at + 1)];
+                  })
+                }
+              >
+                <Copy className="size-4" /> Duplicar indicador {idx + 1}
+              </Button>
               <Button
                 type="button"
                 variant="ghost"
@@ -1507,6 +1620,21 @@ export function PlanEditor(props: PlanEditorProps) {
         </Button>
         {props.plan ? (
           <>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={pending}
+              onClick={() =>
+                startTransition(async () => {
+                  // Duplica o plano GRAVADO (alterações não salvas ficam aqui).
+                  const res = await duplicatePlan(props.plan!.id);
+                  if (!res.ok) notifyActionError("Duplicar plano", res.message);
+                  else if (res.planId) props.onSaved(res.planId);
+                })
+              }
+            >
+              <Copy className="size-4" /> Duplicar plano
+            </Button>
             <Button
               type="button"
               variant="ghost"

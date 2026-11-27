@@ -1581,7 +1581,15 @@ This version has breaking changes — APIs, conventions, and file structure may 
   `saveExcludedRecords` (grava + recalcula o membro), e vira `id neq` no
   recorte do engine por `excludedRecordFilters` (RPCs intocados); a listagem
   NÃO a aplica (é ela que permite remarcar) — linha `excluded` fica fora do Σ
-  e o painel grava a partir de `excludedIds`, nunca só do que está na tela. **Quem participa do plano é o membro CONFIGURADO,
+  e o painel grava a partir de `excludedIds`, nunca só do que está na tela.
+  **Indicador DERIVADO (27/11/2026):** `factor.realizedFrom = "indicators"` =
+  realizado é conta sobre o realizado EFETIVO de outros indicadores de
+  REGISTROS do plano (`comp:f:<id>:realizado`; catálogo ÚNICO
+  `derivedFactorCatalog`), avaliada em `computeEntry` por
+  `resolveDerivedRealized` — o engine NÃO o consulta. É a forma de "tudo
+  menos X" (filtro `neq` derruba campo VAZIO). Origem null ⇒ derivado null
+  (nunca 0). Duplicar plano (`duplicatePlan`) nasce DESLIGADO com métricas
+  AUTO e sem `presetKey`. **Quem participa do plano é o membro CONFIGURADO,
   nunca a presença de lançamento (29/08/2026):** estreitar `memberIds` NÃO
   apaga os `comp_entries` já gravados, então enumerar por entry fazia quem
   saiu do plano levar os indicadores dele para a própria aba `Det-<Nome>` —

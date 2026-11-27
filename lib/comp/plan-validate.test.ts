@@ -18,6 +18,8 @@ import {
   MAX_TIER_RATE_PCT,
   MAX_WEIGHT_PCT,
   cleanCompNumber,
+  duplicatePlanConfig,
+  duplicatePlanName,
   validateCompPlanSave,
 } from "./plan-validate";
 
@@ -287,5 +289,55 @@ describe("caminho feliz", () => {
     if (!res.ok) return;
     expect(res.name).toBe("Plano Comercial");
     expect(res.config.factors).toHaveLength(1);
+  });
+});
+
+describe("indicador derivado", () => {
+  const derived = (formula: Formula): CompPlanConfig =>
+    makeConfig({
+      factors: [
+        ...makeConfig().factors,
+        {
+          id: "f_d",
+          label: "Derivado",
+          weightPct: 0,
+          metricKey: "comp_d",
+          money: true,
+          realizedFrom: "indicators",
+          formula,
+          sources: [],
+        },
+      ],
+    });
+
+  it("aceita conta sobre o realizado de indicador de registros", async () => {
+    const res = await run(derived(f(ref("comp:f:f_a:realizado"))));
+    expect(res.ok).toBe(true);
+  });
+
+  it("recusa ref fora do catálogo (campo, outro derivado, o próprio)", async () => {
+    for (const r of ["agg:sum:value", "comp:f:f_d:realizado", "comp:f:f_a:alvo"]) {
+      const res = await run(derived(f(ref(r))));
+      expect(res.ok).toBe(false);
+      if (res.ok) continue;
+      expect(res.message).toContain("Derivado");
+    }
+  });
+});
+
+describe("duplicar plano", () => {
+  it("cópia troca as métricas por AUTO e tira o presetKey, sem tocar o original", () => {
+    const cfg = makeConfig({ presetKey: "rv_x" });
+    const copy = duplicatePlanConfig(cfg);
+    expect(copy.presetKey).toBeUndefined();
+    expect(copy.factors[0].metricKey).toBe(AUTO_METRIC_KEY);
+    expect(copy.factors[0].id).toBe("f_a");
+    expect(cfg.factors[0].metricKey).toBe("comp_vendas");
+    expect(cfg.presetKey).toBe("rv_x");
+  });
+
+  it("nome único", () => {
+    expect(duplicatePlanName("Plano", ["Plano"])).toBe("Plano (cópia)");
+    expect(duplicatePlanName("Plano", ["Plano", "plano (cópia)"])).toBe("Plano (cópia 2)");
   });
 });

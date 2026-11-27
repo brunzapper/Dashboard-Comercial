@@ -1,3 +1,6 @@
+// Versão: 1.15 | Data: 27/11/2026
+// v1.15: detailDerivedNote — indicador DERIVADO (calculado a partir de outros
+// indicadores) não tem registros próprios; a frase diz de onde ele vem.
 // Versão: 1.14 | Data: 27/11/2026
 // v1.14: detailExcludedNote — quantos registros do recorte foram DESMARCADOS no
 // lançamento (fora do realizado e da comissão). Tela e aba Det-<Nome> usam a
@@ -534,6 +537,16 @@ export function detailExcludedNote(count: number): string {
   return count === 1
     ? "1 registro foi desconsiderado neste mês e não entra no cálculo."
     : `${fmtNumBR(count)} registros foram desconsiderados neste mês e não entram no cálculo.`;
+}
+
+/**
+ * Indicador DERIVADO: o realizado é uma conta sobre outros indicadores do
+ * plano, então não há registro a listar — os registros estão nos de origem.
+ */
+export function detailDerivedNote(sourceLabels: string[]): string {
+  if (sourceLabels.length === 0)
+    return "Este indicador é calculado a partir de outros indicadores do plano e não tem registros próprios.";
+  return `Este indicador é calculado a partir de ${sourceLabels.join(", ")} e não tem registros próprios — confira os registros nesses indicadores.`;
 }
 
 /** Limiar de um degrau da escada, na unidade do gatilho. */

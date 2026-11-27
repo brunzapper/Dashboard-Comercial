@@ -43,7 +43,10 @@ import {
   compFactorRef,
   compOperandCatalog,
   computeEntry,
+  derivedFactorCatalog,
+  derivedSourceFactorIds,
   excludedRecordFilters,
+  isDerivedFactor,
   explicitMemberIds,
   factorTargetCurrencies,
   lastDayOfMonth,
@@ -1362,5 +1365,150 @@ describe("apuracaoRef", () => {
     const cfg = { apuracao: "mes_anterior" as const };
     expect(apuracaoRef(2026, 7, cfg)).toEqual({ year: 2026, month: 6 });
     expect(apuracaoRef(2026, 1, cfg)).toEqual({ year: 2025, month: 12 });
+  });
+});
+
+describe("indicador DERIVADO (realizedFrom: indicators)", () => {
+  // Cenário do Full Cycle: Totais (gatilho/meta) e Outbound (registros);
+  // "Sem Outbound" = Totais − Outbound. Faixa pelo atingimento dos Totais
+  // sobre o "sem Outbound"; Outbound paga 50% fixo pelo realizado.
+  const derivedConfig = (): CompPlanConfig => ({
+    v: 1,
+    factors: [
+      {
+        id: "f_tot",
+        label: "Vendas Totais",
+        weightPct: 0,
+        metricKey: "comp_tot",
+        money: true,
+        formula: aggFormula,
+        sources: [],
+      },
+      {
+        id: "f_out",
+        label: "Vendas Outbound",
+        weightPct: 0,
+        metricKey: "comp_out",
+        money: true,
+        formula: aggFormula,
+        sources: [],
+        filters: [{ field: "custom:fonte", op: "eq", value: "Outbound" }],
+      },
+      {
+        id: "f_rest",
+        label: "Vendas sem Outbound",
+        weightPct: 0,
+        metricKey: "comp_rest",
+        money: true,
+        realizedFrom: "indicators",
+        formula: f(
+          ref(compFactorRef("f_tot", "realizado")),
+          op("-"),
+          ref(compFactorRef("f_out", "realizado"))
+        ),
+        sources: [],
+      },
+    ],
+    commissions: [
+      {
+        id: "tabela",
+        triggerFactorId: "f_tot",
+        basisKind: "factor",
+        basisFactorId: "f_rest",
+        tierBy: "attainment",
+        kind: "pct",
+        tiers: [
+          { fromPct: 0, ratePct: 30 },
+          { fromPct: 75, ratePct: 40 },
+          { fromPct: 100, ratePct: 50 },
+        ],
+      },
+      {
+        id: "outbound",
+        triggerFactorId: "f_out",
+        basisKind: "factor",
+        basisFactorId: "f_out",
+        tierBy: "realized",
+        kind: "pct",
+        tiers: [{ fromPct: 0, ratePct: 50 }],
+      },
+    ],
+  });
+
+  it("parse preserva realizedFrom e descarta o recorte próprio do derivado", () => {
+    const raw = derivedConfig();
+    raw.factors[2].sources = ["negocios"];
+    raw.factors[2].filters = [{ field: "custom:fonte", op: "eq", value: "x" }];
+    raw.factors[2].memberField = "custom:sdr";
+    const cfg = reparse(raw)!;
+    expect(cfg.factors[2].realizedFrom).toBe("indicators");
+    expect(cfg.factors[2].sources).toEqual([]);
+    expect(cfg.factors[2].filters).toBeUndefined();
+    expect(cfg.factors[2].memberField).toBeUndefined();
+    // "records" explícito normaliza para ausência.
+    const r2 = derivedConfig() as unknown as { factors: Record<string, unknown>[] };
+    r2.factors[0].realizedFrom = "records";
+    expect(parseCompPlanConfig(r2)!.factors[0].realizedFrom).toBeUndefined();
+    r2.factors[0].realizedFrom = "outra";
+    expect(parseCompPlanConfig(r2)).toBeNull();
+  });
+
+  it("paga a tabela só sobre o que não é Outbound e 50% sobre o Outbound (sem duplicar)", () => {
+    const cfg = reparse(derivedConfig())!;
+    // Meta 10.000; vendeu 8.000 no total, 2.000 de Outbound ⇒ 80% (faixa 40%).
+    const bd = computeEntry(
+      cfg,
+      0,
+      emptyInputs(),
+      { f_tot: 8000, f_out: 2000 },
+      { f_tot: 10000 }
+    );
+    expect(bd.byFactor.f_rest.realized).toBe(6000);
+    const tabela = bd.commissionBlocks.find((b) => b.blockId === "tabela")!;
+    const outb = bd.commissionBlocks.find((b) => b.blockId === "outbound")!;
+    expect(tabela.value).toBe(2400); // 40% × 6.000
+    expect(outb.value).toBe(1000); // 50% × 2.000
+    expect(bd.total).toBe(3400);
+  });
+
+  it("override do realizado de uma origem recalcula o derivado; override do derivado vence", () => {
+    const cfg = reparse(derivedConfig())!;
+    const bd = computeEntry(
+      cfg,
+      0,
+      parseCompEntryInputs({ overrides: { factors: { f_out: { realized: 500 } } } }),
+      { f_tot: 8000, f_out: 2000 },
+      { f_tot: 10000 }
+    );
+    expect(bd.byFactor.f_rest.realized).toBe(7500);
+    const bd2 = computeEntry(
+      cfg,
+      0,
+      parseCompEntryInputs({ overrides: { factors: { f_rest: { realized: 100 } } } }),
+      { f_tot: 8000, f_out: 2000 },
+      { f_tot: 10000 }
+    );
+    expect(bd2.byFactor.f_rest.realized).toBe(100);
+  });
+
+  it("origem sem resultado (null) deixa o derivado null — nunca paga o Outbound pela tabela", () => {
+    const cfg = reparse(derivedConfig())!;
+    const bd = computeEntry(cfg, 0, emptyInputs(), { f_tot: 8000, f_out: null }, { f_tot: 10000 });
+    expect(bd.byFactor.f_rest.realized).toBeNull();
+    expect(bd.commissionBlocks.find((b) => b.blockId === "tabela")!.value).toBe(0);
+  });
+
+  it("derivedFactorCatalog: só o realizado de indicadores de registros, sem o próprio", () => {
+    const cfg = derivedConfig();
+    expect(derivedFactorCatalog(cfg, "f_rest").map((o) => o.ref)).toEqual([
+      compFactorRef("f_tot", "realizado"),
+      compFactorRef("f_out", "realizado"),
+    ]);
+    // Derivado nunca é origem de outro.
+    expect(derivedFactorCatalog(cfg, "f_tot").map((o) => o.ref)).toEqual([
+      compFactorRef("f_out", "realizado"),
+    ]);
+    expect(derivedSourceFactorIds(cfg.factors[2])).toEqual(["f_tot", "f_out"]);
+    expect(isDerivedFactor(cfg.factors[0])).toBe(false);
   });
 });

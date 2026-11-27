@@ -1,3 +1,6 @@
+// Versão: 1.2 | Data: 27/11/2026
+// v1.2: fator DERIVADO (realizedFrom "indicators") recusa `formulaTexto` — a
+// conta é sobre outros indicadores e se edita na tela; o resto do fator segue.
 // Versão: 1.1 | Data: 28/09/2026
 // v1.1: memberCredit (critério de crédito por membro) entra na lista do que o
 // merge preserva — a config é mutada in place, então ele já sobrevivia.
@@ -258,7 +261,13 @@ export function validateCompEdit(
           if (peso != null) alvo.weightPct = peso;
           if (rawF.moeda !== undefined) alvo.money = rawF.moeda === true;
 
-          if (rawF.formulaTexto !== undefined) {
+          if (rawF.formulaTexto !== undefined && alvo.realizedFrom === "indicators") {
+            // Indicador DERIVADO: a conta é sobre outros indicadores, não sobre
+            // campos — o catálogo agregado da IA não a representa.
+            errors.push(
+              `${where} ("${nomeFator}"): o realizado deste indicador é calculado a partir de outros indicadores — edite a conta na tela do plano.`
+            );
+          } else if (rawF.formulaTexto !== undefined) {
             const texto = asString(rawF.formulaTexto);
             const tok = tokenizeFormulaText(texto, deps.aggCatalog);
             if (!tok.ok) {

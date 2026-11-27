@@ -1,3 +1,6 @@
+// Versão: 1.12 | Data: 27/11/2026
+// v1.12: indicador DERIVADO (realizedFrom "indicators") não tem operandos de
+// registro — factorOperands devolve [] e o fator sai com detailDerivedNote.
 // Versão: 1.11 | Data: 27/11/2026
 // v1.11: REGISTROS DESMARCADOS (inputs.excluded do lançamento). A listagem
 // segue SEM aplicá-los — é ela que permite remarcar —, e cada linha carrega
@@ -61,6 +64,7 @@ import {
   detailAggNote,
   detailMergedAggNote,
   detailCreditNote,
+  detailDerivedNote,
   detailTeamNote,
   detailTruncatedNote,
   factorPayoutFormula,
@@ -131,6 +135,8 @@ import {
   apuracaoRef,
   explicitMemberIds,
   monthPeriod,
+  derivedSourceFactorIds,
+  isDerivedFactor,
   parseCompEntryInputs,
   parseCompPlanConfig,
   roundMoney,
@@ -541,6 +547,8 @@ export function factorOperands(
   ctx: CompDetailContext,
   factor: CompFactor
 ): FactorOperand[] {
+  // Derivado: a fórmula fala de outros indicadores, não de registros.
+  if (isDerivedFactor(factor)) return [];
   const fieldByKey = new Map(
     ctx.allFields.filter((f) => !isCoreDef(f)).map((f) => [f.field_key, f])
   );
@@ -1150,7 +1158,15 @@ export async function loadFactorRecords(
     payoutFormula,
     commissions,
     excludedIds: [...excludedIds],
-    warnings: [] as string[],
+    warnings: isDerivedFactor(factor)
+      ? [
+          detailDerivedNote(
+            derivedSourceFactorIds(factor).map(
+              (id) => plan.config.factors.find((f) => f.id === id)?.label ?? id
+            )
+          ),
+        ]
+      : ([] as string[]),
   };
   if (operands.length === 0) {
     return { ...base, operands: [], listedForCompare: null };

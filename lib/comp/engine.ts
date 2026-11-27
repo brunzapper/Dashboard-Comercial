@@ -1,3 +1,7 @@
+// Versão: 1.8 | Data: 27/11/2026
+// v1.8: INDICADOR DERIVADO (factor.realizedFrom = "indicators") não é
+// consultado — o realizado dele sai de computeEntry sobre as origens. Se uma
+// origem falhou, o derivado herda o erro (errors[id]) para a grade avisar.
 // Versão: 1.7 | Data: 27/11/2026
 // v1.7: REGISTROS DESMARCADOS — o recompute acrescenta ao recorte de cada fator
 // os `id neq` de `inputs.excluded[factorId]` do lançamento
@@ -82,7 +86,9 @@ import {
   factorTargetCurrencies,
   lastDayOfMonth,
   monthPeriod,
+  derivedSourceFactorIds,
   excludedRecordFilters,
+  isDerivedFactor,
   parseCompEntryInputs,
   parseCompPlanConfig,
   resolveOperationMembers,
@@ -479,7 +485,7 @@ export async function recomputePlanMonth(
       const realized: Record<string, number | null> = {};
       const errors: Record<string, string> = {};
       await Promise.all(
-        config.factors.map((factor) =>
+        config.factors.filter((factor) => !isDerivedFactor(factor)).map((factor) =>
           runLimited(async () => {
             const scope = memberScopeFor(factor, member.id, canon, nameById);
             if ("error" in scope) {
@@ -524,6 +530,18 @@ export async function recomputePlanMonth(
           })
         )
       );
+      // Derivado: sem consulta (computeEntry o avalia sobre as origens); herda
+      // a falha de qualquer origem para a grade avisar.
+      for (const factor of config.factors) {
+        if (!isDerivedFactor(factor)) continue;
+        const failed = derivedSourceFactorIds(factor).filter((id) => errors[id]);
+        if (failed.length > 0) {
+          const labels = failed.map(
+            (id) => config.factors.find((f) => f.id === id)?.label ?? id
+          );
+          errors[factor.id] = `Indicador de origem sem resultado: ${labels.join(", ")}.`;
+        }
+      }
       const computed: CompComputedRaw = {
         v: 1,
         at: nowIso,
