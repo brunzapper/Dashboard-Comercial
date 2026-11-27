@@ -1131,3 +1131,66 @@ describe("recomputePlanMonth", () => {
     });
   });
 });
+
+describe("recomputePlanMonth — indicador derivado", () => {
+  it("não consulta o derivado; o total sai da conta sobre as origens", async () => {
+    const writes: Record<string, unknown>[] = [];
+    const fake = fakeSupabase({
+      rpc: {
+        run_widget_query: (args) => {
+          const metric = (args.p_metrics as { field: string }[])[0].field;
+          if (metric === "value") return { data: [{ metric_1: 80 }], error: null };
+          return { data: [{ metric_1: 10 }], error: null };
+        },
+      },
+      tables: {
+        responsibles: responsiblesHandler,
+        field_definitions: [],
+        field_correspondences: [],
+        currency_rates: [],
+        goals: [],
+        comp_entries: (q) => {
+          const ins = q.steps.find((s) => s.method === "insert");
+          if (ins) writes.push(ins.args[0] as Record<string, unknown>);
+          return { data: ins ? null : [] };
+        },
+      },
+    });
+    const config = {
+      ...CONFIG,
+      factors: [
+        ...CONFIG.factors,
+        {
+          id: "f_d",
+          label: "Vendas − Reuniões",
+          weightPct: 0,
+          metricKey: "comp_d",
+          money: true,
+          realizedFrom: "indicators",
+          formula: {
+            tokens: [
+              { kind: "field", ref: "comp:f:f_v:realizado" },
+              { kind: "op", op: "-" },
+              { kind: "field", ref: "comp:f:f_r:realizado" },
+            ],
+          },
+          sources: [],
+        },
+      ],
+    };
+    const out = await recomputePlanMonth(fake.db, fake.db, {
+      plan: { ...PLAN, config },
+      year: 2026,
+      month: 7,
+      orgId: "org-1",
+    });
+    expect(out.ok).toBe(true);
+    const mains = fake.rpcCalls.filter(
+      (c) => ((c.args.p_dimensions as unknown[]) ?? []).length === 0
+    );
+    // 2 membros × 2 fatores DE REGISTROS — o derivado não consulta.
+    expect(mains).toHaveLength(4);
+    const computed = writes[0].computed as { realized: Record<string, number> };
+    expect(computed.realized).toEqual({ f_v: 80, f_r: 10 });
+  });
+});

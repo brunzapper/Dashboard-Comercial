@@ -1,3 +1,12 @@
+// Versão: 2.2 | Data: 27/11/2026
+// v2.2 (27/11/2026): INDICADOR DERIVADO (factor.realizedFrom = "indicators").
+// O realizado não vem de registros: é uma fórmula sobre o REALIZADO EFETIVO de
+// outros indicadores do MESMO plano (refs comp:f:<id>:realizado), avaliada em
+// computeEntry ANTES do laço dos fatores. Serve para "tudo menos X" (Totais −
+// Outbound) sem filtro `neq` — que derruba as linhas com o campo VAZIO. O
+// engine não consulta indicador derivado; origem null (falha/não consultada)
+// deixa o derivado null — fail-closed — e o erro aparece nele. Só indicador de
+// registros pode ser origem (sem cadeia de derivados, sem ciclo).
 // Versão: 2.1 | Data: 27/11/2026
 // v2.1 (27/11/2026): REGISTROS DESMARCADOS por lançamento
 // (comp_entries.inputs.excluded — factorId → ids de registro). O engine os tira
@@ -83,6 +92,7 @@
 // `comp:*` montado aqui — nunca parser/avaliador paralelo (invariante 26).
 import {
   evaluateFormula,
+  formulaRefs,
   type Formula,
   type FormulaToken,
 } from "@/lib/records/formulas";
@@ -141,6 +151,12 @@ export interface CompFactor {
   metricKey: string;
   money: boolean; // formata alvo/realizado como R$ (senão número puro)
   formula: Formula; // fórmula AGREGADA do realizado (contexto "aggregate")
+  // De onde vem o realizado (v2.2). Ausente = REGISTROS (a fórmula agregada
+  // acima, consultada pelo engine). "indicators" = DERIVADO: `formula` passa a
+  // ser uma fórmula de contexto "record" sobre comp:f:<id>:realizado de outros
+  // indicadores NÃO derivados do plano; sources/filters/membro não se aplicam
+  // (o recorte já está nos indicadores de origem).
+  realizedFrom?: "indicators";
   sources: string[]; // fontes do recorte ([] = todas as fontes)
   // Recorte extra do fator (condições em E), editado no plan-editor. Só os 10
   // operadores de UI (FILTER_OPS); `in` é array de strings; `sources`
@@ -502,6 +518,13 @@ function parseFactor(raw: unknown): CompFactor | null {
     (typeof raw.targetCurrency !== "string" || !/^[A-Z]{3}$/.test(raw.targetCurrency))
   )
     return null;
+  if (
+    raw.realizedFrom != null &&
+    raw.realizedFrom !== "records" &&
+    raw.realizedFrom !== "indicators"
+  )
+    return null;
+  const derived = raw.realizedFrom === "indicators";
   const out: CompFactor = {
     id,
     label: label.trim(),
@@ -509,8 +532,11 @@ function parseFactor(raw: unknown): CompFactor | null {
     metricKey,
     money: raw.money !== false, // default true
     formula,
-    sources,
+    // Derivado não tem recorte próprio: sources/filters/membro são descartados
+    // (o save não perpetua config sem efeito).
+    sources: derived ? [] : sources,
   };
+  if (derived) out.realizedFrom = "indicators";
   if (raw.filters != null) {
     if (!Array.isArray(raw.filters)) return null;
     if (raw.filters.length > MAX_FACTOR_FILTERS) return null;
@@ -572,6 +598,12 @@ function parseFactor(raw: unknown): CompFactor | null {
   if (defaultTarget != null) out.defaultTarget = defaultTarget;
   if (typeof raw.targetCurrency === "string" && raw.targetCurrency !== "")
     out.targetCurrency = raw.targetCurrency;
+  if (derived) {
+    delete out.filters;
+    delete out.memberField;
+    delete out.memberTeams;
+    delete out.memberCredit;
+  }
   return out;
 }
 
@@ -682,6 +714,9 @@ export function parseCompPlanConfig(raw: unknown): CompPlanConfig | null {
     seen.add(parsed.id);
     factors.push(parsed);
   }
+  // Refs do derivado NÃO derrubam o parse: a régua com mensagem é o
+  // validateCompPlanSave (derivedFactorCatalog); aqui, ref fora do catálogo só
+  // fica sem valor no contexto e o derivado sai null (fail-closed).
   const out: CompPlanConfig = { v: 1, factors };
   if (Array.isArray(raw.memberIds)) {
     const ids: string[] = [];
@@ -939,6 +974,68 @@ export function factorTargetCurrencies(config: CompPlanConfig): string[] {
   return out;
 }
 
+/** Indicador cujo realizado é fórmula sobre outros indicadores (v2.2). */
+export function isDerivedFactor(f: Pick<CompFactor, "realizedFrom">): boolean {
+  return f.realizedFrom === "indicators";
+}
+
+/**
+ * Operandos da fórmula de um indicador DERIVADO: o realizado de cada
+ * indicador de registros do plano (exceto o próprio). MESMO catálogo no
+ * editor, no savePlan e no parse — nunca listas paralelas.
+ */
+export function derivedFactorCatalog(
+  config: Pick<CompPlanConfig, "factors">,
+  selfId: string
+): OperandRef[] {
+  return config.factors
+    .filter((f) => f.id !== selfId && !isDerivedFactor(f))
+    .map((f) => ({
+      ref: compFactorRef(f.id, "realizado"),
+      label: `${f.label} — Realizado`,
+      group: "Indicadores",
+    }));
+}
+
+/** Ids dos indicadores de origem de um derivado (ordem da fórmula, dedup). */
+export function derivedSourceFactorIds(f: CompFactor): string[] {
+  if (!isDerivedFactor(f)) return [];
+  const out: string[] = [];
+  for (const ref of formulaRefs(f.formula)) {
+    const m = /^comp:f:(.+):realizado$/.exec(ref);
+    if (m && !out.includes(m[1])) out.push(m[1]);
+  }
+  return out;
+}
+
+/**
+ * Realizado CRU com os derivados preenchidos: avalia cada derivado sobre o
+ * realizado EFETIVO (override ?? cru) das origens. Sem venda a origem é 0 (o
+ * engine grava 0); null é "não consultou/falhou" e deixa o derivado null —
+ * fail-closed: "Totais − Outbound" com o Outbound faltando pagaria o Outbound
+ * pela tabela.
+ */
+export function resolveDerivedRealized(
+  config: Pick<CompPlanConfig, "factors">,
+  inputs: CompEntryInputs,
+  realized: Record<string, number | null>
+): Record<string, number | null> {
+  if (!config.factors.some(isDerivedFactor)) return realized;
+  const ctx: Record<string, number | null> = {};
+  for (const f of config.factors) {
+    if (isDerivedFactor(f)) continue;
+    const ov = inputs.overrides.factors[f.id] ?? {};
+    ctx[compFactorRef(f.id, "realizado")] = ov.realized ?? realized[f.id] ?? null;
+  }
+  const out = { ...realized };
+  for (const f of config.factors) {
+    if (!isDerivedFactor(f)) continue;
+    const r = evaluateFormula(f.formula, ctx);
+    out[f.id] = typeof r === "number" && Number.isFinite(r) ? r : null;
+  }
+  return out;
+}
+
 /**
  * Catálogo de operandos da fórmula livre de total — derivado do config (os
  * operandos aparecem/somem em sincronia com os fatores). Consumido pelo
@@ -1000,6 +1097,9 @@ export function computeEntry(
   const byFactor: Record<string, CompFactorBreakdown> = {};
   let factorsTotal = 0;
   let weightSumPct = 0;
+  // Derivados ANTES do laço: o realizado deles vira um cru como outro qualquer
+  // (override ainda vence; cap/floor/meta/faixas seguem iguais).
+  realized = resolveDerivedRealized(config, inputs, realized);
   for (const f of config.factors) {
     weightSumPct += f.weightPct;
     const ov = inputs.overrides.factors[f.id] ?? {};

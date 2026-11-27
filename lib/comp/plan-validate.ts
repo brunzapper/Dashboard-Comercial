@@ -1,3 +1,9 @@
+// Versão: 1.1 | Data: 27/11/2026
+// v1.1b: duplicatePlanConfig/duplicatePlanName — a cópia de plano passa pela
+// MESMA régua (o duplicatePlan chama savePlan).
+// v1.1: INDICADOR DERIVADO (realizedFrom "indicators") — fórmula de contexto
+// "record" sobre derivedFactorCatalog (realizado de indicadores de registros
+// do plano); sem SOMASE; fontes/condições/membro não se aplicam.
 // Versão: 1.0 | Data: 08/09/2026
 // Validação de um SAVE de plano de remuneração, EXTRAÍDA de savePlan
 // (app/(app)/operacao/remuneracao/actions.ts) sem mudança de comportamento.
@@ -40,6 +46,8 @@ import { buildAvailableFields } from "@/lib/widgets/fields";
 import { opHasNoValue } from "@/lib/widgets/filter-ops";
 import {
   compOperandCatalog,
+  derivedFactorCatalog,
+  isDerivedFactor,
   factorTargetCurrencies,
   parseCompPlanConfig,
   type CompPlanConfig,
@@ -61,6 +69,33 @@ export const MAX_TIER_ATTAINMENT_PCT = 100000;
 export const MAX_TIER_RATE_PCT = 1000;
 /** Sentinela de metricKey: o SERVIDOR gera a chave a partir do rótulo. */
 export const AUTO_METRIC_KEY = "__auto__";
+
+/**
+ * Config de uma CÓPIA de plano. Os indicadores mantêm id/fórmula/recorte/metas
+ * padrão (comissões e agrupamento apontam por id e continuam válidos), mas
+ * ganham métrica de meta NOVA (AUTO): as metas do mês são linhas de `goals`
+ * por métrica, e dividir a métrica faria a meta digitada numa cópia mudar a do
+ * plano original. `presetKey` sai — senão o re-apply do preset trataria a
+ * cópia como o plano de fábrica.
+ */
+export function duplicatePlanConfig(config: CompPlanConfig): CompPlanConfig {
+  const copy = JSON.parse(JSON.stringify(config)) as CompPlanConfig;
+  delete copy.presetKey;
+  for (const f of copy.factors) f.metricKey = AUTO_METRIC_KEY;
+  return copy;
+}
+
+/** Nome padrão da cópia ("X (cópia)", "X (cópia 2)"…), único entre os existentes. */
+export function duplicatePlanName(name: string, existing: string[]): string {
+  const taken = new Set(existing.map((n) => n.trim().toLocaleLowerCase("pt-BR")));
+  const base = `${name.trim()} (cópia)`;
+  if (!taken.has(base.toLocaleLowerCase("pt-BR"))) return base;
+  for (let n = 2; n < 100; n++) {
+    const c = `${name.trim()} (cópia ${n})`;
+    if (!taken.has(c.toLocaleLowerCase("pt-BR"))) return c;
+  }
+  return base;
+}
 
 /** Sanidade dos valores digitados — mesma régua do `cleanNumber` da action. */
 export function cleanCompNumber(v: unknown): number | null {
@@ -220,6 +255,28 @@ export async function validateCompPlanSave(
 
   const availableByRef = new Map(available.map((a) => [a.field, a]));
   for (const f of config.factors) {
+    if (isDerivedFactor(f)) {
+      if (f.defaultTarget != null && cleanCompNumber(f.defaultTarget) == null)
+        return { ok: false, message: `Alvo padrão inválido no fator "${f.label}".` };
+      if (formulaUsesCondAgg(f.formula))
+        return {
+          ok: false,
+          message: `Fórmula do fator "${f.label}": SOMASE/CONTASE não se aplicam — o realizado vem de outros indicadores.`,
+        };
+      const catalog = derivedFactorCatalog(config, f.id);
+      if (catalog.length === 0)
+        return {
+          ok: false,
+          message: `O fator "${f.label}" calcula sobre outros indicadores, mas o plano não tem indicador de registros.`,
+        };
+      const v = validateFormulaForContext(f.formula, { kind: "record", catalog });
+      if (!v.ok)
+        return {
+          ok: false,
+          message: `Fórmula do fator "${f.label}": ${v.error ?? "inválida."} Use só o realizado de indicadores que vêm de registros.`,
+        };
+      continue;
+    }
     for (const s of f.sources) {
       if (!sourceKeys.has(s))
         return {

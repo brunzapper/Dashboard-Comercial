@@ -4327,6 +4327,31 @@ total opcional por plano.
   desmarcados não confronta). O painel grava a partir de `excludedIds` (lista
   COMPLETA), nunca só das linhas visíveis; a aba `Det-<Nome>` omite os
   desmarcados e diz quantos saíram (`detailExcludedNote`).
+  **Indicador DERIVADO (27/11/2026):** `factor.realizedFrom = "indicators"`
+  troca a origem do realizado — em vez de consultar registros, a `formula` do
+  fator é uma conta de contexto "record" sobre o realizado EFETIVO (override
+  ?? cru) de outros indicadores do MESMO plano (`comp:f:<id>:realizado`).
+  Existe porque "tudo menos X" não se escreve com filtro: `neq` derruba as
+  linhas com o campo VAZIO (centenas de vendas sem Fonte, toda a Venda Site),
+  então "Vendas sem Outbound" é `[Vendas Totais] − [Vendas Outbound]`, e o
+  Outbound conta no atingimento (gatilho = Totais) sem ser pago duas vezes
+  (a tabela incide sobre o derivado, o Outbound tem bloco próprio). O engine
+  NÃO consulta o derivado; `resolveDerivedRealized` (model.ts) o avalia em
+  `computeEntry` ANTES do laço — logo vale em todo call site, tela e export.
+  Origem null (falha/não consultada) deixa o derivado null, nunca "0" —
+  senão o Outbound faltando seria pago pela tabela; o engine copia a falha da
+  origem para `errors[derivado]`. Só indicador de REGISTROS é origem
+  (`derivedFactorCatalog` — catálogo ÚNICO do editor e do savePlan; sem
+  cadeia nem ciclo); o parse descarta fontes/condições/membro do derivado e
+  NÃO rejeita refs (a régua com mensagem é o `validateCompPlanSave`; ref fora
+  do catálogo só fica sem valor ⇒ null). O detalhamento não lista registros
+  dele (`factorOperands` = [], aviso `detailDerivedNote`). A IA de
+  remuneração recusa `formulaTexto` para derivado (o catálogo dela é o
+  agregado). **Duplicar:** "Duplicar indicador" copia o rascunho com id novo e
+  métrica AUTO; `duplicatePlan` copia o plano GRAVADO DESLIGADO (dois planos
+  ativos com os mesmos membros pagariam em dobro) via `savePlan`, com
+  `duplicatePlanConfig` (métricas AUTO — `goals` é por métrica, dividir a
+  métrica faria a meta da cópia mudar a do original — e sem `presetKey`).
   **O recorte é por OPERANDO (correção de 16/08/2026).** A primeira versão
   montava UMA consulta por fator e errava por três motivos ao mesmo tempo:
   trazia todos os registros do responsável (as condições de um `SOMASE` ficavam

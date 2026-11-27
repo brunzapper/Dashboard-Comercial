@@ -1,3 +1,7 @@
+// Versão: 2.0 | Data: 27/11/2026
+// v2.0 (27/11/2026): duplicatePlan — cópia DESLIGADA (dois planos ativos com
+// os mesmos membros pagariam em dobro) com métricas de meta novas, gravada
+// pelo próprio savePlan (mesma régua, mesmo registro de métricas).
 // Versão: 1.9 | Data: 27/11/2026
 // v1.9 (27/11/2026): saveExcludedRecords — grava os registros DESMARCADOS de
 // um membro × fator no lançamento (inputs.excluded) e recalcula SÓ aquele
@@ -94,7 +98,11 @@ import {
   type CompEntryInputs,
   type CompPlanConfig,
 } from "@/lib/comp/model";
-import { validateCompPlanSave } from "@/lib/comp/plan-validate";
+import {
+  duplicatePlanConfig,
+  duplicatePlanName,
+  validateCompPlanSave,
+} from "@/lib/comp/plan-validate";
 import { ensureMirrorSource, mirrorFormValues } from "@/lib/comp/mirror";
 
 export interface CompActionState {
@@ -204,6 +212,37 @@ export async function savePlan(input: SavePlanInput): Promise<CompActionState> {
     message: "Plano criado.",
     planId: (inserted?.id as string | undefined) ?? undefined,
   };
+}
+
+export async function duplicatePlan(planId: string): Promise<CompActionState> {
+  const err = await ensureAdmin();
+  if (err) return { ok: false, message: err };
+  const supabase = await createClient();
+  const [{ data: plan, error }, { data: all }] = await Promise.all([
+    supabase
+      .from("comp_plans")
+      .select("name, base_amount_default, config")
+      .eq("id", planId)
+      .maybeSingle(),
+    supabase.from("comp_plans").select("name"),
+  ]);
+  if (error) return { ok: false, message: error.message };
+  if (!plan) return { ok: false, message: "Plano não encontrado." };
+  const config = parseCompPlanConfig(plan.config);
+  if (!config)
+    return { ok: false, message: "A configuração do plano está inválida — corrija antes de duplicar." };
+  const res = await savePlan({
+    planId: null,
+    name: duplicatePlanName(
+      plan.name as string,
+      ((all ?? []) as { name: string }[]).map((p) => p.name)
+    ),
+    // Desligada: ligar é decisão de quem revisou a cópia.
+    active: false,
+    baseAmountDefault: (plan.base_amount_default as number | null) ?? null,
+    config: duplicatePlanConfig(config),
+  });
+  return res.ok ? { ...res, message: "Plano duplicado (desligado)." } : res;
 }
 
 export async function deletePlan(planId: string): Promise<CompActionState> {
