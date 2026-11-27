@@ -1,3 +1,9 @@
+// Versão: 2.1 | Data: 27/11/2026
+// v2.1 (27/11/2026): REGISTROS DESMARCADOS por lançamento
+// (comp_entries.inputs.excluded — factorId → ids de registro). O engine os tira
+// do realizado com um `id neq` por registro (excludedRecordFilters), na MESMA
+// consulta; o detalhamento os segue listando, desmarcados e fora do Σ. É dado do
+// MÊS × MEMBRO (inputs), nunca do plano: o recompute não o regrava.
 // Versão: 2.0 | Data: 26/11/2026
 // v2.0 (26/11/2026): META PADRÃO POR MEMBRO (factor.memberTargets — id
 // CANÔNICO → alvo). Fallback de leitura entre a linha de goals do mês e o
@@ -298,6 +304,32 @@ export interface CompEntryInputs {
   };
   bonuses: CompBonus[];
   note?: string;
+  /**
+   * Registros DESMARCADOS por fator (factorId → ids de `records`): ficam fora
+   * do realizado daquele fator neste lançamento — e, por consequência, da
+   * comissão que o fator dispara ou embasa. Ausente = todos contam.
+   */
+  excluded?: Record<string, string[]>;
+}
+
+/** Teto de registros desmarcados por fator num lançamento. */
+export const MAX_EXCLUDED_PER_FACTOR = 500;
+
+/**
+ * Filtros que tiram os registros desmarcados do realizado de um fator: um
+ * `id neq` por registro, combinados em E pelo RPC (que aceita `id` desde a
+ * 0153 e não tem "not in"). Dono ÚNICO — o engine (recompute) e o
+ * detalhamento derivam daqui, nunca de uma lista montada à mão.
+ */
+export function excludedRecordFilters(
+  inputs: Pick<CompEntryInputs, "excluded"> | null | undefined,
+  factorId: string
+): WidgetFilter[] {
+  return (inputs?.excluded?.[factorId] ?? []).map((id) => ({
+    field: "id",
+    op: "neq",
+    value: id,
+  }));
 }
 
 /** comp_entries.computed — snapshot CRU do recompute (nunca derivados). */
@@ -779,8 +811,24 @@ export function parseCompEntryInputs(raw: unknown): CompEntryInputs {
     }
   }
   if (typeof raw.note === "string" && raw.note !== "") out.note = raw.note;
+  // Desmarcados: leniente como o resto dos inputs (sujeira some, o lançamento
+  // vive) — id precisa ter forma de UUID, porque vira literal comparado à
+  // coluna uuid `id` no RPC e um texto qualquer ergueria erro na consulta.
+  if (isRecord(raw.excluded)) {
+    const excluded: Record<string, string[]> = {};
+    for (const [fid, ids] of Object.entries(raw.excluded)) {
+      if (fid === "" || !Array.isArray(ids)) continue;
+      const clean = [
+        ...new Set(ids.filter((id): id is string => typeof id === "string" && UUID_RE.test(id))),
+      ].slice(0, MAX_EXCLUDED_PER_FACTOR);
+      if (clean.length > 0) excluded[fid] = clean;
+    }
+    if (Object.keys(excluded).length > 0) out.excluded = excluded;
+  }
   return out;
 }
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 // Clamp do atingimento CALCULADO (override manual vale verbatim — manual é
 // manual; o cap/floor existe p/ domar a derivação, não a exceção).

@@ -1576,7 +1576,12 @@ This version has breaking changes — APIs, conventions, and file structure may 
   (`listFilterFieldSupported`, exportado de `record-list.ts` ao lado do
   `filterColumn` que o descarta) e operando que agrega `unified:`/`match:`
   (sem Σ, `DETAIL_UNSUPPORTED_FIELD_NOTE`). Consulta sempre pelo client RLS do
-  usuário — NUNCA service role. **Quem participa do plano é o membro CONFIGURADO,
+  usuário — NUNCA service role. **Registros DESMARCADOS (27/11/2026):** a lista
+  vive no LANÇAMENTO (`inputs.excluded[factorId]`), escrita SÓ por
+  `saveExcludedRecords` (grava + recalcula o membro), e vira `id neq` no
+  recorte do engine por `excludedRecordFilters` (RPCs intocados); a listagem
+  NÃO a aplica (é ela que permite remarcar) — linha `excluded` fica fora do Σ
+  e o painel grava a partir de `excludedIds`, nunca só do que está na tela. **Quem participa do plano é o membro CONFIGURADO,
   nunca a presença de lançamento (29/08/2026):** estreitar `memberIds` NÃO
   apaga os `comp_entries` já gravados, então enumerar por entry fazia quem
   saiu do plano levar os indicadores dele para a própria aba `Det-<Nome>` —

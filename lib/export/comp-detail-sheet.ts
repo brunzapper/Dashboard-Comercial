@@ -1,3 +1,6 @@
+// Versão: 1.8 | Data: 27/11/2026
+// v1.8: registros DESMARCADOS no lançamento saem da aba (não entram no que foi
+// pago) e uma linha `info` diz quantos — kind existente, sem republicar o .gs.
 // Versão: 1.7 | Data: 28/08/2026
 // v1.7: linhas de BÔNUS por plano (kind `bonus`, já existente na whitelist e
 // já formatado pelo .gs — não exige republicar o script). O bônus não tem
@@ -48,6 +51,7 @@ import {
   DETAIL_BACK_NOTE,
   DETAIL_DIVERGE_MARK,
   DETAIL_EMPTY_NOTE,
+  detailExcludedNote,
   detailTierLabel,
   detailTierMark,
   detailRowPartsNote,
@@ -149,8 +153,13 @@ function pushOperand(
     return;
   }
   const merged = operand.mergedFrom.length > 0;
+  // Desmarcados não entram no cálculo, então ficam fora da aba (quem lê a
+  // planilha confere o que foi pago); a linha de aviso diz quantos saíram.
+  if (operand.excludedCount > 0)
+    push("info", [detailExcludedNote(operand.excludedCount)]);
   push("detailHeader", detailHeaderCells(operand.valueLabel, merged));
   for (const r of operand.rows) {
+    if (r.excluded) continue;
     push(money ? "detailRowMoney" : "detailRow", [
       r.date,
       r.title,

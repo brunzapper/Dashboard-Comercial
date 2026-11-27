@@ -1,3 +1,7 @@
+// Versão: 1.14 | Data: 27/11/2026
+// v1.14: detailExcludedNote — quantos registros do recorte foram DESMARCADOS no
+// lançamento (fora do realizado e da comissão). Tela e aba Det-<Nome> usam a
+// mesma frase.
 // Versão: 1.13 | Data: 28/09/2026
 // v1.13: detailCreditNote — o critério de crédito do membro (v1.8 do model)
 // dito junto da lista: "todo o recorte", "só sem <campo>" ou "inclui sem
@@ -523,6 +527,13 @@ export function detailAggNote(aggLabel: string, total: number): string {
 /** Aviso de janela: a listagem mostra só os primeiros N do recorte. */
 export function detailTruncatedNote(shown: number, total: number): string {
   return `Mostrando os ${fmtNumBR(shown)} primeiros de ${fmtNumBR(total)} registros.`;
+}
+
+/** Registros desmarcados no lançamento: não entram no realizado nem na comissão. */
+export function detailExcludedNote(count: number): string {
+  return count === 1
+    ? "1 registro foi desconsiderado neste mês e não entra no cálculo."
+    : `${fmtNumBR(count)} registros foram desconsiderados neste mês e não entram no cálculo.`;
 }
 
 /** Limiar de um degrau da escada, na unidade do gatilho. */

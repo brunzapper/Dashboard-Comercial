@@ -1,3 +1,10 @@
+// Versão: 1.2 | Data: 27/11/2026
+// v1.2: DESMARCAR registros do cálculo. Cada linha (e o cabeçalho de cada
+// bloco, para todos) tem uma caixa; desmarcar é RASCUNHO na tela até "Aplicar
+// e recalcular", que grava a lista completa do fator no lançamento
+// (saveExcludedRecords) e recalcula só aquele membro. O rascunho parte de
+// `detail.excludedIds` (lista inteira, inclusive fora da janela) — partir só
+// das linhas visíveis apagaria os desmarcados que não estão na tela.
 // Versão: 1.1 | Data: 16/08/2026
 // v1.1: um bloco por OPERANDO da fórmula (o cálculo consulta assim — ver
 // lib/comp/detail.ts): cada bloco tem sua tabela, sua paginação e seu
@@ -13,16 +20,20 @@
 // saem todas de lib/comp/commission-label.ts (dono único da prosa) — nunca
 // texto novo aqui além de rótulo de coluna, que é layout.
 //
-// Leitura pura: estado local + efeito (não usa useBackgroundSave, que é o
-// padrão de SAVE otimista). A janela inteira do fator já vem numa chamada; a
-// paginação é client-side.
+// Carga: estado local + efeito. O "Aplicar" NÃO é save otimista
+// (useBackgroundSave): ele recalcula o realizado no servidor, e a tela só pode
+// mostrar o número novo depois disso — por isso é um botão explícito, com
+// pending próprio. A janela inteira do fator já vem numa chamada; a paginação
+// é client-side.
 "use client";
 
 import { AlertTriangle } from "lucide-react";
 import { useEffect, useState } from "react";
 
+import { saveExcludedRecords } from "@/app/(app)/operacao/remuneracao/actions";
 import { loadCompFactorDetail } from "@/app/(app)/operacao/remuneracao/detail-actions";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Sheet,
   SheetDescription,
@@ -40,6 +51,7 @@ import {
 } from "@/components/ui/table";
 import {
   DETAIL_EMPTY_NOTE,
+  detailExcludedNote,
   detailTierLabel,
   detailTierMark,
   detailTierValue,
@@ -55,6 +67,7 @@ import type {
   CompDetailOperand,
 } from "@/lib/comp/detail";
 import { MONTH_LABELS } from "@/lib/date/month-labels";
+import { notifyActionError } from "@/lib/feedback/notify";
 
 const PAGE_SIZE = 50;
 
@@ -95,7 +108,9 @@ function Summary(props: { detail: CompDetailFactor }) {
     <div className="bg-muted/40 flex flex-col gap-2 rounded-md border p-3">
       <div className="flex flex-wrap gap-x-8 gap-y-2">
         <div>
-          <div className="text-muted-foreground text-xs">Realizado do fator</div>
+          <div className="text-muted-foreground text-xs">
+            Realizado do fator
+          </div>
           <div className="text-base font-semibold">
             {fmtValue(detail.realized, detail.money)}
           </div>
@@ -136,7 +151,7 @@ function CommissionBlock(props: { commission: CompDetailCommission }) {
           c.triggerLabel,
           c.triggerTarget,
           c.triggerRealized,
-          c.triggerMoney
+          c.triggerMoney,
         )
       : null;
   return (
@@ -145,9 +160,7 @@ function CommissionBlock(props: { commission: CompDetailCommission }) {
         <h3 className="text-sm font-semibold">{c.label}</h3>
         <span className="font-semibold">{fmtMoneyBRL(c.value)}</span>
       </div>
-      {c.formula ? (
-        <p className="text-xs tabular-nums">{c.formula}</p>
-      ) : null}
+      {c.formula ? <p className="text-xs tabular-nums">{c.formula}</p> : null}
       <p className="text-muted-foreground text-xs">{c.tierNote}</p>
       {meta ? <p className="text-xs font-medium">{meta}</p> : null}
       <div className="overflow-x-auto rounded-md border">
@@ -172,7 +185,7 @@ function CommissionBlock(props: { commission: CompDetailCommission }) {
                     t.fromPct,
                     c.tierBy,
                     c.triggerMoney,
-                    c.triggerTarget
+                    c.triggerTarget,
                   )}
                 </TableCell>
                 <TableCell className="text-right whitespace-nowrap">
@@ -199,8 +212,21 @@ function OperandBlock(props: {
   operand: CompDetailOperand;
   money: boolean;
   showLabel: boolean;
+  /** O registro conta no cálculo (no RASCUNHO da tela)? */
+  isIncluded: (id: string) => boolean;
+  /** Marca/desmarca no rascunho — um registro ou o bloco inteiro. */
+  onToggle: (ids: string[], include: boolean) => void;
+  disabled: boolean;
 }) {
-  const { operand, money } = props;
+  const { operand, money, isIncluded, onToggle } = props;
+  const allIds = operand.rows.map((r) => r.id);
+  const includedCount = allIds.filter(isIncluded).length;
+  const headerChecked: boolean | "indeterminate" =
+    includedCount === allIds.length
+      ? true
+      : includedCount === 0
+        ? false
+        : "indeterminate";
   // Bloco fundido: a coluna do responsável dá lugar à composição da linha.
   const merged = operand.mergedFrom.length > 0;
   const [page, setPage] = useState(0);
@@ -230,6 +256,16 @@ function OperandBlock(props: {
             <Table>
               <TableHeader>
                 <TableRow>
+                  <TableHead className="w-8">
+                    <Checkbox
+                      aria-label="Considerar todos os registros deste bloco"
+                      checked={headerChecked}
+                      disabled={props.disabled}
+                      onCheckedChange={() =>
+                        onToggle(allIds, headerChecked !== true)
+                      }
+                    />
+                  </TableHead>
                   <TableHead>Data</TableHead>
                   <TableHead>Registro</TableHead>
                   <TableHead>Base</TableHead>
@@ -242,27 +278,45 @@ function OperandBlock(props: {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {slice.map((r) => (
-                  <TableRow key={r.id}>
-                    <TableCell className="whitespace-nowrap">{r.date}</TableCell>
-                    <TableCell>{r.title}</TableCell>
-                    <TableCell>{r.sourceLabel}</TableCell>
-                    <TableCell>
-                      {merged && r.parts.length > 0
-                        ? detailRowPartsNote(r.parts, money)
-                        : r.responsibleLabel}
-                    </TableCell>
-                    <TableCell>{r.stage}</TableCell>
-                    <TableCell className="text-right whitespace-nowrap">
-                      {r.value != null ? fmtValue(r.value, money) : r.valueText}
-                    </TableCell>
-                    <TableCell className="text-right whitespace-nowrap">
-                      {r.contribution != null
-                        ? fmtMoneyBRL(r.contribution)
-                        : "—"}
-                    </TableCell>
-                  </TableRow>
-                ))}
+                {slice.map((r) => {
+                  const included = isIncluded(r.id);
+                  return (
+                    <TableRow
+                      key={r.id}
+                      className={included ? undefined : "text-muted-foreground"}
+                    >
+                      <TableCell>
+                        <Checkbox
+                          aria-label={`Considerar ${r.title} no cálculo`}
+                          checked={included}
+                          disabled={props.disabled}
+                          onCheckedChange={(v) => onToggle([r.id], v === true)}
+                        />
+                      </TableCell>
+                      <TableCell className="whitespace-nowrap">
+                        {r.date}
+                      </TableCell>
+                      <TableCell>{r.title}</TableCell>
+                      <TableCell>{r.sourceLabel}</TableCell>
+                      <TableCell>
+                        {merged && r.parts.length > 0
+                          ? detailRowPartsNote(r.parts, money)
+                          : r.responsibleLabel}
+                      </TableCell>
+                      <TableCell>{r.stage}</TableCell>
+                      <TableCell className="text-right whitespace-nowrap">
+                        {r.value != null
+                          ? fmtValue(r.value, money)
+                          : r.valueText}
+                      </TableCell>
+                      <TableCell className="text-right whitespace-nowrap">
+                        {included && r.contribution != null
+                          ? fmtMoneyBRL(r.contribution)
+                          : "—"}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
               </TableBody>
             </Table>
           </div>
@@ -323,7 +377,9 @@ function DetailBody(props: {
 }) {
   const { target, year, month } = props;
   const [state, setState] = useState<
-    { kind: "pending" } | { kind: "ok"; data: Loaded } | { kind: "erro"; message: string }
+    | { kind: "pending" }
+    | { kind: "ok"; data: Loaded }
+    | { kind: "erro"; message: string }
   >({ kind: "pending" });
 
   useEffect(() => {
@@ -341,7 +397,7 @@ function DetailBody(props: {
         setState(
           res.ok
             ? { kind: "ok", data: res }
-            : { kind: "erro", message: res.message }
+            : { kind: "erro", message: res.message },
         );
       })
       .catch(() => {
@@ -359,6 +415,69 @@ function DetailBody(props: {
   const data = state.kind === "ok" ? state.data : null;
   const detail = data?.detail ?? null;
   const monthLabel = `${MONTH_LABELS[month - 1]} de ${year}`;
+
+  // Rascunho dos desmarcados: null = igual ao gravado. Parte da lista COMPLETA
+  // do servidor (excludedIds), não só das linhas visíveis.
+  const [draft, setDraft] = useState<Set<string> | null>(null);
+  const [applying, setApplying] = useState(false);
+  const saved = new Set(detail?.excludedIds ?? []);
+  const current = draft ?? saved;
+  const changes = draft
+    ? [...draft].filter((id) => !saved.has(id)).length +
+      [...saved].filter((id) => !draft.has(id)).length
+    : 0;
+  const listedExcluded = new Set(
+    (detail?.operands ?? []).flatMap((o) =>
+      o.rows.filter((r) => r.excluded).map((r) => r.id),
+    ),
+  ).size;
+
+  const toggle = (ids: string[], include: boolean) => {
+    const next = new Set(current);
+    for (const id of ids) {
+      if (include) next.delete(id);
+      else next.add(id);
+    }
+    const same =
+      next.size === saved.size && [...next].every((id) => saved.has(id));
+    setDraft(same ? null : next);
+  };
+
+  const apply = async () => {
+    if (!draft) return;
+    setApplying(true);
+    try {
+      const res = await saveExcludedRecords({
+        planId: target.planId,
+        responsibleId: target.memberId,
+        year,
+        month,
+        factorId: target.factorId,
+        recordIds: [...draft],
+      });
+      if (!res.ok) {
+        notifyActionError("Aplicar registros", res.message);
+        return;
+      }
+      // Recarrega aqui (no handler, não num efeito): o realizado, a comissão
+      // e o Σ voltam do servidor já com a lista nova.
+      const fresh = await loadCompFactorDetail({
+        planId: target.planId,
+        factorId: target.factorId,
+        memberId: target.memberId,
+        memberLabel: target.memberLabel,
+        year,
+        month,
+      });
+      if (fresh.ok) setState({ kind: "ok", data: fresh });
+      else notifyActionError("Recarregar detalhamento", fresh.message);
+      setDraft(null);
+    } catch {
+      notifyActionError("Aplicar registros", "Não foi possível gravar.");
+    } finally {
+      setApplying(false);
+    }
+  };
 
   return (
     <>
@@ -384,6 +503,11 @@ function DetailBody(props: {
         {detail ? (
           <>
             <Summary detail={detail} />
+            {listedExcluded > 0 ? (
+              <p className="text-muted-foreground text-xs">
+                {detailExcludedNote(listedExcluded)}
+              </p>
+            ) : null}
             {detail.warnings.map((w, i) => (
               <p
                 key={`${i}-${w}`}
@@ -397,7 +521,9 @@ function DetailBody(props: {
               <CommissionBlock key={c.blockId} commission={c} />
             ))}
             {detail.operands.length === 0 ? (
-              <p className="text-muted-foreground text-sm">{DETAIL_EMPTY_NOTE}</p>
+              <p className="text-muted-foreground text-sm">
+                {DETAIL_EMPTY_NOTE}
+              </p>
             ) : (
               detail.operands.map((op, i) => (
                 <OperandBlock
@@ -405,9 +531,41 @@ function DetailBody(props: {
                   operand={op}
                   money={detail.money}
                   showLabel={detail.operands.length > 1}
+                  isIncluded={(id) => !current.has(id)}
+                  onToggle={toggle}
+                  disabled={applying}
                 />
               ))
             )}
+            {/* Rascunho pendente: nada muda no cálculo até aplicar. */}
+            {changes > 0 ? (
+              <div className="bg-background sticky bottom-0 flex items-center justify-between gap-2 border-t py-3">
+                <span className="text-sm">
+                  {changes === 1
+                    ? "1 alteração — o cálculo só muda ao aplicar."
+                    : `${changes} alterações — o cálculo só muda ao aplicar.`}
+                </span>
+                <span className="flex gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={applying}
+                    onClick={() => setDraft(null)}
+                  >
+                    Descartar
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    disabled={applying}
+                    onClick={() => void apply()}
+                  >
+                    {applying ? "Recalculando…" : "Aplicar e recalcular"}
+                  </Button>
+                </span>
+              </div>
+            ) : null}
           </>
         ) : null}
       </div>

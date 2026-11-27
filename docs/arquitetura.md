@@ -4312,6 +4312,21 @@ total opcional por plano.
   filtro em campo que o modo lista descarta (`listFilterFieldSupported`,
   exportado ao lado do `filterColumn` que o derruba) e operando que agrega um
   campo `unified:`/`match:` (bloco sem Σ, em vez de um número errado).
+  **Registros DESMARCADOS (27/11/2026):** o admin desmarca, no painel,
+  registros que não devem contar para aquele membro × fator × mês. A lista
+  vive no LANÇAMENTO (`comp_entries.inputs.excluded[factorId]` — ids UUID,
+  teto `MAX_EXCLUDED_PER_FACTOR`; dado do mês, nunca do plano) e é escrita SÓ
+  por `saveExcludedRecords`, que grava e recalcula aquele membro
+  (`recomputePlanMonth` com `memberIds`). O engine tira os registros do
+  realizado com um `id neq` por registro (`excludedRecordFilters`, dono
+  único em `model.ts`), na MESMA consulta — o RPC aceita `id` desde a 0153 e
+  não tem "not in"; RPCs INTOCADOS. Como o realizado muda, a comissão que o
+  fator dispara ou embasa muda junto. A listagem NÃO aplica a exclusão (é ela
+  que permite remarcar): cada linha leva `excluded`, fica fora do Σ e do
+  "Vale", e a contagem confrontada a desconta (lista truncada com
+  desmarcados não confronta). O painel grava a partir de `excludedIds` (lista
+  COMPLETA), nunca só das linhas visíveis; a aba `Det-<Nome>` omite os
+  desmarcados e diz quantos saíram (`detailExcludedNote`).
   **O recorte é por OPERANDO (correção de 16/08/2026).** A primeira versão
   montava UMA consulta por fator e errava por três motivos ao mesmo tempo:
   trazia todos os registros do responsável (as condições de um `SOMASE` ficavam
