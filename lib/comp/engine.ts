@@ -1,3 +1,6 @@
+// Versão: 1.9 | Data: 28/11/2026
+// v1.9: os desmarcados valem para TODO indicador do lançamento
+// (excludedRecordFilters sem fator — união de inputs.excluded).
 // Versão: 1.8 | Data: 27/11/2026
 // v1.8: INDICADOR DERIVADO (factor.realizedFrom = "indicators") não é
 // consultado — o realizado dele sai de computeEntry sobre as origens. Se uma
@@ -502,7 +505,7 @@ export async function recomputePlanMonth(
             const filters: WidgetFilter[] = [
               ...(factor.filters ?? []),
               ...(single ? scope.alternatives[0] : []),
-              ...excludedRecordFilters(memberInputs, factor.id),
+              ...excludedRecordFilters(memberInputs),
             ];
             try {
               const res = await runCalculatedWidget(rpcClient, {

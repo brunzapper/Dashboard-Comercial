@@ -1,3 +1,8 @@
+// Versão: 1.13 | Data: 28/11/2026
+// v1.13: indicador derivado LINEAR (A − B…) LISTA os próprios registros — os
+// das origens, com o valor líquido por registro (coeficiente × valor); quem se
+// anula (a venda Outbound, em Totais − Outbound) não entra. Desmarcados são a
+// UNIÃO do lançamento (excludedRecordIds) em todo fator.
 // Versão: 1.12 | Data: 27/11/2026
 // v1.12: indicador DERIVADO (realizedFrom "indicators") não tem operandos de
 // registro — factorOperands devolve [] e o fator sai com detailDerivedNote.
@@ -64,6 +69,7 @@ import {
   detailAggNote,
   detailMergedAggNote,
   detailCreditNote,
+  detailDerivedLabel,
   detailDerivedNote,
   detailTeamNote,
   detailTruncatedNote,
@@ -136,7 +142,9 @@ import {
   explicitMemberIds,
   monthPeriod,
   derivedSourceFactorIds,
+  excludedRecordIds,
   isDerivedFactor,
+  linearOriginCoefficients,
   parseCompEntryInputs,
   parseCompPlanConfig,
   roundMoney,
@@ -1114,10 +1122,9 @@ export async function loadFactorRecords(
 ): Promise<CompDetailFactor> {
   const fb = breakdown?.byFactor[factor.id] ?? null;
   const operands = factorOperands(ctx, factor);
+  // Desmarcados valem para o LANÇAMENTO inteiro (v2.3 do model).
   const excludedIds = new Set(
-    parseCompEntryInputs(plan.entryByMember.get(memberId)?.inputs).excluded?.[
-      factor.id
-    ] ?? []
+    excludedRecordIds(parseCompEntryInputs(plan.entryByMember.get(memberId)?.inputs))
   );
 
   // ---- Memória de cálculo (o "como isso vira dinheiro") ----
@@ -1158,7 +1165,8 @@ export async function loadFactorRecords(
     payoutFormula,
     commissions,
     excludedIds: [...excludedIds],
-    warnings: isDerivedFactor(factor)
+    warnings:
+      isDerivedFactor(factor) && !linearOriginCoefficients(factor)
       ? [
           detailDerivedNote(
             derivedSourceFactorIds(factor).map(
@@ -1168,6 +1176,23 @@ export async function loadFactorRecords(
         ]
       : ([] as string[]),
   };
+  const coefs = linearOriginCoefficients(factor);
+  if (coefs) {
+    return {
+      ...base,
+      ...(await derivedRecords(
+        supabase,
+        ctx,
+        plan,
+        factor,
+        coefs,
+        memberId,
+        breakdown,
+        rowBudget,
+        uv?.perUnit ?? null
+      )),
+    };
+  }
   if (operands.length === 0) {
     return { ...base, operands: [], listedForCompare: null };
   }
@@ -1231,6 +1256,100 @@ export async function loadFactorRecords(
       visiveis.length === 1
         ? comparableQuantity(ctx, factor, operands, visiveis)
         : null,
+  };
+}
+
+/**
+ * Registros de um derivado LINEAR: os das origens, com valor LÍQUIDO por
+ * registro (Σ coeficiente × valor). Registro que se anula (está em Totais e em
+ * Outbound, numa conta Totais − Outbound) NÃO é do derivado e sai — a menos
+ * que o valor líquido sobre. O realizado segue do computeEntry; a soma das
+ * linhas só é confrontada quando toda origem é confrontável e nada truncou.
+ */
+async function derivedRecords(
+  supabase: SupabaseClient,
+  ctx: CompDetailContext,
+  plan: DetailPlan,
+  factor: CompFactor,
+  coefs: Map<string, number>,
+  memberId: string,
+  breakdown: CompBreakdown | null,
+  rowBudget: number,
+  perUnit: number | null
+): Promise<Pick<CompDetailFactor, "operands" | "listedForCompare" | "warnings">> {
+  const parts: { label: string; coef: number }[] = [];
+  const net = new Map<string, CompDetailRecordRow>();
+  const warnings = new Set<string>();
+  let truncated = false;
+  let comparable = true;
+  let valueLabel = "";
+  for (const [originId, coef] of coefs) {
+    const origin = plan.config.factors.find((f) => f.id === originId);
+    if (!origin || isDerivedFactor(origin)) {
+      comparable = false;
+      continue;
+    }
+    parts.push({ label: origin.label, coef });
+    const od = await loadFactorRecords(
+      supabase,
+      ctx,
+      plan,
+      origin,
+      memberId,
+      breakdown,
+      rowBudget
+    );
+    if (od.listedForCompare == null) comparable = false;
+    for (const w of od.warnings) warnings.add(w);
+    for (const op of od.operands) {
+      if (op.truncated) truncated = true;
+      if (!valueLabel) valueLabel = op.valueLabel;
+      for (const r of op.rows) {
+        const add = coef * (r.value ?? 0);
+        const cur = net.get(r.id);
+        if (cur) {
+          cur.value = (cur.value ?? 0) + add;
+          cur.excluded = cur.excluded || r.excluded;
+        } else {
+          net.set(r.id, { ...r, value: add, parts: [], contribution: null });
+        }
+      }
+    }
+  }
+  const rows = [...net.values()]
+    .filter((r) => Math.abs(r.value ?? 0) >= 0.005)
+    .map((r) => {
+      const value = roundMoney(r.value ?? 0);
+      return {
+        ...r,
+        value,
+        valueText: "",
+        contribution:
+          !r.excluded && perUnit != null ? roundMoney(perUnit * value) : null,
+      };
+    });
+  if (rows.length === 0) return { operands: [], listedForCompare: null, warnings: [...warnings] };
+  const listedSum = roundMoney(
+    rows.reduce((a, r) => a + (r.excluded ? 0 : (r.value ?? 0)), 0)
+  );
+  const label = detailDerivedLabel(parts);
+  const block: CompDetailOperand = {
+    label,
+    valueLabel: valueLabel || factor.label,
+    aggNote: detailAggNote(label, rows.length),
+    rows,
+    listedSum,
+    total: rows.length,
+    truncated,
+    excludedCount: rows.filter((r) => r.excluded).length,
+    mergedFrom: [],
+    sumParts: [],
+    warnings: [],
+  };
+  return {
+    operands: [block],
+    listedForCompare: comparable && !truncated ? listedSum : null,
+    warnings: [...warnings],
   };
 }
 

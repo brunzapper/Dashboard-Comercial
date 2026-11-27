@@ -735,7 +735,7 @@ describe("recomputePlanMonth", () => {
     }
   });
 
-  it("registros desmarcados: `id neq` só no fator dele; memberIds recalcula só aquele membro", async () => {
+  it("registros desmarcados: `id neq` em TODO fator do lançamento; memberIds recalcula só aquele membro", async () => {
     const REC = "11111111-2222-4333-8444-555555555555";
     const seen: {
       metric: string;
@@ -802,8 +802,12 @@ describe("recomputePlanMonth", () => {
       );
     const reunioes = seen.filter((c) => c.metric === "*");
     expect(reunioes.length).toBeGreaterThan(0);
+    // O desmarcado vale para o lançamento inteiro (v2.3): sai também do outro
+    // indicador — senão um derivado "A − B" o devolveria ao cálculo.
     for (const c of reunioes)
-      expect(c.filters.some((x) => x.field === "id")).toBe(false);
+      expect(c.filters).toEqual(
+        expect.arrayContaining([{ field: "id", op: "neq", value: REC }])
+      );
   });
 
   it("targetCurrency: alvo digitado em USD converte pela taxa do trimestre; sem taxa ⇒ atingimento null", async () => {

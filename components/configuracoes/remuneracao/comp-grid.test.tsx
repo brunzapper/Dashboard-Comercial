@@ -199,10 +199,17 @@ describe("CompGrid — memória de cálculo", () => {
     });
   });
 
-  it("Valor de fator com peso 0 sem override exibe — (display-only)", () => {
+  it("indicador de peso 0 pago por comissão: sem Meta/Ating./Valor; mostra Remun. e Recebe", () => {
     renderGrid();
-    const dash = screen.getByTitle(/^Peso 0%/);
-    expect(dash.textContent).toBe("—");
+    const heads = screen.getAllByRole("columnheader").map((h) => h.textContent);
+    expect(heads).toContain("Real.");
+    expect(heads).toContain("Remun.");
+    expect(heads).toContain("Recebe");
+    expect(heads).not.toContain("Meta");
+    expect(heads).not.toContain("Ating.");
+    expect(heads).not.toContain("Valor");
+    // O peso 0% não polui o cabeçalho do indicador.
+    expect(heads.some((h) => h?.includes("(0%)"))).toBe(false);
   });
 
   it("ícone do Realizado abre a conferência SEM disparar o override", async () => {

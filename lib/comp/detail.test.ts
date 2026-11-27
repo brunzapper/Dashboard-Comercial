@@ -537,10 +537,65 @@ describe("loadFactorRecords", () => {
       expect(out.listedForCompare).toBe(1);
     });
 
-    it("desmarcado de OUTRO fator não afeta este", async () => {
+    it("indicador DERIVADO linear lista os registros líquidos das origens", async () => {
+      // Totais (todos) − Outbound (só o r0): o derivado é r1 + r2. O r0 está nas
+      // duas origens e se anula — não é registro do "sem Outbound".
+      const all = rows().map((r, i) => ({
+        ...r,
+        custom_fields: { fonte: i === 0 ? "Outbound" : "Inbound" },
+      }));
+      const db = fakeSupabase({
+        tables: {
+          records: (q) => {
+            const outbound = JSON.stringify(q.steps).includes("Outbound");
+            const data = outbound ? all.slice(0, 1) : all;
+            return { data, error: null, count: data.length };
+          },
+          record_matches: [],
+          responsibles: [{ id: M1, display_name: "Ana" }],
+        },
+      }).db;
+      const totais = factor({ id: "f_v", label: "Vendas Totais" });
+      const outbound = factor({
+        id: "f_o",
+        label: "Vendas Outbound",
+        filters: [{ field: "custom:fonte", op: "eq", value: "Outbound" }],
+      });
+      const derivado = factor({
+        id: "f_d",
+        label: "Vendas sem Outbound",
+        realizedFrom: "indicators",
+        sources: [],
+        formula: {
+          tokens: [
+            { kind: "field", ref: "comp:f:f_v:realizado" },
+            { kind: "op", op: "-" },
+            { kind: "field", ref: "comp:f:f_o:realizado" },
+          ],
+        },
+      });
+      const plan = (ids: string[]): DetailPlan => {
+        const base = planExcluding(ids);
+        const config = { ...base.config, factors: [totais, outbound, derivado] };
+        return { ...base, config, row: { ...base.row, config } };
+      };
+      const out = await loadFactorRecords(db, ctxWith(), plan([]), derivado, M1, breakdownStub(200));
+      expect(out.operands).toHaveLength(1);
+      expect(out.operands[0].label).toBe("Vendas Totais − Vendas Outbound");
+      expect(out.operands[0].rows.map((r) => r.id)).toEqual([uid(1), uid(2)]);
+      expect(out.operands[0].listedSum).toBe(200);
+      expect(out.listedForCompare).toBe(200);
+      expect(out.warnings).toEqual([]);
+      // Desmarcado: segue listado (dá para remarcar) e sai do Σ.
+      const ex = await loadFactorRecords(db, ctxWith(), plan([uid(1)]), derivado, M1, breakdownStub(100));
+      expect(ex.operands[0].rows.find((r) => r.id === uid(1))?.excluded).toBe(true);
+      expect(ex.operands[0].listedSum).toBe(100);
+    });
+
+    it("desmarcado em OUTRO fator também sai deste (vale para o lançamento todo)", async () => {
       const out = await loadEx([uid(1)], { id: "f_outro" });
-      expect(out.operands[0].excludedCount).toBe(0);
-      expect(out.operands[0].listedSum).toBe(300);
+      expect(out.operands[0].excludedCount).toBe(1);
+      expect(out.excludedIds).toEqual([uid(1)]);
     });
   });
 

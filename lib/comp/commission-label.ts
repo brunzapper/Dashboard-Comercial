@@ -1,3 +1,7 @@
+// Versão: 1.16 | Data: 28/11/2026
+// v1.16: detailDerivedLabel — rótulo do bloco de registros de um indicador
+// derivado LINEAR ("Vendas Totais − Vendas Outbound"); detailDerivedNote passa
+// a valer só para a conta NÃO linear (sem registros a listar).
 // Versão: 1.15 | Data: 27/11/2026
 // v1.15: detailDerivedNote — indicador DERIVADO (calculado a partir de outros
 // indicadores) não tem registros próprios; a frase diz de onde ele vem.
@@ -540,8 +544,23 @@ export function detailExcludedNote(count: number): string {
 }
 
 /**
- * Indicador DERIVADO: o realizado é uma conta sobre outros indicadores do
- * plano, então não há registro a listar — os registros estão nos de origem.
+ * Rótulo da conta de um derivado LINEAR, na ordem da fórmula: origens com
+ * coeficiente positivo somam, negativo subtrai ("Vendas Totais − Vendas
+ * Outbound"). É o cabeçalho do bloco de registros do derivado.
+ */
+export function detailDerivedLabel(parts: { label: string; coef: number }[]): string {
+  return parts
+    .map((p, i) => {
+      const sign = p.coef < 0 ? "−" : "+";
+      const mult = Math.abs(p.coef) !== 1 ? `${fmtNumBR(Math.abs(p.coef))} × ` : "";
+      return i === 0 && p.coef > 0 ? `${mult}${p.label}` : `${sign} ${mult}${p.label}`;
+    })
+    .join(" ");
+}
+
+/**
+ * Indicador DERIVADO com conta NÃO linear (razão, constante…): não há
+ * registro a listar — um registro não "vale metade" numa divisão.
  */
 export function detailDerivedNote(sourceLabels: string[]): string {
   if (sourceLabels.length === 0)
