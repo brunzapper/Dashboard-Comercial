@@ -40,6 +40,7 @@ vi.mock("@/app/(app)/operacao/remuneracao/detail-actions", () => ({
       payoutFormula: null,
       commissions: [],
       listedForCompare: 44,
+      excludedIds: [],
       warnings: [],
       operands: [
         {
@@ -50,6 +51,7 @@ vi.mock("@/app/(app)/operacao/remuneracao/detail-actions", () => ({
           listedSum: null,
           total: 44,
           truncated: false,
+          excludedCount: 0,
           mergedFrom: [],
           sumParts: [],
           warnings: [],

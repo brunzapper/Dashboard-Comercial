@@ -1,3 +1,7 @@
+// Versão: 1.9 | Data: 27/11/2026
+// v1.9 (27/11/2026): saveExcludedRecords — grava os registros DESMARCADOS de
+// um membro × fator no lançamento (inputs.excluded) e recalcula SÓ aquele
+// membro (recomputePlanMonth com memberIds). Mesmo gate de admin das demais.
 // Versão: 1.8 | Data: 08/09/2026
 // v1.8 (08/09/2026): a validação do savePlan (≈238 linhas: rótulos únicos,
 // bounds de peso/faixa, fontes, campo de membro, condições do recorte,
@@ -83,6 +87,7 @@ import {
   apuracaoRef,
   computeEntry,
   lastDayOfMonth,
+  MAX_EXCLUDED_PER_FACTOR,
   parseCompEntryInputs,
   parseCompPlanConfig,
   type CompComputedRaw,
@@ -417,6 +422,89 @@ function applyEntryPatch(
     if (note) inputs.note = note.slice(0, 2000);
     else delete inputs.note;
   }
+}
+
+// ===================== Registros desmarcados =====================
+
+const RECORD_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Substitui a lista de registros DESMARCADOS de um membro × fator no
+ * lançamento do mês e recalcula o realizado daquele membro. A lista é a
+ * COMPLETA desejada (vazia = todos voltam a contar). Exige lançamento: o
+ * detalhamento só abre sobre um, e criar um aqui pularia o recompute normal.
+ */
+export async function saveExcludedRecords(input: {
+  planId: string;
+  responsibleId: string;
+  year: number;
+  month: number;
+  factorId: string;
+  recordIds: string[];
+}): Promise<RecomputeResult> {
+  const err = await ensureAdmin();
+  if (err) return { ok: false, message: err };
+  if (!periodOk(input.year, input.month))
+    return { ok: false, message: "Período inválido." };
+  const session = await getSessionInfo();
+  if (!session) return { ok: false, message: "Sessão expirada." };
+  const ids = [
+    ...new Set(
+      (Array.isArray(input.recordIds) ? input.recordIds : []).filter(
+        (id) => typeof id === "string" && RECORD_ID_RE.test(id)
+      )
+    ),
+  ];
+  if (ids.length > MAX_EXCLUDED_PER_FACTOR)
+    return {
+      ok: false,
+      message: `Dá para desmarcar até ${MAX_EXCLUDED_PER_FACTOR} registros por indicador.`,
+    };
+
+  const supabase = await createClient();
+  const orgId = await getActiveOrgId();
+  const { plan, config, message } = await loadPlanConfig(supabase, input.planId);
+  if (!plan || !config) return { ok: false, message };
+  if (!config.factors.some((f) => f.id === input.factorId))
+    return { ok: false, message: "Indicador não encontrado no plano." };
+  const canon = await loadResponsibleCanon(supabase);
+  const responsibleId = canonicalOf(input.responsibleId, canon);
+
+  const { data: entryData } = await supabase
+    .from("comp_entries")
+    .select("id, inputs")
+    .eq("plan_id", input.planId)
+    .eq("period_year", input.year)
+    .eq("period_month", input.month)
+    .eq("responsible_id", responsibleId)
+    .maybeSingle();
+  const entry = entryData as { id: string; inputs: unknown } | null;
+  if (!entry)
+    return { ok: false, message: "Recalcule o mês antes de desmarcar registros." };
+
+  const inputs = parseCompEntryInputs(entry.inputs);
+  const excluded = { ...(inputs.excluded ?? {}) };
+  if (ids.length > 0) excluded[input.factorId] = ids;
+  else delete excluded[input.factorId];
+  if (Object.keys(excluded).length > 0) inputs.excluded = excluded;
+  else delete inputs.excluded;
+
+  const { error } = await supabase
+    .from("comp_entries")
+    .update({ inputs })
+    .eq("id", entry.id);
+  if (error) return { ok: false, message: error.message };
+
+  const rpcClient = withRpcMemo(withRpcTtlCache(supabase, `u:${session.user.id}`));
+  const result = await recomputePlanMonth(supabase, rpcClient, {
+    plan,
+    year: input.year,
+    month: input.month,
+    orgId,
+    memberIds: [responsibleId],
+  });
+  revalidatePath("/operacao/remuneracao");
+  return result;
 }
 
 // ===================== Recalcular / Publicar =====================

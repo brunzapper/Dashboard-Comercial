@@ -1,3 +1,8 @@
+// Versão: 1.7 | Data: 27/11/2026
+// v1.7: REGISTROS DESMARCADOS — o recompute acrescenta ao recorte de cada fator
+// os `id neq` de `inputs.excluded[factorId]` do lançamento
+// (excludedRecordFilters, model.ts), e aceita `memberIds` para recalcular um
+// lançamento só. RPCs intocados (`id` é filtrável desde a 0153).
 // Versão: 1.6 | Data: 28/09/2026
 // v1.6: CRITÉRIO DE CRÉDITO POR MEMBRO (factor.memberCredit). memberScopeFor
 // devolve o recorte do membro como ALTERNATIVAS DISJUNTAS de filtros (a união é
@@ -77,6 +82,7 @@ import {
   factorTargetCurrencies,
   lastDayOfMonth,
   monthPeriod,
+  excludedRecordFilters,
   parseCompEntryInputs,
   parseCompPlanConfig,
   resolveOperationMembers,
@@ -367,7 +373,16 @@ export async function loadTargetsByMember(
 export async function recomputePlanMonth(
   supabase: SupabaseClient,
   rpcClient: SupabaseClient,
-  opts: { plan: CompPlanRow; year: number; month: number; orgId: string | null }
+  opts: {
+    plan: CompPlanRow;
+    year: number;
+    month: number;
+    orgId: string | null;
+    // Recalcula SÓ estes membros (ids canônicos) — o "Aplicar" dos registros
+    // desmarcados mexe num lançamento só e não deve pagar a matriz inteira.
+    // Ausente = todos, como sempre.
+    memberIds?: string[];
+  }
 ): Promise<RecomputeResult> {
   const config = parseCompPlanConfig(opts.plan.config);
   if (!config) {
@@ -421,7 +436,9 @@ export async function recomputePlanMonth(
     config.memberOperationIds,
     operationMembersFromScopes(opScopes, canon)
   );
-  const members = memberResponsibles(responsibles, canon, config, operationMemberIds);
+  const allMembers = memberResponsibles(responsibles, canon, config, operationMemberIds);
+  const only = opts.memberIds ? new Set(opts.memberIds) : null;
+  const members = only ? allMembers.filter((m) => only.has(m.id)) : allMembers;
   if (members.length === 0)
     return { ok: false, message: "O plano não tem membros ativos." };
   if (members.length * config.factors.length > MAX_RECOMPUTE_CELLS) {
@@ -450,11 +467,15 @@ export async function recomputePlanMonth(
   const runLimited = createTaskLimiter(WIDGET_TASK_CONCURRENCY);
   const nowIso = new Date().toISOString();
   let queryErrors = 0;
+  // Antes das consultas: os registros desmarcados do lançamento entram no
+  // recorte de cada fator.
+  const entryByMember = new Map(entries.map((e) => [e.responsible_id, e]));
 
   // Uma consulta por membro×fator; falha de UMA célula isola (realized null +
   // errors[fid]) — os demais fatores do membro seguem valendo.
   const perMember = await Promise.all(
     members.map(async (member) => {
+      const memberInputs = parseCompEntryInputs(entryByMember.get(member.id)?.inputs);
       const realized: Record<string, number | null> = {};
       const errors: Record<string, string> = {};
       await Promise.all(
@@ -470,9 +491,12 @@ export async function recomputePlanMonth(
             // Uma alternativa (o caso clássico) entra direto nos filtros — a
             // consulta sai idêntica à de antes; 2+ viram filterAlternatives.
             const single = scope.alternatives.length === 1;
+            // Desmarcados ficam no recorte BASE: valem para toda alternativa
+            // de crédito (o choke point faz E de `filters` com cada uma).
             const filters: WidgetFilter[] = [
               ...(factor.filters ?? []),
               ...(single ? scope.alternatives[0] : []),
+              ...excludedRecordFilters(memberInputs, factor.id),
             ];
             try {
               const res = await runCalculatedWidget(rpcClient, {
@@ -511,7 +535,6 @@ export async function recomputePlanMonth(
     })
   );
 
-  const entryByMember = new Map(entries.map((e) => [e.responsible_id, e]));
   for (const { member, computed } of perMember) {
     const entry = entryByMember.get(member.id);
     const inputs = parseCompEntryInputs(entry?.inputs);

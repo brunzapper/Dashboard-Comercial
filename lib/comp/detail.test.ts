@@ -490,6 +490,60 @@ describe("loadFactorRecords", () => {
     });
   });
 
+  describe("registros desmarcados", () => {
+    const uid = (i: number) => `00000000-0000-4000-8000-00000000000${i}`;
+    const rows = () => recRows(3).map((r, i) => ({ ...r, id: uid(i) }));
+    const planExcluding = (ids: string[]): DetailPlan => ({
+      ...planWith(),
+      entryByMember: new Map([
+        [
+          M1,
+          {
+            id: "e1",
+            responsible_id: M1,
+            base_amount: null,
+            inputs: { excluded: { f_v: ids } },
+            computed: {},
+            total: 0,
+            mirror_record_id: null,
+            published_at: null,
+          },
+        ],
+      ]),
+    });
+    const loadEx = (ids: string[], over: Partial<CompFactor> = {}) =>
+      loadFactorRecords(
+        supa(rows()).db,
+        ctxWith(),
+        planExcluding(ids),
+        factor(over),
+        M1,
+        breakdownStub(999)
+      );
+
+    it("seguem listados, marcados, e ficam fora do Σ", async () => {
+      const out = await loadEx([uid(1)]);
+      const block = out.operands[0];
+      expect(block.rows).toHaveLength(3);
+      expect(block.rows.map((r) => r.excluded)).toEqual([false, true, false]);
+      expect(block.excludedCount).toBe(1);
+      expect(block.listedSum).toBe(200);
+      expect(out.listedForCompare).toBe(200);
+      expect(out.excludedIds).toEqual([uid(1)]);
+    });
+
+    it("contagem confrontável desconta os desmarcados", async () => {
+      const out = await loadEx([uid(0), uid(2)], { formula: f("agg:count:*") });
+      expect(out.listedForCompare).toBe(1);
+    });
+
+    it("desmarcado de OUTRO fator não afeta este", async () => {
+      const out = await loadEx([uid(1)], { id: "f_outro" });
+      expect(out.operands[0].excludedCount).toBe(0);
+      expect(out.operands[0].listedSum).toBe(300);
+    });
+  });
+
   it("contagem: o confrontável é a QUANTIDADE do recorte, não uma soma", async () => {
     const out = await load(recRows(4), { formula: f("agg:count:*") });
     expect(out.listedForCompare).toBe(4);

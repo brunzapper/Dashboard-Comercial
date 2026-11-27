@@ -43,6 +43,7 @@ import {
   compFactorRef,
   compOperandCatalog,
   computeEntry,
+  excludedRecordFilters,
   explicitMemberIds,
   factorTargetCurrencies,
   lastDayOfMonth,
@@ -1200,6 +1201,21 @@ describe("alvo padrão e moeda do alvo", () => {
     expect(parseCompPlanConfig(bad)).toBeNull();
     bad.factors[0].memberTargets = { ana: "x" };
     expect(parseCompPlanConfig(bad)).toBeNull();
+  });
+
+  it("inputs.excluded: parse leniente (só UUID, sem duplicata) e filtros `id neq` por fator", () => {
+    const A = "11111111-2222-4333-8444-555555555555";
+    const B = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
+    const inputs = parseCompEntryInputs({
+      excluded: { f_a: [A, A, "lixo", 3, B], f_b: [], f_c: "x" },
+    });
+    expect(inputs.excluded).toEqual({ f_a: [A, B] });
+    expect(excludedRecordFilters(inputs, "f_a")).toEqual([
+      { field: "id", op: "neq", value: A },
+      { field: "id", op: "neq", value: B },
+    ]);
+    expect(excludedRecordFilters(inputs, "f_b")).toEqual([]);
+    expect(parseCompEntryInputs({}).excluded).toBeUndefined();
   });
 
   it("targetCurrency: converte o alvo pela taxa do caller; taxa ausente ⇒ atingimento null (nunca 1:1)", () => {

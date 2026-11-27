@@ -735,6 +735,77 @@ describe("recomputePlanMonth", () => {
     }
   });
 
+  it("registros desmarcados: `id neq` só no fator dele; memberIds recalcula só aquele membro", async () => {
+    const REC = "11111111-2222-4333-8444-555555555555";
+    const seen: {
+      metric: string;
+      filters: { field: string; op: string; value?: unknown }[];
+    }[] = [];
+    const writes: RecordedQuery[] = [];
+    const fake = fakeSupabase({
+      rpc: {
+        run_widget_query: (args) => {
+          seen.push({
+            metric: (args.p_metrics as { field: string }[])[0].field,
+            filters: (args.p_filters ?? []) as {
+              field: string;
+              op: string;
+              value?: unknown;
+            }[],
+          });
+          return { data: [{ metric_1: 7 }], error: null };
+        },
+      },
+      tables: {
+        responsibles: responsiblesHandler,
+        field_definitions: [],
+        field_correspondences: [],
+        currency_rates: [],
+        goals: [],
+        comp_entries: (q) => {
+          if (q.steps.some((s) => s.method === "update" || s.method === "insert")) {
+            writes.push(q);
+            return { data: null };
+          }
+          return {
+            data: [
+              {
+                id: "e1",
+                responsible_id: M1,
+                base_amount: null,
+                inputs: { excluded: { f_v: [REC] } },
+                computed: null,
+                total: null,
+                mirror_record_id: null,
+                published_at: null,
+              },
+            ],
+          };
+        },
+      },
+    });
+    const out = await recomputePlanMonth(fake.db, fake.db, {
+      plan: PLAN,
+      year: 2026,
+      month: 7,
+      orgId: "org-1",
+      memberIds: [M1],
+    });
+    expect(out).toEqual({ ok: true, members: 1, factors: 2, queryErrors: 0 });
+    // Só o membro pedido é consultado e gravado.
+    expect(writes).toHaveLength(1);
+    const vendas = seen.filter((c) => c.metric === "value");
+    expect(vendas.length).toBeGreaterThan(0);
+    for (const c of vendas)
+      expect(c.filters).toEqual(
+        expect.arrayContaining([{ field: "id", op: "neq", value: REC }])
+      );
+    const reunioes = seen.filter((c) => c.metric === "*");
+    expect(reunioes.length).toBeGreaterThan(0);
+    for (const c of reunioes)
+      expect(c.filters.some((x) => x.field === "id")).toBe(false);
+  });
+
   it("targetCurrency: alvo digitado em USD converte pela taxa do trimestre; sem taxa ⇒ atingimento null", async () => {
     const writes: Record<string, unknown>[] = [];
     const fake = fakeSupabase({

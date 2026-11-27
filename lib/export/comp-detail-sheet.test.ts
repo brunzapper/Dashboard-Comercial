@@ -63,6 +63,7 @@ const operando = (
   listedSum: 300,
   total: 2,
   truncated: false,
+  excludedCount: 0,
   mergedFrom: [],
   sumParts: [],
   warnings: [],
@@ -78,6 +79,7 @@ const operando = (
       valueText: "R$ 100,00",
       contribution: 12.5,
       parts: [],
+      excluded: false,
     },
     {
       id: "r2",
@@ -90,6 +92,7 @@ const operando = (
       valueText: "R$ 200,00",
       contribution: 25,
       parts: [],
+      excluded: false,
     },
   ],
   ...over,
@@ -104,6 +107,7 @@ const fator = (over: Partial<CompDetailFactor> = {}): CompDetailFactor => ({
   commissions: [],
   operands: [operando()],
   listedForCompare: 300,
+  excludedIds: [],
   warnings: [],
   ...over,
 });

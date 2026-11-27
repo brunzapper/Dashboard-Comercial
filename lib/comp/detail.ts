@@ -1,3 +1,8 @@
+// Versão: 1.11 | Data: 27/11/2026
+// v1.11: REGISTROS DESMARCADOS (inputs.excluded do lançamento). A listagem
+// segue SEM aplicá-los — é ela que permite remarcar —, e cada linha carrega
+// `excluded`: fora do Σ, sem "Vale" e descontada da contagem confrontada.
+// `excludedCount` por bloco e `excludedIds` (lista completa) por fator.
 // Versão: 1.10 | Data: 28/09/2026
 // v1.10: CRITÉRIO DE CRÉDITO POR MEMBRO (factor.memberCredit). O recorte do
 // membro sai de memberScopeFor — o MESMO do engine — como alternativas
@@ -126,6 +131,7 @@ import {
   apuracaoRef,
   explicitMemberIds,
   monthPeriod,
+  parseCompEntryInputs,
   parseCompPlanConfig,
   roundMoney,
   type CompBreakdown,
@@ -180,6 +186,12 @@ export interface CompDetailRecordRow {
    * fora, para não encher a coluna de "R$ 0,00 de X".
    */
   parts: { label: string; value: number }[];
+  /**
+   * Registro DESMARCADO neste lançamento (`inputs.excluded`): o engine o tira
+   * do realizado, e aqui ele segue listado — é o que permite remarcá-lo — mas
+   * fora do Σ e sem "Vale".
+   */
+  excluded: boolean;
 }
 
 /** Um degrau da escada de faixas, pronto para exibição. */
@@ -238,6 +250,8 @@ export interface CompDetailOperand {
   /** Tamanho do recorte inteiro (contagem exata), mesmo com lista truncada. */
   total: number;
   truncated: boolean;
+  /** Quantos dos registros LISTADOS estão desmarcados (fora do cálculo). */
+  excludedCount: number;
   /**
    * Rótulos dos operandos DOBRADOS neste bloco (engrenagem). Vazio = bloco de
    * um operando só. É o sinal de fusão para os consumidores — antes eles
@@ -271,6 +285,12 @@ export interface CompDetailFactor {
    * inventar um seria o alarme falso que essa tela existe para evitar.
    */
   listedForCompare: number | null;
+  /**
+   * Lista COMPLETA de registros desmarcados do fator no lançamento — inclusive
+   * os fora da janela listada. O painel parte dela ao gravar, senão salvar
+   * apagaria em silêncio os desmarcados que não estão na tela.
+   */
+  excludedIds: string[];
   warnings: string[];
 }
 
@@ -752,7 +772,8 @@ function toDetailRow(
   labels: RecordLabels,
   period: DashboardPeriod,
   // R$ por unidade do realizado; null = relação não linear (nada de inventar).
-  perUnit: number | null
+  perUnit: number | null,
+  excluded: boolean
 ): CompDetailRecordRow {
   const root = ctx.rootByRecordType.get(record.record_type);
   const dateRef =
@@ -774,7 +795,7 @@ function toDetailRow(
     stage: recordCellValue(record, "stage", ctx.allFields, labels),
     value: Number.isFinite(numeric) ? numeric : null,
     contribution:
-      perUnit != null && Number.isFinite(numeric)
+      !excluded && perUnit != null && Number.isFinite(numeric)
         ? roundMoney(perUnit * numeric)
         : null,
     // recordColumnValue (não recordCellValue): resolve também `unified:` e
@@ -791,6 +812,7 @@ function toDetailRow(
           ),
     // Preenchido só no colapso de bloco fundido (collapseRowsByRecord).
     parts: [],
+    excluded,
   };
 }
 
@@ -803,7 +825,8 @@ async function loadOperandRecords(
   operand: FactorOperand,
   rowBudget: number,
   memberId: string,
-  perUnit: number | null
+  perUnit: number | null,
+  excluded: ReadonlySet<string>
 ): Promise<CompDetailOperand> {
   const valueLabel = operand.field === "*" ? "Registros" : operand.fieldLabel;
   const query = operandRecordQuery(ctx, plan, factor, operand, memberId);
@@ -816,6 +839,7 @@ async function loadOperandRecords(
       listedSum: null,
       total: 0,
       truncated: false,
+      excludedCount: 0,
       mergedFrom: [],
       sumParts: [],
       warnings: [query.error],
@@ -836,8 +860,10 @@ async function loadOperandRecords(
   const rows = windows.flatMap((w) => w.rows);
   const total = windows.reduce((a, w) => a + w.total, 0);
   const kept = rows.slice(0, maxRows);
+  // A listagem NÃO aplica os desmarcados (senão não daria para remarcá-los):
+  // eles vêm na lista, marcados, e saem só do Σ.
   const detailRows = kept.map((r) =>
-    toDetailRow(r, ctx, operand, ctx.fkLabels, query.period, perUnit)
+    toDetailRow(r, ctx, operand, ctx.fkLabels, query.period, perUnit, excluded.has(r.id))
   );
   // Campo que o modo lista não sabe resolver (unified:/match:) não vira Σ — um
   // número ali seria pior que a ausência dele.
@@ -855,10 +881,11 @@ async function loadOperandRecords(
     rows: detailRows,
     listedSum:
       summable && !truncated
-        ? detailRows.reduce((a, r) => a + (r.value ?? 0), 0)
+        ? detailRows.reduce((a, r) => a + (r.excluded ? 0 : (r.value ?? 0)), 0)
         : null,
     total,
     truncated,
+    excludedCount: detailRows.filter((r) => r.excluded).length,
     mergedFrom: [],
     sumParts: [],
     warnings,
@@ -949,7 +976,11 @@ function mergeOperandBlocks(
   let completo = true;
   for (const p of parts) {
     if (!operandSums(p.operand)) {
-      parcelas.push({ label: p.block.label, value: p.block.total, money: false });
+      parcelas.push({
+        label: p.block.label,
+        value: p.block.total - p.block.excludedCount,
+        money: false,
+      });
       continue;
     }
     // Soma sem Σ (lista truncada ou campo que o modo lista não recorta): não
@@ -987,6 +1018,7 @@ function mergeOperandBlocks(
     listedSum: somavel ? parcelas.reduce((a, x) => a + x.value, 0) : null,
     total: truncated ? total : rows.length,
     truncated,
+    excludedCount: rows.filter((r) => r.excluded).length,
     mergedFrom: dobrados.map((p) => p.block.label),
     sumParts: somavel ? [] : parcelas,
     warnings: [...new Set(parts.flatMap((p) => p.block.warnings))],
@@ -1074,6 +1106,11 @@ export async function loadFactorRecords(
 ): Promise<CompDetailFactor> {
   const fb = breakdown?.byFactor[factor.id] ?? null;
   const operands = factorOperands(ctx, factor);
+  const excludedIds = new Set(
+    parseCompEntryInputs(plan.entryByMember.get(memberId)?.inputs).excluded?.[
+      factor.id
+    ] ?? []
+  );
 
   // ---- Memória de cálculo (o "como isso vira dinheiro") ----
   const roles = commissionRolesOf(plan.config, factor.id);
@@ -1112,6 +1149,7 @@ export async function loadFactorRecords(
     realized: fb?.realized ?? null,
     payoutFormula,
     commissions,
+    excludedIds: [...excludedIds],
     warnings: [] as string[],
   };
   if (operands.length === 0) {
@@ -1136,7 +1174,8 @@ export async function loadFactorRecords(
         operand,
         perOperand,
         memberId,
-        uv?.perUnit ?? null
+        uv?.perUnit ?? null,
+        excludedIds
       )
     );
   }
@@ -1202,7 +1241,13 @@ function comparableQuantity(
   if (lowered.tokens.length !== 1 || lowered.tokens[0].kind !== "field")
     return null;
   const agg = effectiveAgg(operands[0].aggs);
-  if (agg === "count") return blocks[0].total;
+  // Contagem com desmarcados numa lista TRUNCADA: os desmarcados fora da janela
+  // não são conhecidos, e a subtração daria um número errado — melhor não
+  // confrontar.
+  if (agg === "count")
+    return blocks[0].truncated && blocks[0].excludedCount > 0
+      ? null
+      : blocks[0].total - blocks[0].excludedCount;
   if (agg === "sum") return blocks[0].listedSum;
   return null; // média: o Σ das linhas não é o valor do operando
 }
