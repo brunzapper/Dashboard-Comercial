@@ -1,3 +1,7 @@
+// Versão: 2.0 | Data: 26/11/2026
+// v2.0 (26/11/2026): META PADRÃO POR MEMBRO (factor.memberTargets — id
+// CANÔNICO → alvo). Fallback de leitura entre a linha de goals do mês e o
+// defaultTarget do plano; targetSource ganha "member". Ausente = byte-idêntico.
 // Versão: 1.9 | Data: 01/10/2026
 // v1.9 (01/10/2026): `parseUiFilter` EXPORTADO (era o parseFilter privado) —
 // o catálogo de Indicadores (lib/indicators/model.ts) parseia o recorte do
@@ -158,6 +162,11 @@ export interface CompFactor {
   // sub-operação"). Fallback de LEITURA — nunca vira linha de goals; digitar
   // na célula grava um goal (override), limpar deleta e volta ao padrão.
   defaultTarget?: number;
+  // Meta padrão POR MEMBRO (id CANÔNICO → alvo; v2.0). Mesma natureza do
+  // defaultTarget — fallback de LEITURA, nunca vira linha de goals — só que
+  // por pessoa. Precedência: goals do mês > memberTargets[membro] >
+  // defaultTarget. Ausente = todos herdam o padrão do plano (byte-idêntico).
+  memberTargets?: Record<string, number>;
   // Moeda em que alvo/defaultTarget são DIGITADOS (ex. "USD"). Conversão a
   // BRL acontece na LEITURA (computeEntry) pela taxa do trimestre passada
   // pelos callers (targetRates); ausente = BRL (sem conversão).
@@ -309,8 +318,9 @@ export interface CompFactorBreakdown {
   attainmentPct: number | null;
   payout: number;
   overridden: { realized: boolean; attainmentPct: boolean; payout: boolean };
-  // De onde saiu o alvo: linha de goals, defaultTarget do plano, ou nenhum.
-  targetSource: "goal" | "default" | null;
+  // De onde saiu o alvo: linha de goals, meta padrão do MEMBRO
+  // (memberTargets), defaultTarget do plano, ou nenhum.
+  targetSource: "goal" | "member" | "default" | null;
   // Alvo convertido a BRL (== target sem targetCurrency); null quando não há
   // alvo OU a taxa da moeda falta (targetRateMissing).
   targetBRL: number | null;
@@ -514,6 +524,18 @@ function parseFactor(raw: unknown): CompFactor | null {
       memberCredit[memberId] = mode;
     }
     if (Object.keys(memberCredit).length > 0) out.memberCredit = memberCredit;
+  }
+  // Meta padrão por membro (v2.0) — molde fail-closed do memberCredit: alvo
+  // não-finito/negativo derruba o config; mapa vazio é descartado.
+  if (raw.memberTargets != null) {
+    if (!isRecord(raw.memberTargets)) return null;
+    const memberTargets: Record<string, number> = {};
+    for (const [memberId, value] of Object.entries(raw.memberTargets)) {
+      const n = finiteOrNull(value);
+      if (memberId === "" || n == null || n < 0) return null;
+      memberTargets[memberId] = n;
+    }
+    if (Object.keys(memberTargets).length > 0) out.memberTargets = memberTargets;
   }
   if (defaultTarget != null) out.defaultTarget = defaultTarget;
   if (typeof raw.targetCurrency === "string" && raw.targetCurrency !== "")
@@ -933,11 +955,19 @@ export function computeEntry(
   for (const f of config.factors) {
     weightSumPct += f.weightPct;
     const ov = inputs.overrides.factors[f.id] ?? {};
-    // Alvo efetivo: linha de goals ?? defaultTarget do plano (unidade DIGITADA).
+    // Alvo efetivo: linha de goals ?? meta padrão do membro ?? defaultTarget
+    // do plano (unidade DIGITADA).
     const goalTarget = targets[f.id] ?? null;
-    const target = goalTarget ?? f.defaultTarget ?? null;
-    const targetSource: "goal" | "default" | null =
-      goalTarget != null ? "goal" : target != null ? "default" : null;
+    const memberTarget = memberId ? (f.memberTargets?.[memberId] ?? null) : null;
+    const target = goalTarget ?? memberTarget ?? f.defaultTarget ?? null;
+    const targetSource: CompFactorBreakdown["targetSource"] =
+      goalTarget != null
+        ? "goal"
+        : memberTarget != null
+          ? "member"
+          : target != null
+            ? "default"
+            : null;
     // Conversão a BRL: sem targetCurrency é identidade; com, exige taxa do
     // caller — ausente/null ⇒ targetBRL null (atingimento null, fail-closed).
     let targetBRL: number | null = target;

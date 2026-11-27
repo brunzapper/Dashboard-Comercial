@@ -373,6 +373,7 @@ export function sheetFactorNote(
   // peso 0 a meta já aparece na coluna dela e o resto é ruído.
   if (!semValorProprio) {
     if (b.targetSource === "default") extras.push("Meta padrão do plano");
+    else if (b.targetSource === "member") extras.push("Meta padrão do membro");
     if (f.targetCurrency && b.target != null) {
       extras.push(
         b.targetRateMissing

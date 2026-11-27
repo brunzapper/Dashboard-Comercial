@@ -1,3 +1,7 @@
+// Versão: 1.9 | Data: 26/11/2026
+// v1.9 (26/11/2026): "Meta por membro" por indicador (factor.memberTargets) —
+// meta padrão de cada pessoa, que vale todo mês até a grade fixar outra; vazio
+// herda a meta padrão do plano. O save RE-EMITE a chave (regra do presetKey).
 // Versão: 1.8 | Data: 01/10/2026
 // v1.8 (01/10/2026): `SourcePicker` EXPORTADO — o editor de Indicadores
 // (components/admin/indicators-manager.tsx) escolhe as bases do realizado com o
@@ -148,6 +152,9 @@ interface FactorDraft {
   // registros (padrão, com a equipe).
   memberCredit: Record<string, CompMemberCreditMode>;
   defaultTarget: string;
+  // Meta padrão por membro (v1.9): id → texto do input. Vazio/ausente = herda
+  // o defaultTarget do plano.
+  memberTargets: Record<string, string>;
   targetCurrency: string; // "" = R$ (sem conversão)
   filters: WidgetFilter[]; // condições do recorte (linhas cruas da UI)
 }
@@ -171,6 +178,7 @@ function emptyFactor(): FactorDraft {
     memberTeams: {},
     memberCredit: {},
     defaultTarget: "",
+    memberTargets: {},
     targetCurrency: "",
     filters: [],
   };
@@ -196,6 +204,10 @@ function draftsFromConfig(config: CompPlanConfig | null): FactorDraft[] {
     // Idem: clonado e RE-EMITIDO no save (v1.7).
     memberCredit: { ...(f.memberCredit ?? {}) },
     defaultTarget: f.defaultTarget != null ? String(f.defaultTarget) : "",
+    // Idem: RE-EMITIDO no save (v1.9).
+    memberTargets: Object.fromEntries(
+      Object.entries(f.memberTargets ?? {}).map(([k, v]) => [k, String(v)])
+    ),
     targetCurrency: f.targetCurrency ?? "",
     // Clona (nunca mutar o config das props) — e RE-EMITIR no save é
     // obrigatório: sem isso o round-trip destruiria os filtros em silêncio.
@@ -660,6 +672,19 @@ export function PlanEditor(props: PlanEditorProps) {
           );
           return;
         }
+        for (const [mid, text] of Object.entries(f.memberTargets)) {
+          if (text.trim() === "") continue;
+          const n = numOrNull(text);
+          if (n == null || n < 0) {
+            const name =
+              props.responsibles.find((r) => r.id === mid)?.label ?? "um membro";
+            notifyActionError(
+              "Salvar plano",
+              `A meta de ${name} no indicador "${who}" precisa ser um número maior ou igual a zero.`
+            );
+            return;
+          }
+        }
       }
       const commissions = buildCommissions();
       if (typeof commissions === "string") {
@@ -711,6 +736,18 @@ export function PlanEditor(props: PlanEditorProps) {
           ...(numOrNull(f.defaultTarget) != null
             ? { defaultTarget: numOrNull(f.defaultTarget) }
             : {}),
+          // RE-EMITIR a meta por membro (v1.9) — mesma regra da equipe.
+          // Entradas vazias saem: vazio = herda a meta padrão do plano.
+          ...(() => {
+            const targets: Record<string, number> = {};
+            for (const [mid, text] of Object.entries(f.memberTargets)) {
+              const n = text.trim() === "" ? null : numOrNull(text);
+              if (n != null) targets[mid] = n;
+            }
+            return Object.keys(targets).length > 0
+              ? { memberTargets: targets }
+              : {};
+          })(),
           ...(f.targetCurrency !== "" ? { targetCurrency: f.targetCurrency } : {}),
           // RE-EMITIR as condições do recorte (regra do presetKey/apuracao):
           // sem isso o round-trip do save as destruiria em silêncio.
@@ -1125,6 +1162,46 @@ export function PlanEditor(props: PlanEditorProps) {
                   esse campo vazio. &quot;Todo o recorte&quot; dispensa
                   critério de membro: conta tudo o que passar pelas Condições
                   do recorte (ex.: quem recebe sobre 100% do que for vendido).
+                </p>
+              </div>
+            ) : null}
+            {/* Meta POR MEMBRO (v1.9): meta padrão de cada pessoa neste
+                indicador. Mesma condição do bloco acima — sem membros
+                efetivos não há a quem atribuir. */}
+            {commissionMembers.length > 0 ? (
+              <div className="flex flex-col gap-1.5">
+                <Label>Meta por membro</Label>
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                  {commissionMembers.map((m) => (
+                    <div key={m.id} className="flex flex-col gap-1">
+                      <span className="text-muted-foreground text-xs">
+                        {m.label}
+                      </span>
+                      <Input
+                        inputMode="decimal"
+                        aria-label={`Meta de ${m.label} em ${f.label || "este indicador"}`}
+                        value={f.memberTargets[m.id] ?? ""}
+                        placeholder={
+                          f.defaultTarget.trim() !== ""
+                            ? `Padrão: ${f.defaultTarget}`
+                            : "Sem meta"
+                        }
+                        onChange={(e) =>
+                          patchFactor(f.id, {
+                            memberTargets: {
+                              ...f.memberTargets,
+                              [m.id]: e.target.value,
+                            },
+                          })
+                        }
+                      />
+                    </div>
+                  ))}
+                </div>
+                <p className="text-muted-foreground text-xs">
+                  Meta de cada pessoa neste indicador, válida em todos os
+                  meses. Vazio usa a meta padrão do plano. Uma meta digitada na
+                  grade vale só para aquele mês e vence esta.
                 </p>
               </div>
             ) : null}

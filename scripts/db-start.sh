@@ -1,5 +1,11 @@
 #!/usr/bin/env bash
-# Versão: 1.1 | Data: 19/11/2026
+# Versão: 1.2 | Data: 27/11/2026
+# v1.2: `supabase start` com UMA nova tentativa. No CI (runner novo a cada
+#       job) o start falhou com "failed to bind host port 0.0.0.0:54322:
+#       address already in use" — o mesmo commit passou noutra rodada, então
+#       é colisão transitória do docker, não do código. Na falha o script
+#       registra quem segura as portas do stack, derruba os containers e
+#       tenta de novo; falhar duas vezes segue derrubando o job.
 # v1.1: os prefixos duplicados 0017_*/0049_* viraram 00170/00171 e
 #       00490/00491 (mesma ordem lexical). O desvio abaixo segue de propósito:
 #       espelha o fluxo manual de produção (SQL Editor, ordem por NOME).
@@ -24,7 +30,17 @@ trap restore EXIT
 
 mv supabase/migrations "$HOLD"
 mkdir supabase/migrations
-supabase start
+start_stack() {
+  if supabase start; then return 0; fi
+  echo "::warning::supabase start falhou — diagnóstico e nova tentativa"
+  # Quem segura as portas do stack (54321 API, 54322 DB) — só diagnóstico.
+  (ss -ltnp 2>/dev/null || netstat -ltnp 2>/dev/null || true) | grep -E ':5432[0-9]' || true
+  docker ps -a --format '{{.Names}}	{{.Status}}	{{.Ports}}' || true
+  supabase stop --no-backup || true
+  sleep 5
+  supabase start
+}
+start_stack
 restore
 
 eval "$(supabase status -o env)"

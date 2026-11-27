@@ -4482,10 +4482,14 @@ total opcional por plano.
   `responsible_id`, intocado. O `savePlan` valida o ref contra
   `buildAvailableFields` (numérico/data/sintético/agregado recusados). (b)
   `factor.defaultTarget` = alvo FALLBACK quando não há linha de `goals` p/
-  membro×mês (meta "por sub-operação"): efetivo = `goals ?? defaultTarget`;
-  digitar na célula grava goal (override durável), limpar DELETA e volta ao
-  padrão; `CompFactorBreakdown.targetSource` ("goal"|"default"|null) alimenta
-  o itálico/tooltip da grade; nunca vira linha de goals. (c)
+  membro×mês (meta "por sub-operação"). `factor.memberTargets` (id CANÔNICO →
+  alvo, 26/11/2026) é a meta padrão POR MEMBRO, editada no plano ("Meta por
+  membro"): efetivo = `goals ?? memberTargets[membro] ?? defaultTarget`;
+  digitar na célula grava goal (override durável do mês), limpar DELETA e
+  volta ao padrão; `CompFactorBreakdown.targetSource`
+  ("goal"|"member"|"default"|null) alimenta o itálico/tooltip da grade; nenhum
+  dos dois padrões vira linha de goals, e o save do plan-editor RE-EMITE
+  `memberTargets` (regra do presetKey). (c)
   `factor.targetCurrency` (`^[A-Z]{3}$`, habilitada em `currencies`) = moeda
   em que alvo/defaultTarget são DIGITADOS; a conversão a BRL acontece NA
   LEITURA: os callers resolvem `targetRates` (moeda → R$/un. no trimestre do
