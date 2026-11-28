@@ -1577,9 +1577,9 @@ This version has breaking changes — APIs, conventions, and file structure may 
   `filterColumn` que o descarta) e operando que agrega `unified:`/`match:`
   (sem Σ, `DETAIL_UNSUPPORTED_FIELD_NOTE`). Consulta sempre pelo client RLS do
   usuário — NUNCA service role. **Registros DESMARCADOS (27/11/2026):** a lista
-  vive no LANÇAMENTO (`inputs.excluded`, chave única `EXCLUDED_ALL_KEY`
-  desde 28/11/2026 — o desmarcado sai de TODO indicador do membro no mês;
-  chaves por fator legadas entram na união `excludedRecordIds`), escrita SÓ
+  vive no LANÇAMENTO, POR INDICADOR (`inputs.excluded[factorId]` — sai SÓ
+  daquele; a chave `EXCLUDED_ALL_KEY` "*" é legado que vale para todos e o
+  save a desfaz), escrita SÓ
   por `saveExcludedRecords` (grava + recalcula o membro), e vira `id neq` no
   recorte do engine por `excludedRecordFilters` (RPCs intocados); a listagem
   NÃO a aplica (é ela que permite remarcar) — linha `excluded` fica fora do Σ
@@ -1590,8 +1590,13 @@ This version has breaking changes — APIs, conventions, and file structure may 
   `derivedFactorCatalog`), avaliada em `computeEntry` por
   `resolveDerivedRealized` — o engine NÃO o consulta. É a forma de "tudo
   menos X" (filtro `neq` derruba campo VAZIO). Origem null ⇒ derivado null
-  (nunca 0). Derivado LINEAR (±origens, `linearOriginCoefficients`) lista os
-  registros LÍQUIDOS das origens no detalhamento (quem se anula sai). Grade de
+  (nunca 0). O derivado lê cada origem COMO ELE A VÊ — recorte da origem com
+  os desmarcados DO DERIVADO, `realized[derivedOriginKey(D, O)]` consultado
+  pelo engine — então desmarcado/override de uma ORIGEM nunca vaza para o
+  derivado (a venda desmarcada no Outbound não reaparece em Totais −
+  Outbound). Derivado LINEAR (±origens, `linearOriginCoefficients`) lista os
+  registros LÍQUIDOS das origens pelo valor CRU (quem se anula sai), com a
+  marcação do próprio derivado. Grade de
   Lançamentos: colunas por indicador SÓ de `factorGridColumns`
   (`lib/comp/grid-columns.ts` — Meta/Ating. onde o atingimento entra em conta,
   Valor com peso, Remun./Recebe onde ele é BASE de comissão). Duplicar plano

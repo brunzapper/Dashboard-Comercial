@@ -1,3 +1,8 @@
+// Versão: 2.0 | Data: 28/11/2026
+// v2.0: desmarcados de volta POR INDICADOR, e o derivado ganha consultas
+// próprias: cada origem é lida de novo com os desmarcados DO DERIVADO
+// (computed.realized[derivedOriginKey(D, O)]) — só quando eles diferem dos da
+// origem; iguais (o caso comum, nenhum desmarcado) reaproveitam o resultado.
 // Versão: 1.9 | Data: 28/11/2026
 // v1.9: os desmarcados valem para TODO indicador do lançamento
 // (excludedRecordFilters sem fator — união de inputs.excluded).
@@ -89,7 +94,9 @@ import {
   factorTargetCurrencies,
   lastDayOfMonth,
   monthPeriod,
+  derivedOriginKey,
   derivedSourceFactorIds,
+  excludedRecordIds,
   excludedRecordFilters,
   isDerivedFactor,
   parseCompEntryInputs,
@@ -487,54 +494,90 @@ export async function recomputePlanMonth(
       const memberInputs = parseCompEntryInputs(entryByMember.get(member.id)?.inputs);
       const realized: Record<string, number | null> = {};
       const errors: Record<string, string> = {};
+      // Consulta do realizado de UM indicador de registros, com os desmarcados
+      // de `exclusionsOf` (o próprio, ou o derivado que o lê como origem).
+      const queryFactor = async (
+        factor: (typeof config.factors)[number],
+        exclusionsOf: string
+      ): Promise<{ value: number | null } | { error: string }> => {
+        const scope = memberScopeFor(factor, member.id, canon, nameById);
+        if ("error" in scope) return { error: scope.error };
+        // Uma alternativa (o caso clássico) entra direto nos filtros — a
+        // consulta sai idêntica à de antes; 2+ viram filterAlternatives.
+        const single = scope.alternatives.length === 1;
+        // Desmarcados ficam no recorte BASE: valem para toda alternativa de
+        // crédito (o choke point faz E de `filters` com cada uma).
+        const filters: WidgetFilter[] = [
+          ...(factor.filters ?? []),
+          ...(single ? scope.alternatives[0] : []),
+          ...excludedRecordFilters(memberInputs, exclusionsOf),
+        ];
+        try {
+          const res = await runCalculatedWidget(rpcClient, {
+            formula: factor.formula,
+            sources: factor.sources,
+            sourceDefs: sources,
+            filters,
+            ...(single ? {} : { filterAlternatives: scope.alternatives }),
+            period,
+            correspondences,
+            currencyMode: "fixed",
+            currencyCode: "BRL",
+            allowNegative: true,
+            fields: allFields,
+            rates,
+            conversionPeriod,
+          });
+          return { value: res.value };
+        } catch (e) {
+          return { error: e instanceof Error ? e.message : "Falha na consulta." };
+        }
+      };
       await Promise.all(
         config.factors.filter((factor) => !isDerivedFactor(factor)).map((factor) =>
           runLimited(async () => {
-            const scope = memberScopeFor(factor, member.id, canon, nameById);
-            if ("error" in scope) {
+            const res = await queryFactor(factor, factor.id);
+            if ("error" in res) {
               realized[factor.id] = null;
-              errors[factor.id] = scope.error;
+              errors[factor.id] = res.error;
               queryErrors += 1;
-              return;
-            }
-            // Uma alternativa (o caso clássico) entra direto nos filtros — a
-            // consulta sai idêntica à de antes; 2+ viram filterAlternatives.
-            const single = scope.alternatives.length === 1;
-            // Desmarcados ficam no recorte BASE: valem para toda alternativa
-            // de crédito (o choke point faz E de `filters` com cada uma).
-            const filters: WidgetFilter[] = [
-              ...(factor.filters ?? []),
-              ...(single ? scope.alternatives[0] : []),
-              ...excludedRecordFilters(memberInputs),
-            ];
-            try {
-              const res = await runCalculatedWidget(rpcClient, {
-                formula: factor.formula,
-                sources: factor.sources,
-                sourceDefs: sources,
-                filters,
-                ...(single ? {} : { filterAlternatives: scope.alternatives }),
-                period,
-                correspondences,
-                currencyMode: "fixed",
-                currencyCode: "BRL",
-                allowNegative: true,
-                fields: allFields,
-                rates,
-                conversionPeriod,
-              });
-              realized[factor.id] = res.value;
-            } catch (e) {
-              realized[factor.id] = null;
-              errors[factor.id] =
-                e instanceof Error ? e.message : "Falha na consulta.";
-              queryErrors += 1;
-            }
+            } else realized[factor.id] = res.value;
           })
         )
       );
-      // Derivado: sem consulta (computeEntry o avalia sobre as origens); herda
-      // a falha de qualquer origem para a grade avisar.
+      // Derivado: cada origem COMO O DERIVADO A VÊ — os desmarcados dele, não
+      // os da origem. Mesmo conjunto de desmarcados ⇒ reaproveita o realizado
+      // da origem (nenhuma consulta a mais no caso comum).
+      const sameSet = (a: string[], b: string[]) =>
+        a.length === b.length && a.every((x) => b.includes(x));
+      await Promise.all(
+        config.factors.filter(isDerivedFactor).flatMap((derived) =>
+          derivedSourceFactorIds(derived).map((originId) =>
+            runLimited(async () => {
+              const origin = config.factors.find((f) => f.id === originId);
+              if (!origin || isDerivedFactor(origin)) return;
+              const key = derivedOriginKey(derived.id, origin.id);
+              if (
+                sameSet(
+                  excludedRecordIds(memberInputs, derived.id),
+                  excludedRecordIds(memberInputs, origin.id)
+                )
+              ) {
+                realized[key] = realized[origin.id] ?? null;
+                return;
+              }
+              const res = await queryFactor(origin, derived.id);
+              if ("error" in res) {
+                realized[key] = null;
+                errors[derived.id] = res.error;
+                queryErrors += 1;
+              } else realized[key] = res.value;
+            })
+          )
+        )
+      );
+      // Derivado: computeEntry o avalia sobre as origens; herda a falha de
+      // qualquer origem para a grade avisar.
       for (const factor of config.factors) {
         if (!isDerivedFactor(factor)) continue;
         const failed = derivedSourceFactorIds(factor).filter((id) => errors[id]);

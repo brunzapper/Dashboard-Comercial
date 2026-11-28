@@ -1,3 +1,15 @@
+// Versão: 2.4 | Data: 28/11/2026
+// v2.4 (28/11/2026): DESMARCAR volta a valer POR INDICADOR, e o DERIVADO passa
+// a ser calculado pela COMPOSIÇÃO das origens. A v2.3 resolveu "a venda
+// Outbound desmarcada reaparece em Totais − Outbound" tirando o registro de
+// TODO indicador — e com isso ele saía também do atingimento (Totais), o que
+// não era o pedido. O certo: o desmarcado sai SÓ do indicador onde se clicou,
+// e o derivado lê cada origem PELO RECORTE dela, com os desmarcados DO
+// DERIVADO (não os da origem) — chave `derivedOriginKey(D, O)` no
+// computed.realized, que o engine consulta. Desmarcar no Outbound tira o
+// registro do pagamento de 50% sem devolvê-lo ao "sem Outbound"; o override
+// de uma origem também não vaza mais para o derivado. EXCLUDED_ALL_KEY ("*")
+// fica só como LEGADO (valor gravado pela v2.3 = vale para todos).
 // Versão: 2.3 | Data: 28/11/2026
 // v2.3 (28/11/2026): DESMARCAR vale para o LANÇAMENTO inteiro. O registro
 // desmarcado sai de TODOS os indicadores do membro no mês (excludedRecordIds =
@@ -330,10 +342,9 @@ export interface CompEntryInputs {
   bonuses: CompBonus[];
   note?: string;
   /**
-   * Registros DESMARCADOS no lançamento (chave → ids de `records`). Desde a
-   * v2.3 valem para TODOS os indicadores do membro no mês (a união das
-   * chaves); a gravação usa só EXCLUDED_ALL_KEY. Chave por fator é legado
-   * (lida, entra na união). Ausente = todos contam.
+   * Registros DESMARCADOS por indicador (factorId → ids de `records`): saem
+   * SÓ daquele indicador neste lançamento. A chave EXCLUDED_ALL_KEY ("*") é
+   * legado da v2.3 e vale para todos. Ausente = todos contam.
    */
   excluded?: Record<string, string[]>;
 }
@@ -341,29 +352,38 @@ export interface CompEntryInputs {
 /** Teto de registros desmarcados num lançamento. */
 export const MAX_EXCLUDED_PER_FACTOR = 500;
 
-/** Chave única de inputs.excluded (v2.3): o desmarcado vale para o lançamento todo. */
+/** Chave LEGADA de inputs.excluded (v2.3): o desmarcado vale para todo indicador. */
 export const EXCLUDED_ALL_KEY = "*";
 
-/** Todos os registros desmarcados do lançamento (união das chaves, dedup). */
+/** Desmarcados de UM indicador: os dele ∪ os legados de EXCLUDED_ALL_KEY. */
 export function excludedRecordIds(
-  inputs: Pick<CompEntryInputs, "excluded"> | null | undefined
+  inputs: Pick<CompEntryInputs, "excluded"> | null | undefined,
+  factorId: string
 ): string[] {
-  const out = new Set<string>();
-  for (const ids of Object.values(inputs?.excluded ?? {}))
-    for (const id of ids) out.add(id);
-  return [...out];
+  const ex = inputs?.excluded ?? {};
+  return [...new Set([...(ex[factorId] ?? []), ...(ex[EXCLUDED_ALL_KEY] ?? [])])];
 }
 
 /**
- * Filtros que tiram os registros desmarcados do realizado: um `id neq` por
- * registro, combinados em E pelo RPC (que aceita `id` desde a 0153 e não tem
- * "not in"). Valem para TODO indicador do lançamento (v2.3). Dono ÚNICO — o
- * engine (recompute) deriva daqui, nunca de uma lista montada à mão.
+ * Chave, em computed.realized, do realizado de uma ORIGEM como o DERIVADO a vê:
+ * o recorte da origem com os desmarcados do derivado (não os da origem). O
+ * "@" nunca aparece num id de fator.
+ */
+export function derivedOriginKey(derivedId: string, originId: string): string {
+  return `${derivedId}@${originId}`;
+}
+
+/**
+ * Filtros que tiram os registros desmarcados do realizado de um indicador: um
+ * `id neq` por registro, combinados em E pelo RPC (que aceita `id` desde a
+ * 0153 e não tem "not in"). Dono ÚNICO — o engine (recompute) deriva daqui,
+ * nunca de uma lista montada à mão.
  */
 export function excludedRecordFilters(
-  inputs: Pick<CompEntryInputs, "excluded"> | null | undefined
+  inputs: Pick<CompEntryInputs, "excluded"> | null | undefined,
+  factorId: string
 ): WidgetFilter[] {
-  return excludedRecordIds(inputs).map((id) => ({
+  return excludedRecordIds(inputs, factorId).map((id) => ({
     field: "id",
     op: "neq",
     value: id,
@@ -1063,27 +1083,31 @@ export function derivedSourceFactorIds(f: CompFactor): string[] {
 }
 
 /**
- * Realizado CRU com os derivados preenchidos: avalia cada derivado sobre o
- * realizado EFETIVO (override ?? cru) das origens. Sem venda a origem é 0 (o
- * engine grava 0); null é "não consultou/falhou" e deixa o derivado null —
- * fail-closed: "Totais − Outbound" com o Outbound faltando pagaria o Outbound
- * pela tabela.
+ * Realizado CRU com os derivados preenchidos (v2.4): cada derivado avalia a
+ * conta sobre as origens COMO ELE AS VÊ — `realized[derivedOriginKey(D, O)]`
+ * (recorte da origem com os desmarcados do derivado), caindo no realizado
+ * cru da origem quando o snapshot é anterior à chave. Desmarcado e override
+ * de uma ORIGEM não vazam para o derivado: cada indicador responde só pelo
+ * que foi mexido nele (o override do próprio derivado segue vencendo, no
+ * laço de computeEntry). Sem venda a origem é 0 (o engine grava 0); null é
+ * "não consultou/falhou" e deixa o derivado null — fail-closed.
  */
 export function resolveDerivedRealized(
   config: Pick<CompPlanConfig, "factors">,
-  inputs: CompEntryInputs,
+  _inputs: CompEntryInputs,
   realized: Record<string, number | null>
 ): Record<string, number | null> {
   if (!config.factors.some(isDerivedFactor)) return realized;
-  const ctx: Record<string, number | null> = {};
-  for (const f of config.factors) {
-    if (isDerivedFactor(f)) continue;
-    const ov = inputs.overrides.factors[f.id] ?? {};
-    ctx[compFactorRef(f.id, "realizado")] = ov.realized ?? realized[f.id] ?? null;
-  }
   const out = { ...realized };
   for (const f of config.factors) {
     if (!isDerivedFactor(f)) continue;
+    const ctx: Record<string, number | null> = {};
+    for (const o of config.factors) {
+      if (isDerivedFactor(o) || o.id === f.id) continue;
+      const seen = realized[derivedOriginKey(f.id, o.id)];
+      ctx[compFactorRef(o.id, "realizado")] =
+        seen !== undefined ? seen : (realized[o.id] ?? null);
+    }
     const r = evaluateFormula(f.formula, ctx);
     out[f.id] = typeof r === "number" && Number.isFinite(r) ? r : null;
   }
