@@ -44,6 +44,7 @@ import {
   compOperandCatalog,
   computeEntry,
   derivedFactorCatalog,
+  derivedOriginKey,
   derivedSourceFactorIds,
   EXCLUDED_ALL_KEY,
   excludedRecordFilters,
@@ -1209,7 +1210,7 @@ describe("alvo padrão e moeda do alvo", () => {
     expect(parseCompPlanConfig(bad)).toBeNull();
   });
 
-  it("inputs.excluded: parse leniente (só UUID, sem duplicata) e filtros `id neq` do LANÇAMENTO inteiro", () => {
+  it("inputs.excluded: parse leniente (só UUID, sem duplicata) e filtros `id neq` POR indicador (+ legado *)", () => {
     const A = "11111111-2222-4333-8444-555555555555";
     const B = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
     const C = "cccccccc-bbbb-4ccc-8ddd-eeeeeeeeeeee";
@@ -1217,15 +1218,15 @@ describe("alvo padrão e moeda do alvo", () => {
       excluded: { f_a: [A, A, "lixo", 3, B], f_b: [], f_c: "x", "*": [B, C] },
     });
     expect(inputs.excluded).toEqual({ f_a: [A, B], "*": [B, C] });
-    // União das chaves (legado por fator + chave única), sem duplicata: o
-    // desmarcado sai de TODO indicador do membro no mês.
-    expect(excludedRecordIds(inputs)).toEqual([A, B, C]);
-    expect(excludedRecordFilters(inputs)).toEqual([
+    // Os do indicador ∪ os legados de "*" (v2.3 valia para todos), sem duplicata.
+    expect(excludedRecordIds(inputs, "f_a")).toEqual([A, B, C]);
+    expect(excludedRecordIds(inputs, "f_b")).toEqual([B, C]);
+    expect(excludedRecordFilters(inputs, "f_a")).toEqual([
       { field: "id", op: "neq", value: A },
       { field: "id", op: "neq", value: B },
       { field: "id", op: "neq", value: C },
     ]);
-    expect(excludedRecordFilters(parseCompEntryInputs({}))).toEqual([]);
+    expect(excludedRecordFilters(parseCompEntryInputs({ excluded: { f_a: [A] } }), "f_b")).toEqual([]);
     expect(parseCompEntryInputs({}).excluded).toBeUndefined();
     expect(EXCLUDED_ALL_KEY).toBe("*");
   });
@@ -1480,7 +1481,7 @@ describe("indicador DERIVADO (realizedFrom: indicators)", () => {
     expect(bd.total).toBe(3400);
   });
 
-  it("override do realizado de uma origem recalcula o derivado; override do derivado vence", () => {
+  it("override de uma ORIGEM não vaza para o derivado; override do derivado vence", () => {
     const cfg = reparse(derivedConfig())!;
     const bd = computeEntry(
       cfg,
@@ -1489,7 +1490,9 @@ describe("indicador DERIVADO (realizedFrom: indicators)", () => {
       { f_tot: 8000, f_out: 2000 },
       { f_tot: 10000 }
     );
-    expect(bd.byFactor.f_rest.realized).toBe(7500);
+    // Pagar menos Outbound não pode devolver a diferença ao "sem Outbound".
+    expect(bd.byFactor.f_out.realized).toBe(500);
+    expect(bd.byFactor.f_rest.realized).toBe(6000);
     const bd2 = computeEntry(
       cfg,
       0,
@@ -1498,6 +1501,28 @@ describe("indicador DERIVADO (realizedFrom: indicators)", () => {
       { f_tot: 10000 }
     );
     expect(bd2.byFactor.f_rest.realized).toBe(100);
+  });
+
+  it("derivado lê a origem COMO ELE A VÊ (derivedOriginKey): desmarcado no Outbound não volta ao derivado", () => {
+    const cfg = reparse(derivedConfig())!;
+    // Venda Outbound de 1.500 desmarcada SÓ no Outbound: o Outbound cai para
+    // 500, Totais segue 8.000 (atingimento), e o derivado lê o Outbound SEM o
+    // desmarcado dele (2.000) — a venda não paga nada, nem pela tabela.
+    const bd = computeEntry(
+      cfg,
+      0,
+      emptyInputs(),
+      {
+        f_tot: 8000,
+        f_out: 500,
+        [derivedOriginKey("f_rest", "f_tot")]: 8000,
+        [derivedOriginKey("f_rest", "f_out")]: 2000,
+      },
+      { f_tot: 10000 }
+    );
+    expect(bd.byFactor.f_tot.attainmentPct).toBe(80);
+    expect(bd.byFactor.f_rest.realized).toBe(6000);
+    expect(bd.commissionBlocks.find((b) => b.blockId === "outbound")!.value).toBe(250);
   });
 
   it("origem sem resultado (null) deixa o derivado null — nunca paga o Outbound pela tabela", () => {

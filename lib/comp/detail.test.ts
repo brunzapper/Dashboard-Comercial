@@ -574,28 +574,40 @@ describe("loadFactorRecords", () => {
           ],
         },
       });
-      const plan = (ids: string[]): DetailPlan => {
-        const base = planExcluding(ids);
+      // Desmarcados por indicador: { f_o: [...] } (na origem) ou { f_d: [...] }.
+      const plan = (excluded: Record<string, string[]>): DetailPlan => {
+        const base = planExcluding([]);
         const config = { ...base.config, factors: [totais, outbound, derivado] };
-        return { ...base, config, row: { ...base.row, config } };
+        const entry = { ...base.entryByMember.get(M1)!, inputs: { excluded } };
+        return {
+          ...base,
+          config,
+          row: { ...base.row, config },
+          entryByMember: new Map([[M1, entry]]),
+        };
       };
-      const out = await loadFactorRecords(db, ctxWith(), plan([]), derivado, M1, breakdownStub(200));
+      const out = await loadFactorRecords(db, ctxWith(), plan({}), derivado, M1, breakdownStub(200));
       expect(out.operands).toHaveLength(1);
       expect(out.operands[0].label).toBe("Vendas Totais − Vendas Outbound");
       expect(out.operands[0].rows.map((r) => r.id)).toEqual([uid(1), uid(2)]);
       expect(out.operands[0].listedSum).toBe(200);
       expect(out.listedForCompare).toBe(200);
       expect(out.warnings).toEqual([]);
-      // Desmarcado: segue listado (dá para remarcar) e sai do Σ.
-      const ex = await loadFactorRecords(db, ctxWith(), plan([uid(1)]), derivado, M1, breakdownStub(100));
+      // Desmarcado NO derivado: segue listado (dá para remarcar) e sai do Σ.
+      const ex = await loadFactorRecords(db, ctxWith(), plan({ f_d: [uid(1)] }), derivado, M1, breakdownStub(100));
       expect(ex.operands[0].rows.find((r) => r.id === uid(1))?.excluded).toBe(true);
       expect(ex.operands[0].listedSum).toBe(100);
+      // Desmarcado na ORIGEM Outbound (o r0): não volta ao derivado — a
+      // composição usa o valor cru, e o r0 segue se anulando.
+      const naOrigem = await loadFactorRecords(db, ctxWith(), plan({ f_o: [uid(0)] }), derivado, M1, breakdownStub(200));
+      expect(naOrigem.operands[0].rows.map((r) => r.id)).toEqual([uid(1), uid(2)]);
+      expect(naOrigem.operands[0].listedSum).toBe(200);
     });
 
-    it("desmarcado em OUTRO fator também sai deste (vale para o lançamento todo)", async () => {
+    it("desmarcado de OUTRO indicador não afeta este (vale só onde se clicou)", async () => {
       const out = await loadEx([uid(1)], { id: "f_outro" });
-      expect(out.operands[0].excludedCount).toBe(1);
-      expect(out.excludedIds).toEqual([uid(1)]);
+      expect(out.operands[0].excludedCount).toBe(0);
+      expect(out.operands[0].listedSum).toBe(300);
     });
   });
 

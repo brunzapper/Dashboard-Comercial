@@ -1,3 +1,7 @@
+// Versão: 2.2 | Data: 28/11/2026
+// v2.2 (28/11/2026): saveExcludedRecords volta a gravar POR INDICADOR
+// (inputs.excluded[factorId]). A chave legada EXCLUDED_ALL_KEY é desfeita no
+// primeiro save: vira a lista de cada indicador e some.
 // Versão: 2.1 | Data: 28/11/2026
 // v2.1 (28/11/2026): saveExcludedRecords grava a lista do LANÇAMENTO inteiro
 // sob EXCLUDED_ALL_KEY (o desmarcado sai de todos os indicadores do membro no
@@ -96,6 +100,7 @@ import {
   computeEntry,
   lastDayOfMonth,
   EXCLUDED_ALL_KEY,
+  excludedRecordIds,
   MAX_EXCLUDED_PER_FACTOR,
   parseCompEntryInputs,
   parseCompPlanConfig,
@@ -502,7 +507,7 @@ export async function saveExcludedRecords(input: {
   if (ids.length > MAX_EXCLUDED_PER_FACTOR)
     return {
       ok: false,
-      message: `Dá para desmarcar até ${MAX_EXCLUDED_PER_FACTOR} registros por lançamento.`,
+      message: `Dá para desmarcar até ${MAX_EXCLUDED_PER_FACTOR} registros por indicador.`,
     };
 
   const supabase = await createClient();
@@ -527,9 +532,19 @@ export async function saveExcludedRecords(input: {
     return { ok: false, message: "Recalcule o mês antes de desmarcar registros." };
 
   const inputs = parseCompEntryInputs(entry.inputs);
-  // A lista recebida é a do LANÇAMENTO inteiro (o painel parte da união):
-  // grava sob a chave única e descarta as chaves por fator legadas.
-  if (ids.length > 0) inputs.excluded = { [EXCLUDED_ALL_KEY]: ids };
+  // Por indicador. A chave legada "*" (v2.3, valia para todos) é desfeita:
+  // cada indicador herda a lista dela e ela some — senão o desmarcado
+  // seguiria valendo em todo indicador mesmo depois de remarcado aqui.
+  const excluded: Record<string, string[]> = {};
+  const legacy = inputs.excluded?.[EXCLUDED_ALL_KEY] ?? [];
+  for (const f of config.factors) {
+    const merged = excludedRecordIds(inputs, f.id);
+    if (merged.length > 0 && (legacy.length > 0 || inputs.excluded?.[f.id]))
+      excluded[f.id] = merged;
+  }
+  if (ids.length > 0) excluded[input.factorId] = ids;
+  else delete excluded[input.factorId];
+  if (Object.keys(excluded).length > 0) inputs.excluded = excluded;
   else delete inputs.excluded;
 
   const { error } = await supabase

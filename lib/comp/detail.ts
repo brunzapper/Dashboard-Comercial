@@ -1,3 +1,6 @@
+// Versão: 1.14 | Data: 28/11/2026
+// v1.14: desmarcados POR INDICADOR de novo; no derivado, as linhas saem das
+// origens pela composição (valor cru) e a marcação é a do PRÓPRIO derivado.
 // Versão: 1.13 | Data: 28/11/2026
 // v1.13: indicador derivado LINEAR (A − B…) LISTA os próprios registros — os
 // das origens, com o valor líquido por registro (coeficiente × valor); quem se
@@ -1122,9 +1125,12 @@ export async function loadFactorRecords(
 ): Promise<CompDetailFactor> {
   const fb = breakdown?.byFactor[factor.id] ?? null;
   const operands = factorOperands(ctx, factor);
-  // Desmarcados valem para o LANÇAMENTO inteiro (v2.3 do model).
+  // Desmarcados DESTE indicador (v2.4 do model).
   const excludedIds = new Set(
-    excludedRecordIds(parseCompEntryInputs(plan.entryByMember.get(memberId)?.inputs))
+    excludedRecordIds(
+      parseCompEntryInputs(plan.entryByMember.get(memberId)?.inputs),
+      factor.id
+    )
   );
 
   // ---- Memória de cálculo (o "como isso vira dinheiro") ----
@@ -1189,7 +1195,8 @@ export async function loadFactorRecords(
         memberId,
         breakdown,
         rowBudget,
-        uv?.perUnit ?? null
+        uv?.perUnit ?? null,
+        excludedIds
       )),
     };
   }
@@ -1275,7 +1282,8 @@ async function derivedRecords(
   memberId: string,
   breakdown: CompBreakdown | null,
   rowBudget: number,
-  perUnit: number | null
+  perUnit: number | null,
+  excludedIds: ReadonlySet<string>
 ): Promise<Pick<CompDetailFactor, "operands" | "listedForCompare" | "warnings">> {
   const parts: { label: string; coef: number }[] = [];
   const net = new Map<string, CompDetailRecordRow>();
@@ -1306,13 +1314,18 @@ async function derivedRecords(
       if (!valueLabel) valueLabel = op.valueLabel;
       for (const r of op.rows) {
         const add = coef * (r.value ?? 0);
+        // Composição pelo valor CRU (desmarcado na origem segue contando
+        // aqui); a marcação é a do PRÓPRIO derivado.
         const cur = net.get(r.id);
-        if (cur) {
-          cur.value = (cur.value ?? 0) + add;
-          cur.excluded = cur.excluded || r.excluded;
-        } else {
-          net.set(r.id, { ...r, value: add, parts: [], contribution: null });
-        }
+        if (cur) cur.value = (cur.value ?? 0) + add;
+        else
+          net.set(r.id, {
+            ...r,
+            value: add,
+            parts: [],
+            contribution: null,
+            excluded: excludedIds.has(r.id),
+          });
       }
     }
   }

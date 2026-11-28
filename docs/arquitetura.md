@@ -4348,12 +4348,21 @@ total opcional por plano.
   (só ± origens — `linearOriginCoefficients`) lista os registros das origens
   com o valor LÍQUIDO por registro (Σ coeficiente × valor; quem se anula — a
   venda Outbound em Totais − Outbound — sai); conta não linear (razão,
-  constante) não tem registros e mostra `detailDerivedNote`. **Desmarcar vale
-  para o LANÇAMENTO (28/11/2026):** desmarcar a venda Outbound só no
-  Outbound fazia ela reaparecer no derivado (Totais − Outbound) e ser paga
-  pela tabela. Hoje `inputs.excluded` grava sob a chave única
-  `EXCLUDED_ALL_KEY` e o engine aplica a UNIÃO (`excludedRecordIds`) a todo
-  indicador do membro no mês; chaves por fator antigas seguem lidas. **Grade
+  constante) não tem registros e mostra `detailDerivedNote`. **Desmarcar é POR
+  INDICADOR e o derivado é pela COMPOSIÇÃO (28/11/2026):** desmarcar a venda
+  Outbound no Outbound fazia ela reaparecer no derivado (Totais − Outbound,
+  paga pela tabela). A 1ª correção (desmarcado valendo para o lançamento
+  inteiro) a tirava também do atingimento — errado. A regra certa: o
+  desmarcado sai SÓ do indicador onde se clicou (`inputs.excluded[factorId]`;
+  o "*" `EXCLUDED_ALL_KEY` gravado naquela versão é legado que vale para
+  todos e o save o desfaz), e o derivado lê cada origem pelo recorte DELA com
+  os desmarcados DO DERIVADO — o engine grava esse valor em
+  `computed.realized[derivedOriginKey(D, O)]` (só consulta de novo quando os
+  conjuntos diferem; iguais reaproveitam). Desmarcar no Outbound tira a venda
+  do pagamento de 50% e a mantém no atingimento de Totais, sem devolvê-la ao
+  "sem Outbound"; override de uma origem também não vaza mais. No
+  detalhamento a composição usa o valor CRU das origens e a marcação do
+  próprio derivado. **Grade
   de Lançamentos objetiva (28/11/2026):** as colunas de cada indicador saem
   de `factorGridColumns` (`lib/comp/grid-columns.ts`, puro, por PLANO):
   Meta/Ating. só se ele tem peso, dispara faixa por atingimento ou a fórmula

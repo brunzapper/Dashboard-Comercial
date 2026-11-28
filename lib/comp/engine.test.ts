@@ -735,7 +735,7 @@ describe("recomputePlanMonth", () => {
     }
   });
 
-  it("registros desmarcados: `id neq` em TODO fator do lançamento; memberIds recalcula só aquele membro", async () => {
+  it("registros desmarcados: `id neq` só no indicador dele; memberIds recalcula só aquele membro", async () => {
     const REC = "11111111-2222-4333-8444-555555555555";
     const seen: {
       metric: string;
@@ -802,12 +802,8 @@ describe("recomputePlanMonth", () => {
       );
     const reunioes = seen.filter((c) => c.metric === "*");
     expect(reunioes.length).toBeGreaterThan(0);
-    // O desmarcado vale para o lançamento inteiro (v2.3): sai também do outro
-    // indicador — senão um derivado "A − B" o devolveria ao cálculo.
     for (const c of reunioes)
-      expect(c.filters).toEqual(
-        expect.arrayContaining([{ field: "id", op: "neq", value: REC }])
-      );
+      expect(c.filters.some((x) => x.field === "id")).toBe(false);
   });
 
   it("targetCurrency: alvo digitado em USD converte pela taxa do trimestre; sem taxa ⇒ atingimento null", async () => {
@@ -1192,9 +1188,97 @@ describe("recomputePlanMonth — indicador derivado", () => {
     const mains = fake.rpcCalls.filter(
       (c) => ((c.args.p_dimensions as unknown[]) ?? []).length === 0
     );
-    // 2 membros × 2 fatores DE REGISTROS — o derivado não consulta.
+    // 2 membros × 2 fatores DE REGISTROS — o derivado não consulta (sem
+    // desmarcados, as origens como o derivado as vê reaproveitam o resultado).
     expect(mains).toHaveLength(4);
     const computed = writes[0].computed as { realized: Record<string, number> };
-    expect(computed.realized).toEqual({ f_v: 80, f_r: 10 });
+    expect(computed.realized).toEqual({
+      f_v: 80,
+      f_r: 10,
+      "f_d@f_v": 80,
+      "f_d@f_r": 10,
+    });
+  });
+});
+
+describe("recomputePlanMonth — derivado com desmarcado na ORIGEM", () => {
+  it("a origem desmarcada é lida de novo SEM o desmarcado dela para o derivado", async () => {
+    const REC = "11111111-2222-4333-8444-555555555555";
+    const writes: Record<string, unknown>[] = [];
+    const fake = fakeSupabase({
+      rpc: {
+        run_widget_query: (args) => {
+          const metric = (args.p_metrics as { field: string }[])[0].field;
+          const excl = JSON.stringify(args.p_filters ?? []).includes(REC);
+          if (metric === "value") return { data: [{ metric_1: 80 }], error: null };
+          // Reuniões: 10 no recorte; 7 sem o registro desmarcado.
+          return { data: [{ metric_1: excl ? 7 : 10 }], error: null };
+        },
+      },
+      tables: {
+        responsibles: responsiblesHandler,
+        field_definitions: [],
+        field_correspondences: [],
+        currency_rates: [],
+        goals: [],
+        comp_entries: (q) => {
+          const upd = q.steps.find((s) => s.method === "update" || s.method === "insert");
+          if (upd) {
+            writes.push(upd.args[0] as Record<string, unknown>);
+            return { data: null };
+          }
+          return {
+            data: [
+              {
+                id: "e1",
+                responsible_id: M1,
+                base_amount: null,
+                inputs: { excluded: { f_r: [REC] } },
+                computed: null,
+                total: null,
+                mirror_record_id: null,
+                published_at: null,
+              },
+            ],
+          };
+        },
+      },
+    });
+    const config = {
+      ...CONFIG,
+      factors: [
+        ...CONFIG.factors,
+        {
+          id: "f_d",
+          label: "Vendas − Reuniões",
+          weightPct: 0,
+          metricKey: "comp_d",
+          money: true,
+          realizedFrom: "indicators",
+          formula: {
+            tokens: [
+              { kind: "field", ref: "comp:f:f_v:realizado" },
+              { kind: "op", op: "-" },
+              { kind: "field", ref: "comp:f:f_r:realizado" },
+            ],
+          },
+          sources: [],
+        },
+      ],
+    };
+    const out = await recomputePlanMonth(fake.db, fake.db, {
+      plan: { ...PLAN, config },
+      year: 2026,
+      month: 7,
+      orgId: "org-1",
+      memberIds: [M1],
+    });
+    expect(out.ok).toBe(true);
+    const computed = writes[0].computed as { realized: Record<string, number> };
+    // A origem paga SEM o desmarcado; o derivado a lê COM ele (o registro não
+    // migra de um indicador para o outro).
+    expect(computed.realized.f_r).toBe(7);
+    expect(computed.realized["f_d@f_r"]).toBe(10);
+    expect(computed.realized["f_d@f_v"]).toBe(80);
   });
 });
