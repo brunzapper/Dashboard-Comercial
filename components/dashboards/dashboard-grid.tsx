@@ -1370,7 +1370,7 @@ export function DashboardGrid({
   // FloatingPanel (posiciona no clique, fecha ao clicar fora). O flyout NÃO
   // fecha no mouse-leave — tem input de busca dentro; fecha com o menu ou Esc.
   const pasteMenu = pasteAt ? (
-    <FloatingPanel x={pasteAt.x} y={pasteAt.y} onClose={() => setPasteAt(null)} className="w-48">
+    <FloatingPanel x={pasteAt.x} y={pasteAt.y} onClose={() => setPasteAt(null)} className="w-48 overflow-visible">
       {onQuickCreate ? (
         <>
           <div className="relative" onMouseEnter={() => setInsertOpen(true)}>
